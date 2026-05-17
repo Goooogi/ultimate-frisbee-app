@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>The Layout — disc</title>
+  <g transform="rotate(-12 64 64)">
+    <ellipse cx="64" cy="64" rx="56" ry="26" fill="#FF3D00"></ellipse>
+    <ellipse cx="64" cy="64" rx="42" ry="17" fill="none" stroke="#FFFFFF" stroke-opacity="0.6" stroke-width="3"></ellipse>
+    <ellipse cx="64" cy="64" rx="28" ry="10" fill="none" stroke="#FFFFFF" stroke-opacity="0.45" stroke-width="2.2"></ellipse>
+  </g>
+</svg>

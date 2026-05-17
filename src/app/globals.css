@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Theme tokens ───
+   `field` (light, Strava-leaning) and `broadcast` (dark scoreboard).
+   Values are space-separated RGB triplets so Tailwind's `<alpha-value>` works. */
+
+:root,
+:root[data-theme='field'] {
+  --bg: 244 242 236;          /* #F4F2EC */
+  --surface: 255 255 255;     /* #FFFFFF */
+  --surface-hi: 255 255 255;
+  --ink: 14 14 12;            /* #0E0E0C */
+  --muted: 111 107 98;        /* #6F6B62 */
+  --faint: 166 162 154;       /* #A6A29A */
+  --border: 229 225 214;      /* #E5E1D6 */
+  --hairline: 239 236 227;    /* #EFECE3 */
+  --live: 225 29 72;          /* #E11D48 */
+  --accent: 255 61 0;         /* #FF3D00 — coral */
+  --accent-ink: 255 255 255;
+}
+
+:root[data-theme='broadcast'] {
+  --bg: 10 10 9;              /* #0A0A09 */
+  --surface: 20 20 18;        /* #141412 */
+  --surface-hi: 27 27 24;     /* #1B1B18 */
+  --ink: 244 242 235;         /* #F4F2EB */
+  --muted: 134 132 125;       /* derived from rgba(244,242,235,0.55) over bg */
+  --faint: 78 77 73;          /* derived from rgba(244,242,235,0.32) over bg */
+  --border: 28 28 25;         /* derived from rgba(244,242,235,0.08) */
+  --hairline: 22 22 19;       /* derived from rgba(244,242,235,0.05) */
+  --live: 217 255 58;         /* #D9FF3A — volt (broadcast uses accent for live too) */
+  --accent: 217 255 58;       /* #D9FF3A — volt */
+  --accent-ink: 10 10 9;
+}
+
+html, body {
+  background: rgb(var(--bg));
+  color: rgb(var(--ink));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular numerals for scores + clocks */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

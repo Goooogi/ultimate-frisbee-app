@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 150" fill="none">
+  <title>The Layout — wordmark</title>
+  <defs>
+    
+  </defs>
+  <text x="8" y="36" font-family="Antonio, &#39;Helvetica Neue Condensed&#39;, Impact, sans-serif" font-style="italic" font-weight="600" font-size="26" letter-spacing="4.7" fill="#FF3D00">THE</text>
+  <text x="0" y="128" font-family="Antonio, &#39;Helvetica Neue Condensed&#39;, Impact, sans-serif" font-style="italic" font-weight="700" font-size="108" letter-spacing="-0.5" fill="#0E0E0C">LAYOUT</text>
+  <g transform="translate(345 38)">
+    <g transform="rotate(-12 60 42)">
+      <path d="M -10 56 Q 30 50 60 48" stroke="#FF3D00" stroke-opacity="0.35" stroke-width="2" stroke-linecap="round"></path>
+      <path d="M -2 50 Q 28 46 56 44" stroke="#FF3D00" stroke-opacity="0.6" stroke-width="2" stroke-linecap="round"></path>
+      <ellipse cx="74" cy="42" rx="40" ry="18" fill="#FF3D00"></ellipse>
+      <ellipse cx="74" cy="42" rx="30" ry="12" fill="none" stroke="#FFFFFF" stroke-opacity="0.55" stroke-width="1.8"></ellipse>
+      <ellipse cx="74" cy="42" rx="20" ry="7" fill="none" stroke="#FFFFFF" stroke-opacity="0.4" stroke-width="1.4"></ellipse>
+    </g>
+  </g>
+</svg>
