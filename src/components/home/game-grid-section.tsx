@@ -1,4 +1,6 @@
-// "Tonight · N more games" — section header + 4-up game tile grid.
+// Generic "row of game tiles" section for the home page. Used twice — once
+// for upcoming games and once for recent results. Caller provides title +
+// subtitle (e.g. "UP NEXT · Next 4 games", "RECENT RESULTS · Last 4 finals").
 // Each tile is a compact card showing both team rows + score + status.
 
 import Link from 'next/link';
@@ -7,28 +9,41 @@ import { teamMeta } from '@/lib/ufa/teams';
 import { gameUiState, formatStartCompact } from '@/lib/ufa/format';
 import { TeamLogo } from '@/components/team-logo';
 
-const ACCENT = '#FF3D00';
-
-interface TonightSectionProps {
+interface GameGridSectionProps {
+  /** Uppercase eyebrow on the left, e.g. "UP NEXT". */
+  title: string;
+  /** Trailing dynamic context (count, date range), e.g. "Next 4 games". */
+  subtitle?: string;
   games: UfaGame[];
+  /** Optional right-side action — defaults to a "Full schedule" link. */
+  rightLink?: { label: string; href: string };
 }
 
-export function TonightSection({ games }: TonightSectionProps) {
+export function GameGridSection({
+  title,
+  subtitle,
+  games,
+  rightLink = { label: 'Full schedule', href: '/schedule' },
+}: GameGridSectionProps) {
   if (games.length === 0) return null;
 
-  const label = games.length === 1 ? '1 more game' : `${games.length} more games`;
-
   return (
-    <section aria-label="Tonight's games" className="px-5 lg:px-12 pt-1 pb-6 lg:pb-8">
+    <section aria-label={title} className="px-5 lg:px-12 pt-1 pb-6 lg:pb-8">
       <div className="flex items-baseline justify-between mb-4">
-        <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[#6F6B62]">
-          Tonight · {label}
+        <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted">
+          {title}
+          {subtitle && (
+            <>
+              <span className="mx-1.5 text-faint">·</span>
+              <span className="text-ink">{subtitle}</span>
+            </>
+          )}
         </span>
         <Link
-          href="/schedule"
-          className="text-[11px] font-bold tracking-[0.14em] uppercase text-[#0E0E0C] no-underline inline-flex items-center gap-1.5 hover:text-[#FF3D00] transition-colors"
+          href={rightLink.href}
+          className="text-[11px] font-bold tracking-[0.14em] uppercase text-ink no-underline inline-flex items-center gap-1.5 hover:text-accent transition-colors"
         >
-          Full schedule
+          {rightLink.label}
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M3 8H13M13 8L8.5 3.5M13 8L8.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
           </svg>
@@ -56,15 +71,14 @@ function GameTile({ game }: { game: UfaGame }) {
   return (
     <Link
       href={`/g/${game.gameID}`}
-      className="group bg-white border border-[#E5E1D6] px-4 py-3.5 flex flex-col gap-2.5 hover:border-[#0E0E0C] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3D00]"
+      className="group bg-surface border border-border px-4 py-3.5 flex flex-col gap-2.5 hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
-      <div className="flex justify-between items-center font-mono text-[10.5px] text-[#6F6B62] tracking-[0.06em]">
+      <div className="flex justify-between items-center font-mono text-[10.5px] text-muted tracking-[0.06em]">
         <span>{status}</span>
         {state.isLive && (
-          <span className="inline-flex items-center gap-1.5 text-[#FF3D00] font-bold">
+          <span className="inline-flex items-center gap-1.5 text-accent font-bold">
             <span
-              className="w-[7px] h-[7px] rounded-full"
-              style={{ background: ACCENT, boxShadow: `0 0 0 3px ${ACCENT}33` }}
+              className="w-[7px] h-[7px] rounded-full bg-accent shadow-[0_0_0_3px_rgb(var(--accent)/0.2)]"
             />
             LIVE
           </span>
@@ -113,13 +127,15 @@ function TileRow({
     >
       <span className="inline-flex items-center gap-2.5">
         <TeamLogo team={meta} size={20} />
-        <span className="font-display italic font-bold text-[18px] text-[#0E0E0C] tracking-[-0.02em]">
+        <span className="font-display italic font-bold text-[18px] text-ink tracking-[-0.02em]">
           {abbr}
         </span>
       </span>
       <span
-        className="font-display font-bold text-[22px] tabular"
-        style={{ color: winner ? '#0E0E0C' : '#6F6B62' }}
+        className={[
+          'font-display font-bold text-[22px] tabular',
+          winner ? 'text-ink' : 'text-muted',
+        ].join(' ')}
       >
         {showScore ? score : '–'}
       </span>

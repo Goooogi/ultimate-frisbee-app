@@ -51,8 +51,15 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
       <div className="hidden lg:flex h-screen overflow-hidden bg-bg text-ink">
         <SidebarNav />
         <main className="flex-1 overflow-y-auto flex flex-col">
-          <div className="flex-shrink-0 h-[60px] px-8 flex items-center justify-center border-b border-hairline bg-bg">
-            {tab}
+          {/* Top bar: league tabs stay visually centered (absolute), avatar
+              anchors the right edge so the chrome matches the home page. */}
+          <div className="relative flex-shrink-0 h-[60px] px-8 flex items-center border-b border-hairline bg-bg">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="pointer-events-auto">{tab}</div>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <UserAvatar size={32} />
+            </div>
           </div>
           <div className="flex-1">{children}</div>
         </main>
@@ -108,8 +115,28 @@ function MobileHeader({ theme }: { theme: 'field' | 'broadcast' }) {
           size={0.95}
         />
       </Link>
-      <ThemeToggle />
+      <div className="flex items-center gap-3">
+        <ThemeToggle />
+        <UserAvatar size={28} />
+      </div>
     </header>
+  );
+}
+
+/** Placeholder avatar — matches the home page's "JM" pill. Reuses theme
+ *  tokens so it inverts cleanly in broadcast mode. */
+function UserAvatar({ size = 32 }: { size?: number }) {
+  return (
+    <span
+      aria-label="Account"
+      className={[
+        'inline-flex items-center justify-center rounded-full bg-ink text-bg',
+        'text-[11px] font-bold tracking-[0.02em] font-tight',
+      ].join(' ')}
+      style={{ width: size, height: size }}
+    >
+      JM
+    </span>
   );
 }
 

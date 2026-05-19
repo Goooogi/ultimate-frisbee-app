@@ -4,6 +4,7 @@
 
 import type { Metadata } from 'next';
 import {
+  getAllGamesByYears,
   getCurrentGames,
   getStandings,
   getTeamStats,
@@ -12,11 +13,10 @@ import {
 import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { getToday } from '@/lib/today';
-import { LiveTicker } from '@/components/home/live-ticker';
 import { HomeNav } from '@/components/home/home-nav';
 import { HeroGameCard } from '@/components/home/hero-game-card';
 import { PlaybookTile, FantasyTile } from '@/components/home/sub-app-tiles';
-import { TonightSection } from '@/components/home/tonight-section';
+import { GameGridSection } from '@/components/home/game-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
 import { MobileTabBar } from '@/components/home/mobile-tab-bar';
 
@@ -32,13 +32,24 @@ export default async function HomePage() {
   const today = getToday();
   const year = currentSeasonYear();
 
-  const [gamesRes, standingsRes, teamStatsRes] = await Promise.allSettled([
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes] = await Promise.allSettled([
     getCurrentGames(),
+    // Season-wide fetch so "Up next" stays populated between weekends, when
+    // the current-week feed flips to all-finals and would otherwise be empty.
+    // Cached 5min by the underlying call.
+    getAllGamesByYears([year]),
     getStandings(),
     getTeamStats({ year }),
   ]);
 
-  const games: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
+  const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
+  const seasonGames: UfaGame[] = seasonRes.status === 'fulfilled' ? seasonRes.value : [];
+  // Merge — current-week feed wins on id collision so live/score updates take
+  // precedence over the schedule snapshot.
+  const gamesByID = new Map<string, UfaGame>();
+  for (const g of seasonGames) gamesByID.set(g.gameID, g);
+  for (const g of currentGames) gamesByID.set(g.gameID, g);
+  const games: UfaGame[] = Array.from(gamesByID.values());
   const standings: UfaStanding[] =
     standingsRes.status === 'fulfilled' ? standingsRes.value : [];
   const teamStats: UfaTeamStat[] =
@@ -60,10 +71,31 @@ export default async function HomePage() {
   const awayRec = recordOf(featured?.awayTeamID);
   const homeRec = recordOf(featured?.homeTeamID);
 
-  // The hero takes the featured game; the tonight grid shows the rest.
-  const tonightGames = featured
-    ? games.filter((g) => g.gameID !== featured.gameID).slice(0, 4)
-    : games.slice(0, 4);
+  // Two derived slices fed to the home grids:
+  //  - upNext: next 4 games chronologically (Live or Upcoming, soonest first)
+  //  - recent: last 4 results (Final, most recent first)
+  // We intentionally don't exclude the featured (hero) game — when there's
+  // only one upcoming game on the slate, hiding it leaves the row empty.
+  // Showing it twice (hero + first tile in Up Next) reads as emphasis, not
+  // duplication.
+  const tsOf = (g: UfaGame): number =>
+    g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0;
+
+  const upNext = games
+    .filter((g) => {
+      const s = gameUiState(g);
+      return s.isUpcoming || s.isLive;
+    })
+    .sort((a, b) => tsOf(a) - tsOf(b))
+    .slice(0, 4);
+
+  const recent = games
+    .filter((g) => gameUiState(g).isFinal)
+    .sort((a, b) => tsOf(b) - tsOf(a))
+    .slice(0, 4);
+
+  const countLabel = (n: number, noun: string) =>
+    `${n} ${n === 1 ? noun : `${noun}s`}`;
 
   // Derive a week label from the featured game when possible (e.g. "WK 4").
   const weekLabel = featured?.week
@@ -71,8 +103,7 @@ export default async function HomePage() {
     : undefined;
 
   return (
-    <div className="min-h-screen bg-[#F4F2EC] text-[#0E0E0C] pb-20 lg:pb-0">
-      <LiveTicker games={games} />
+    <div className="min-h-screen bg-bg text-ink pb-20 lg:pb-0">
       <HomeNav today={today} weekLabel={weekLabel ? `${weekLabel.toUpperCase()}` : undefined} />
 
       {/* HERO BENTO — primary game on the left, sub-app tiles stacked right */}
@@ -84,7 +115,17 @@ export default async function HomePage() {
         </div>
       </div>
 
-      <TonightSection games={tonightGames} />
+      <GameGridSection
+        title="Up next"
+        subtitle={upNext.length > 0 ? countLabel(upNext.length, 'game') : undefined}
+        games={upNext}
+      />
+
+      <GameGridSection
+        title="Recent results"
+        subtitle={recent.length > 0 ? countLabel(recent.length, 'final') : undefined}
+        games={recent}
+      />
 
       <StandingsStrip
         standings={standings}

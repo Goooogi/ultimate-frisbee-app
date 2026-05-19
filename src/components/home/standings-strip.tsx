@@ -53,8 +53,9 @@ export function StandingsStrip({
       aria-label={`${displayDiv} standings`}
       className="px-5 lg:px-12 pt-2 pb-12 lg:pb-14"
     >
-      <div className="bg-white border border-[#E5E1D6] grid grid-cols-1 md:grid-cols-[200px_1fr]">
-        {/* Dark left panel */}
+      <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
+        {/* Dark left panel — kept dark in both themes; it's a design element,
+            not chrome, paired with the dark stadium hero card. */}
         <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-between gap-3 min-h-[140px]">
           <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
             {displayDiv} · standings
@@ -79,17 +80,17 @@ export function StandingsStrip({
               <Link
                 key={s.teamID}
                 href={`/teams/${s.teamID}`}
-                className="flex items-center gap-3 py-2.5 border-b border-[#EFECE3] last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 lg:[&:nth-last-child(-n+4)]:border-b-0 hover:opacity-80 transition-opacity"
+                className="flex items-center gap-3 py-2.5 border-b border-hairline last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 lg:[&:nth-last-child(-n+4)]:border-b-0 hover:opacity-80 transition-opacity"
               >
-                <span className="font-mono text-[11px] text-[#A6A29A] w-[18px]">
+                <span className="font-mono text-[11px] text-faint w-[18px]">
                   {String(s.rk).padStart(2, '0')}
                 </span>
                 <TeamLogo team={meta} size={28} />
                 <div className="flex-1 min-w-0">
-                  <div className="font-display italic font-bold text-[15px] lg:text-[16px] leading-none text-[#0E0E0C] truncate">
+                  <div className="font-display italic font-bold text-[15px] lg:text-[16px] leading-none text-ink truncate">
                     {meta.name ?? s.teamName.split(' ').slice(-1).join(' ')}
                   </div>
-                  <div className="font-mono text-[10.5px] text-[#6F6B62] mt-1 tabular">
+                  <div className="font-mono text-[10.5px] text-muted mt-1 tabular">
                     {record}
                     {ts && ts.scoresFor != null && ts.scoresAgainst != null
                       ? ` · ${ts.scoresFor}-${ts.scoresAgainst}`
