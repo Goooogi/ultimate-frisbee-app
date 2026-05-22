@@ -10,6 +10,7 @@
 // Mobile (<lg): compact header with logo + theme toggle, then page title +
 // children. The league switcher renders here too in a slim band.
 
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
@@ -18,6 +19,12 @@ import { SidebarNav } from '@/components/sidebar-nav';
 import { LeagueTabs } from '@/components/league-tabs';
 import { AccountChip } from '@/components/auth/account-chip';
 import { useLeague } from '@/lib/use-league';
+
+// Hooks like useSearchParams() must be wrapped in Suspense for Next 14
+// static prerendering — otherwise the whole tree falls back to CSR and
+// the build errors out. We use empty fallbacks since the chrome is
+// always interactive and these never block first paint meaningfully.
+const SUSPENSE_FALLBACK = null;
 
 interface AppShellProps {
   /** Override the slim top bar's right-edge content. Defaults to a stateful
@@ -34,7 +41,13 @@ interface AppShellProps {
  */
 export function AppShell({ topNavSlot, children }: AppShellProps) {
   const [theme] = useTheme();
-  const tab = topNavSlot ?? <DefaultLeagueTabs />;
+  // Each tab slot consumes useSearchParams (either via useLeague or via
+  // a router push) — wrap in Suspense so prerendering succeeds.
+  const tab = (
+    <Suspense fallback={SUSPENSE_FALLBACK}>
+      {topNavSlot ?? <DefaultLeagueTabs />}
+    </Suspense>
+  );
 
   return (
     <>
@@ -49,7 +62,9 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
 
       {/* ── Desktop (lg+) ── */}
       <div className="hidden lg:flex h-screen overflow-hidden bg-bg text-ink">
-        <SidebarNav />
+        <Suspense fallback={SUSPENSE_FALLBACK}>
+          <SidebarNav />
+        </Suspense>
         <main className="flex-1 overflow-y-auto flex flex-col">
           {/* Top bar: league tabs stay visually centered (absolute), avatar
               anchors the right edge so the chrome matches the home page. */}

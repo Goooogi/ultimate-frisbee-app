@@ -5,6 +5,7 @@
 // The league switcher lives in the AppShell's top bar and is now controlled
 // from here so changing leagues swaps the content (UFA games ↔ USAU events).
 
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame } from '@/lib/ufa/types';
@@ -23,7 +24,17 @@ interface FeedPageProps {
   usauEvent: UsauEventSummary | null;
 }
 
-export function FeedPage({ games, today, usauEvent }: FeedPageProps) {
+// Suspense wraps the useLeague() call so Next 14 can statically
+// prerender /scores without bailing the whole tree to CSR.
+export function FeedPage(props: FeedPageProps) {
+  return (
+    <Suspense fallback={null}>
+      <FeedPageInner {...props} />
+    </Suspense>
+  );
+}
+
+function FeedPageInner({ games, today, usauEvent }: FeedPageProps) {
   // League state lives in ?league= — see lib/use-league.ts. Switching tabs
   // updates the URL so /scores → /teams → /scores remembers the choice.
   const [league, setLeague] = useLeague();

@@ -69,28 +69,45 @@ export function UsauSchedule() {
 
   return (
     <div className="flex flex-col gap-6">
-      {seasons.length > 0 && (
+      {seasons.length > 0 && season != null && (
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
             Season
           </span>
-          <div className="inline-flex rounded-full bg-surface border border-border p-[3px]">
-            {seasons.map((y) => {
-              const on = y === season;
-              return (
-                <button
-                  key={y}
-                  type="button"
-                  onClick={() => setSeason(y)}
-                  className={[
-                    'rounded-full px-3 py-1.5 text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer transition-colors',
-                    on ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink',
-                  ].join(' ')}
-                >
-                  {y}
-                </button>
-              );
-            })}
+          <div className="relative inline-flex items-center">
+            <select
+              value={season}
+              onChange={(e) => setSeason(parseInt(e.target.value, 10))}
+              aria-label="Select season"
+              className={[
+                'appearance-none cursor-pointer',
+                'px-3 py-[6px] pr-7 rounded-full',
+                'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
+                'bg-surface border border-border text-ink',
+                'hover:border-ink transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              ].join(' ')}
+            >
+              {seasons.map((y) => (
+                <option key={y} value={y}>
+                  {y} Season
+                </option>
+              ))}
+            </select>
+            <svg
+              className="pointer-events-none absolute right-2 w-3 h-3 text-muted"
+              viewBox="0 0 12 12"
+              fill="none"
+              aria-hidden="true"
+            >
+              <path
+                d="M3 4.5L6 7.5L9 4.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
         </div>
       )}
