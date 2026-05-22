@@ -1,15 +1,16 @@
 'use client';
 
-// Compact team chip + dropdown that lives in the playbook sidebar.
+// Compact scope chip + dropdown in the playbook sidebar.
 //
-// Shows the currently-selected team as a colored pill with the short name.
-// Click → opens a list of all teams + a "Manage" link to /playbook/teams.
-// Keyboard-accessible via <details>/<summary>; will be replaced with a real
-// menu primitive when shadcn-ui lands.
+// Scopes: a magic "Personal" pseudo-team (id = `__personal__`) plus every
+// team the user belongs to. The editor uses the id to pick which plays it
+// loads. Clicking "Manage teams" routes to /playbook/teams.
 
 import Link from 'next/link';
 import { useEffect, useRef } from 'react';
-import type { Team } from '@/lib/playbook/teams';
+import type { Team } from '@/lib/playbook/data';
+
+const PERSONAL_ID = '__personal__';
 
 interface TeamSwitcherProps {
   teams: Team[];
@@ -31,41 +32,41 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
     return () => document.removeEventListener('pointerdown', onDocPointer);
   }, []);
 
-  const current = teams.find((t) => t.id === currentID) ?? teams[0];
+  const isPersonal = !currentID || currentID === PERSONAL_ID;
+  const current = isPersonal ? null : teams.find((t) => t.id === currentID) ?? null;
   const owned = teams.filter((t) => t.role === 'owner');
-  const member = teams.filter((t) => t.role === 'member');
-  const invited = teams.filter((t) => t.role === 'invited');
-
-  if (!current) return null;
+  const coachOf = teams.filter((t) => t.role === 'coach');
+  const memberOf = teams.filter((t) => t.role === 'member');
 
   return (
     <div className="flex flex-col gap-1.5">
       <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight px-1">
-        Team
+        Scope
       </div>
 
       <details ref={detailsRef} className="relative group">
         <summary
-          aria-label={`Current team: ${current.name}. Click to switch.`}
+          aria-label={
+            current ? `Current team: ${current.name}. Click to switch.` : 'Personal scope. Click to switch.'
+          }
           className={[
             'list-none cursor-pointer flex items-center gap-2 px-2 py-2 rounded-md',
             'border border-border bg-surface hover:border-ink transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           ].join(' ')}
         >
-          <TeamDot team={current} />
+          {current ? <TeamDot team={current} /> : <PersonalDot />}
           <span className="flex-1 min-w-0 text-left">
             <span className="block text-[12px] font-bold text-ink font-tight truncate leading-tight">
-              {current.name}
+              {current?.name ?? 'Personal'}
             </span>
             <span className="block text-[9px] font-bold uppercase tracking-[0.16em] text-faint font-tight mt-0.5">
-              {current.role}
+              {current ? current.role : 'My plays'}
             </span>
           </span>
           <ChevronIcon />
         </summary>
 
-        {/* Popover-style list. Positioned absolutely so it doesn't push sidebar layout. */}
         <div
           className={[
             'absolute left-0 right-0 top-full mt-1 z-30',
@@ -73,15 +74,9 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
             'flex flex-col gap-1.5 max-h-[60vh] overflow-y-auto',
           ].join(' ')}
         >
-          {invited.length > 0 && (
-            <TeamGroup
-              label="Pending invites"
-              teams={invited}
-              currentID={currentID}
-              onSwitch={onSwitch}
-              accent
-            />
-          )}
+          {/* Personal scope — always present as a pseudo-team. */}
+          <PersonalRow active={isPersonal} onSelect={() => onSwitch(PERSONAL_ID)} />
+
           {owned.length > 0 && (
             <TeamGroup
               label="Owned"
@@ -90,10 +85,18 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
               onSwitch={onSwitch}
             />
           )}
-          {member.length > 0 && (
+          {coachOf.length > 0 && (
+            <TeamGroup
+              label="Coaching"
+              teams={coachOf}
+              currentID={currentID}
+              onSwitch={onSwitch}
+            />
+          )}
+          {memberOf.length > 0 && (
             <TeamGroup
               label="Member"
-              teams={member}
+              teams={memberOf}
               currentID={currentID}
               onSwitch={onSwitch}
             />
@@ -114,27 +117,54 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
   );
 }
 
+function PersonalRow({ active, onSelect }: { active: boolean; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        onSelect();
+        const det = e.currentTarget.closest('details') as HTMLDetailsElement | null;
+        if (det) det.open = false;
+      }}
+      className={[
+        'flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        active ? 'bg-surface' : 'hover:bg-surface',
+      ].join(' ')}
+    >
+      <PersonalDot />
+      <span className="flex-1 min-w-0">
+        <span className="block text-[12px] font-semibold text-ink font-tight truncate leading-tight">
+          Personal
+        </span>
+        <span className="block text-[9px] font-medium uppercase tracking-[0.14em] text-faint font-tight">
+          Just for me
+        </span>
+      </span>
+      {active && (
+        <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+          On
+        </span>
+      )}
+    </button>
+  );
+}
+
 function TeamGroup({
   label,
   teams,
   currentID,
   onSwitch,
-  accent,
 }: {
   label: string;
   teams: Team[];
   currentID?: string;
   onSwitch: (id: string) => void;
-  accent?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <div
-        className={[
-          'px-2 pt-1 pb-0.5 text-[9px] font-bold tracking-[0.18em] uppercase font-tight',
-          accent ? 'text-accent' : 'text-faint',
-        ].join(' ')}
-      >
+      <div className="px-2 pt-1 pb-0.5 text-[9px] font-bold tracking-[0.18em] uppercase font-tight text-faint">
         {label}
       </div>
       {teams.map((t) => {
@@ -146,7 +176,6 @@ function TeamGroup({
             onClick={(e) => {
               e.preventDefault();
               onSwitch(t.id);
-              // close the details
               const det = (e.currentTarget.closest('details') as HTMLDetailsElement | null);
               if (det) det.open = false;
             }}
@@ -185,6 +214,27 @@ function TeamDot({ team }: { team: Team }) {
       style={{ background: team.color }}
     >
       {team.shortName}
+    </span>
+  );
+}
+
+function PersonalDot() {
+  // Inverted token so it reads as the "neutral / me" option distinct from
+  // any team color.
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0 bg-ink text-bg"
+    >
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M3 13.5c0-2.5 2.24-4 5-4s5 1.5 5 4"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
     </span>
   );
 }

@@ -15,7 +15,7 @@ import { usePathname } from 'next/navigation';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { UserAvatar } from './user-avatar';
+import { AccountChip } from '@/components/auth/account-chip';
 import { TeamSwitcher } from './team-switcher';
 import type { Team } from '@/lib/playbook/teams';
 
@@ -61,10 +61,10 @@ export function PlaybookShell({
             />
           </Link>
           <div className="flex items-center gap-1.5 min-w-0">
-            {/* Team pill — compact tap target that opens the full switcher. */}
+            {/* Scope pill — compact tap target that opens the full switcher. */}
             <details className="relative">
               <summary
-                aria-label={`Current team: ${currentTeam?.name ?? 'No team'}`}
+                aria-label={`Current scope: ${currentTeam?.name ?? 'Personal'}`}
                 className={[
                   'list-none cursor-pointer inline-flex items-center gap-1.5 pl-1 pr-2 py-1 rounded-full border border-border bg-surface',
                   'text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-ink max-w-[120px]',
@@ -74,11 +74,11 @@ export function PlaybookShell({
                 <span
                   aria-hidden="true"
                   className="inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold tracking-[0.04em] text-white flex-shrink-0"
-                  style={{ background: currentTeam?.color ?? '#999' }}
+                  style={{ background: currentTeam?.color ?? 'rgb(var(--ink))' }}
                 >
-                  {currentTeam?.shortName ?? '—'}
+                  {currentTeam?.shortName ?? 'ME'}
                 </span>
-                <span className="truncate">{currentTeam?.name ?? 'Team'}</span>
+                <span className="truncate">{currentTeam?.name ?? 'Personal'}</span>
               </summary>
               <div className="absolute right-0 top-full mt-1 z-30 w-64 border border-border bg-bg rounded-md p-2 shadow-lg">
                 <TeamSwitcher teams={teams} currentID={currentTeamID} onSwitch={onSwitchTeam} />
@@ -99,7 +99,7 @@ export function PlaybookShell({
                 <PlaybookSubnav pathname={pathname} />
               </div>
             </details>
-            <UserAvatar size={28} />
+            <AccountChip size={28} />
           </div>
         </header>
 
@@ -155,7 +155,7 @@ export function PlaybookShell({
             <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
               {pageTitle}
             </span>
-            <UserAvatar size={32} />
+            <AccountChip size={32} />
           </div>
           <div className="flex-1">{children}</div>
         </main>

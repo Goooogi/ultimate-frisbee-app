@@ -9,6 +9,7 @@ import { usePathname } from 'next/navigation';
 import type { Today } from '@/lib/today';
 import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { AccountChip } from '@/components/auth/account-chip';
 import { useTheme } from '@/lib/use-theme';
 
 const LINKS: Array<{ label: string; href: string; tag?: 'beta' | 'soon' }> = [
@@ -63,12 +64,7 @@ export function HomeNav({ today, weekLabel }: HomeNavProps) {
 
       <div className="flex items-center gap-3">
         <ThemeToggle />
-        <span
-          aria-hidden="true"
-          className="w-8 h-8 rounded-full bg-ink text-bg inline-flex items-center justify-center text-[11px] font-bold"
-        >
-          JM
-        </span>
+        <AccountChip size={32} />
       </div>
     </header>
   );

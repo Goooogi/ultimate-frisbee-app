@@ -131,7 +131,6 @@ export default async function HomePage() {
         standings={standings}
         teamStats={teamStats}
         seasonLabel={`UFA · ${year}`}
-        weekLabel={weekLabel ? weekLabel.replace(/^Wk /, 'Week ') : undefined}
       />
 
       <MobileTabBar />

@@ -2,8 +2,8 @@
 
 // Pill-style segmented control for switching leagues (UFA / USAU / INTL).
 // Renders the same look on both themes — CSS variables (bg-surface, bg-accent,
-// text-muted, text-ink) handle the light/dark swap. Only UFA is wired up right
-// now; the others render as disabled "soon" stubs.
+// text-muted, text-ink) handle the light/dark swap. UFA + USAU are wired;
+// INTL is the only "soon" stub remaining.
 
 import { LEAGUES, type League } from '@/lib/data';
 
@@ -24,7 +24,8 @@ export function LeagueTabs({ active, onChange, compact = false }: LeagueTabsProp
     >
       {LEAGUES.map((l) => {
         const on = l.id === active;
-        const disabled = l.id !== 'ufa';
+        // Only INTL is still a stub; UFA + USAU are both wired up.
+        const disabled = l.id === 'intl';
         return (
           <button
             key={l.id}

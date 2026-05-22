@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { PlaybookApp } from '@/components/playbook/playbook-app';
+import { AuthGate } from '@/components/auth/auth-gate';
 
 export const metadata: Metadata = {
   title: 'The Playbook · The Layout',
@@ -8,5 +9,12 @@ export const metadata: Metadata = {
 };
 
 export default function PlaybookPage() {
-  return <PlaybookApp />;
+  return (
+    <AuthGate
+      headline="Pull up your playbook."
+      subhead="Sign in to save plays, switch teams, and pick up exactly where you left off."
+    >
+      <PlaybookApp />
+    </AuthGate>
+  );
 }

@@ -8,19 +8,32 @@ import { getCurrentGames } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
+import { getCurrentClubEventSlug, getEvent, type UsauEventSummary } from '@/lib/usau/data';
 
 export const revalidate = 30;
 
 export default async function HomePage() {
-  let games: UfaGame[] = [];
-  try {
-    games = await getCurrentGames();
-  } catch (err) {
-    // Upstream is down — render empty rather than crashing the page.
-    console.error('Failed to fetch UFA current games:', err);
-  }
+  // Fetch UFA + USAU in parallel so switching tabs is instant.
+  const [games, usauEvent] = await Promise.all([
+    getCurrentGames().catch((err) => {
+      console.error('Failed to fetch UFA current games:', err);
+      return [] as UfaGame[];
+    }),
+    loadCurrentClubEvent(),
+  ]);
   const today = getToday();
-  return <FeedPage games={sortForFeed(games)} today={today} />;
+  return <FeedPage games={sortForFeed(games)} today={today} usauEvent={usauEvent} />;
+}
+
+async function loadCurrentClubEvent(): Promise<UsauEventSummary | null> {
+  try {
+    const slug = await getCurrentClubEventSlug();
+    if (!slug) return null;
+    return await getEvent(slug);
+  } catch (err) {
+    console.error('Failed to load USAU current event:', err);
+    return null;
+  }
 }
 
 /**

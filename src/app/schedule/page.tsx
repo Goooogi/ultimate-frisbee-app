@@ -11,6 +11,8 @@ import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
 import { YearSelector } from '@/components/year-selector';
+import { parseLeagueParam } from '@/lib/league';
+import { UsauSchedule } from '@/components/usau/usau-schedule';
 
 export const revalidate = 300;
 
@@ -19,10 +21,20 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string };
+  searchParams: { year?: string; league?: string };
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
+  const league = parseLeagueParam(searchParams.league);
+
+  if (league === 'usau') {
+    return (
+      <PageShell title="Schedule" eyebrow="USAU · Club">
+        <UsauSchedule />
+      </PageShell>
+    );
+  }
+
   const currentYear = currentSeasonYear();
   const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
   const isCurrentSeason = year === currentYear;

@@ -1,7 +1,8 @@
-// /teams — divisional standings + team stats.
-// Server Component. Reads ?year=YYYY from searchParams.
-// Current year: 4 division blocks with standings.
-// Non-current year: flat team-stats table.
+// /teams — branches on ?league=:
+//   - league=usau → USAU teams ranked by last completed Nationals
+//   - default (UFA) → divisional standings + team stats (existing flow)
+//
+// Server Component. Reads ?year=YYYY and ?league=… from searchParams.
 
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -11,6 +12,8 @@ import type { UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { YearSelector } from '@/components/year-selector';
 import { TeamLogo } from '@/components/team-logo';
+import { UsauTeamsRanked } from '@/components/usau/usau-teams-ranked';
+import { parseLeagueParam } from '@/lib/league';
 
 export const revalidate = 600;
 
@@ -19,13 +22,26 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string };
+  searchParams: { year?: string; league?: string };
 }
 
 const DIVISIONS = ['East', 'Central', 'South', 'West'] as const;
 type Division = (typeof DIVISIONS)[number];
 
 export default async function TeamsPage({ searchParams }: Props) {
+  const league = parseLeagueParam(searchParams.league);
+
+  // USAU branch: ranked team list. No year selector (USAU's notion of
+  // year is implicit in the source data, last-completed-Nationals).
+  if (league === 'usau') {
+    return (
+      <PageShell title="Teams" eyebrow="USAU · Club">
+        <UsauTeamsRanked genderDivision="Men" />
+      </PageShell>
+    );
+  }
+
+  // UFA branch (original behavior).
   const currentYear = currentSeasonYear();
   const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
   const isCurrentSeason = year === currentYear;

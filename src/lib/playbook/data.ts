@@ -1,0 +1,517 @@
+'use client';
+
+// Supabase-backed playbook data layer.
+//
+// All async — call sites should await + handle the in-flight state. Errors
+// throw so the UI can decide how to surface them (toast, banner, retry).
+//
+// Shape conventions:
+//   - DB row shape ↔ editor shape conversion happens inside this module.
+//     The editor keeps using the `Play` / `Step` / `Team` types it already
+//     does; this layer maps to/from the table rows so the editor code stays
+//     out of the SQL weeds.
+//   - Plays are scoped by either `owner_id` (personal) or `team_id` (team).
+//     `listPlays(teamID?)` returns one or the other — never mixed — so the
+//     editor never has to think about which bucket a play came from.
+
+import { createClient } from '@/lib/supabase/client';
+import type { Json } from '@/lib/supabase/database.types';
+import type {
+  DiscPos,
+  Drawing,
+  FieldType,
+  FormationID,
+  Play,
+  PlayerPos,
+  Step,
+} from './types';
+
+export type TeamRole = 'owner' | 'coach' | 'member';
+
+export interface Team {
+  id: string;
+  name: string;
+  shortName: string;
+  color: string;
+  role: TeamRole;
+  memberCount: number;
+  /** Seconds since epoch. Editor sorts on this. */
+  joinedAt: number;
+}
+
+export interface TeamMember {
+  userID: string;
+  role: TeamRole;
+  displayName: string | null;
+  email: string;
+  joinedAt: number;
+}
+
+export interface PendingInvite {
+  id: string;
+  email: string;
+  role: TeamRole;
+  expiresAt: number;
+  createdAt: number;
+}
+
+// ─── teams ─────────────────────────────────────────────────────────────────
+
+/**
+ * List every team the signed-in user belongs to, with their per-team role.
+ * Member counts are computed via a second small query so we can keep the
+ * RLS predicates simple — the row counts a member can see are exactly the
+ * row counts of teams they belong to.
+ */
+export async function listMyTeams(): Promise<Team[]> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data: rows, error } = await supabase
+    .from('pb_team_members')
+    .select(
+      `
+      role,
+      joined_at,
+      team:team_id (
+        id,
+        name,
+        short_name,
+        color
+      )
+    `,
+    )
+    .eq('user_id', user.id);
+
+  if (error) throw error;
+
+  // Fetch member counts in a single roundtrip per page (low N for a normal
+  // user). If teams ever balloon, swap this for an RPC that returns the
+  // count grouped by team_id.
+  const teamIDs = (rows ?? [])
+    .map((r) => (r.team as { id: string } | null)?.id)
+    .filter((v): v is string => !!v);
+
+  const counts = new Map<string, number>();
+  if (teamIDs.length > 0) {
+    const { data: memberRows } = await supabase
+      .from('pb_team_members')
+      .select('team_id')
+      .in('team_id', teamIDs);
+    for (const r of memberRows ?? []) {
+      counts.set(r.team_id, (counts.get(r.team_id) ?? 0) + 1);
+    }
+  }
+
+  return (rows ?? [])
+    .filter((r) => r.team)
+    .map((r) => {
+      const t = r.team as { id: string; name: string; short_name: string; color: string };
+      return {
+        id: t.id,
+        name: t.name,
+        shortName: t.short_name,
+        color: t.color,
+        role: r.role as TeamRole,
+        memberCount: counts.get(t.id) ?? 1,
+        joinedAt: new Date(r.joined_at).getTime(),
+      };
+    });
+}
+
+export async function createTeam(input: {
+  name: string;
+  shortName: string;
+  color: string;
+}): Promise<Team> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const { data, error } = await supabase
+    .from('pb_teams')
+    .insert({
+      name: input.name.trim(),
+      short_name: input.shortName.trim().toUpperCase(),
+      color: input.color,
+      owner_id: user.id,
+    })
+    .select('id, name, short_name, color, created_at')
+    .single();
+  if (error) throw error;
+
+  return {
+    id: data.id,
+    name: data.name,
+    shortName: data.short_name,
+    color: data.color,
+    role: 'owner',
+    memberCount: 1,
+    joinedAt: new Date(data.created_at).getTime(),
+  };
+}
+
+export async function renameTeam(teamID: string, name: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('pb_teams')
+    .update({ name: name.trim() })
+    .eq('id', teamID);
+  if (error) throw error;
+}
+
+/** Owner-only. RLS denies non-owners. */
+export async function deleteTeam(teamID: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('pb_teams').delete().eq('id', teamID);
+  if (error) throw error;
+}
+
+/** Remove yourself from a team. */
+export async function leaveTeam(teamID: string): Promise<void> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const { error } = await supabase
+    .from('pb_team_members')
+    .delete()
+    .eq('team_id', teamID)
+    .eq('user_id', user.id);
+  if (error) throw error;
+}
+
+export async function listTeamMembers(teamID: string): Promise<TeamMember[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('pb_team_members')
+    .select(
+      `
+      role,
+      joined_at,
+      user_id,
+      profiles:user_id (
+        display_name,
+        email
+      )
+    `,
+    )
+    .eq('team_id', teamID);
+  if (error) throw error;
+
+  return (data ?? []).map((row) => {
+    const profile = row.profiles as { display_name: string | null; email: string } | null;
+    return {
+      userID: row.user_id,
+      role: row.role as TeamRole,
+      displayName: profile?.display_name ?? null,
+      email: profile?.email ?? '',
+      joinedAt: new Date(row.joined_at).getTime(),
+    };
+  });
+}
+
+export async function listPendingInvites(teamID: string): Promise<PendingInvite[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('pb_team_invites')
+    .select('id, email, role, expires_at, created_at, accepted_at')
+    .eq('team_id', teamID)
+    .is('accepted_at', null)
+    .gt('expires_at', new Date().toISOString());
+  if (error) throw error;
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    email: row.email,
+    role: row.role as TeamRole,
+    expiresAt: new Date(row.expires_at).getTime(),
+    createdAt: new Date(row.created_at).getTime(),
+  }));
+}
+
+/** Server-side: generates token + inserts invite. Returns the token so the
+ *  caller can build a share link. */
+export async function createInvite(
+  teamID: string,
+  email: string,
+  role: TeamRole = 'member',
+): Promise<{ token: string; expiresAt: number }> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc('create_team_invite', {
+    p_team_id: teamID,
+    p_email: email,
+    p_role: role,
+  });
+  if (error) throw error;
+  const row = (data as { token: string; expires_at: string }[])[0];
+  if (!row) throw new Error('Invite was not created.');
+  return { token: row.token, expiresAt: new Date(row.expires_at).getTime() };
+}
+
+export async function revokeInvite(inviteID: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('pb_team_invites').delete().eq('id', inviteID);
+  if (error) throw error;
+}
+
+export async function acceptInvite(token: string): Promise<{
+  teamID: string;
+  teamName: string;
+  role: TeamRole;
+}> {
+  const supabase = createClient();
+  const { data, error } = await supabase.rpc('accept_team_invite', { p_token: token });
+  if (error) throw error;
+  const row = (data as { team_id: string; team_name: string; role: TeamRole }[])[0];
+  if (!row) throw new Error('Invite could not be accepted.');
+  return { teamID: row.team_id, teamName: row.team_name, role: row.role };
+}
+
+// ─── plays ─────────────────────────────────────────────────────────────────
+
+/**
+ * List plays in one scope. Pass `{ scope: 'personal' }` for the user's own
+ * plays, or `{ scope: 'team', teamID }` for a team's plays. Includes every
+ * step inline (we always need them for the editor — separate fetches would
+ * cause a flash of "empty" steps when the user opens a play).
+ */
+export async function listPlays(
+  scope: { scope: 'personal' } | { scope: 'team'; teamID: string },
+): Promise<Play[]> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  let query = supabase
+    .from('pb_plays')
+    .select(
+      `
+      id, name, formation, field_type, owner_id, team_id, created_at, updated_at,
+      pb_play_steps (
+        id, position, duration_ms, note, payload
+      )
+    `,
+    )
+    .order('updated_at', { ascending: false });
+
+  if (scope.scope === 'personal') {
+    query = query.eq('owner_id', user.id).is('team_id', null);
+  } else {
+    query = query.eq('team_id', scope.teamID);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  return (data ?? []).map(playRowToPlay);
+}
+
+export async function createPlay(input: {
+  name: string;
+  formation: FormationID;
+  fieldType: FieldType;
+  firstStep: Omit<Step, 'id'>;
+  scope: { scope: 'personal' } | { scope: 'team'; teamID: string };
+}): Promise<Play> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  // Both insert shapes share these fields. The discriminated XOR (owner_id
+  // null XOR team_id null) is enforced by the CHECK constraint in SQL.
+  const insertRow: {
+    name: string;
+    formation: string;
+    field_type: string;
+    owner_id: string | null;
+    team_id: string | null;
+    created_by: string;
+  } =
+    input.scope.scope === 'personal'
+      ? {
+          name: input.name.trim() || 'Untitled play',
+          formation: input.formation,
+          field_type: input.fieldType,
+          owner_id: user.id,
+          team_id: null,
+          created_by: user.id,
+        }
+      : {
+          name: input.name.trim() || 'Untitled play',
+          formation: input.formation,
+          field_type: input.fieldType,
+          owner_id: null,
+          team_id: input.scope.teamID,
+          created_by: user.id,
+        };
+
+  const { data: play, error } = await supabase
+    .from('pb_plays')
+    .insert(insertRow)
+    .select('id, name, formation, field_type, owner_id, team_id, created_at, updated_at')
+    .single();
+  if (error) throw error;
+
+  // Insert the seed step at position 0.
+  const { data: step, error: stepErr } = await supabase
+    .from('pb_play_steps')
+    .insert({
+      play_id: play.id,
+      position: 0,
+      duration_ms: input.firstStep.durationMs ?? 0,
+      note: input.firstStep.note ?? null,
+      payload: stepToPayload(input.firstStep) as unknown as Json,
+    })
+    .select('id, position, duration_ms, note, payload')
+    .single();
+  if (stepErr) throw stepErr;
+
+  return playRowToPlay({ ...play, pb_play_steps: [step] });
+}
+
+export async function renamePlay(playID: string, name: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('pb_plays')
+    .update({ name: name.trim() || 'Untitled play' })
+    .eq('id', playID);
+  if (error) throw error;
+}
+
+export async function deletePlay(playID: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('pb_plays').delete().eq('id', playID);
+  if (error) throw error;
+}
+
+// ─── steps ─────────────────────────────────────────────────────────────────
+
+/**
+ * Upsert the entire step list for a play. We delete the existing rows and
+ * insert the new set in a single transaction-ish pair of calls (Postgres
+ * cascade on play_id makes this cheap). Last-write-wins by design — until
+ * we add multi-editor sync, the user holding the editor open last is the
+ * one whose changes survive.
+ */
+export async function replaceSteps(playID: string, steps: Step[]): Promise<Step[]> {
+  const supabase = createClient();
+
+  // Wipe + reinsert. Could be a single `upsert` but rebalancing positions
+  // on inserts/deletes is fiddly and the editor never has more than a few
+  // dozen steps, so a clean replace is fine.
+  const { error: delErr } = await supabase.from('pb_play_steps').delete().eq('play_id', playID);
+  if (delErr) throw delErr;
+
+  if (steps.length === 0) return [];
+
+  const rows = steps.map((s, i) => ({
+    play_id: playID,
+    position: i,
+    duration_ms: s.durationMs ?? 700,
+    note: s.note ?? null,
+    payload: stepToPayload(s) as unknown as Json,
+  }));
+
+  const { data, error } = await supabase
+    .from('pb_play_steps')
+    .insert(rows)
+    .select('id, position, duration_ms, note, payload');
+  if (error) throw error;
+
+  return (data ?? [])
+    .sort((a, b) => a.position - b.position)
+    .map(stepRowToStep);
+}
+
+// Bump the play's updated_at without touching anything else (used after a
+// successful step replace so the play list re-sorts correctly).
+export async function touchPlay(playID: string): Promise<void> {
+  const supabase = createClient();
+  await supabase.from('pb_plays').update({ updated_at: new Date().toISOString() }).eq('id', playID);
+}
+
+// ─── conversions ───────────────────────────────────────────────────────────
+
+interface StepPayload {
+  players: PlayerPos[];
+  defenders?: PlayerPos[];
+  disc: DiscPos;
+  drawings?: Drawing[];
+}
+
+function stepToPayload(step: Omit<Step, 'id'> | Step): StepPayload {
+  return {
+    players: step.players,
+    defenders: step.defenders,
+    disc: step.disc,
+    drawings: step.drawings,
+  };
+}
+
+function stepRowToStep(row: {
+  id: string;
+  position: number;
+  duration_ms: number;
+  note: string | null;
+  payload: unknown;
+}): Step {
+  const p = (row.payload ?? {}) as Partial<StepPayload>;
+  return {
+    id: row.id,
+    players: p.players ?? [],
+    defenders: p.defenders,
+    disc: p.disc ?? { ownerID: 0, x: 0.5, y: 0.5 },
+    drawings: p.drawings,
+    note: row.note ?? undefined,
+    durationMs: row.duration_ms,
+  };
+}
+
+interface PlayRow {
+  id: string;
+  name: string;
+  formation: string;
+  field_type: string;
+  owner_id: string | null;
+  team_id: string | null;
+  created_at: string;
+  updated_at: string;
+  pb_play_steps:
+    | {
+        id: string;
+        position: number;
+        duration_ms: number;
+        note: string | null;
+        payload: unknown;
+      }[]
+    | null;
+}
+
+function playRowToPlay(row: PlayRow): Play {
+  const steps = (row.pb_play_steps ?? [])
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map(stepRowToStep);
+
+  return {
+    id: row.id,
+    name: row.name,
+    formation: row.formation as FormationID,
+    fieldType: row.field_type as FieldType,
+    steps,
+    createdAt: new Date(row.created_at).getTime(),
+    updatedAt: new Date(row.updated_at).getTime(),
+  };
+}

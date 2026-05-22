@@ -10,14 +10,14 @@
 // Mobile (<lg): compact header with logo + theme toggle, then page title +
 // children. The league switcher renders here too in a slim band.
 
-import { useState } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { SidebarNav } from '@/components/sidebar-nav';
 import { LeagueTabs } from '@/components/league-tabs';
-import type { League } from '@/lib/data';
+import { AccountChip } from '@/components/auth/account-chip';
+import { useLeague } from '@/lib/use-league';
 
 interface AppShellProps {
   /** Override the slim top bar's right-edge content. Defaults to a stateful
@@ -58,7 +58,7 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
               <div className="pointer-events-auto">{tab}</div>
             </div>
             <div className="ml-auto flex items-center gap-3">
-              <UserAvatar size={32} />
+              <AccountChip size={32} />
             </div>
           </div>
           <div className="flex-1">{children}</div>
@@ -69,7 +69,10 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
 }
 
 function DefaultLeagueTabs() {
-  const [active, setActive] = useState<League['id']>('ufa');
+  // Backed by ?league=… in the URL so the active league survives navigation.
+  // Every page that uses AppShell without overriding topNavSlot now reads
+  // + writes the same state.
+  const [active, setActive] = useLeague();
   return <LeagueTabs active={active} onChange={setActive} />;
 }
 
@@ -117,26 +120,9 @@ function MobileHeader({ theme }: { theme: 'field' | 'broadcast' }) {
       </Link>
       <div className="flex items-center gap-3">
         <ThemeToggle />
-        <UserAvatar size={28} />
+        <AccountChip size={28} />
       </div>
     </header>
-  );
-}
-
-/** Placeholder avatar — matches the home page's "JM" pill. Reuses theme
- *  tokens so it inverts cleanly in broadcast mode. */
-function UserAvatar({ size = 32 }: { size?: number }) {
-  return (
-    <span
-      aria-label="Account"
-      className={[
-        'inline-flex items-center justify-center rounded-full bg-ink text-bg',
-        'text-[11px] font-bold tracking-[0.02em] font-tight',
-      ].join(' ')}
-      style={{ width: size, height: size }}
-    >
-      JM
-    </span>
   );
 }
 

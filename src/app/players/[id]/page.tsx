@@ -1,8 +1,13 @@
-// /players/[id] — player profile.
-// Pulls career row + per-year stats from /web-v1/roster-stats-for-player
-// (one direct call, no leaderboard pagination), and per-game logs from
-// /web-v1/roster-game-stats-for-player. Display name comes from a one-time
-// scrape of the watchufa.com player page (the API has no name field).
+// /players/[id] — unified player profile.
+//
+// Branches on id shape:
+//   - UUID → USAU player profile (data from usau_players + rosters + stats)
+//   - anything else → existing UFA profile (the original behavior)
+//
+// End state: a single profile page that combines USAU + UFA careers under
+// one identity. For now they're separate code paths because we don't yet
+// have an identity-merge layer that links a USAU player UUID to a UFA
+// player slug. We'll add that once we have a deduplication strategy.
 
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
@@ -19,6 +24,9 @@ import type {
 import { teamMeta, teamMetaByAbbr } from '@/lib/ufa/teams';
 import { PageShell } from '@/components/page-shell';
 import { TeamLogo } from '@/components/team-logo';
+import { findUsauPlayerByName, getPlayerProfile, looksLikeUsauUuid } from '@/lib/usau/data';
+import { UsauPlayerProfile } from '@/components/usau/usau-player-profile';
+import { PlayerLeagueTabs } from '@/components/player-league-tabs';
 
 export const revalidate = 3600;
 
@@ -27,6 +35,13 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  // USAU path — fetch from Supabase.
+  if (looksLikeUsauUuid(params.id)) {
+    const profile = await getPlayerProfile(params.id).catch(() => null);
+    if (!profile) return { title: 'Player not found · The Layout' };
+    return { title: `${profile.displayName} · The Layout` };
+  }
+  // UFA path — existing behavior.
   const info = await getPlayerInfo(params.id).catch(() => null);
   if (!info) return { title: 'Player not found · The Layout' };
   return { title: `${info.name} · The Layout` };
@@ -35,6 +50,25 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function PlayerProfilePage({ params }: Props) {
   const playerID = params.id;
 
+  // USAU branch: render the USAU profile component. We keep this as a
+  // separate component so the existing UFA code below is untouched.
+  if (looksLikeUsauUuid(playerID)) {
+    const profile = await getPlayerProfile(playerID).catch(() => null);
+    if (!profile) notFound();
+    // No UFA name index on the server, so the UFA tab always points at
+    // the league's home rather than a matching profile. Acceptable v1:
+    // user can search by name from there.
+    const leagueTabs = (
+      <PlayerLeagueTabs
+        active="usau"
+        usauHref={`/players/${playerID}`}
+        ufaHref="/scores"
+      />
+    );
+    return <UsauPlayerProfile profile={profile} topNavSlot={leagueTabs} />;
+  }
+
+  // UFA branch (original code, unchanged below).
   const [info, seasons] = await Promise.all([
     getPlayerInfo(playerID).catch(() => null),
     getPlayerSeasons(playerID).catch(() => [] as UfaPlayerSeasonRow[]),
@@ -61,8 +95,17 @@ export default async function PlayerProfilePage({ params }: Props) {
 
   const career = aggregateCareer(seasons);
 
+  // Best-effort name match into our USAU dataset. When the user clicks
+  // the USAU tab we jump straight to their USAU profile; otherwise we
+  // fall back to /scores?league=usau.
+  const usauMatch = info?.name ? await findUsauPlayerByName(info.name).catch(() => null) : null;
+  const usauHref = usauMatch ? `/players/${usauMatch}` : '/scores?league=usau';
+  const leagueTabs = (
+    <PlayerLeagueTabs active="ufa" ufaHref={`/players/${playerID}`} usauHref={usauHref} />
+  );
+
   return (
-    <PageShell title={name} eyebrow="UFA · Career">
+    <PageShell title={name} eyebrow="UFA · Career" topNavSlot={leagueTabs}>
       {/* Hero */}
       <div className="flex flex-wrap items-center gap-4 mb-8 pb-6 border-b border-hairline">
         {currentTeam && (

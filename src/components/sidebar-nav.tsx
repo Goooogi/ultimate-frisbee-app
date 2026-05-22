@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { SidebarSearch } from '@/components/sidebar-search';
+import { DEFAULT_LEAGUE, inferLeagueFromPath, parseLeagueParam } from '@/lib/league';
 
 interface NavItem {
   label: string;
@@ -16,9 +18,9 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { label: 'The Games',   href: '/scores',   match: '/scores',   aliases: ['/g'] },
+  { label: 'The Games',   href: '/scores',   match: '/scores',   aliases: ['/g', '/usau/events'] },
   { label: 'Schedule',    href: '/schedule', match: '/schedule' },
-  { label: 'Teams',       href: '/teams',    match: '/teams',    aliases: ['/players'] },
+  { label: 'Teams',       href: '/teams',    match: '/teams',    aliases: ['/players', '/usau/teams'] },
 ];
 
 function isActive(pathname: string, item: NavItem): boolean {
@@ -37,10 +39,18 @@ function isActive(pathname: string, item: NavItem): boolean {
 export function SidebarNav() {
   const [theme] = useTheme();
   const pathname = usePathname() ?? '/';
+  const searchParams = useSearchParams();
+  // Active league for nav links: explicit ?league= wins, else infer from
+  // path. Sidebar links append ?league= so navigating /scores -> /teams
+  // -> /schedule stays in the same league without USAU-specific URLs.
+  const activeLeague = searchParams.get('league')
+    ? parseLeagueParam(searchParams.get('league'))
+    : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
+  const leagueQs = activeLeague === DEFAULT_LEAGUE ? '' : `?league=${activeLeague}`;
 
   return (
     <aside className="w-[220px] flex-shrink-0 flex flex-col px-6 py-8 bg-bg border-r border-hairline">
-      <Link href="/" aria-label="The Layout — home" className="mb-9 inline-block">
+      <Link href="/" aria-label="The Layout — home" className="mb-6 inline-block">
         <LogoStrikeInline
           accentColor="rgb(var(--accent))"
           theme={theme === 'broadcast' ? 'dark' : 'light'}
@@ -48,13 +58,17 @@ export function SidebarNav() {
         />
       </Link>
 
+      <div className="mb-5">
+        <SidebarSearch />
+      </div>
+
       <nav className="flex flex-col gap-0.5" aria-label="Main navigation">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item);
           return (
             <Link
               key={item.href}
-              href={item.href}
+              href={`${item.href}${leagueQs}`}
               className={[
                 'w-full text-left px-3 py-[9px] rounded-md text-[13px] cursor-pointer transition-colors duration-150',
                 'border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',

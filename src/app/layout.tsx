@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Antonio, Inter, Inter_Tight } from 'next/font/google';
 import './globals.css';
 import { ThemeBootstrap } from '@/components/theme-bootstrap';
+import { AuthProvider } from '@/lib/auth/auth-provider';
 
 const interTight = Inter_Tight({
   subsets: ['latin'],
@@ -35,7 +36,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <ThemeBootstrap />
       </head>
-      <body className="font-sans bg-bg text-ink min-h-screen">{children}</body>
+      <body className="font-sans bg-bg text-ink min-h-screen">
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }
