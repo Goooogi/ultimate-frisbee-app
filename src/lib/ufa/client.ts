@@ -365,6 +365,44 @@ export async function getGameBoxscore(gameID: string): Promise<UfaGameBoxscore> 
   return { gameID, year, away, home };
 }
 
+// ── Champions ────────────────────────────────────────────────────────────────
+
+/**
+ * UFA champions by year. Strategy: for each requested year fetch the full
+ * schedule, keep only finals, take the one with the latest start; the
+ * higher-score side is the champion. UFA's API doesn't tag a "Championship
+ * Final" explicitly so we use "last final played" as the marker — that's
+ * the championship game by construction (no consolation rounds after).
+ *
+ * Returns a map of `year → teamAbbrev`. Years with no Final games (current
+ * season mid-playoffs, etc.) are omitted.
+ */
+export async function getUfaChampionsByYear(years: number[]): Promise<Map<number, string>> {
+  const result = new Map<number, string>();
+  // Run years in parallel; each is just one paged fetch.
+  await Promise.all(
+    years.map(async (year) => {
+      try {
+        const games = await getAllGamesByYears([year]);
+        let bestTs = -Infinity;
+        let winner: string | null = null;
+        for (const g of games) {
+          if (g.status !== 'Final') continue;
+          if (g.awayScore === g.homeScore) continue; // shouldn't happen but skip ties
+          const ts = g.startTimestamp ? new Date(g.startTimestamp).getTime() : -Infinity;
+          if (ts <= bestTs) continue;
+          bestTs = ts;
+          winner = g.awayScore > g.homeScore ? g.awayTeamID : g.homeTeamID;
+        }
+        if (winner) result.set(year, winner.toLowerCase());
+      } catch (err) {
+        console.error(`getUfaChampionsByYear: failed for ${year}`, err);
+      }
+    }),
+  );
+  return result;
+}
+
 // ── Season helpers ───────────────────────────────────────────────────────────
 
 /** Current UFA season year. Season runs ~April through August. */

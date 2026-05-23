@@ -11,8 +11,9 @@ import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
 import { YearSelector } from '@/components/year-selector';
-import { parseLeagueParam } from '@/lib/league';
+import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
+import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 
 export const revalidate = 300;
 
@@ -21,16 +22,21 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; league?: string };
+  searchParams: { year?: string; league?: string; div?: string };
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
   const league = parseLeagueParam(searchParams.league);
 
   if (league === 'usau') {
+    const division = parseDivisionParam(searchParams.div);
     return (
-      <PageShell title="Schedule" eyebrow="USAU · Club">
-        <UsauSchedule />
+      <PageShell
+        title="Schedule"
+        eyebrow={`USAU · Club · ${division}`}
+        controls={<UsauDivisionSelect />}
+      >
+        <UsauSchedule division={division} />
       </PageShell>
     );
   }

@@ -5,8 +5,13 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { SidebarSearch } from '@/components/sidebar-search';
-import { DEFAULT_LEAGUE, inferLeagueFromPath, parseLeagueParam } from '@/lib/league';
+import {
+  DEFAULT_LEAGUE,
+  buildLeagueQs,
+  inferLeagueFromPath,
+  parseDivisionParam,
+  parseLeagueParam,
+} from '@/lib/league';
 
 interface NavItem {
   label: string;
@@ -20,7 +25,8 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { label: 'The Games',   href: '/scores',   match: '/scores',   aliases: ['/g', '/usau/events'] },
   { label: 'Schedule',    href: '/schedule', match: '/schedule' },
-  { label: 'Teams',       href: '/teams',    match: '/teams',    aliases: ['/players', '/usau/teams'] },
+  { label: 'Teams',       href: '/teams',    match: '/teams',    aliases: ['/usau/teams'] },
+  { label: 'Players',     href: '/players',  match: '/players' },
 ];
 
 function isActive(pathname: string, item: NavItem): boolean {
@@ -40,13 +46,14 @@ export function SidebarNav() {
   const [theme] = useTheme();
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
-  // Active league for nav links: explicit ?league= wins, else infer from
-  // path. Sidebar links append ?league= so navigating /scores -> /teams
-  // -> /schedule stays in the same league without USAU-specific URLs.
+  // Active league + division for nav links: explicit query params win,
+  // else infer from path. Sidebar links carry both so navigating
+  // /scores -> /teams -> /schedule stays in the same league + division.
   const activeLeague = searchParams.get('league')
     ? parseLeagueParam(searchParams.get('league'))
     : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
-  const leagueQs = activeLeague === DEFAULT_LEAGUE ? '' : `?league=${activeLeague}`;
+  const activeDivision = parseDivisionParam(searchParams.get('div'));
+  const leagueQs = buildLeagueQs(activeLeague, activeDivision);
 
   return (
     <aside className="w-[220px] flex-shrink-0 flex flex-col px-6 py-8 bg-bg border-r border-hairline">
@@ -57,10 +64,6 @@ export function SidebarNav() {
           size={1.05}
         />
       </Link>
-
-      <div className="mb-5">
-        <SidebarSearch />
-      </div>
 
       <nav className="flex flex-col gap-0.5" aria-label="Main navigation">
         {NAV_ITEMS.map((item) => {

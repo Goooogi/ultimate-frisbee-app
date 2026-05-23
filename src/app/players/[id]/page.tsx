@@ -16,7 +16,9 @@ import {
   getPlayerInfo,
   getPlayerSeasons,
   getPlayerGameLog,
+  getUfaChampionsByYear,
 } from '@/lib/ufa/client';
+import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import type {
   UfaPlayerGameRow,
   UfaPlayerSeasonRow,
@@ -95,6 +97,24 @@ export default async function PlayerProfilePage({ params }: Props) {
 
   const career = aggregateCareer(seasons);
 
+  // UFA championship years for this player. Strategy: fetch champions
+  // for every year this player has a roster entry, then match by team
+  // abbreviation. We don't restrict to playoff rows — being rostered the
+  // year the team won is enough to count, even if they didn't play in
+  // the final (UFA's per-game roster is reported elsewhere).
+  const championsByYear = await getUfaChampionsByYear(yearsDescending).catch(
+    () => new Map<number, string>(),
+  );
+  const championYears: number[] = [];
+  for (const year of yearsDescending) {
+    const champ = championsByYear.get(year);
+    if (!champ) continue;
+    const rows = byYear.get(year) ?? [];
+    if (rows.some((r) => r.teamAbbrev.toLowerCase() === champ)) {
+      championYears.push(year);
+    }
+  }
+
   // Best-effort name match into our USAU dataset. When the user clicks
   // the USAU tab we jump straight to their USAU profile; otherwise we
   // fall back to /scores?league=usau.
@@ -106,6 +126,10 @@ export default async function PlayerProfilePage({ params }: Props) {
 
   return (
     <PageShell title={name} eyebrow="UFA · Career" topNavSlot={leagueTabs}>
+      {championYears.length > 0 && (
+        <ChampionBanner years={championYears} label="UFA Champion" />
+      )}
+
       {/* Hero */}
       <div className="flex flex-wrap items-center gap-4 mb-8 pb-6 border-b border-hairline">
         {currentTeam && (
@@ -173,6 +197,7 @@ export default async function PlayerProfilePage({ params }: Props) {
                 year={year}
                 seasonRows={byYear.get(year) ?? []}
                 games={logsByYear.get(year) ?? []}
+                isChampion={championYears.includes(year)}
               />
             ))}
           </div>
@@ -188,10 +213,12 @@ function YearAccordion({
   year,
   seasonRows,
   games,
+  isChampion,
 }: {
   year: number;
   seasonRows: UfaPlayerSeasonRow[];
   games: UfaPlayerGameRow[];
+  isChampion?: boolean;
 }) {
   // Combine reg-season + playoff rows for the summary.
   const summary = sumRows(seasonRows);
@@ -219,6 +246,19 @@ function YearAccordion({
               </span>
             );
           })}
+          {isChampion && (
+            <span
+              title="UFA Champion"
+              aria-label="UFA Champion"
+              className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent text-accent-ink flex-shrink-0 ml-1"
+            >
+              <svg width="11" height="11" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+                <path d="M6 3h10v5a5 5 0 0 1-10 0V3Z" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M6 5H3v2a2 2 0 0 0 2 2M16 5h3v2a2 2 0 0 1-2 2" stroke="currentColor" strokeWidth="1.6" />
+                <path d="M11 13v3M8 19h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+            </span>
+          )}
         </span>
         <YearSummaryCells
           gp={summary.gamesPlayed}

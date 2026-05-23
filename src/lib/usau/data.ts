@@ -58,6 +58,11 @@ type CompetitionLevel =
 export async function listEvents(opts?: {
   season?: number;
   competitionLevel?: CompetitionLevel;
+  /** Filter to events that have at least one participating team in this
+   *  gender division. USAU events themselves aren't tagged by gender —
+   *  the division lives on the participating teams. We treat an event
+   *  as "in the X division" if any of its teams.gender_division = X. */
+  genderDivision?: 'Men' | 'Women' | 'Mixed';
   limit?: number;
 }): Promise<UsauEventCard[]> {
   const db = await supabase();
@@ -72,20 +77,37 @@ export async function listEvents(opts?: {
   const { data: events, error } = await q;
   if (error) throw error;
 
-  // Pull team counts per event in one query (filtered to the ids we just got).
+  // Pull team counts per event AND collect each event's gender divisions
+  // (from the participating teams) so we can both report a count and
+  // filter to the requested division. One query covers both.
   const ids = (events ?? []).map((e) => e.id);
   const countByEvent = new Map<string, number>();
+  const divisionsByEvent = new Map<string, Set<string>>();
   if (ids.length > 0) {
     const { data: parts } = await db
       .from('usau_event_teams')
-      .select('event_id')
+      .select('event_id, usau_teams(gender_division)')
       .in('event_id', ids);
-    for (const r of parts ?? []) {
+    for (const r of (parts ?? []) as Array<{
+      event_id: string;
+      usau_teams: { gender_division: string | null } | null;
+    }>) {
       countByEvent.set(r.event_id, (countByEvent.get(r.event_id) ?? 0) + 1);
+      const div = r.usau_teams?.gender_division;
+      if (div) {
+        if (!divisionsByEvent.has(r.event_id)) divisionsByEvent.set(r.event_id, new Set());
+        divisionsByEvent.get(r.event_id)!.add(div);
+      }
     }
   }
 
-  return (events ?? []).map((e) => ({
+  const filtered = (events ?? []).filter((e) => {
+    if (!opts?.genderDivision) return true;
+    const set = divisionsByEvent.get(e.id);
+    return set ? set.has(opts.genderDivision) : false;
+  });
+
+  return filtered.map((e) => ({
     id: e.id,
     slug: e.usau_slug,
     name: e.name,
@@ -100,83 +122,152 @@ export async function listEvents(opts?: {
 }
 
 /**
- * Returns the most relevant club tournament for the "current" view:
- * the soonest-upcoming (or in-progress) event if one exists with games
- * scraped, otherwise the most-recently-completed event. Skips empty
- * placeholder events that have no games + no teams. Returns the slug
- * only; callers can fetch the full event with `getEvent(slug)`.
+ * Returns the most relevant tournament for "The Games" view.
+ *
+ * Tiered preference:
+ *   1. A LIVE event (started, not yet ended) — Club or College, whatever's
+ *      happening right now. This is the one that should headline.
+ *   2. The soonest-upcoming event with games already scraped.
+ *   3. The most-recently-completed event with games.
+ *
+ * We consider any tournament-grade level (Club, College D-I/D-III,
+ * Masters, Grand Masters) — these are the ones with real bracket data.
+ * HS/MS/Beach are excluded so we don't surface a state HS tournament
+ * over a major club event.
+ *
+ * Returns the slug only; callers fetch the full event via getEvent().
+ * The second return value is true when the chosen event has NO games
+ * ingested yet — UI can render a "happening now, brackets pending"
+ * fallback.
  */
-export async function getCurrentClubEventSlug(): Promise<string | null> {
+const FLAGSHIP_LEVELS: CompetitionLevel[] = [
+  'CLUB',
+  'COLLEGE_D1',
+  'COLLEGE_D3',
+  'MASTERS',
+  'GRAND_MASTERS',
+];
+
+export async function getCurrentEvent(opts?: {
+  /** Filter to events whose participating teams include this division. */
+  genderDivision?: 'Men' | 'Women' | 'Mixed';
+}): Promise<{ slug: string; hasGames: boolean } | null> {
   const db = await supabase();
-  // Fetch a window of recent events (past 6 months + future 6 months) so
-  // we can filter out the empty placeholders in JS without a heavy query.
   const today = new Date().toISOString().slice(0, 10);
   const sixMonthsBack = new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 10);
   const sixMonthsForward = new Date(Date.now() + 180 * 86400_000).toISOString().slice(0, 10);
 
-  const { data: events } = await db
+  const { data: windowEvents } = await db
     .from('usau_events')
-    .select('id, usau_slug, start_date, end_date')
-    .eq('competition_level', 'CLUB')
+    .select('id, usau_slug, start_date, end_date, competition_level')
+    .in('competition_level', FLAGSHIP_LEVELS)
     .gte('start_date', sixMonthsBack)
     .lte('start_date', sixMonthsForward)
     .order('start_date', { ascending: true });
 
-  if (!events || events.length === 0) {
-    // Wider net: latest club event with games.
-    const { data: latest } = await db
-      .from('usau_events')
-      .select('id, usau_slug, start_date')
-      .eq('competition_level', 'CLUB')
-      .order('start_date', { ascending: false, nullsFirst: false })
-      .limit(40);
-    for (const e of latest ?? []) {
-      const { count } = await db
-        .from('usau_games')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_id', e.id);
-      if ((count ?? 0) > 0) return e.usau_slug;
-    }
-    return null;
-  }
+  type EventRow = {
+    id: string;
+    usau_slug: string;
+    start_date: string | null;
+    end_date: string | null;
+    competition_level: string | null;
+  };
+  let events: EventRow[] = (windowEvents ?? []) as EventRow[];
 
-  // Filter to events that actually have games (skip empty placeholders).
-  const ids = events.map((e) => e.id);
-  const { data: gameCounts } = await db
-    .from('usau_games')
-    .select('event_id')
-    .in('event_id', ids);
+  // Per-event game counts + gender divisions of participating teams.
   const counts = new Map<string, number>();
-  for (const g of gameCounts ?? []) {
-    counts.set(g.event_id, (counts.get(g.event_id) ?? 0) + 1);
-  }
-  const withGames = events.filter((e) => (counts.get(e.id) ?? 0) > 0);
-  if (withGames.length === 0) {
-    // No events in our window have games yet — fall back to most-recent
-    // completed tournament across the whole DB.
-    const { data: latest } = await db
-      .from('usau_events')
-      .select('id, usau_slug')
-      .eq('competition_level', 'CLUB')
-      .lt('start_date', today)
-      .order('start_date', { ascending: false, nullsFirst: false })
-      .limit(40);
-    for (const e of latest ?? []) {
-      const { count } = await db
-        .from('usau_games')
-        .select('*', { count: 'exact', head: true })
-        .eq('event_id', e.id);
-      if ((count ?? 0) > 0) return e.usau_slug;
+  const divisionsByEvent = new Map<string, Set<string>>();
+  if (events.length > 0) {
+    // Games count (for "has games" + ranking).
+    const { data: gameCounts } = await db
+      .from('usau_games')
+      .select('event_id')
+      .in('event_id', events.map((e) => e.id));
+    for (const g of gameCounts ?? []) {
+      counts.set(g.event_id, (counts.get(g.event_id) ?? 0) + 1);
     }
-    return null;
+    // Participating divisions, for the optional filter.
+    if (opts?.genderDivision) {
+      const { data: parts } = await db
+        .from('usau_event_teams')
+        .select('event_id, usau_teams(gender_division)')
+        .in('event_id', events.map((e) => e.id));
+      for (const r of (parts ?? []) as Array<{
+        event_id: string;
+        usau_teams: { gender_division: string | null } | null;
+      }>) {
+        const div = r.usau_teams?.gender_division;
+        if (div) {
+          if (!divisionsByEvent.has(r.event_id)) divisionsByEvent.set(r.event_id, new Set());
+          divisionsByEvent.get(r.event_id)!.add(div);
+        }
+      }
+      events = events.filter((e) => divisionsByEvent.get(e.id)?.has(opts.genderDivision!) ?? false);
+    }
   }
 
-  // Prefer upcoming/in-progress. Otherwise most-recent completed.
-  const upcoming = withGames.find(
-    (e) => (e.end_date ?? e.start_date ?? '') >= today,
-  );
-  if (upcoming) return upcoming.usau_slug;
-  return withGames[withGames.length - 1].usau_slug;
+  // Tier 1: live tournament (has started, hasn't ended). Take the soonest-
+  // ending one so we focus on what's about to wrap up.
+  const live = events
+    .filter((e) => (e.start_date ?? '') <= today && (e.end_date ?? e.start_date ?? '') >= today)
+    .sort((a, b) => (a.end_date ?? '').localeCompare(b.end_date ?? ''));
+  if (live.length > 0) {
+    const e = live[0];
+    return { slug: e.usau_slug, hasGames: (counts.get(e.id) ?? 0) > 0 };
+  }
+
+  // Tier 2: soonest upcoming with games.
+  const upcoming = events
+    .filter((e) => (e.start_date ?? '') > today && (counts.get(e.id) ?? 0) > 0)
+    .sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''));
+  if (upcoming.length > 0) {
+    return { slug: upcoming[0].usau_slug, hasGames: true };
+  }
+
+  // Tier 3: most-recent completed with games (search wider if window is empty).
+  const completed = events
+    .filter((e) => (counts.get(e.id) ?? 0) > 0)
+    .sort((a, b) => (b.start_date ?? '').localeCompare(a.start_date ?? ''));
+  if (completed.length > 0) {
+    return { slug: completed[0].usau_slug, hasGames: true };
+  }
+
+  // Final fallback: most-recent flagship event with games anywhere in DB.
+  // Apply the division filter via the team-participation join when set.
+  const { data: latest } = await db
+    .from('usau_events')
+    .select('id, usau_slug, start_date')
+    .in('competition_level', FLAGSHIP_LEVELS)
+    .order('start_date', { ascending: false, nullsFirst: false })
+    .limit(80);
+  for (const e of latest ?? []) {
+    const { count } = await db
+      .from('usau_games')
+      .select('*', { count: 'exact', head: true })
+      .eq('event_id', e.id);
+    if ((count ?? 0) === 0) continue;
+    if (opts?.genderDivision) {
+      // Skip events that don't have the requested division participating.
+      const { count: matchCount } = await db
+        .from('usau_event_teams')
+        .select('team_id, usau_teams!inner(gender_division)', { count: 'exact', head: true })
+        .eq('event_id', e.id)
+        .eq('usau_teams.gender_division', opts.genderDivision);
+      if (!matchCount || matchCount === 0) continue;
+    }
+    return { slug: e.usau_slug, hasGames: true };
+  }
+  return null;
+}
+
+/**
+ * @deprecated Kept as a thin wrapper for any callers still asking only
+ * for a slug. New code should use getCurrentEvent() which also reports
+ * whether games are ingested.
+ */
+export async function getCurrentClubEventSlug(): Promise<string | null> {
+  const res = await getCurrentEvent();
+  return res?.slug ?? null;
 }
 
 /**
@@ -212,6 +303,132 @@ export async function findUsauPlayerByName(name: string): Promise<string | null>
   return ids.sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))[0];
 }
 
+/**
+ * USAU Club National Champions by season.
+ * Returns a map of `season → { teamId, teamName }`. We look for the
+ * `round = 'final'` game inside the National Championship bracket of the
+ * Club Nationals event; the team with the higher score is the champion.
+ *
+ * Since usau_teams has multiple rows per franchise (one per year), the
+ * returned teamId is the specific season's row — useful for matching
+ * against usau_rosters.team_id directly.
+ */
+export interface UsauChampion {
+  teamId: string;
+  teamName: string;
+  division: 'Men' | 'Women' | 'Mixed' | null;
+}
+
+/**
+ * USAU Club National Champions, keyed by season then division.
+ *
+ * USAU runs Men's, Women's, and Mixed Nationals as one event id — so a
+ * single event can have THREE finals (one per division). We resolve the
+ * winning team for each, look up its gender_division, and bucket
+ * accordingly. Callers can also call championsForSeasonAndDivision() to
+ * pluck out a specific (season, division) winner.
+ */
+export async function getUsauClubChampionsBySeason(): Promise<
+  Map<number, Map<string, UsauChampion>>
+> {
+  const db = await supabase();
+  const { data: nationals } = await db
+    .from('usau_events')
+    .select('id, season, usau_slug')
+    .eq('competition_level', 'CLUB')
+    .or(
+      'usau_slug.ilike.%national-championships%,' +
+        'usau_slug.ilike.%club-nationals%,' +
+        'usau_slug.ilike.%usa-ultimate-club-championships%',
+    )
+    .not('usau_slug', 'ilike', '%us-open%');
+  const nationalsBySeason = new Map<string, { id: string; season: number }>();
+  for (const e of nationals ?? []) {
+    nationalsBySeason.set(e.id, { id: e.id, season: e.season });
+  }
+  if (nationalsBySeason.size === 0) return new Map();
+
+  // Pull every round='final' game at any Nationals event. With Men +
+  // Women + Mixed all under one event_id, we expect up to 3 finals per
+  // event — one per division.
+  const { data: finals } = await db
+    .from('usau_games')
+    .select(
+      'event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+        'team_a:usau_teams!team_a_id(name, gender_division), ' +
+        'team_b:usau_teams!team_b_id(name, gender_division)',
+    )
+    .in('event_id', Array.from(nationalsBySeason.keys()))
+    .eq('round', 'final');
+
+  type TeamRef = { name: string; gender_division: string | null } | null;
+  type Row = {
+    event_id: string;
+    team_a_id: string | null;
+    team_b_id: string | null;
+    score_a: number | null;
+    score_b: number | null;
+    scheduled_at: string | null;
+    bracket_name: string | null;
+    team_a: TeamRef;
+    team_b: TeamRef;
+  };
+
+  // season → division → champion
+  const result = new Map<number, Map<string, UsauChampion>>();
+  for (const g of (finals ?? []) as unknown as Row[]) {
+    if (g.score_a == null || g.score_b == null) continue;
+    if (g.team_a_id == null || g.team_b_id == null) continue;
+    const ev = nationalsBySeason.get(g.event_id);
+    if (!ev) continue;
+
+    const aWon = g.score_a > g.score_b;
+    const winnerId = aWon ? g.team_a_id : g.team_b_id;
+    const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
+    // Both teams in a final are the same division. Use either side's
+    // gender_division — fall back to inferring from the bracket name
+    // ("Women's Division Championship") if the team lacks it.
+    let division = (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
+    if (!division) {
+      const b = (g.bracket_name ?? '').toLowerCase();
+      if (b.includes('mixed')) division = 'Mixed';
+      else if (b.includes("women")) division = 'Women';
+      else if (b.includes("men")) division = 'Men';
+    }
+    if (!division) continue;
+
+    if (!result.has(ev.season)) result.set(ev.season, new Map());
+    const seasonMap = result.get(ev.season)!;
+    // Multiple final rows for the same (season, division) shouldn't
+    // happen, but if they do prefer the latest-scheduled one.
+    const existing = seasonMap.get(division);
+    if (existing) {
+      // Compare schedules to keep the latest.
+      const ts = g.scheduled_at ? new Date(g.scheduled_at).getTime() : 0;
+      // We don't store scheduled_at on UsauChampion; keep first-write
+      // for simplicity unless we explicitly add it. First-write wins.
+      void ts;
+      continue;
+    }
+    seasonMap.set(division, {
+      teamId: winnerId,
+      teamName: winnerName,
+      division: division as UsauChampion['division'],
+    });
+  }
+  return result;
+}
+
+/** Convenience: just the champion for one (season, division), or null. */
+export function championFor(
+  champions: Map<number, Map<string, UsauChampion>>,
+  season: number,
+  division: 'Men' | 'Women' | 'Mixed' | null | undefined,
+): UsauChampion | null {
+  if (!division) return null;
+  return champions.get(season)?.get(division) ?? null;
+}
+
 /** Distinct seasons we have any event for, newest first. */
 export async function listSeasons(): Promise<number[]> {
   const db = await supabase();
@@ -241,6 +458,198 @@ export interface UsauPlayerCard {
   displayName: string;
   /** A team this player has been rostered on (deduped); used as a hint. */
   primaryTeam: string | null;
+}
+
+export interface UsauPlayerListRow {
+  /** Anchor player_id — the one with the most roster rows for this name.
+   *  Linking here picks up the full cluster via getPlayerProfile(). */
+  id: string;
+  displayName: string;
+  /** Latest team this player played for. */
+  latestTeam: string | null;
+  latestTeamId: string | null;
+  /** Most recent season we've seen them rostered. */
+  latestSeason: number | null;
+  /** Number of distinct (team, season) stints — used as an "activity"
+   *  proxy until we have real cross-event stats. */
+  appearances: number;
+  /** Years this player won the Club Nationals championship. Empty if none. */
+  championYears: number[];
+}
+
+/**
+ * Top N USAU players by activity (number of distinct team-season stints).
+ * Names are deduped so each human appears once even when the scraper
+ * inserted multiple player_ids for them. The returned id is the anchor
+ * with the most roster rows (richest profile).
+ */
+export async function listUsauPlayers(opts?: {
+  limit?: number;
+  season?: number;
+  search?: string;
+  /** Restrict to players whose team is in this gender division. */
+  genderDivision?: 'Men' | 'Women' | 'Mixed';
+}): Promise<UsauPlayerListRow[]> {
+  const limit = opts?.limit ?? 60;
+  const db = await supabase();
+
+  // Pull rosters with their team + season. Two strategies:
+  //   1. With a search term: narrow at the SQL layer by first finding
+  //      matching player_ids (usau_players ilike), then only fetching
+  //      THEIR rosters. Cheap even on a 30k-row table — typical search
+  //      returns < 100 player_ids and < 500 rosters.
+  //   2. Without search: scan rosters in pages of 1000 (Supabase ceiling)
+  //      so a > 1k roster table doesn't silently drop entries.
+  type RosterRow = {
+    player_id: string;
+    season: number;
+    team_id: string;
+    usau_players: { display_name: string } | null;
+    usau_teams: { name: string; gender_division: string | null } | null;
+  };
+  let rows: RosterRow[] = [];
+
+  if (opts?.search && opts.search.trim().length >= 2) {
+    const needle = opts.search.trim();
+    const pattern = `%${needle.replace(/[%_]/g, '\\$&')}%`;
+    // Step 1: matching player_ids. Supabase caps each select at 1000.
+    const { data: matches, error: pErr } = await db
+      .from('usau_players')
+      .select('id')
+      .ilike('display_name', pattern)
+      .limit(1000);
+    if (pErr) throw pErr;
+    const matchIds = (matches ?? []).map((m) => m.id);
+    if (matchIds.length === 0) return [];
+
+    // Step 2: rosters for those player_ids. Page in 1000 chunks (Supabase
+    // ".in()" has a similar ceiling).
+    const CHUNK = 500;
+    for (let i = 0; i < matchIds.length; i += CHUNK) {
+      const slice = matchIds.slice(i, i + CHUNK);
+      let q = db
+        .from('usau_rosters')
+        .select(
+          'player_id, season, team_id, usau_players(display_name), usau_teams!inner(name, gender_division)',
+        )
+        .in('player_id', slice);
+      if (opts?.season != null) q = q.eq('season', opts.season);
+      if (opts?.genderDivision) {
+        q = q.eq('usau_teams.gender_division', opts.genderDivision);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      rows = rows.concat((data ?? []) as unknown as RosterRow[]);
+    }
+  } else {
+    const PAGE = 1000;
+    let from = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      let q = db
+        .from('usau_rosters')
+        .select(
+          'player_id, season, team_id, usau_players(display_name), usau_teams!inner(name, gender_division)',
+        )
+        .range(from, from + PAGE - 1);
+      if (opts?.season != null) q = q.eq('season', opts.season);
+      if (opts?.genderDivision) {
+        q = q.eq('usau_teams.gender_division', opts.genderDivision);
+      }
+      const { data, error } = await q;
+      if (error) throw error;
+      const page = (data ?? []) as unknown as RosterRow[];
+      rows = rows.concat(page);
+      if (page.length < PAGE) break;
+      from += PAGE;
+      if (from > 200_000) break;
+    }
+  }
+
+  type Row = RosterRow;
+
+  // Fetch champion map once so we can tag list rows in the same loop.
+  const championsBySeason = await getUsauClubChampionsBySeason().catch(
+    () => new Map<number, Map<string, UsauChampion>>(),
+  );
+
+  // Group by lowercased name → aggregate stats across player_id dupes.
+  interface Agg {
+    anchorId: string;
+    anchorCount: number;
+    displayName: string;
+    latestSeason: number | null;
+    latestTeam: string | null;
+    latestTeamId: string | null;
+    appearances: number;
+    perPlayerCount: Map<string, number>;
+    championYears: Set<number>;
+  }
+  const byName = new Map<string, Agg>();
+  for (const r of (rows ?? []) as unknown as Row[]) {
+    const name = r.usau_players?.display_name;
+    if (!name) continue;
+    const key = name.toLowerCase();
+    // Look up the (season, division) champion — same Nationals event
+    // has separate Men/Women/Mixed finals, so we need both keys.
+    const div = r.usau_teams?.gender_division ?? null;
+    const champ = div ? championsBySeason.get(r.season)?.get(div) : null;
+    const isChampStint = !!champ && champ.teamId === r.team_id;
+    const existing = byName.get(key);
+    if (!existing) {
+      const ppc = new Map<string, number>([[r.player_id, 1]]);
+      const cy = new Set<number>();
+      if (isChampStint) cy.add(r.season);
+      byName.set(key, {
+        anchorId: r.player_id,
+        anchorCount: 1,
+        displayName: name,
+        latestSeason: r.season,
+        latestTeam: r.usau_teams?.name ?? null,
+        latestTeamId: r.team_id,
+        appearances: 1,
+        perPlayerCount: ppc,
+        championYears: cy,
+      });
+    } else {
+      const ppc = existing.perPlayerCount;
+      const next = (ppc.get(r.player_id) ?? 0) + 1;
+      ppc.set(r.player_id, next);
+      if (next > existing.anchorCount) {
+        existing.anchorCount = next;
+        existing.anchorId = r.player_id;
+      }
+      if (existing.latestSeason == null || r.season > existing.latestSeason) {
+        existing.latestSeason = r.season;
+        existing.latestTeam = r.usau_teams?.name ?? null;
+        existing.latestTeamId = r.team_id;
+      }
+      existing.appearances += 1;
+      if (isChampStint) existing.championYears.add(r.season);
+    }
+  }
+
+  // Note: when opts.search was provided, the SQL pass above already
+  // filtered rosters to just matching player_ids, so no JS filter needed.
+  const entries = Array.from(byName.values());
+
+  entries.sort((a, b) => {
+    // Prefer most-recently-active first, then by total appearances.
+    const sa = a.latestSeason ?? 0;
+    const sb = b.latestSeason ?? 0;
+    if (sa !== sb) return sb - sa;
+    return b.appearances - a.appearances;
+  });
+
+  return entries.slice(0, limit).map((e) => ({
+    id: e.anchorId,
+    displayName: e.displayName,
+    latestTeam: e.latestTeam,
+    latestTeamId: e.latestTeamId,
+    latestSeason: e.latestSeason,
+    appearances: e.appearances,
+    championYears: Array.from(e.championYears).sort((a, b) => b - a),
+  }));
 }
 
 // ─── Search ────────────────────────────────────────────────────────────
@@ -350,6 +759,8 @@ export interface UsauPlayerSummary {
     teamName: string;
     season: number;
     jerseyNumber: string | null;
+    /** True if this team won the Club Nationals championship that season. */
+    isChampion: boolean;
     events: Array<{
       slug: string;
       name: string;
@@ -361,6 +772,8 @@ export interface UsauPlayerSummary {
       pool: string | null;
     }>;
   }>;
+  /** Years this player won the USAU Club National Championship. */
+  championYears: number[];
 }
 
 /**
@@ -397,13 +810,15 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     .map((p) => p.id);
 
   if (candidateIds.length === 0) {
-    return { id: anchor.id, displayName: anchor.display_name, teamHistory: [] };
+    return { id: anchor.id, displayName: anchor.display_name, teamHistory: [], championYears: [] };
   }
 
   // Pull rosters for ALL candidates so we can compute the cluster.
+  // gender_division is needed downstream to look up the right (season,
+  // division) champion since 3 divisions share the same Nationals event.
   const { data: candidateRosters } = await db
     .from('usau_rosters')
-    .select('player_id, team_id, season, jersey_number, usau_teams(name)')
+    .select('player_id, team_id, season, jersey_number, usau_teams(name, gender_division)')
     .in('player_id', candidateIds);
 
   // Union-find: two ids are linked iff they never have (same season,
@@ -501,6 +916,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
         teamName,
         season: r.season,
         jerseyNumber: r.jersey_number,
+        isChampion: false,
         events: [],
       });
     } else if (!existing.jerseyNumber && r.jersey_number) {
@@ -536,10 +952,36 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     (a, b) => b.season - a.season || a.teamName.localeCompare(b.teamName),
   );
 
+  // Mark championship stints. Champions are keyed (season → division →
+  // winner) since one Nationals event has separate Men/Women/Mixed
+  // finals. We pull the stint's team's gender_division and look up the
+  // matching division's winner for that year.
+  const champions = await getUsauClubChampionsBySeason().catch(
+    () => new Map<number, Map<string, UsauChampion>>(),
+  );
+  // Build a fast (team_id → division) lookup from the rosters we
+  // already have, so we don't re-query.
+  const divisionByTeamId = new Map<string, string>();
+  for (const r of clusterRosters) {
+    const tr = (r as { usau_teams: { gender_division: string | null } | null }).usau_teams;
+    if (tr?.gender_division) divisionByTeamId.set(r.team_id, tr.gender_division);
+  }
+  const championYears: number[] = [];
+  for (const stint of teamHistory) {
+    const div = divisionByTeamId.get(stint.teamId);
+    const champ = div ? champions.get(stint.season)?.get(div) : null;
+    if (champ && champ.teamId === stint.teamId) {
+      stint.isChampion = true;
+      championYears.push(stint.season);
+    }
+  }
+  championYears.sort((a, b) => b - a);
+
   return {
     id: anchor.id,
     displayName: anchor.display_name,
     teamHistory,
+    championYears,
   };
 }
 

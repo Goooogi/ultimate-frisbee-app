@@ -13,7 +13,8 @@ import { PageShell } from '@/components/page-shell';
 import { YearSelector } from '@/components/year-selector';
 import { TeamLogo } from '@/components/team-logo';
 import { UsauTeamsRanked } from '@/components/usau/usau-teams-ranked';
-import { parseLeagueParam } from '@/lib/league';
+import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
 
 export const revalidate = 600;
 
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; league?: string };
+  searchParams: { year?: string; league?: string; div?: string };
 }
 
 const DIVISIONS = ['East', 'Central', 'South', 'West'] as const;
@@ -34,9 +35,14 @@ export default async function TeamsPage({ searchParams }: Props) {
   // USAU branch: ranked team list. No year selector (USAU's notion of
   // year is implicit in the source data, last-completed-Nationals).
   if (league === 'usau') {
+    const division = parseDivisionParam(searchParams.div);
     return (
-      <PageShell title="Teams" eyebrow="USAU · Club">
-        <UsauTeamsRanked genderDivision="Men" />
+      <PageShell
+        title="Teams"
+        eyebrow={`USAU · Club · ${division}`}
+        controls={<UsauDivisionSelect />}
+      >
+        <UsauTeamsRanked genderDivision={division} />
       </PageShell>
     );
   }

@@ -13,8 +13,8 @@ import type { Today } from '@/lib/today';
 import { GameCard } from '@/components/game-card';
 import { FeedHero } from '@/components/feed-hero';
 import { AppShell } from '@/components/page-shell';
-import { LeagueTabs } from '@/components/league-tabs';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
+import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { useLeague } from '@/lib/use-league';
 
@@ -35,13 +35,15 @@ export function FeedPage(props: FeedPageProps) {
 }
 
 function FeedPageInner({ games, today, usauEvent }: FeedPageProps) {
-  // League state lives in ?league= — see lib/use-league.ts. Switching tabs
-  // updates the URL so /scores → /teams → /scores remembers the choice.
-  const [league, setLeague] = useLeague();
+  // League state lives in ?league= — see lib/use-league.ts. We don't pass
+  // a topNavSlot so AppShell's default renders: pill tabs on desktop, a
+  // dropdown on mobile. Both write to the same useLeague() state via the
+  // URL so changing it anywhere updates this component on next render.
+  const [league] = useLeague();
   const counts = gameCounts(games);
 
   return (
-    <AppShell topNavSlot={<LeagueTabs active={league} onChange={setLeague} />}>
+    <AppShell>
       <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
         {league === 'ufa' ? (
           <UfaFeed games={games} today={today} counts={counts} />
@@ -96,16 +98,18 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
   if (!event) {
     return (
       <>
-        <div className="flex flex-col gap-1 mb-5 lg:mb-7">
+        <div className="flex items-center justify-between gap-3 mb-5">
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
-            USAU Club · Open
+            USAU
           </span>
+          <UsauDivisionSelect />
+        </div>
+        <div className="flex flex-col gap-1 mb-5 lg:mb-7">
           <h1 className="m-0 font-display italic font-bold text-[36px] lg:text-[44px] leading-[0.95] tracking-[-0.04em] text-ink">
             No tournament available
           </h1>
           <p className="text-[13px] text-muted font-tight max-w-[600px]">
-            Check back when the next sanctioned event is on the calendar.
-            Browse{' '}
+            Try a different division above, or browse{' '}
             <Link href="/schedule?league=usau" className="text-accent hover:underline">
               the schedule
             </Link>{' '}
@@ -123,6 +127,13 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
   const isUpcoming = startMs != null && startMs > now;
   const eyebrowState = isLive ? 'Live now' : isUpcoming ? 'Upcoming' : 'Most recent';
   const dateRange = formatEventDates(event.startDate, event.endDate);
+  const levelLabel = prettyLevel(event.competitionLevel);
+  // "Bracket-pending" state: the event is live or upcoming AND we don't
+  // have games scraped yet. USAU sometimes publishes the bracket only on
+  // the morning of the tournament — show a friendly placeholder until
+  // our cron picks it up.
+  const noGamesYet = event.games.length === 0;
+  const showBracketPending = noGamesYet && (isLive || isUpcoming);
 
   return (
     <>
@@ -133,7 +144,7 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
             isLive ? 'text-live' : 'text-accent',
           ].join(' ')}
         >
-          USAU Club · {eyebrowState}
+          USAU {levelLabel} · {eyebrowState}
         </span>
         <h1 className="m-0 font-display italic font-bold text-[36px] lg:text-[44px] leading-[0.95] tracking-[-0.04em] text-ink">
           <Link href={`/usau/events/${event.slug}`} className="hover:text-accent transition-colors no-underline">
@@ -150,17 +161,71 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
       <div className="flex flex-wrap items-center gap-2 mb-8 pb-6 border-b border-hairline">
         <UsauChip label="Teams" value={event.teams.length} />
         <UsauChip label="Games" value={event.games.length} />
-        <Link
-          href={`/schedule?league=usau`}
-          className="ml-auto text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors no-underline"
-        >
-          All tournaments →
-        </Link>
+        <div className="ml-auto flex items-center gap-3">
+          <UsauDivisionSelect />
+          <Link
+            href={`/schedule?league=usau`}
+            className="text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors no-underline"
+          >
+            All tournaments →
+          </Link>
+        </div>
       </div>
 
-      <UsauEventDetail event={event} />
+      {showBracketPending ? (
+        <BracketPending event={event} isLive={isLive} />
+      ) : (
+        <UsauEventDetail event={event} />
+      )}
     </>
   );
+}
+
+function BracketPending({
+  event,
+  isLive,
+}: {
+  event: UsauEventSummary;
+  isLive: boolean;
+}) {
+  return (
+    <div className="bg-surface border border-border rounded-md p-6 flex flex-col gap-3">
+      <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+        {isLive ? 'Bracket pending' : 'Bracket not yet published'}
+      </div>
+      <p className="text-[14px] text-ink font-tight leading-relaxed max-w-[640px]">
+        {event.teams.length > 0
+          ? `${event.teams.length} ${event.teams.length === 1 ? 'team is' : 'teams are'} in the field, but USAU hasn't published the schedule yet.`
+          : "We've seen the event but USAU hasn't posted teams or the bracket yet."}
+        {' '}
+        We re-check every few minutes during live tournaments — refresh later to see scores roll in.
+      </p>
+      <div className="flex items-center gap-3 pt-1">
+        <a
+          href={`https://play.usaultimate.org/events/${event.slug}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] uppercase text-accent hover:underline font-tight no-underline"
+        >
+          View on USAU
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M4 2h6v6M10 2L4 8M2 4v6h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </a>
+      </div>
+    </div>
+  );
+}
+
+function prettyLevel(level: string): string {
+  switch (level) {
+    case 'CLUB': return 'Club';
+    case 'COLLEGE_D1': return 'College · D-I';
+    case 'COLLEGE_D3': return 'College · D-III';
+    case 'MASTERS': return 'Masters';
+    case 'GRAND_MASTERS': return 'Grand Masters';
+    default: return level;
+  }
 }
 
 function UsauChip({ label, value }: { label: string; value: string | number }) {

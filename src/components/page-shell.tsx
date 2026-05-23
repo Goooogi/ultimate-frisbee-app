@@ -18,6 +18,9 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import { SidebarNav } from '@/components/sidebar-nav';
 import { LeagueTabs } from '@/components/league-tabs';
 import { AccountChip } from '@/components/auth/account-chip';
+import { MobileBottomNav } from '@/components/mobile-bottom-nav';
+import { MobileLeagueSelect } from '@/components/mobile-league-select';
+import { SearchTrigger } from '@/components/search-trigger';
 import { useLeague } from '@/lib/use-league';
 
 // Hooks like useSearchParams() must be wrapped in Suspense for Next 14
@@ -49,15 +52,28 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
     </Suspense>
   );
 
+  // On mobile the league switcher lives inside the header as a compact
+  // dropdown (saves vertical space + thumb-friendly). The desktop pill
+  // tabs stay on lg+. Custom topNavSlot wins on both sizes — when a
+  // caller passes one (e.g. /players/{id} uses PlayerLeagueTabs to
+  // override navigation), we render that slot everywhere.
+  const mobileTab = topNavSlot ? (
+    <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
+  ) : (
+    <Suspense fallback={SUSPENSE_FALLBACK}>
+      <MobileLeagueSelect />
+    </Suspense>
+  );
+
   return (
     <>
       {/* ── Mobile (<lg) ── */}
-      <div className="lg:hidden min-h-screen bg-bg text-ink">
-        <MobileHeader theme={theme} />
-        <div className="px-4 py-2.5 border-b border-hairline flex justify-center bg-bg">
-          {tab}
-        </div>
+      <div className="lg:hidden min-h-screen bg-bg text-ink pb-[88px]">
+        <MobileHeader theme={theme} leagueSlot={mobileTab} />
         {children}
+        <Suspense fallback={SUSPENSE_FALLBACK}>
+          <MobileBottomNav />
+        </Suspense>
       </div>
 
       {/* ── Desktop (lg+) ── */}
@@ -73,6 +89,7 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
               <div className="pointer-events-auto">{tab}</div>
             </div>
             <div className="ml-auto flex items-center gap-3">
+              <SearchTrigger size={32} />
               <AccountChip size={32} />
             </div>
           </div>
@@ -123,17 +140,25 @@ export function PageShell({
   );
 }
 
-function MobileHeader({ theme }: { theme: 'field' | 'broadcast' }) {
+function MobileHeader({
+  theme,
+  leagueSlot,
+}: {
+  theme: 'field' | 'broadcast';
+  leagueSlot: React.ReactNode;
+}) {
   return (
-    <header className="flex items-center justify-between px-5 pt-4 pb-2 border-b border-hairline">
-      <Link href="/" aria-label="The Layout — home">
+    <header className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-hairline">
+      <Link href="/" aria-label="The Layout — home" className="flex-shrink-0">
         <LogoStrikeInline
           accentColor="rgb(var(--accent))"
           theme={theme === 'broadcast' ? 'dark' : 'light'}
           size={0.95}
         />
       </Link>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5 flex-shrink-0">
+        {leagueSlot}
+        <SearchTrigger size={28} />
         <ThemeToggle />
         <AccountChip size={28} />
       </div>

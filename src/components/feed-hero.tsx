@@ -1,8 +1,10 @@
 'use client';
 
-// Unified hero for /scores ("Today.") — single layout for both themes.
+// Unified hero for /scores ("Upcoming.") — single layout for both themes.
 // Per the chrome merge, the broadcast "NEXT 01" treatment was retired in
-// favor of the light-mode "Today." headline. Theme tokens swap via CSS vars.
+// favor of a plain headline. The label is "Upcoming." since /scores shows
+// this-week + live games (the soonest games rise to the top), not a strict
+// today-only slate. Theme tokens swap via CSS vars.
 
 import type { GameCounts } from '@/components/feed-page';
 import type { Today } from '@/lib/today';
@@ -21,7 +23,7 @@ export function FeedHero({ counts, today, desktop = false }: FeedHeroProps) {
           {today.weekday} · {today.month} {today.day} · {today.year}
         </div>
         <h1 className="text-[56px] font-bold tracking-[-0.04em] text-ink leading-none font-tight m-0">
-          Today.
+          Upcoming.
         </h1>
         <p className="text-[15px] text-muted font-medium mt-2.5 font-tight">
           {subline(counts)} Tap any card to follow.
@@ -33,7 +35,7 @@ export function FeedHero({ counts, today, desktop = false }: FeedHeroProps) {
   return (
     <div className="px-5 pt-3.5 pb-2">
       <div className="text-[40px] font-bold tracking-[-0.04em] text-ink leading-none font-tight">
-        Today.
+        Upcoming.
       </div>
       <div className="text-[14px] text-muted font-medium mt-1.5 font-tight">
         {subline(counts)}

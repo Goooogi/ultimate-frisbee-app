@@ -27,6 +27,11 @@ export function UsauPlayerProfile({ profile, topNavSlot }: Props) {
 
   return (
     <PageShell title={profile.displayName} eyebrow="USAU · Career" topNavSlot={topNavSlot}>
+      {/* Championship banner — only if they've won at least one Club Nationals. */}
+      {profile.championYears.length > 0 && (
+        <ChampionBanner years={profile.championYears} label="USAU National Champion" />
+      )}
+
       {/* Hero summary chips */}
       <div className="flex flex-wrap items-center gap-3 mb-8 pb-6 border-b border-hairline">
         <SummaryChip label="Events" value={totalEvents} />
@@ -114,15 +119,22 @@ function TeamStintCard({ stint }: { stint: UsauPlayerSummary['teamHistory'][numb
           {stint.season}
         </span>
         <span className="flex-1 min-w-0">
-          <Link
-            href={`/usau/teams/${stint.teamId}`}
-            className="block font-display italic font-bold text-[18px] leading-tight tracking-[-0.02em] text-ink truncate hover:text-accent transition-colors"
-          >
-            {stint.teamName}
-          </Link>
+          {/* Use min-w-0 + flex-1 on the Link so truncate respects the
+              container width. pr-1.5 reserves space for the italic
+              glyph's right-edge slant so "Bravo" doesn't appear clipped. */}
+          <span className="flex items-center gap-2 min-w-0">
+            <Link
+              href={`/usau/teams/${stint.teamId}`}
+              className="flex-1 min-w-0 block font-display italic font-bold text-[18px] leading-tight tracking-[-0.02em] text-ink truncate pr-1.5 hover:text-accent transition-colors"
+            >
+              {stint.teamName}
+            </Link>
+            {stint.isChampion && <TrophyBadge title="USAU National Champion" />}
+          </span>
           <span className="block text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight mt-0.5">
             {stint.events.length} {stint.events.length === 1 ? 'event' : 'events'}
             {stint.jerseyNumber && ` · #${stint.jerseyNumber}`}
+            {stint.isChampion && ' · Champion'}
           </span>
         </span>
         {hasStats && (
@@ -245,6 +257,58 @@ function SummaryStat({ label, value }: { label: string; value: number }) {
         {label}
       </span>
     </span>
+  );
+}
+
+/**
+ * Big championship banner at the top of the profile. Lists all the years
+ * this player won the title — single-source-of-truth for the achievement,
+ * the per-stint trophy icon is just a quick scan cue further down.
+ */
+export function ChampionBanner({ years, label }: { years: number[]; label: string }) {
+  const sorted = [...years].sort((a, b) => b - a);
+  return (
+    <div
+      role="note"
+      className={[
+        'flex items-center gap-3 mb-6 px-4 py-3 rounded-md',
+        'bg-accent/10 border border-accent/40 text-ink',
+      ].join(' ')}
+    >
+      <span className="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-accent text-accent-ink">
+        <TrophyGlyph size={18} />
+      </span>
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+          {label}
+        </span>
+        <span className="text-[14px] font-bold font-tight text-ink truncate">
+          {sorted.length === 1 ? `${sorted[0]} title` : `${sorted.length}× champion · ${sorted.join(', ')}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function TrophyBadge({ title }: { title: string }) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent text-accent-ink flex-shrink-0"
+    >
+      <TrophyGlyph size={11} />
+    </span>
+  );
+}
+
+function TrophyGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
+      <path d="M6 3h10v5a5 5 0 0 1-10 0V3Z" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 5H3v2a2 2 0 0 0 2 2M16 5h3v2a2 2 0 0 1-2 2" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M11 13v3M8 19h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
   );
 }
 

@@ -1,0 +1,269 @@
+'use client';
+
+// Global search overlay. Triggered by the search icon in the desktop
+// topbar and the mobile header. Same search() function as the old
+// sidebar widget — debounced, grouped Teams/Players results, arrow-keys
+// + Enter to navigate.
+
+import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { search, type SearchResult } from '@/lib/usau/data';
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+export function SearchModal({ open, onClose }: Props) {
+  const router = useRouter();
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  // Reset when the modal closes so reopen starts fresh.
+  useEffect(() => {
+    if (!open) {
+      setQuery('');
+      setResults([]);
+      setLoading(false);
+      setHighlight(0);
+    } else {
+      // Focus the input on open.
+      setTimeout(() => inputRef.current?.focus(), 20);
+    }
+  }, [open]);
+
+  // Debounced search, aborting stale renders.
+  useEffect(() => {
+    if (!open) return;
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await search(q, 8);
+        if (!cancelled) {
+          setResults(r);
+          setHighlight(0);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [query, open]);
+
+  // Esc to close.
+  useEffect(() => {
+    if (!open) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  function goTo(r: SearchResult) {
+    onClose();
+    if (r.kind === 'team') router.push(`/usau/teams/${r.id}`);
+    else router.push(`/players/${r.id}`);
+  }
+
+  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (results.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlight((h) => Math.min(h + 1, results.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlight((h) => Math.max(h - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const target = results[highlight];
+      if (target) goTo(target);
+    }
+  }
+
+  if (!open) return null;
+
+  const teamResults = results.filter((r) => r.kind === 'team');
+  const playerResults = results.filter((r) => r.kind === 'player');
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search teams and players"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] px-4"
+    >
+      {/* Backdrop */}
+      <button
+        type="button"
+        aria-label="Close search"
+        onClick={onClose}
+        className="absolute inset-0 bg-ink/40 backdrop-blur-sm cursor-default"
+      />
+
+      {/* Panel */}
+      <div className="relative z-10 w-full max-w-[560px] bg-bg border border-border rounded-lg shadow-2xl overflow-hidden">
+        <div className="relative border-b border-hairline">
+          <span
+            aria-hidden="true"
+            className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+          >
+            <SearchGlyph size={16} />
+          </span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="Search teams, players…"
+            aria-label="Search teams and players"
+            className={[
+              'w-full bg-transparent',
+              'pl-11 pr-12 py-4 text-[15px] text-ink font-tight placeholder:text-faint',
+              'focus-visible:outline-none',
+            ].join(' ')}
+          />
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close search"
+            className="absolute right-3 top-1/2 -translate-y-1/2 inline-flex items-center justify-center w-7 h-7 rounded-md text-faint hover:text-ink hover:bg-surface transition-colors cursor-pointer"
+          >
+            <CloseGlyph />
+          </button>
+        </div>
+
+        <div className="max-h-[55vh] overflow-y-auto">
+          {query.trim().length < 2 ? (
+            <div className="px-4 py-6 text-[12px] text-faint font-tight">
+              Type at least 2 characters to search.
+            </div>
+          ) : loading && results.length === 0 ? (
+            <div className="px-4 py-6 text-[12px] text-faint font-tight">Searching…</div>
+          ) : results.length === 0 ? (
+            <div className="px-4 py-6 text-[12px] text-faint font-tight">No matches.</div>
+          ) : (
+            <>
+              {teamResults.length > 0 && (
+                <Group label="Teams">
+                  {teamResults.map((r) => {
+                    const i = results.indexOf(r);
+                    return (
+                      <ResultRow
+                        key={r.id}
+                        result={r}
+                        active={i === highlight}
+                        onClick={() => goTo(r)}
+                      />
+                    );
+                  })}
+                </Group>
+              )}
+              {playerResults.length > 0 && (
+                <Group label="Players">
+                  {playerResults.map((r) => {
+                    const i = results.indexOf(r);
+                    return (
+                      <ResultRow
+                        key={r.id}
+                        result={r}
+                        active={i === highlight}
+                        onClick={() => goTo(r)}
+                      />
+                    );
+                  })}
+                </Group>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Group({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col">
+      <div className="px-4 pt-3 pb-1.5 text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+        {label}
+      </div>
+      <div className="flex flex-col">{children}</div>
+    </div>
+  );
+}
+
+function ResultRow({
+  result,
+  active,
+  onClick,
+}: {
+  result: SearchResult;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      onClick={onClick}
+      className={[
+        'flex items-center gap-3 px-4 py-2.5 text-left transition-colors cursor-pointer',
+        'focus-visible:outline-none',
+        active ? 'bg-surface' : 'hover:bg-surface',
+      ].join(' ')}
+    >
+      <span
+        aria-hidden="true"
+        className={[
+          'inline-flex items-center justify-center w-7 h-7 rounded-md text-[9px] font-bold tracking-[0.04em] flex-shrink-0',
+          result.kind === 'team' ? 'bg-ink text-bg' : 'bg-accent text-accent-ink',
+        ].join(' ')}
+      >
+        {result.kind === 'team' ? 'TM' : 'PL'}
+      </span>
+      <span className="flex-1 min-w-0">
+        <span className="block text-[14px] font-semibold text-ink font-tight leading-tight truncate">
+          {result.name}
+        </span>
+        {result.hint && (
+          <span className="block text-[11px] font-medium text-faint font-tight truncate mt-0.5">
+            {result.hint}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+export function SearchGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CloseGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M3 3L11 11M11 3L3 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}

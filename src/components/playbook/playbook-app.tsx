@@ -596,11 +596,17 @@ export function PlaybookApp() {
           placeholder="Untitled play"
           spellCheck={false}
           aria-label="Play name"
+          // The display font is italic + heavy with negative tracking, which
+          // makes WebKit render the text-caret visually *inside* the last
+          // glyph (the italic slant overhangs the character's advance width).
+          // pr-3 reserves space past the rightmost glyph so the caret sits
+          // clearly after the last letter. leading-tight also gives the line
+          // box enough vertical room that the caret aligns to the baseline.
           className={[
             'block w-full bg-transparent border-0 outline-none',
-            'font-display italic font-bold text-[24px] md:text-[32px] lg:text-[56px] leading-[0.95] tracking-[-0.04em] text-ink',
+            'font-display italic font-bold text-[24px] md:text-[32px] lg:text-[56px] leading-tight tracking-[-0.04em] text-ink',
             'placeholder-faint focus:placeholder-transparent',
-            'py-0.5 transition-colors',
+            'py-0.5 pr-3 transition-colors',
           ].join(' ')}
         />
       </div>

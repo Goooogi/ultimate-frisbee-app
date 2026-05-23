@@ -8,28 +8,37 @@ import { getCurrentGames } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
-import { getCurrentClubEventSlug, getEvent, type UsauEventSummary } from '@/lib/usau/data';
+import { getCurrentEvent, getEvent, type UsauEventSummary } from '@/lib/usau/data';
+import { parseDivisionParam } from '@/lib/league';
 
 export const revalidate = 30;
 
-export default async function HomePage() {
+interface Props {
+  searchParams: { league?: string; div?: string };
+}
+
+export default async function HomePage({ searchParams }: Props) {
+  // USAU division filter persists across pages via ?div=. Default 'Men'.
+  const division = parseDivisionParam(searchParams.div);
   // Fetch UFA + USAU in parallel so switching tabs is instant.
   const [games, usauEvent] = await Promise.all([
     getCurrentGames().catch((err) => {
       console.error('Failed to fetch UFA current games:', err);
       return [] as UfaGame[];
     }),
-    loadCurrentClubEvent(),
+    loadCurrentEvent(division),
   ]);
   const today = getToday();
   return <FeedPage games={sortForFeed(games)} today={today} usauEvent={usauEvent} />;
 }
 
-async function loadCurrentClubEvent(): Promise<UsauEventSummary | null> {
+async function loadCurrentEvent(
+  division: 'Men' | 'Women' | 'Mixed',
+): Promise<UsauEventSummary | null> {
   try {
-    const slug = await getCurrentClubEventSlug();
-    if (!slug) return null;
-    return await getEvent(slug);
+    const pick = await getCurrentEvent({ genderDivision: division });
+    if (!pick) return null;
+    return await getEvent(pick.slug);
   } catch (err) {
     console.error('Failed to load USAU current event:', err);
     return null;

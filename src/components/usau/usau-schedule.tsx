@@ -14,8 +14,14 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { listEvents, listSeasons, type UsauEventCard } from '@/lib/usau/data';
+import type { UsauDivision } from '@/lib/league';
 
-export function UsauSchedule() {
+interface Props {
+  /** Optional gender division filter. When omitted, all divisions show. */
+  division?: UsauDivision;
+}
+
+export function UsauSchedule({ division }: Props = {}) {
   const [seasons, setSeasons] = useState<number[]>([]);
   const [season, setSeason] = useState<number | null>(null);
   const [events, setEvents] = useState<UsauEventCard[]>([]);
@@ -45,8 +51,8 @@ export function UsauSchedule() {
     // No competitionLevel filter — schedule shows everything we have for
     // the season (Club, College D-I/D-III, HS, MS, Masters, etc.). The
     // upcoming section auto-pins the most relevant event regardless of
-    // level (this weekend = College D-I Nationals for 2026, for instance).
-    listEvents({ season, limit: 500 })
+    // level. Division filter is applied server-side via listEvents().
+    listEvents({ season, limit: 500, genderDivision: division })
       .then((e) => !cancelled && setEvents(e))
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
@@ -55,7 +61,7 @@ export function UsauSchedule() {
     return () => {
       cancelled = true;
     };
-  }, [season]);
+  }, [season, division]);
 
   const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
 
