@@ -71,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     supabase
       .from('profiles')
-      .select('id, email, display_name, username, avatar_url, phone')
+      .select('id, email, display_name, username, avatar_url, phone, role')
       .eq('id', userId)
       .maybeSingle()
       .then(({ data }) => {
@@ -121,6 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           email: session.user.email ?? '',
           name: profile?.display_name || session.user.email?.split('@')[0] || 'Player',
           initials: computeInitials(profile?.display_name || session.user.email || ''),
+          isAdmin: profile?.role === 'admin',
           profile,
         }
       : null;

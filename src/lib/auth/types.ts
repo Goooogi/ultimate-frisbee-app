@@ -1,3 +1,5 @@
+export type UserRole = 'user' | 'admin';
+
 export interface Profile {
   id: string;
   email: string;
@@ -5,6 +7,7 @@ export interface Profile {
   username: string | null;
   avatar_url: string | null;
   phone: string | null;
+  role: UserRole;
 }
 
 export interface SessionUser {
@@ -14,5 +17,7 @@ export interface SessionUser {
   name: string;
   /** Two-letter initials derived from display name. */
   initials: string;
+  /** Convenience: true when profile.role === 'admin'. */
+  isAdmin: boolean;
   profile: Profile | null;
 }

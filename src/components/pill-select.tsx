@@ -1,0 +1,239 @@
+'use client';
+
+// PillSelect — branded dropdown that replaces native <select> so the
+// popover matches the rest of the chrome. The trigger looks identical
+// to the previous pill-style native selects (same padding, font, etc.)
+// so existing layouts continue to work; the difference is the menu —
+// it's a styled <ul> popover instead of the OS-rendered list.
+//
+// Used by YearSelector, UsauDivisionSelect, and the USAU team-history
+// year picker. Keep this primitive small and dependency-free — it's a
+// shared chrome component touched by many pages.
+
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+export interface PillSelectOption<V extends string | number> {
+  value: V;
+  label: string;
+  /** Optional small secondary line (e.g. "soon"). */
+  hint?: string;
+  /** Disabled options render greyed out and are not focusable. */
+  disabled?: boolean;
+}
+
+interface Props<V extends string | number> {
+  value: V;
+  options: PillSelectOption<V>[];
+  onChange: (next: V) => void;
+  /** Accessibility label for the trigger button. */
+  ariaLabel: string;
+  /** Optional className extension on the trigger button (e.g. min-w-[X]). */
+  className?: string;
+  /** Anchor the popover to the trigger's left (default) or right edge. */
+  align?: 'left' | 'right';
+}
+
+export function PillSelect<V extends string | number>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
+  className = '',
+  align = 'left',
+}: Props<V>) {
+  const [open, setOpen] = useState(false);
+  const [focusIdx, setFocusIdx] = useState<number>(-1);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const listId = useId();
+
+  const enabledIndexes = useMemo(
+    () => options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0),
+    [options],
+  );
+  const currentLabel = useMemo(
+    () => options.find((o) => o.value === value)?.label ?? '',
+    [options, value],
+  );
+
+  // Sync the highlighted index whenever the menu opens — start on the
+  // currently selected option so Enter works without arrow-keying first.
+  useEffect(() => {
+    if (!open) return;
+    const idx = options.findIndex((o) => o.value === value);
+    setFocusIdx(idx >= 0 && !options[idx].disabled ? idx : enabledIndexes[0] ?? -1);
+  }, [open, options, value, enabledIndexes]);
+
+  // Outside click + Escape close.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const select = useCallback(
+    (v: V) => {
+      onChange(v);
+      setOpen(false);
+      // Restore focus so keyboard users don't lose their place.
+      requestAnimationFrame(() => triggerRef.current?.focus());
+    },
+    [onChange],
+  );
+
+  function onTriggerKey(e: React.KeyboardEvent) {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) {
+      e.preventDefault();
+      setOpen(true);
+      return;
+    }
+    if (!open) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const dir = e.key === 'ArrowDown' ? 1 : -1;
+      const pos = enabledIndexes.indexOf(focusIdx);
+      const next =
+        pos < 0
+          ? enabledIndexes[0]
+          : enabledIndexes[(pos + dir + enabledIndexes.length) % enabledIndexes.length];
+      setFocusIdx(next);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const opt = options[focusIdx];
+      if (opt && !opt.disabled) select(opt.value);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setFocusIdx(enabledIndexes[0] ?? -1);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setFocusIdx(enabledIndexes[enabledIndexes.length - 1] ?? -1);
+    }
+  }
+
+  return (
+    <div ref={wrapRef} className="relative inline-flex items-center">
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={onTriggerKey}
+        className={[
+          'inline-flex items-center gap-2 pl-3 pr-2 py-[6px] rounded-full',
+          'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
+          'bg-surface border border-border text-ink cursor-pointer',
+          'hover:border-ink transition-colors duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          'whitespace-nowrap',
+          className,
+        ].join(' ')}
+      >
+        <span>{currentLabel}</span>
+        <Chevron open={open} />
+      </button>
+
+      {open && (
+        <ul
+          id={listId}
+          role="listbox"
+          aria-label={ariaLabel}
+          tabIndex={-1}
+          className={[
+            'absolute top-full mt-1.5 z-30 min-w-[--pill-w] py-1',
+            'bg-bg border border-border rounded-md shadow-lg',
+            'max-h-[60vh] overflow-y-auto',
+            align === 'right' ? 'right-0' : 'left-0',
+          ].join(' ')}
+          style={
+            // Match trigger width so the menu doesn't look orphaned for
+            // short option lists.
+            { ['--pill-w' as string]: `${triggerRef.current?.offsetWidth ?? 120}px` } as React.CSSProperties
+          }
+        >
+          {options.map((o, i) => {
+            const selected = o.value === value;
+            const focused = focusIdx === i;
+            return (
+              <li key={String(o.value)} role="option" aria-selected={selected}>
+                <button
+                  type="button"
+                  disabled={o.disabled}
+                  onMouseEnter={() => !o.disabled && setFocusIdx(i)}
+                  onClick={() => !o.disabled && select(o.value)}
+                  className={[
+                    'w-full text-left px-3 py-2 flex items-center justify-between gap-3',
+                    'text-[12px] font-bold tracking-[0.12em] uppercase font-tight transition-colors duration-100',
+                    o.disabled
+                      ? 'text-faint cursor-not-allowed'
+                      : focused
+                        ? 'bg-surface-hi text-ink cursor-pointer'
+                        : 'text-muted hover:text-ink cursor-pointer',
+                  ].join(' ')}
+                >
+                  <span className="flex items-center gap-2">
+                    {selected && (
+                      <span aria-hidden="true" className="inline-block w-1.5 h-1.5 rounded-full bg-accent" />
+                    )}
+                    <span className={selected && !o.disabled ? 'text-ink' : undefined}>
+                      {o.label}
+                    </span>
+                  </span>
+                  {o.hint && (
+                    <span className="text-[9px] tracking-[0.18em] text-faint">{o.hint}</span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      className={[
+        'text-muted transition-transform duration-150',
+        open ? 'rotate-180' : '',
+      ].join(' ')}
+    >
+      <path
+        d="M3 4.5L6 7.5L9 4.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}

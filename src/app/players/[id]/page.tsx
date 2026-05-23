@@ -12,8 +12,13 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getUnifiedPlayerProfile } from '@/lib/unified-player';
 import { UnifiedProfile } from '@/components/players/unified-player-profile';
+import { getApprovedContentForPlayer } from '@/lib/player-content/server';
 
-export const revalidate = 3600;
+// Content rows are user-uploaded and approved on demand — they can change
+// any time without an underlying data refresh. Drop the page-level revalidate
+// so each request re-fetches; the upstream UFA/USAU calls remain cached via
+// their own TTL config.
+export const dynamic = 'force-dynamic';
 
 interface Props {
   params: { id: string };
@@ -28,5 +33,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function PlayerProfilePage({ params }: Props) {
   const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
   if (!profile) notFound();
-  return <UnifiedProfile profile={profile} />;
+
+  const content = await getApprovedContentForPlayer(profile.anchorLeague, profile.anchorId);
+
+  return <UnifiedProfile profile={profile} content={content} />;
 }

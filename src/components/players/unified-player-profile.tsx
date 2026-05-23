@@ -21,12 +21,15 @@ import { PageShell } from '@/components/page-shell';
 import { TeamLogo } from '@/components/team-logo';
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
+import { PlayerContentGallery } from '@/components/players/player-content-gallery';
+import type { PlayerContentItem } from '@/lib/player-content/types';
 
 interface Props {
   profile: UnifiedPlayerProfile;
+  content: PlayerContentItem[];
 }
 
-export function UnifiedProfile({ profile }: Props) {
+export function UnifiedProfile({ profile, content }: Props) {
   const { career, years } = profile;
   const latestYear = years[0];
   const latestUfa = latestYear?.stints.find(isUfa) ?? null;
@@ -127,6 +130,13 @@ export function UnifiedProfile({ profile }: Props) {
           </div>
         </section>
       )}
+
+      <PlayerContentGallery
+        playerKind={profile.anchorLeague}
+        playerRef={profile.anchorId}
+        playerDisplayName={profile.displayName}
+        items={content}
+      />
     </PageShell>
   );
 }

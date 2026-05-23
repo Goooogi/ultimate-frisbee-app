@@ -1,10 +1,8 @@
 // Featured game hero card — dark "stadium" background, big score, decorative
 // chalk field lines + flight arc, optional mini-stat strip, two CTAs.
 //
-// Picks "game of the week" from the supplied games array:
-//   1. first Live game
-//   2. else first Upcoming game
-//   3. else first game (Final)
+// The caller picks the game via pickGameOfTheWeek() (lib/ufa/game-of-the-week).
+// This component just renders whichever UfaGame it's handed.
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
@@ -14,7 +12,7 @@ import { HeroFieldLines } from './field-diagram';
 import { TeamLogo } from '@/components/team-logo';
 
 interface HeroGameCardProps {
-  games: UfaGame[];
+  game: UfaGame | undefined;
   awayRecord?: string;
   homeRecord?: string;
 }
@@ -27,18 +25,18 @@ const STADIUM = {
 };
 const ACCENT = '#FF3D00';
 
-export function HeroGameCard({ games, awayRecord, homeRecord }: HeroGameCardProps) {
-  const game = pickFeatured(games);
+export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps) {
   if (!game) return <EmptyHero />;
 
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const state = gameUiState(game);
+  const matchup = `${away.city} ${away.name} @ ${home.city} ${home.name}`;
   const eyebrowLabel = state.isLive
-    ? 'Live now · Game of the week'
+    ? `Live now · ${matchup}`
     : state.isUpcoming
-      ? `Up next · ${away.city} ${away.name} @ ${home.city} ${home.name}`
-      : `Recent · ${away.city} ${away.name} @ ${home.city} ${home.name}`;
+      ? `Game of the week · ${matchup}`
+      : `Recent · ${matchup}`;
   const statusLine = state.isLive
     ? 'LIVE · IN PROGRESS'
     : state.isUpcoming
@@ -136,14 +134,6 @@ export function HeroGameCard({ games, awayRecord, homeRecord }: HeroGameCardProp
       </div>
     </article>
   );
-}
-
-function pickFeatured(games: UfaGame[]): UfaGame | undefined {
-  const live = games.find((g) => gameUiState(g).isLive);
-  if (live) return live;
-  const upcoming = games.find((g) => gameUiState(g).isUpcoming);
-  if (upcoming) return upcoming;
-  return games[0];
 }
 
 function truncate(s: string, n: number) {

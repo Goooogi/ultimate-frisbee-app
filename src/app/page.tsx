@@ -11,6 +11,7 @@ import {
   currentSeasonYear,
 } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
+import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { getToday } from '@/lib/today';
 import { HomeNav } from '@/components/home/home-nav';
@@ -55,11 +56,10 @@ export default async function HomePage() {
   const teamStats: UfaTeamStat[] =
     teamStatsRes.status === 'fulfilled' ? teamStatsRes.value.stats ?? [] : [];
 
-  // Pick "game of the week" (live first, else upcoming, else first).
-  const featured =
-    games.find((g) => gameUiState(g).isLive) ??
-    games.find((g) => gameUiState(g).isUpcoming) ??
-    games[0];
+  // Pick "Game of the Week" — most evenly-matched current-week game between
+  // two good teams. See pickGameOfTheWeek() for the heuristic; the UFA API
+  // doesn't expose a featured-game flag so we derive it from standings.
+  const featured = pickGameOfTheWeek(games, standings) ?? games[0];
 
   // Records for the featured game's two teams (from current standings).
   const recordOf = (slug?: string): string | undefined => {
@@ -108,7 +108,7 @@ export default async function HomePage() {
 
       {/* HERO BENTO — primary game on the left, sub-app tiles stacked right */}
       <div className="px-5 lg:px-12 pt-6 lg:pt-9 pb-5 lg:pb-6 grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-5">
-        <HeroGameCard games={games} awayRecord={awayRec} homeRecord={homeRec} />
+        <HeroGameCard game={featured} awayRecord={awayRec} homeRecord={homeRec} />
         <div className="grid grid-rows-[1fr_1fr] gap-5">
           <PlaybookTile />
           <FantasyTile />

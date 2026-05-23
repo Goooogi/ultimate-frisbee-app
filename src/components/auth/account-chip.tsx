@@ -13,6 +13,7 @@
 // AuthProvider hydrates — prevents the "Sign in" button from flashing for
 // returning users on a hard refresh.
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from './auth-modal';
@@ -150,6 +151,20 @@ export function AccountChip({
             </div>
             <div className="text-[11px] text-muted font-tight truncate">{user.email}</div>
           </div>
+          {user.isAdmin && (
+            <Link
+              href="/admin/content"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+              className={[
+                'block w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+                'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
+                'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink',
+              ].join(' ')}
+            >
+              Admin
+            </Link>
+          )}
           <button
             type="button"
             role="menuitem"

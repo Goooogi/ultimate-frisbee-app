@@ -236,6 +236,81 @@ export type Database = {
           },
         ]
       }
+      player_content: {
+        Row: {
+          caption: string | null
+          created_at: string
+          external_url: string | null
+          file_size_bytes: number | null
+          id: string
+          kind: Database["public"]["Enums"]["player_content_kind"]
+          mime_type: string | null
+          player_display_name: string
+          player_kind: string
+          player_ref: string
+          rejection_reason: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["player_content_status"]
+          storage_path: string | null
+          updated_at: string
+          uploaded_by: string
+        }
+        Insert: {
+          caption?: string | null
+          created_at?: string
+          external_url?: string | null
+          file_size_bytes?: number | null
+          id?: string
+          kind: Database["public"]["Enums"]["player_content_kind"]
+          mime_type?: string | null
+          player_display_name: string
+          player_kind: string
+          player_ref: string
+          rejection_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["player_content_status"]
+          storage_path?: string | null
+          updated_at?: string
+          uploaded_by: string
+        }
+        Update: {
+          caption?: string | null
+          created_at?: string
+          external_url?: string | null
+          file_size_bytes?: number | null
+          id?: string
+          kind?: Database["public"]["Enums"]["player_content_kind"]
+          mime_type?: string | null
+          player_display_name?: string
+          player_kind?: string
+          player_ref?: string
+          rejection_reason?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["player_content_status"]
+          storage_path?: string | null
+          updated_at?: string
+          uploaded_by?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_content_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_content_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -244,6 +319,7 @@ export type Database = {
           email: string
           id: string
           phone: string | null
+          role: Database["public"]["Enums"]["user_role"]
           updated_at: string
           username: string | null
         }
@@ -254,6 +330,7 @@ export type Database = {
           email: string
           id: string
           phone?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
           username?: string | null
         }
@@ -264,6 +341,7 @@ export type Database = {
           email?: string
           id?: string
           phone?: string | null
+          role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
           username?: string | null
         }
@@ -768,11 +846,14 @@ export type Database = {
           token: string
         }[]
       }
+      is_admin: { Args: Record<string, never>; Returns: boolean }
       is_team_editor: { Args: { p_team_id: string }; Returns: boolean }
       is_team_member: { Args: { p_team_id: string }; Returns: boolean }
     }
     Enums: {
       pb_team_role: "owner" | "coach" | "member"
+      player_content_kind: "image" | "video" | "video_link"
+      player_content_status: "pending" | "approved" | "rejected"
       usau_competition_level:
         | "CLUB"
         | "COLLEGE_D1"
@@ -811,6 +892,7 @@ export type Database = {
         | "forfeit"
         | "cancelled"
       usau_gender_division: "Men" | "Women" | "Mixed" | "Open"
+      user_role: "user" | "admin"
     }
     CompositeTypes: {
       [_ in never]: never
