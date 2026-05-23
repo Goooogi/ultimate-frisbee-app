@@ -128,12 +128,17 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
   const eyebrowState = isLive ? 'Live now' : isUpcoming ? 'Upcoming' : 'Most recent';
   const dateRange = formatEventDates(event.startDate, event.endDate);
   const levelLabel = prettyLevel(event.competitionLevel);
-  // "Bracket-pending" state: the event is live or upcoming AND we don't
-  // have games scraped yet. USAU sometimes publishes the bracket only on
-  // the morning of the tournament — show a friendly placeholder until
-  // our cron picks it up.
-  const noGamesYet = event.games.length === 0;
-  const showBracketPending = noGamesYet && (isLive || isUpcoming);
+  // Three rendering modes:
+  //   - hasNothing: no teams + no games → fall back to the friendly
+  //     "happens later, USAU hasn't posted anything yet" placeholder.
+  //   - games arrived: render UsauEventDetail straight up.
+  //   - teams (with pools) but no games: render UsauEventDetail so pools
+  //     show, AND surface a thin "bracket pending" notice above it so
+  //     users know scores are coming. This is the in-progress state right
+  //     before USAU posts the bracket — pool seedings are visible.
+  const hasGames = event.games.length > 0;
+  const hasTeams = event.teams.length > 0;
+  const showBracketPending = !hasGames && (isLive || isUpcoming);
 
   return (
     <>
@@ -172,11 +177,10 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
         </div>
       </div>
 
-      {showBracketPending ? (
-        <BracketPending event={event} isLive={isLive} />
-      ) : (
-        <UsauEventDetail event={event} />
+      {showBracketPending && (
+        <BracketPending event={event} isLive={isLive} hasTeams={hasTeams} />
       )}
+      {(hasGames || hasTeams) && <UsauEventDetail event={event} />}
     </>
   );
 }
@@ -184,20 +188,42 @@ function UsauFeed({ event }: { event: UsauEventSummary | null }) {
 function BracketPending({
   event,
   isLive,
+  hasTeams,
 }: {
   event: UsauEventSummary;
   isLive: boolean;
+  hasTeams: boolean;
 }) {
+  // Compact one-line banner when pools/teams data already shows below.
+  // The bigger explanatory card only when we have literally nothing.
+  if (hasTeams) {
+    return (
+      <div className="flex items-center justify-between gap-3 mb-6 px-4 py-2.5 rounded-md bg-accent/10 border border-accent/40">
+        <span className="text-[11px] font-bold tracking-[0.14em] uppercase text-accent font-tight">
+          {isLive ? 'Bracket pending · scores roll in soon' : 'Bracket not yet published'}
+        </span>
+        <a
+          href={`https://play.usaultimate.org/events/${event.slug}/`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[10px] font-bold tracking-[0.14em] uppercase text-accent hover:underline font-tight no-underline whitespace-nowrap"
+        >
+          View on USAU
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M4 2h6v6M10 2L4 8M2 4v6h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+        </a>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-surface border border-border rounded-md p-6 flex flex-col gap-3">
       <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
         {isLive ? 'Bracket pending' : 'Bracket not yet published'}
       </div>
       <p className="text-[14px] text-ink font-tight leading-relaxed max-w-[640px]">
-        {event.teams.length > 0
-          ? `${event.teams.length} ${event.teams.length === 1 ? 'team is' : 'teams are'} in the field, but USAU hasn't published the schedule yet.`
-          : "We've seen the event but USAU hasn't posted teams or the bracket yet."}
-        {' '}
+        We&rsquo;ve seen the event but USAU hasn&rsquo;t posted teams or the bracket yet.
         We re-check every few minutes during live tournaments — refresh later to see scores roll in.
       </p>
       <div className="flex items-center gap-3 pt-1">
