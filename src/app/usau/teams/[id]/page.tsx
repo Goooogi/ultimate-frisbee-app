@@ -35,7 +35,15 @@ export default async function UsauTeamPage({ params }: Props) {
   const yearsCount = team.seasons.length;
 
   return (
-    <PageShell title={team.name} eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}>
+    <PageShell
+      title={team.name}
+      eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}
+      breadcrumbs={[
+        { label: 'Home', href: '/' },
+        { label: 'Teams', href: '/teams?league=usau' },
+        { label: team.name },
+      ]}
+    >
       <div className="flex flex-wrap items-center gap-3 mb-8 pb-6 border-b border-hairline">
         <SummaryChip label="Seasons" value={yearsCount} />
         <SummaryChip label="Events" value={totalEvents} />

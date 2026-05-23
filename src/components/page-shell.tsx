@@ -22,6 +22,7 @@ import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { MobileLeagueSelect } from '@/components/mobile-league-select';
 import { SearchTrigger } from '@/components/search-trigger';
 import { useLeague } from '@/lib/use-league';
+import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 
 // Hooks like useSearchParams() must be wrapped in Suspense for Next 14
 // static prerendering — otherwise the whole tree falls back to CSR and
@@ -55,8 +56,9 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
   // On mobile the league switcher lives inside the header as a compact
   // dropdown (saves vertical space + thumb-friendly). The desktop pill
   // tabs stay on lg+. Custom topNavSlot wins on both sizes — when a
-  // caller passes one (e.g. /players/{id} uses PlayerLeagueTabs to
-  // override navigation), we render that slot everywhere.
+  // caller passes one (e.g. /players/{id} passes an empty span to hide
+  // the switcher entirely because the unified profile combines leagues),
+  // we render that slot everywhere.
   const mobileTab = topNavSlot ? (
     <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
   ) : (
@@ -119,6 +121,9 @@ interface PageShellProps {
   controls?: React.ReactNode;
   /** Optional override for the top-bar slot. Defaults to the league switcher. */
   topNavSlot?: React.ReactNode;
+  /** Optional breadcrumb trail rendered above the title. Shallowest first;
+   *  last entry is the current page (rendered as plain text). */
+  breadcrumbs?: Crumb[];
   children: React.ReactNode;
 }
 
@@ -128,11 +133,13 @@ export function PageShell({
   eyebrow,
   controls,
   topNavSlot,
+  breadcrumbs,
   children,
 }: PageShellProps) {
   return (
     <AppShell topNavSlot={topNavSlot}>
       <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
+        {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />}
         <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />
         {children}
       </div>

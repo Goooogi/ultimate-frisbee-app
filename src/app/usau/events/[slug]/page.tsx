@@ -36,7 +36,16 @@ export default async function UsauEventPage({ params }: Props) {
     .join(' · ');
 
   return (
-    <PageShell title={event.name} eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`} subtitle={subtitle ?? undefined}>
+    <PageShell
+      title={event.name}
+      eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}
+      subtitle={subtitle ?? undefined}
+      breadcrumbs={[
+        { label: 'Home', href: '/' },
+        { label: 'The Games', href: '/scores?league=usau' },
+        { label: event.name },
+      ]}
+    >
       {/* Quick stats */}
       <div className="flex flex-wrap items-center gap-2 mb-8 pb-6 border-b border-hairline">
         <Chip label="Teams" value={event.teams.length} />

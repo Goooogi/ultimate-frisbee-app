@@ -99,6 +99,11 @@ export default async function TeamPage({ params }: Props) {
     <PageShell
       title={`${meta.city} ${meta.name}`}
       eyebrow={`UFA · ${meta.division ?? 'Team'}`}
+      breadcrumbs={[
+        { label: 'Home', href: '/' },
+        { label: 'Teams', href: '/teams' },
+        { label: `${meta.city} ${meta.name}` },
+      ]}
     >
       {/* Hero band with team color */}
       <div

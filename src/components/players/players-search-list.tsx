@@ -10,6 +10,7 @@ import { TeamLogo } from '@/components/team-logo';
 import { teamMetaByAbbr } from '@/lib/ufa/teams';
 import { SearchGlyph } from '@/components/search-modal';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
+import { searchUfaPlayers } from '@/lib/ufa/search-actions';
 import { listUsauPlayers, type UsauPlayerListRow } from '@/lib/usau/data';
 import type { UsauDivision } from '@/lib/league';
 
@@ -20,6 +21,9 @@ type Mode =
       /** Set of teamIDs that won the championship the year these stats
        *  cover. Used to mark champion rows with a trophy chip. */
       championTeamIds: string[];
+      /** The year the prefetched stats cover. Used by the on-demand
+       *  search server action so it queries the same season. */
+      year: number;
     }
   | { kind: 'usau'; players: UsauPlayerListRow[]; division: UsauDivision };
 
@@ -34,16 +38,18 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
   const query = useDeferredValue(raw);
   const needle = query.trim().toLowerCase();
 
-  // For USAU: when the user types ≥ 2 chars, re-query the full DB so
-  // matches outside the prefetched top-200 (like Seth Faris on 2025
-  // Fungi, who's well past the recency cutoff) still show up.
-  const [searchResults, setSearchResults] = useState<UsauPlayerListRow[] | null>(null);
+  // When the user types ≥ 2 chars, re-query the full dataset on the
+  // server so matches outside the prefetched top-200 still show up.
+  // Both leagues share the same shape: a debounced effect that flips a
+  // single results buffer typed to whichever league is active.
+  const [usauSearchResults, setUsauSearchResults] = useState<UsauPlayerListRow[] | null>(null);
+  const [ufaSearchResults, setUfaSearchResults] = useState<UfaPlayerStat[] | null>(null);
   const [searching, setSearching] = useState(false);
   useEffect(() => {
-    if (mode.kind !== 'usau') return;
     const q = needle;
     if (q.length < 2) {
-      setSearchResults(null);
+      setUsauSearchResults(null);
+      setUfaSearchResults(null);
       setSearching(false);
       return;
     }
@@ -52,14 +58,28 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
     // 200ms debounce — matches the global search modal's cadence.
     const t = setTimeout(async () => {
       try {
-        const rows = await listUsauPlayers({
-          limit: 200,
-          search: q,
-          genderDivision: mode.division,
-        });
-        if (!cancelled) setSearchResults(rows);
+        if (mode.kind === 'usau') {
+          const rows = await listUsauPlayers({
+            limit: 200,
+            search: q,
+            genderDivision: mode.division,
+          });
+          if (!cancelled) {
+            setUsauSearchResults(rows);
+            setUfaSearchResults(null);
+          }
+        } else {
+          const rows = await searchUfaPlayers(q, mode.year);
+          if (!cancelled) {
+            setUfaSearchResults(rows);
+            setUsauSearchResults(null);
+          }
+        }
       } catch {
-        if (!cancelled) setSearchResults([]);
+        if (!cancelled) {
+          if (mode.kind === 'usau') setUsauSearchResults([]);
+          else setUfaSearchResults([]);
+        }
       } finally {
         if (!cancelled) setSearching(false);
       }
@@ -73,17 +93,27 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
   const filtered = useMemo(() => {
     if (!needle) return mode;
     if (mode.kind === 'ufa') {
+      // Prefer server-side full-leaderboard search when present (catches
+      // role players outside the prefetched top 200, e.g. Carter
+      // Hawkins). Otherwise fall back to a client filter over the
+      // prefetched set — covers the still-loading and < 2 char cases.
+      if (ufaSearchResults != null) {
+        return {
+          kind: 'ufa' as const,
+          stats: ufaSearchResults,
+          championTeamIds: mode.championTeamIds,
+          year: mode.year,
+        };
+      }
       return {
         kind: 'ufa' as const,
         stats: mode.stats.filter((p) => p.name.toLowerCase().includes(needle)),
         championTeamIds: mode.championTeamIds,
+        year: mode.year,
       };
     }
-    // USAU: prefer server-side search results when present, else fall
-    // back to a client-side filter over the prefetched 200 (covers the
-    // < 2 char and "still loading" cases).
-    if (searchResults != null) {
-      return { kind: 'usau' as const, players: searchResults, division: mode.division };
+    if (usauSearchResults != null) {
+      return { kind: 'usau' as const, players: usauSearchResults, division: mode.division };
     }
     return {
       kind: 'usau' as const,
@@ -93,7 +123,7 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
       }),
       division: mode.division,
     };
-  }, [mode, needle, searchResults]);
+  }, [mode, needle, ufaSearchResults, usauSearchResults]);
 
   const count =
     filtered.kind === 'ufa' ? filtered.stats.length : filtered.players.length;
@@ -137,7 +167,8 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
           {searching
             ? 'Searching…'
             : needle
-              ? mode.kind === 'usau' && searchResults != null
+              ? (mode.kind === 'usau' && usauSearchResults != null) ||
+                (mode.kind === 'ufa' && ufaSearchResults != null)
                 ? `${count} ${count === 1 ? 'match' : 'matches'}`
                 : `${count} of ${totalCount}`
               : `${totalCount} ${totalCount === 1 ? 'player' : 'players'}`}

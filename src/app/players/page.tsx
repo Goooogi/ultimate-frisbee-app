@@ -75,7 +75,7 @@ export default async function PlayersPage({ searchParams }: Props) {
       controls={<YearSelector currentYear={year} />}
     >
       <PlayersSearchList
-        mode={{ kind: 'ufa', stats: ranked, championTeamIds }}
+        mode={{ kind: 'ufa', stats: ranked, championTeamIds, year }}
         scopeLabel={`${year} UFA leaders`}
       />
     </PageShell>

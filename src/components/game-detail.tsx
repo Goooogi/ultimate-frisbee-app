@@ -15,6 +15,7 @@ import type {
 import type { Today } from '@/lib/today';
 import { LiveDotAccent } from '@/components/live-dot';
 import { AppShell } from '@/components/page-shell';
+import { Breadcrumbs } from '@/components/breadcrumbs';
 import { GameBoxscore } from '@/components/game-boxscore';
 import { TeamLogo } from '@/components/team-logo';
 
@@ -59,17 +60,19 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
   const hasGameStats =
     !!(enrichment?.gameStats?.leaderCategories && enrichment.gameStats.leaderCategories.length > 0);
 
+  const matchupLabel = `${away.city ?? away.abbr} vs ${home.city ?? home.abbr}`;
+
   return (
     <div className="bg-surface flex flex-col font-tight text-ink">
-      <div className="flex items-center justify-between px-5 py-3 md:px-14 md:py-5 flex-shrink-0">
-        <Link
-          href="/scores"
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-muted hover:text-ink transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
-        >
-          <BackArrow />
-          All games
-        </Link>
-        <span className="text-[10px] font-bold tracking-[0.18em] text-faint uppercase">
+      <div className="flex items-center justify-between gap-3 px-5 py-3 md:px-14 md:py-5 flex-shrink-0">
+        <Breadcrumbs
+          crumbs={[
+            { label: 'Home', href: '/' },
+            { label: 'The Games', href: '/scores' },
+            { label: matchupLabel },
+          ]}
+        />
+        <span className="text-[10px] font-bold tracking-[0.18em] text-faint uppercase flex-shrink-0">
           UFA · Regular Season
         </span>
       </div>
@@ -351,23 +354,6 @@ function ScoreHalf({
   );
 }
 
-function BackArrow() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 14 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M9 2L4 7l5 5" />
-    </svg>
-  );
-}
 
 // ── Season comparison ────────────────────────────────────────────────────────
 // Shared shape for both Field + Broadcast season-comparison sub-blocks.

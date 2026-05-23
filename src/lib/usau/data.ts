@@ -11,6 +11,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
+import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 
 type DB = SupabaseClient<Database>;
 
@@ -271,23 +272,29 @@ export async function getCurrentClubEventSlug(): Promise<string | null> {
 }
 
 /**
- * Find a USAU player profile by name (case-insensitive exact match).
+ * Find a USAU player profile by name using the token-subset match (see
+ * src/lib/name-match.ts). Handles "Mitchell McCarthy" ↔ "Robert Mitchell
+ * McCarthy" — the surname must match exactly, and the shorter name's
+ * given tokens must all appear in the longer name's given tokens.
+ *
  * Returns the player_id of the most-active matching row (most roster
- * entries) so the link goes to a profile with the richest history.
- * Returns null if no match. Used by /players/{ufaSlug} to deep-link to
- * the same human's USAU career when they click the USAU tab.
+ * entries). Returns null if no match. Used by /players/{ufaSlug} to
+ * deep-link to the same human's USAU career.
  */
 export async function findUsauPlayerByName(name: string): Promise<string | null> {
-  const trimmed = name.trim();
-  if (!trimmed) return null;
+  const surname = surnameForPrefilter(name);
+  if (!surname) return null;
   const db = await supabase();
+  // Cheap SQL prefilter: anyone whose display_name *contains* the
+  // surname. We then apply the strict token-subset match in JS. The
+  // surname filter is conservative — Postgres only returns the small
+  // surname-cluster (typically < 30 rows for any given surname).
   const { data: matches } = await db
     .from('usau_players')
     .select('id, display_name')
-    .ilike('display_name', trimmed);
-  const candidates = (matches ?? []).filter(
-    (m) => m.display_name.toLowerCase() === trimmed.toLowerCase(),
-  );
+    .ilike('display_name', `%${surname}%`)
+    .limit(500);
+  const candidates = (matches ?? []).filter((m) => namesMatch(name, m.display_name));
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0].id;
   // Multiple candidate IDs — pick the one with the most rosters (most active).
