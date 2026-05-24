@@ -1167,6 +1167,9 @@ export interface UsauEventSummary {
     seed: number | null;
     pool: string | null;
     finalPlacement: number | null;
+    /** "Men" | "Women" | "Mixed" | "Open" — used to split mixed-gender events
+     *  like College Championships into separate Men's/Women's brackets. */
+    genderDivision: string | null;
   }>;
   games: Array<{
     id: string;
@@ -1199,7 +1202,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const [partRes, gameRes] = await Promise.all([
     db
       .from('usau_event_teams')
-      .select('team_id, seed, pool, final_placement, usau_teams(name)')
+      .select('team_id, seed, pool, final_placement, usau_teams(name, gender_division)')
       .eq('event_id', event.id),
     db
       .from('usau_games')
@@ -1215,13 +1218,14 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   ]);
 
   const teams = (partRes.data ?? []).map((p) => {
-    const t = (p as { usau_teams: { name: string } | null }).usau_teams;
+    const t = (p as { usau_teams: { name: string; gender_division: string | null } | null }).usau_teams;
     return {
       teamId: p.team_id,
       teamName: t?.name ?? 'Unknown',
       seed: p.seed,
       pool: p.pool,
       finalPlacement: p.final_placement,
+      genderDivision: t?.gender_division ?? null,
     };
   });
 

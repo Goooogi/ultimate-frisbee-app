@@ -4,6 +4,7 @@
 
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
+import { UsauBracketTree } from './usau-bracket-tree';
 
 interface Props {
   event: UsauEventSummary;
@@ -76,6 +77,10 @@ export function UsauEventDetail({ event }: Props) {
 
   return (
     <>
+      {/* Championship bracket tree — visual left→right flow. Renders only
+          when there are 1st-place bracket games to show. */}
+      <UsauBracketTree event={event} />
+
       {pools.length > 0 && (
         <section className="mb-10" aria-labelledby="pools-heading">
           <h2
