@@ -2,23 +2,21 @@
 
 // Tournament bracket tree visualization for USAU events.
 //
-// Takes the flat list of championship-bracket games we have and derives a
-// left-to-right tree:
-//   R1 (8 games) → QFs (8) → SFs (4) → Final (2 — one per gender)
+// Takes a flat list of championship-bracket games (already gender-filtered
+// by the parent UsauEventDetail) and derives a left-to-right tree:
+//   R1 (8 games) → QFs (8) → SFs (4) → Final
 //
 // The parser stores Friday R1 + Saturday QFs both as round='quarter'. We
 // split them by scheduled date: earliest-date quarters = R1, later = QFs.
 //
-// Gender toggle appears when the event has both Men's and Women's teams
-// (College Championships, Club Nationals). Each gender has its own bracket
-// since the formats are independent.
-//
-// Layout:
-//   - Desktop (lg+): horizontal columns per round, hairline connector lines
-//     between match cards.
-//   - Mobile (<lg): stack vertically by round with section headers.
+// Layout strategy: dependency-driven. Each card in column N+1 is positioned
+// at the vertical midpoint of its source card(s) in column N. This makes
+// the visual flow read "R1 game → QF game" without explicit connector
+// lines. Source detection is by team participation — a QF feeding from R1
+// must contain at least one of the R1 winners (or both teams if neither
+// had a bye).
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 
@@ -26,7 +24,11 @@ type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
 
 interface Props {
-  event: UsauEventSummary;
+  games: Game[];
+  /** Currently filtered teams. Reserved for future use (e.g. displaying
+   *  bye seeds explicitly); the bracket tree itself derives everything
+   *  from the games array. */
+  teams: Team[];
 }
 
 interface RoundColumn {
@@ -37,50 +39,21 @@ interface RoundColumn {
   games: Game[];
 }
 
-export function UsauBracketTree({ event }: Props) {
+// Vertical pitch (height per "row slot") on desktop. R1 sets the base unit;
+// every later column anchors to row slots in R1 so cards line up. Card
+// height ≈ 88px; we leave a bit of breathing room.
+const ROW_PITCH_PX = 104;
+
+export function UsauBracketTree({ games }: Props) {
   // ── Pull championship-bracket games only ───────────────────────────────
   const champGames = useMemo(
-    () => event.games.filter((g) => isChampionshipBracket(g)),
-    [event.games],
+    () => games.filter((g) => isChampionshipBracket(g)),
+    [games],
   );
 
-  // ── Detect available genders + default selection ───────────────────────
-  const teamGender = useMemo(() => {
-    const m = new Map<string, string | null>();
-    for (const t of event.teams) m.set(t.teamId, t.genderDivision);
-    return m;
-  }, [event.teams]);
-
-  const availableGenders = useMemo(() => {
-    const set = new Set<string>();
-    for (const g of champGames) {
-      const a = teamGender.get(g.teamAId ?? '') ?? null;
-      const b = teamGender.get(g.teamBId ?? '') ?? null;
-      if (a) set.add(a);
-      if (b) set.add(b);
-    }
-    return Array.from(set);
-  }, [champGames, teamGender]);
-
-  const [gender, setGender] = useState<string>(() => {
-    // Prefer Men first if multiple exist (matches the existing semis order).
-    if (availableGenders.includes('Men')) return 'Men';
-    if (availableGenders.includes('Women')) return 'Women';
-    return availableGenders[0] ?? '';
-  });
-
-  // ── Filter to the selected gender ──────────────────────────────────────
-  const genderGames = useMemo(() => {
-    if (!gender) return champGames;
-    return champGames.filter((g) => {
-      const a = teamGender.get(g.teamAId ?? '');
-      const b = teamGender.get(g.teamBId ?? '');
-      return a === gender || b === gender;
-    });
-  }, [champGames, gender, teamGender]);
-
-  // ── Split into round columns ───────────────────────────────────────────
-  const columns = useMemo(() => buildColumns(genderGames), [genderGames]);
+  // ── Split into round columns + assign vertical positions ───────────────
+  const columns = useMemo(() => buildColumns(champGames), [champGames]);
+  const positions = useMemo(() => assignPositions(columns), [columns]);
 
   if (columns.every((c) => c.games.length === 0)) {
     return null;
@@ -88,21 +61,12 @@ export function UsauBracketTree({ event }: Props) {
 
   return (
     <section className="mb-10" aria-labelledby="bracket-heading">
-      <div className="flex items-baseline justify-between mb-4 gap-4 flex-wrap">
-        <h2
-          id="bracket-heading"
-          className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight"
-        >
-          Championship bracket
-        </h2>
-        {availableGenders.length > 1 && (
-          <GenderToggle
-            value={gender}
-            options={availableGenders}
-            onChange={setGender}
-          />
-        )}
-      </div>
+      <h2
+        id="bracket-heading"
+        className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-4"
+      >
+        Championship bracket
+      </h2>
 
       {/* Mobile: vertical stack by round */}
       <div className="lg:hidden flex flex-col gap-5">
@@ -123,57 +87,59 @@ export function UsauBracketTree({ event }: Props) {
         )}
       </div>
 
-      {/* Desktop: horizontal columns, hairline connectors */}
+      {/* Desktop: horizontal columns with absolute-positioned cards */}
       <div className="hidden lg:block overflow-x-auto pb-2">
-        <div
-          className="grid gap-x-8 min-w-[920px]"
-          style={{
-            gridTemplateColumns: `repeat(${columns.length}, minmax(180px, 1fr))`,
-          }}
-        >
-          {columns.map((col) => (
-            <div key={col.key} className="flex flex-col">
-              <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center">
-                {col.label}
-              </div>
-              <BracketColumn games={col.games} columnKey={col.key} />
-            </div>
-          ))}
-        </div>
+        <DesktopBracket columns={columns} positions={positions} />
       </div>
     </section>
   );
 }
 
-// ── Column layout (desktop) ───────────────────────────────────────────────
+// ── Desktop bracket layout ────────────────────────────────────────────────
 
-function BracketColumn({
-  games,
-  columnKey,
+function DesktopBracket({
+  columns,
+  positions,
 }: {
-  games: Game[];
-  columnKey: RoundColumn['key'];
+  columns: RoundColumn[];
+  positions: Map<string, number>;
 }) {
-  // Each round has progressively fewer games. We grow vertical spacing
-  // exponentially so matches in later rounds align with the midpoint
-  // between their two source matches in the prior column.
-  const spacingByCol: Record<RoundColumn['key'], string> = {
-    r1: 'gap-2',
-    qf: 'gap-12',
-    sf: 'gap-32',
-    final: 'gap-32',
-  };
-  const paddingTopByCol: Record<RoundColumn['key'], string> = {
-    r1: 'pt-0',
-    qf: 'pt-7',
-    sf: 'pt-[88px]',
-    final: 'pt-[152px]',
-  };
+  // Determine total height needed. R1 has the most games and pitches at
+  // ROW_PITCH_PX per game. The +1 leaves room for the round-label row above.
+  const r1Count = columns.find((c) => c.key === 'r1')?.games.length ?? 0;
+  const qfCount = columns.find((c) => c.key === 'qf')?.games.length ?? 0;
+  const baseCount = Math.max(r1Count, qfCount);
+  const totalHeight = Math.max(baseCount, 4) * ROW_PITCH_PX + 32; // 32 for header row
+
+  // Column count drives grid template.
+  const renderedColumns = columns.filter((c) => c.games.length > 0);
 
   return (
-    <div className={`flex flex-col ${spacingByCol[columnKey]} ${paddingTopByCol[columnKey]}`}>
-      {games.map((g) => (
-        <MatchCard key={g.id} game={g} />
+    <div
+      className="grid gap-x-6 min-w-[920px] relative"
+      style={{
+        gridTemplateColumns: `repeat(${renderedColumns.length}, minmax(180px, 1fr))`,
+        height: `${totalHeight}px`,
+      }}
+    >
+      {renderedColumns.map((col) => (
+        <div key={col.key} className="relative h-full">
+          <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
+            {col.label}
+          </div>
+          {col.games.map((g) => {
+            const top = positions.get(g.id) ?? 0;
+            return (
+              <div
+                key={g.id}
+                className="absolute left-0 right-0"
+                style={{ top: `${top + 32}px` }}
+              >
+                <MatchCard game={g} />
+              </div>
+            );
+          })}
+        </div>
       ))}
     </div>
   );
@@ -330,47 +296,12 @@ function gameTime(game: Game): string {
   });
 }
 
-// ── Gender toggle ────────────────────────────────────────────────────────
 
-function GenderToggle({
-  value,
-  options,
-  onChange,
-}: {
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="inline-flex items-center rounded-full bg-surface border border-border p-0.5">
-      {options.map((opt) => (
-        <button
-          key={opt}
-          type="button"
-          onClick={() => onChange(opt)}
-          className={[
-            'inline-flex items-center px-3 py-1 rounded-full text-[10px] font-bold tracking-[0.16em] uppercase font-tight transition-colors cursor-pointer',
-            value === opt
-              ? 'bg-ink text-bg'
-              : 'text-muted hover:text-ink',
-          ].join(' ')}
-        >
-          {opt}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ── Helpers: filter + column build ───────────────────────────────────────
+// ── Helpers: filter, columns, position assignment ────────────────────────
 
 function isChampionshipBracket(g: Game): boolean {
-  // Championship bracket = 1st place games (not placement / consolation /
-  // pool / 13th-place etc.). We treat the canonical bracket_name='1st Place'
-  // as the championship bracket marker.
   const b = (g.bracketName ?? '').toLowerCase();
   if (b.includes('1st place')) return true;
-  // Fallback: if no bracket names at all, accept anything in (quarter, semi, final)
   if (!g.bracketName && ['quarter', 'semi', 'final'].includes(g.round)) return true;
   return false;
 }
@@ -381,8 +312,6 @@ function buildColumns(games: Game[]): RoundColumn[] {
   const semis = games.filter((g) => g.round === 'semi');
   const finals = games.filter((g) => g.round === 'final');
 
-  // Distinct quarter dates → assume earliest dates = R1, later = QF.
-  // If there's only one set of quarters, treat them as QFs (no R1 column).
   const quarterDates = Array.from(
     new Set(
       quarters
@@ -399,18 +328,104 @@ function buildColumns(games: Game[]): RoundColumn[] {
     qf = quarters.filter((g) => g.scheduledAt?.slice(0, 10) !== earliest);
   }
 
-  // Sort each column by scheduled time, then by seed (so brackets read top→bottom)
-  const sortByTimeThenSeed = (a: Game, b: Game) => {
-    const at = a.scheduledAt ? new Date(a.scheduledAt).getTime() : 0;
-    const bt = b.scheduledAt ? new Date(b.scheduledAt).getTime() : 0;
-    if (at !== bt) return at - bt;
-    return (a.seedA ?? 99) - (b.seedA ?? 99);
-  };
+  // Initial sort: R1 by lower seed first (1-vs-16, 2-vs-15... feels right
+  // even though college brackets use 1-bye + 5-vs-12 style). Later rounds
+  // will get re-ordered by assignPositions().
+  const sortBySeed = (a: Game, b: Game) =>
+    (a.seedA ?? a.seedB ?? 99) - (b.seedA ?? b.seedB ?? 99);
 
   return [
-    { key: 'r1', label: 'Round 1', games: r1.sort(sortByTimeThenSeed) },
-    { key: 'qf', label: 'Quarterfinals', games: qf.sort(sortByTimeThenSeed) },
-    { key: 'sf', label: 'Semifinals', games: semis.sort(sortByTimeThenSeed) },
-    { key: 'final', label: 'Final', games: finals.sort(sortByTimeThenSeed) },
+    { key: 'r1', label: 'Round 1', games: r1.slice().sort(sortBySeed) },
+    { key: 'qf', label: 'Quarterfinals', games: qf.slice().sort(sortBySeed) },
+    { key: 'sf', label: 'Semifinals', games: semis.slice().sort(sortBySeed) },
+    { key: 'final', label: 'Final', games: finals.slice().sort(sortBySeed) },
   ];
+}
+
+/**
+ * Assign each game a vertical pixel offset so:
+ *   - R1 column lays out evenly top-to-bottom
+ *   - Each later-round game sits at the midpoint between its source games
+ *   - When a game has only one identifiable source (the other team had a
+ *     bye), it sits at the row of its source
+ *   - Games without any identifiable source fall back to an even distribution
+ *
+ * Returns a Map<game.id, top-px-offset>.
+ *
+ * Side-effect: also mutates each column's games array to be **ordered by
+ * vertical position** so the bracket reads top-to-bottom in render order.
+ * (We re-sort the array, not just compute positions, so the column lays
+ * out without depending on insertion order.)
+ */
+function assignPositions(columns: RoundColumn[]): Map<string, number> {
+  const positions = new Map<string, number>();
+
+  // R1: position evenly. Each game takes ROW_PITCH_PX of vertical space.
+  const r1 = columns.find((c) => c.key === 'r1');
+  const qf = columns.find((c) => c.key === 'qf');
+
+  // The base "row scale" is determined by R1 (or QF if no R1) so column
+  // height matches the longest column.
+  const baseColumn = (r1?.games.length ?? 0) > 0 ? r1! : qf!;
+  if (!baseColumn || baseColumn.games.length === 0) return positions;
+
+  // Assign R1 positions: 0, pitch, 2*pitch, ...
+  baseColumn.games.forEach((g, i) => {
+    positions.set(g.id, i * ROW_PITCH_PX);
+  });
+
+  // For each subsequent column, position each game at the midpoint of its
+  // source-game positions. Process in order: r1 → qf → sf → final.
+  const orderedKeys: RoundColumn['key'][] = ['r1', 'qf', 'sf', 'final'];
+  let prevCol: RoundColumn | null = baseColumn;
+  for (const k of orderedKeys) {
+    if (k === baseColumn.key) continue;
+    const col = columns.find((c) => c.key === k);
+    if (!col || col.games.length === 0) continue;
+
+    for (const g of col.games) {
+      const sources = findSources(g, prevCol);
+      if (sources.length === 0) {
+        // No matched source — fall back to even distribution across
+        // baseColumn's total height.
+        const idx = col.games.indexOf(g);
+        const totalSlots = baseColumn.games.length;
+        const step = (totalSlots * ROW_PITCH_PX) / Math.max(col.games.length, 1);
+        positions.set(g.id, idx * step + step / 2 - ROW_PITCH_PX / 2);
+      } else {
+        const tops = sources.map((s) => positions.get(s.id) ?? 0);
+        const avg = tops.reduce((a, b) => a + b, 0) / tops.length;
+        positions.set(g.id, avg);
+      }
+    }
+
+    // Re-sort the column array so render order matches vertical order.
+    col.games.sort(
+      (a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0),
+    );
+    prevCol = col;
+  }
+
+  return positions;
+}
+
+/**
+ * Find the games in `prevCol` that fed into `game`. A prev-col game is a
+ * source if it contains either of `game`'s participating team ids. (A team
+ * with a bye won't have a prev-col game — that participant gets ignored.)
+ */
+function findSources(game: Game, prevCol: RoundColumn | null): Game[] {
+  if (!prevCol) return [];
+  const ids = [game.teamAId, game.teamBId].filter((x): x is string => !!x);
+  if (ids.length === 0) return [];
+  const sources: Game[] = [];
+  for (const candidate of prevCol.games) {
+    if (
+      (candidate.teamAId && ids.includes(candidate.teamAId)) ||
+      (candidate.teamBId && ids.includes(candidate.teamBId))
+    ) {
+      sources.push(candidate);
+    }
+  }
+  return sources;
 }
