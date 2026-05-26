@@ -299,10 +299,47 @@ function gameTime(game: Game): string {
 
 // ── Helpers: filter, columns, position assignment ────────────────────────
 
-function isChampionshipBracket(g: Game): boolean {
-  const b = (g.bracketName ?? '').toLowerCase();
-  if (b.includes('1st place')) return true;
-  if (!g.bracketName && ['quarter', 'semi', 'final'].includes(g.round)) return true;
+/**
+ * Decide whether a game belongs to the "the championship bracket" — the
+ * main winner's bracket of the event, which we render as a visual tree.
+ *
+ * USAU's bracket_name values are inconsistent across events:
+ *   D-I Nationals 2026          → "1st Place"
+ *   North Central Regional      → "Championship Bracket"
+ *   Many regionals              → "Championship"
+ *   Older events                → "First Place Bracket" / "Championship Final"
+ *   Multi-format events         → "Open Championship" / "Women's Division Championship"
+ *
+ * Match strategy: lowercased name either (a) contains a "1st/first place"
+ * marker, or (b) is exactly one of the known championship phrases (or a
+ * "{division} Championship" form), or (c) lacks a bracket_name but has a
+ * tree-round (legacy fallback).
+ */
+export function isChampionshipBracket(g: Game): boolean {
+  const raw = g.bracketName ?? '';
+  const b = raw.trim().toLowerCase();
+
+  if (!b && ['quarter', 'semi', 'final'].includes(g.round)) return true;
+  if (!b) return false;
+
+  if (b.includes('1st place') || b.includes('first place')) return true;
+
+  // Allow "Championship", "Championship Bracket", "Championship Final",
+  // "National Championship", "Sectional Championship", "Regional
+  // Championship", or "<Division> Championship" — but exclude things that
+  // happen to contain "championship" plus an ordinal place ("5th Place
+  // Championship") which signals a side bracket, not the main one.
+  if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
+  if (b.includes('consolation') || b.includes('placement') || b.includes('play in') || b.includes('play-in')) return false;
+  if (b === 'finals') return true;
+  // The main pattern: "championship" possibly preceded by qualifiers, possibly followed by "bracket" or "final" or "game".
+  if (/(^|\s)championship(\s+(bracket|final|game))?$/.test(b)) return true;
+  if (/^(national|sectional|regional|open|men'?s|women'?s|mixed|men'?s division|women'?s division|mixed division)\s+championship$/.test(b)) return true;
+
+  // Catch-all: generic "(the) bracket" / "bracket play" / "sunday bracket" names
+  // used by smaller events where there's only one bracket on the page.
+  if (b === 'bracket' || b === 'bracket play' || b === 'sunday bracket' || b === 'champion bracket') return true;
+
   return false;
 }
 

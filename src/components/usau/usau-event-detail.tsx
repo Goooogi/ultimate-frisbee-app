@@ -19,7 +19,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision } from '@/lib/use-division';
-import { UsauBracketTree } from './usau-bracket-tree';
+import { UsauBracketTree, isChampionshipBracket } from './usau-bracket-tree';
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -117,7 +117,7 @@ export function UsauEventDetail({ event }: Props) {
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
     if (g.bracketName?.toLowerCase().startsWith('pool')) continue;
-    if (g.bracketName?.toLowerCase() === '1st place') continue;
+    if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
     if (!byBracket.has(k)) byBracket.set(k, []);
     byBracket.get(k)!.push(g);

@@ -27,18 +27,21 @@ export function gameUiState(game: UfaGame): GameUiState {
   return { isUpcoming, isLive, isFinal, hasScore, awayWin, homeWin, isClose, startDate };
 }
 
-/** "WED · 7:00 PM EDT" — designed to match the design's tabular meta strip. */
+/** "WED, JUN 1 · 7:00 PM EDT" — designed to match the design's tabular meta strip. */
 export function formatStartCompact(game: UfaGame): string {
   const d = game.startTimestamp ? new Date(game.startTimestamp) : null;
   if (!d) return 'TBD';
   const wd = d.toLocaleString('en-US', { weekday: 'short', timeZone: 'America/New_York' }).toUpperCase();
+  const md = d
+    .toLocaleString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/New_York' })
+    .toUpperCase();
   const time = d.toLocaleString('en-US', {
     hour: 'numeric',
     minute: '2-digit',
     timeZone: 'America/New_York',
   });
   const tz = game.startTimezone ?? 'ET';
-  return `${wd} · ${time} ${tz}`;
+  return `${wd}, ${md} · ${time} ${tz}`;
 }
 
 /** "May 16" — designed for the Final-state meta strip. */

@@ -46,28 +46,8 @@ export default async function UsauEventPage({ params }: Props) {
         { label: event.name },
       ]}
     >
-      {/* Quick stats */}
-      <div className="flex flex-wrap items-center gap-2 mb-8 pb-6 border-b border-hairline">
-        <Chip label="Teams" value={event.teams.length} />
-        <Chip label="Games" value={event.games.length} />
-        {event.state && <Chip label="State" value={event.state} />}
-      </div>
-
       <UsauEventDetail event={event} />
     </PageShell>
-  );
-}
-
-function Chip({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="inline-flex items-baseline gap-2 px-3 py-2 rounded-md bg-surface border border-border">
-      <span className="tabular text-[18px] font-bold font-tight leading-none tracking-[-0.02em] text-ink">
-        {value}
-      </span>
-      <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-        {label}
-      </span>
-    </div>
   );
 }
 
