@@ -6,6 +6,7 @@
 // + Enter to navigate.
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { search, type SearchResult } from '@/lib/usau/data';
 
@@ -21,6 +22,10 @@ export function SearchModal({ open, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Portal target only exists in the browser; gate render until mounted so
+  // SSR/first paint stays safe.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Reset when the modal closes so reopen starts fresh.
   useEffect(() => {
@@ -94,17 +99,24 @@ export function SearchModal({ open, onClose }: Props) {
     }
   }
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const teamResults = results.filter((r) => r.kind === 'team');
   const playerResults = results.filter((r) => r.kind === 'player');
 
-  return (
+  // Portal to <body> so the overlay escapes the app rail's stacking context
+  // (the rail is sticky + backdrop-blur, which traps any z-index set on a
+  // descendant). Rendered at the body root, z-[100] reliably covers the rail.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Search teams and players"
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh] px-4"
+      // z-[100] sits ABOVE the app rail (sticky z-50). If the backdrop shared
+      // the rail's z-index, the rail floated above the dim layer and its own
+      // backdrop-blur re-sampled the darkened page behind it — the muddy black
+      // band across the nav. Covering the whole screen (rail included) fixes it.
+      className="fixed inset-0 z-[100] flex items-start justify-center pt-[12vh] px-4"
     >
       {/* Backdrop */}
       <button
@@ -192,7 +204,8 @@ export function SearchModal({ open, onClose }: Props) {
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

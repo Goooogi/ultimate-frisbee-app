@@ -23,7 +23,7 @@ export interface TeamMeta {
 export const TEAM_META: Record<string, TeamMeta> = {
   // ── East (current) ──
   empire:       { id: 'empire',       internalID: 14, abbr: 'NY',  primary: '#69BD45', accent: '#0E0E0C', city: 'New York',     name: 'Empire',       division: 'East',    active: true, logo: '/teams/empire.png' },
-  glory:        { id: 'glory',        internalID: 37, abbr: 'BOS', primary: '#000000', accent: '#C8102E', city: 'Boston',       name: 'Glory',        division: 'East',    active: true, logo: '/teams/glory.png' },
+  glory:        { id: 'glory',        internalID: 37, abbr: 'BOS', primary: '#000000', accent: '#E1B87F', city: 'Boston',       name: 'Glory',        division: 'East',    active: true, logo: '/teams/glory.png' },
   breeze:       { id: 'breeze',       internalID:  5, abbr: 'DC',  primary: '#0A3751', accent: '#BF0A30', city: 'DC',           name: 'Breeze',       division: 'East',    active: true, logo: '/teams/breeze.png' },
   phoenix:      { id: 'phoenix',      internalID: 16, abbr: 'PHI', primary: '#F04E23', accent: '#0E0E0C', city: 'Philadelphia', name: 'Phoenix',      division: 'East',    active: true, logo: '/teams/phoenix.png' },
   royal:        { id: 'royal',        internalID: 13, abbr: 'MTL', primary: '#00305E', accent: '#C8102E', city: 'Montreal',     name: 'Royal',        division: 'East',    active: true, logo: '/teams/royal.png' },

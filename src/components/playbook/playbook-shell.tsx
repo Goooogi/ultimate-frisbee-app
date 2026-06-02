@@ -6,16 +6,16 @@
 // authenticated user avatar in the top right.
 //
 // Layout:
-//   Desktop (lg+): 240px sidebar + sticky 56px top bar + scrollable main.
-//   Mobile (<lg): top bar holds logo + team chip + avatar; sidebar collapses
-//   into a left-edge sheet via <details> for compactness.
+//   Desktop (lg+): AppRail (top, global) + 240px sidebar (intra-Playbook) + sticky 56px top bar + scrollable main.
+//   Mobile (<lg): AppRail (top, global) + compact intra-app header (team + section) + content.
+//
+// The global AppRail owns: logo, app switcher, search, theme toggle, account chip.
+// PlaybookShell owns: TeamSwitcher, Plays/Film subnav.
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useTheme } from '@/lib/use-theme';
-import { LogoStrikeInline } from '@/components/logo-strike';
+import { AppRail } from '@/components/app-rail';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { AccountChip } from '@/components/auth/account-chip';
 import { TeamSwitcher } from './team-switcher';
 import type { Team } from '@/lib/playbook/teams';
 
@@ -45,21 +45,16 @@ export function PlaybookShell({
   children,
 }: PlaybookShellProps) {
   const pathname = usePathname() ?? '/playbook';
-  const [theme] = useTheme();
   const currentTeam = teams.find((t) => t.id === currentTeamID);
 
   return (
-    <>
+    <div className="h-screen bg-bg text-ink flex flex-col">
+      {/* Global top app rail */}
+      <AppRail />
+
       {/* ── Mobile (<lg) ───────────────────────────────────────────────── */}
-      <div className="lg:hidden min-h-screen bg-bg text-ink">
+      <div className="lg:hidden flex-1 overflow-y-auto">
         <header className="sticky top-0 z-20 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-hairline bg-bg">
-          <Link href="/" aria-label="The Layout — home" className="flex-shrink-0">
-            <LogoStrikeInline
-              accentColor="rgb(var(--accent))"
-              theme={theme === 'broadcast' ? 'dark' : 'light'}
-              size={0.75}
-            />
-          </Link>
           <div className="flex items-center gap-1.5 min-w-0">
             {/* Scope pill — compact tap target that opens the full switcher. */}
             <details className="relative">
@@ -80,7 +75,7 @@ export function PlaybookShell({
                 </span>
                 <span className="truncate">{currentTeam?.name ?? 'Personal'}</span>
               </summary>
-              <div className="absolute right-0 top-full mt-1 z-30 w-64 border border-border bg-bg rounded-md p-2 shadow-lg">
+              <div className="absolute left-0 top-full mt-1 z-30 w-64 border border-border bg-bg rounded-md p-2 shadow-lg">
                 <TeamSwitcher teams={teams} currentID={currentTeamID} onSwitch={onSwitchTeam} />
               </div>
             </details>
@@ -95,11 +90,10 @@ export function PlaybookShell({
               >
                 <PlaybookGlyph size={10} />
               </summary>
-              <div className="absolute right-0 top-full mt-1 z-30 w-44 border border-border bg-bg rounded-md p-1.5 shadow-lg">
+              <div className="absolute left-0 top-full mt-1 z-30 w-44 border border-border bg-bg rounded-md p-1.5 shadow-lg">
                 <PlaybookSubnav pathname={pathname} />
               </div>
             </details>
-            <AccountChip size={28} />
           </div>
         </header>
 
@@ -107,19 +101,11 @@ export function PlaybookShell({
       </div>
 
       {/* ── Desktop (lg+) ─────────────────────────────────────────────── */}
-      <div className="hidden lg:flex h-screen overflow-hidden bg-bg text-ink">
+      <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
         {/* Sidebar */}
-        <aside className="w-[240px] flex-shrink-0 flex flex-col px-5 py-6 bg-bg border-r border-hairline">
-          <Link href="/" aria-label="The Layout — home" className="mb-7 inline-flex">
-            <LogoStrikeInline
-              accentColor="rgb(var(--accent))"
-              theme={theme === 'broadcast' ? 'dark' : 'light'}
-              size={1.0}
-            />
-          </Link>
-
-          {/* Team switcher — now sits above Playbook so the user always
-              sees "who they're acting as" first. */}
+        <aside className="w-[240px] flex-shrink-0 flex flex-col px-5 pt-5 pb-6 bg-bg border-r border-hairline">
+          {/* Team switcher — sits at top so user always sees "who they're
+              acting as" immediately. */}
           <TeamSwitcher teams={teams} currentID={currentTeamID} onSwitch={onSwitchTeam} />
 
           {/* Playbook section header */}
@@ -151,16 +137,15 @@ export function PlaybookShell({
         {/* Main column. The top bar uses `sticky top-0` so it stays pinned
             inside main's scroll container as the user reads down the page. */}
         <main className="flex-1 overflow-y-auto flex flex-col">
-          <div className="sticky top-0 z-10 flex-shrink-0 h-[56px] px-6 flex items-center justify-between border-b border-hairline bg-bg">
+          <div className="sticky top-0 z-10 flex-shrink-0 h-[56px] px-6 flex items-center border-b border-hairline bg-bg">
             <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
               {pageTitle}
             </span>
-            <AccountChip size={32} />
           </div>
           <div className="flex-1">{children}</div>
         </main>
       </div>
-    </>
+    </div>
   );
 }
 

@@ -6,7 +6,7 @@
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
-import { teamMeta } from '@/lib/ufa/teams';
+import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
 import { gameUiState, formatStartCompact } from '@/lib/ufa/format';
 import { HeroFieldLines } from './field-diagram';
 import { TeamLogo } from '@/components/team-logo';
@@ -24,6 +24,87 @@ const STADIUM = {
   textMuted: 'rgba(244,242,235,0.55)',
 };
 const ACCENT = '#FF3D00';
+
+/** Parse a 3- or 6-digit hex color to its [r,g,b] channels (0–255). */
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  const full = h.length === 3
+    ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
+    : h;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+function rgbaStr([r, g, b]: [number, number, number], alpha: number): string {
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** Relative luminance (0–1) via the sRGB coefficients. Used only to decide
+ *  whether a color is too dark to register against the stadium base. */
+function luminance([r, g, b]: [number, number, number]): number {
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+// Below this luminance a team color is indistinguishable from the dark
+// stadium base (#0F1B2E ≈ 0.08), so the gradient stop would "collapse" and
+// the other team's color visually dominates. Boston Glory's primary is pure
+// black (#000000, lum 0) — the classic offender.
+const MIN_STOP_LUMINANCE = 0.14;
+
+/**
+ * Pick the gradient stop color for one team. Prefer the team's primary, but
+ * if the primary is too dark to read against the base, fall back to the
+ * accent — but only when the accent is actually brighter (some teams have a
+ * near-black accent too, e.g. Empire #0E0E0C; in that case there's nothing to
+ * recover, so we keep the primary).
+ */
+function stopColor(primary: string, accent: string): [number, number, number] {
+  const p = hexToRgb(primary);
+  if (luminance(p) >= MIN_STOP_LUMINANCE) return p;
+  const a = hexToRgb(accent);
+  return luminance(a) > luminance(p) ? a : p;
+}
+
+/**
+ * Build a team-color gradient background for the hero article.
+ *
+ * Layer stack (bottom → top):
+ *   1. STADIUM.bg (#0F1B2E) — solid dark base, guarantees minimum darkness.
+ *   2. away radial pool — team color anchored left at 0.85, fading out by ~58%.
+ *   3. home radial pool — team color anchored right at 0.85, fading out by ~58%.
+ *      Each stop is the team's primary, or its accent when the primary is
+ *      near-black (so a black team like Glory still contributes color — see
+ *      stopColor()).
+ *   4. dark scrim (top→bottom) — darkens the top and bottom bands where the
+ *      light text lives, so the 0.85 color pools stay above AA contrast.
+ *
+ * Each team color gets its OWN radial pool anchored to its side (away→left,
+ * home→right), held strong across its half and faded to transparent before
+ * center. This stops a vivid color (e.g. Empire green) from bleeding across
+ * the midpoint and visually swallowing a softer one (e.g. Glory gold) — the
+ * earlier single linear wash let the brighter/​more-saturated hue dominate.
+ * The dark base shows through the middle as a natural divider.
+ */
+function buildHeroBackground(away: TeamMeta, home: TeamMeta): string {
+  // Strong on each side (0.85) so the softer of the two colors still reads.
+  const awayStop = rgbaStr(stopColor(away.primary, away.accent), 0.85);
+  const homeStop = rgbaStr(stopColor(home.primary, home.accent), 0.85);
+  return [
+    // scrim: darkens top + bottom (where text lives) so the strong 0.85 color
+    // pools below don't drop the light text under AA contrast. Lighter in the
+    // middle band where only the large "vs" sits.
+    'linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.08) 42%, rgba(0,0,0,0.4) 100%)',
+    // away color pool — anchored left, fades out by ~58% across
+    `radial-gradient(120% 130% at 0% 50%, ${awayStop} 0%, transparent 58%)`,
+    // home color pool — anchored right, fades out by ~58% across
+    `radial-gradient(120% 130% at 100% 50%, ${homeStop} 0%, transparent 58%)`,
+    // solid dark base
+    STADIUM.bg,
+  ].join(', ');
+}
 
 export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps) {
   if (!game) return <EmptyHero />;
@@ -46,7 +127,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
   return (
     <article
       className="relative overflow-hidden p-9 lg:min-h-[480px] flex flex-col justify-between"
-      style={{ background: STADIUM.bg, color: STADIUM.text }}
+      style={{ background: buildHeroBackground(away, home), color: STADIUM.text }}
     >
       <div
         className="absolute inset-0 pointer-events-none"
@@ -60,26 +141,23 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
 
       <div className="relative flex-1 flex flex-col justify-between gap-5">
         {/* eyebrow row */}
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2.5 mb-2">
-              {state.isLive ? (
-                <span className="w-[7px] h-[7px] rounded-full bg-[#FF3D00] shadow-[0_0_0_3px_rgba(255,61,0,0.2)]" />
-              ) : (
-                <span className="w-[7px] h-[7px] rounded-full bg-[rgba(244,242,235,0.4)]" />
-              )}
-              <span className="font-mono text-[11px] font-bold tracking-[0.14em]" style={{ color: state.isLive ? ACCENT : STADIUM.textMuted }}>
-                {statusLine}
-              </span>
-            </div>
-            <div
-              className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase"
-              style={{ color: STADIUM.textMuted }}
-            >
-              {eyebrowLabel}
-            </div>
+        <div>
+          <div className="inline-flex items-center gap-2.5 mb-2">
+            {state.isLive ? (
+              <span className="w-[7px] h-[7px] rounded-full bg-[#FF3D00] shadow-[0_0_0_3px_rgba(255,61,0,0.2)]" />
+            ) : (
+              <span className="w-[7px] h-[7px] rounded-full bg-[rgba(244,242,235,0.4)]" />
+            )}
+            <span className="font-mono text-[11px] font-bold tracking-[0.14em]" style={{ color: state.isLive ? ACCENT : STADIUM.textMuted }}>
+              {statusLine}
+            </span>
           </div>
-          <Pill>01 · The Games</Pill>
+          <div
+            className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase"
+            style={{ color: STADIUM.textMuted }}
+          >
+            {eyebrowLabel}
+          </div>
         </div>
 
         {/* score block */}
@@ -153,21 +231,6 @@ function EmptyHero() {
         The schedule is dark. Check back during UFA season — games run April through August.
       </p>
     </div>
-  );
-}
-
-function Pill({ children }: { children: React.ReactNode }) {
-  return (
-    <span
-      className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full"
-      style={{
-        color: STADIUM.text,
-        background: 'rgba(244,242,235,0.08)',
-        border: '1px solid rgba(244,242,235,0.12)',
-      }}
-    >
-      {children}
-    </span>
   );
 }
 

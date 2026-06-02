@@ -1,64 +1,131 @@
 'use client';
 
 // Mobile-only league dropdown. Replaces the pill-style LeagueTabs on
-// <lg screens — pills crowd the header on phones, a select is denser and
-// thumb-friendly. Wired to the same useLeague() hook so it shares state
-// with the desktop pills and any other league-aware component.
+// <lg screens — built as a <details>/<summary> custom dropdown so we
+// own both the trigger width (genuinely content-sized) and the menu
+// position (absolute left-0 top-full, directly below the trigger).
+// Mirrors the MobileSubAppDropdown idiom in app-rail.tsx.
 
+import { useRef } from 'react';
 import { LEAGUES } from '@/lib/data';
 import { useLeague } from '@/lib/use-league';
 
 export function MobileLeagueSelect() {
   const [league, setLeague] = useLeague();
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+
+  const activeLeague = LEAGUES.find((l) => l.id === league) ?? LEAGUES[0];
 
   return (
-    <div className="relative inline-flex items-center">
-      {/* Accent dot — small orange marker to tie the chip into the brand
-          palette. Hidden when the active league is the disabled stub. */}
-      <span
-        aria-hidden="true"
-        className="absolute left-2 w-1.5 h-1.5 rounded-full bg-accent"
-      />
-      <select
-        value={league}
-        onChange={(e) => setLeague(e.target.value as typeof league)}
-        aria-label="Select league"
+    <details ref={detailsRef} className="relative">
+      {/* Trigger — summary with inline-flex gives us genuine content-width.
+          list-none + webkit marker removal hide the default disclosure marker.
+          Accent dot, label, and chevron are normal inline-flex children —
+          no absolute positioning required since we control the layout. */}
+      <summary
+        aria-label={`League: ${activeLeague.short}. Tap to switch.`}
         className={[
-          'appearance-none cursor-pointer',
-          // Tighter horizontal padding + min-width so the chip stays
-          // compact ("UFA ▾" is ~60px). Left padding leaves room for the
-          // accent dot.
-          'pl-5 pr-6 py-[6px] rounded-full',
+          'list-none [&::-webkit-details-marker]:hidden cursor-pointer',
+          'inline-flex items-center gap-1.5 px-3 py-[6px] rounded-full',
           'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
           'bg-surface border border-border text-ink',
           'hover:border-accent transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >
+        {/* Accent dot */}
+        <span aria-hidden="true" className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+        {/* Active league label */}
+        {activeLeague.short}
+        {/* Chevron */}
+        <svg
+          className="w-3 h-3 text-accent flex-shrink-0"
+          viewBox="0 0 12 12"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M3 4.5L6 7.5L9 4.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </summary>
+
+      {/* Dropdown menu — z-[60] clears the rail's z-50.
+          absolute left-0 top-full mt-1 anchors it directly below the trigger,
+          left-aligned. min-w-[120px] keeps rows comfortable without ballooning. */}
+      <div className="absolute left-0 top-full mt-1 z-[60] min-w-[120px] border border-border bg-bg rounded-md p-1.5 shadow-lg">
         {LEAGUES.map((l) => {
-          const disabled = l.id === 'intl';
+          const isActive = l.id === league;
+          const isDisabled = l.id === 'intl';
+
+          if (isDisabled) {
+            return (
+              <span
+                key={l.id}
+                aria-disabled="true"
+                title="Coming soon"
+                className={[
+                  'flex items-center gap-1.5 px-3 py-2 rounded',
+                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
+                  'text-faint cursor-not-allowed select-none',
+                ].join(' ')}
+              >
+                {/* Spacer aligns with the check glyph on active rows */}
+                <span className="w-2.5 flex-shrink-0" aria-hidden="true" />
+                {l.short}
+                <sup className="text-[7px] font-bold tracking-[0.14em] text-faint ml-0.5 align-super leading-none">
+                  SOON
+                </sup>
+              </span>
+            );
+          }
+
           return (
-            <option key={l.id} value={l.id} disabled={disabled}>
+            <button
+              key={l.id}
+              type="button"
+              onClick={() => {
+                setLeague(l.id);
+                if (detailsRef.current) detailsRef.current.open = false;
+              }}
+              className={[
+                'flex items-center gap-1.5 w-full px-3 py-2 rounded text-left',
+                'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
+                'transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                isActive
+                  ? 'text-ink bg-surface'
+                  : 'text-muted hover:text-ink hover:bg-surface',
+              ].join(' ')}
+            >
+              {/* Check glyph on active row; spacer keeps other rows aligned */}
+              {isActive ? (
+                <svg
+                  className="w-2.5 h-2.5 text-accent flex-shrink-0"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M2 5L4 7L8 3"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              ) : (
+                <span className="w-2.5 flex-shrink-0" aria-hidden="true" />
+              )}
               {l.short}
-              {disabled ? ' · soon' : ''}
-            </option>
+            </button>
           );
         })}
-      </select>
-      <svg
-        className="pointer-events-none absolute right-1.5 w-3 h-3 text-accent"
-        viewBox="0 0 12 12"
-        fill="none"
-        aria-hidden="true"
-      >
-        <path
-          d="M3 4.5L6 7.5L9 4.5"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </div>
+      </div>
+    </details>
   );
 }

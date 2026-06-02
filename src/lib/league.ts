@@ -28,6 +28,52 @@ export function parseDivisionParam(value: string | null | undefined): UsauDivisi
     : DEFAULT_DIVISION;
 }
 
+// ─── USAU competition-level filter ─────────────────────────────────────
+// Persisted as ?level=club|college-d1|college-d3|masters|grand-masters in
+// the URL. Maps to the canonical enum value stored on usau_teams /
+// usau_events.competition_level.
+//
+// 'club' is the default so existing links continue to land on Club teams.
+
+export type UsauLevel = 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' | 'MASTERS' | 'GRAND_MASTERS';
+export const DEFAULT_LEVEL: UsauLevel = 'CLUB';
+const LEVEL_FROM_PARAM: Record<string, UsauLevel> = {
+  club: 'CLUB',
+  'college-d1': 'COLLEGE_D1',
+  'college-d3': 'COLLEGE_D3',
+  masters: 'MASTERS',
+  'grand-masters': 'GRAND_MASTERS',
+};
+const PARAM_FROM_LEVEL: Record<UsauLevel, string> = {
+  CLUB: 'club',
+  COLLEGE_D1: 'college-d1',
+  COLLEGE_D3: 'college-d3',
+  MASTERS: 'masters',
+  GRAND_MASTERS: 'grand-masters',
+};
+const LEVEL_LABELS: Record<UsauLevel, string> = {
+  CLUB: 'Club',
+  COLLEGE_D1: 'College D-I',
+  COLLEGE_D3: 'College D-III',
+  MASTERS: 'Masters',
+  GRAND_MASTERS: 'Grand Masters',
+};
+
+export function parseLevelParam(value: string | null | undefined): UsauLevel {
+  if (!value) return DEFAULT_LEVEL;
+  return LEVEL_FROM_PARAM[value.toLowerCase()] ?? DEFAULT_LEVEL;
+}
+
+export function levelToParam(level: UsauLevel): string {
+  return PARAM_FROM_LEVEL[level];
+}
+
+export function levelLabel(level: UsauLevel): string {
+  return LEVEL_LABELS[level];
+}
+
+export const USAU_LEVELS: UsauLevel[] = ['CLUB', 'COLLEGE_D1', 'COLLEGE_D3', 'MASTERS', 'GRAND_MASTERS'];
+
 /**
  * Build the league + division query string, omitting params that match
  * the default so URLs stay clean (`?league=ufa&div=men` collapses to

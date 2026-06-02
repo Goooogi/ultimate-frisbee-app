@@ -14,7 +14,13 @@ import { YearSelector } from '@/components/year-selector';
 import { TeamLogo } from '@/components/team-logo';
 import { UsauTeamsRanked } from '@/components/usau/usau-teams-ranked';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
-import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
+import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import {
+  parseDivisionParam,
+  parseLeagueParam,
+  parseLevelParam,
+  levelLabel,
+} from '@/lib/league';
 
 export const revalidate = 600;
 
@@ -23,7 +29,7 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; league?: string; div?: string };
+  searchParams: { year?: string; league?: string; div?: string; level?: string };
 }
 
 const DIVISIONS = ['East', 'Central', 'South', 'West'] as const;
@@ -36,13 +42,23 @@ export default async function TeamsPage({ searchParams }: Props) {
   // year is implicit in the source data, last-completed-Nationals).
   if (league === 'usau') {
     const division = parseDivisionParam(searchParams.div);
+    const level = parseLevelParam(searchParams.level);
+    // College has no Mixed division — quietly coerce so the page doesn't
+    // render empty when a user lands here via a stale `?div=mixed` link.
+    const isCollege = level === 'COLLEGE_D1' || level === 'COLLEGE_D3';
+    const effectiveDivision = isCollege && division === 'Mixed' ? 'Men' : division;
     return (
       <PageShell
         title="Teams"
-        eyebrow={`USAU · Club · ${division}`}
-        controls={<UsauDivisionSelect />}
+        eyebrow={`USAU · ${levelLabel(level)} · ${effectiveDivision}`}
+        controls={
+          <div className="flex flex-wrap items-center gap-2">
+            <UsauLevelSelect />
+            <UsauDivisionSelect />
+          </div>
+        }
       >
-        <UsauTeamsRanked genderDivision={division} />
+        <UsauTeamsRanked genderDivision={effectiveDivision} competitionLevel={level} />
       </PageShell>
     );
   }

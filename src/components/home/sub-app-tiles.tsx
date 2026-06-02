@@ -24,8 +24,8 @@ export function PlaybookTile() {
       className="group bg-surface border border-border grid grid-cols-[1.15fr_1fr] gap-[18px] overflow-hidden relative hover:border-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex flex-col min-w-0 p-5 lg:p-6">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full text-accent bg-[rgb(var(--accent)/0.1)] border border-[rgb(var(--accent)/0.25)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full text-accent bg-[rgb(var(--accent)/0.1)] border border-[rgb(var(--accent)/0.25)]">
             02 · Playbook
           </span>
           <span className="inline-flex items-center font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full text-muted bg-[rgb(var(--ink)/0.04)] border border-[rgb(var(--ink)/0.08)]">
@@ -63,8 +63,8 @@ export function FantasyTile() {
       className="group bg-surface-hi border border-border grid grid-cols-[1.15fr_1fr] gap-[18px] overflow-hidden relative hover:border-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex flex-col min-w-0 p-5 lg:p-6">
-        <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full text-accent bg-[rgb(var(--accent)/0.1)] border border-[rgb(var(--accent)/0.25)]">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full text-accent bg-[rgb(var(--accent)/0.1)] border border-[rgb(var(--accent)/0.25)]">
             03 · Fantasy
           </span>
           <span className="inline-flex items-center font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-1 rounded-full text-muted bg-[rgb(var(--ink)/0.04)] border border-[rgb(var(--ink)/0.08)]">

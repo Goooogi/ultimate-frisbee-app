@@ -367,33 +367,116 @@ export async function getGameBoxscore(gameID: string): Promise<UfaGameBoxscore> 
 
 // ── Champions ────────────────────────────────────────────────────────────────
 
+// Game start time as a sortable number; missing timestamps sort last.
+function gameTs(g: UfaGame): number {
+  return g.startTimestamp ? new Date(g.startTimestamp).getTime() : -Infinity;
+}
+
+// The UFA all-star game is a non-competitive exhibition that lands in the
+// final weeks of the schedule and must never be mistaken for the title game.
+// It shows up as a gameID like "2025-08-23-allstar-game" / "2022-11-12-allstar-game".
+function isAllStarGame(g: UfaGame): boolean {
+  const id = (g.gameID ?? '').toLowerCase();
+  const wk = (g.week ?? '').toLowerCase();
+  return id.includes('allstar') || id.includes('all-star') || wk.includes('allstar') || wk.includes('all-star');
+}
+
+// Decided Finals only (no ties, no all-star exhibition).
+function decidedFinals(games: UfaGame[]): UfaGame[] {
+  return games.filter(
+    (g) => g.status === 'Final' && g.awayScore !== g.homeScore && !isAllStarGame(g),
+  );
+}
+
 /**
- * UFA champions by year. Strategy: for each requested year fetch the full
- * schedule, keep only finals, take the one with the latest start; the
- * higher-score side is the champion. UFA's API doesn't tag a "Championship
- * Final" explicitly so we use "last final played" as the marker — that's
- * the championship game by construction (no consolation rounds after).
+ * Identify the championship game for one fully-completed season.
  *
- * Returns a map of `year → teamAbbrev`. Years with no Final games (current
- * season mid-playoffs, etc.) are omitted.
+ * There is NO single field the UFA API exposes that marks the title game,
+ * and the `week` labeling convention has changed every season:
+ *   2021  week="championship-weekend"
+ *   2022  week="championship-weekend" (+ "playoffs", "week-allstars")
+ *   2023  week="semi-finals" / "divisional-champ" / "playoffs" (no "championship")
+ *   2024  all "week-N" — no playoff label at all
+ *   2025  all "week-N" (+ the all-star game)
+ *
+ * So we try the strongest marker available, in priority order, and fall
+ * back to the structural one (last decided final in the highest week).
+ * Returns the championship game, or null if none can be identified.
+ */
+function findChampionshipGame(games: UfaGame[]): UfaGame | null {
+  const finals = decidedFinals(games);
+  if (finals.length === 0) return null;
+
+  const latest = (pool: UfaGame[]): UfaGame | null =>
+    pool.length === 0 ? null : pool.reduce((a, b) => (gameTs(b) > gameTs(a) ? b : a));
+
+  const weekIs = (g: UfaGame, ...labels: string[]) =>
+    labels.includes((g.week ?? '').toLowerCase());
+
+  // (a) Explicit "championship-weekend" label (2021, 2022) — the title game
+  //     is the last decided final within it.
+  const champWeekend = finals.filter((g) => weekIs(g, 'championship-weekend'));
+  if (champWeekend.length > 0) return latest(champWeekend);
+
+  // (b) Other playoff labels (2023). The final is the last decided game
+  //     across the playoff-tagged weeks. 'semi-finals' here actually holds
+  //     the 2023 final (UFA mislabeled it), so include it.
+  const playoffLabeled = finals.filter((g) =>
+    weekIs(g, 'semi-finals', 'semifinals', 'divisional-champ', 'playoffs', 'championship', 'final', 'finals'),
+  );
+  if (playoffLabeled.length > 0) return latest(playoffLabeled);
+
+  // (c) No playoff labels (2024, 2025): the bracket lives in the highest
+  //     week number. Take the last decided final inside that top week —
+  //     that's the title game (semis are earlier in the same week).
+  const weekNum = (g: UfaGame): number => {
+    const m = (g.week ?? '').match(/^week-(\d+)$/);
+    return m ? parseInt(m[1], 10) : -1;
+  };
+  const maxWeek = Math.max(...finals.map(weekNum));
+  if (maxWeek >= 0) {
+    const topWeek = finals.filter((g) => weekNum(g) === maxWeek);
+    if (topWeek.length > 0) return latest(topWeek);
+  }
+
+  // Last resort: the latest decided final overall.
+  return latest(finals);
+}
+
+/**
+ * UFA champions by year. Returns a map of `year → teamID` (lowercased).
+ *
+ * Crucially, a champion is awarded ONLY for a season that is actually
+ * complete — i.e. has zero remaining Upcoming/Live games. Mid-season the
+ * "latest final played" is just a regular-season result, not a title, so
+ * awarding it (the previous behavior) produced a bogus "champion" every
+ * weekend. In-progress seasons are omitted from the map entirely.
+ *
+ * For completed seasons the title game is found via `findChampionshipGame`,
+ * which copes with UFA's year-to-year `week`-labeling drift.
  */
 export async function getUfaChampionsByYear(years: number[]): Promise<Map<number, string>> {
   const result = new Map<number, string>();
-  // Run years in parallel; each is just one paged fetch.
   await Promise.all(
     years.map(async (year) => {
       try {
         const games = await getAllGamesByYears([year]);
-        let bestTs = -Infinity;
-        let winner: string | null = null;
-        for (const g of games) {
-          if (g.status !== 'Final') continue;
-          if (g.awayScore === g.homeScore) continue; // shouldn't happen but skip ties
-          const ts = g.startTimestamp ? new Date(g.startTimestamp).getTime() : -Infinity;
-          if (ts <= bestTs) continue;
-          bestTs = ts;
-          winner = g.awayScore > g.homeScore ? g.awayTeamID : g.homeTeamID;
-        }
+        if (games.length === 0) return;
+
+        // Gate: season must be over. If any game is still Upcoming or Live,
+        // the championship hasn't been played — no champion yet.
+        const seasonComplete = !games.some(
+          (g) => g.status === 'Upcoming' || g.status === 'Live',
+        );
+        if (!seasonComplete) return;
+
+        const finalGame = findChampionshipGame(games);
+        if (!finalGame) return;
+
+        const winner =
+          finalGame.awayScore > finalGame.homeScore
+            ? finalGame.awayTeamID
+            : finalGame.homeTeamID;
         if (winner) result.set(year, winner.toLowerCase());
       } catch (err) {
         console.error(`getUfaChampionsByYear: failed for ${year}`, err);

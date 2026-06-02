@@ -2,8 +2,6 @@
 
 import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
-import { useTheme } from '@/lib/use-theme';
-import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
 import {
   DEFAULT_LEAGUE,
@@ -38,12 +36,12 @@ function isActive(pathname: string, item: NavItem): boolean {
 }
 
 /**
- * Desktop left rail — used by both light & dark themes after the chrome merge.
- * The logo's stroke palette swaps based on the active theme so it reads
- * correctly on either bg.
+ * Games sub-app left sidebar — intra-Games navigation only.
+ * Logo / account / theme are owned by the global AppRail; this sidebar
+ * focuses solely on [The Games, Schedule, Teams, Players].
+ * ThemeToggle is retained at the bottom for ergonomics on desktop.
  */
 export function SidebarNav() {
-  const [theme] = useTheme();
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
   // Active league + division for nav links: explicit query params win,
@@ -56,16 +54,15 @@ export function SidebarNav() {
   const leagueQs = buildLeagueQs(activeLeague, activeDivision);
 
   return (
-    <aside className="w-[220px] flex-shrink-0 flex flex-col px-6 py-8 bg-bg border-r border-hairline">
-      <Link href="/" aria-label="The Layout — home" className="mb-6 inline-block">
-        <LogoStrikeInline
-          accentColor="rgb(var(--accent))"
-          theme={theme === 'broadcast' ? 'dark' : 'light'}
-          size={1.05}
-        />
-      </Link>
+    <aside className="w-[220px] flex-shrink-0 flex flex-col px-6 pt-6 pb-8 bg-bg border-r border-hairline">
+      {/* Section label */}
+      <div className="px-1 mb-3">
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+          Games
+        </span>
+      </div>
 
-      <nav className="flex flex-col gap-0.5" aria-label="Main navigation">
+      <nav className="flex flex-col gap-0.5" aria-label="Games navigation">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item);
           return (

@@ -4,23 +4,16 @@
 // theme. The light/dark toggle in the sidebar swaps CSS variables only, not
 // the layout itself.
 //
-// Desktop (lg+): SidebarNav rail + main column. A slim top bar above the main
-// content hosts the league switcher (UFA / USAU / INTL) and any other slot a
-// caller passes via `topNavSlot`.
-// Mobile (<lg): compact header with logo + theme toggle, then page title +
-// children. The league switcher renders here too in a slim band.
+// Desktop (lg+): AppRail (top, global, carries league switcher via gamesSlot) + SidebarNav (left, intra-Games) + main column.
+// Mobile (<lg): AppRail (top, carries league switcher via gamesSlotMobile in rail) + content + MobileBottomNav.
+//   The league pill lives IN the AppRail on mobile — no separate below-rail strip.
 
 import { Suspense } from 'react';
-import Link from 'next/link';
-import { useTheme } from '@/lib/use-theme';
-import { LogoStrikeInline } from '@/components/logo-strike';
-import { ThemeToggle } from '@/components/theme-toggle';
+import { AppRail } from '@/components/app-rail';
 import { SidebarNav } from '@/components/sidebar-nav';
 import { LeagueTabs } from '@/components/league-tabs';
-import { AccountChip } from '@/components/auth/account-chip';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { MobileLeagueSelect } from '@/components/mobile-league-select';
-import { SearchTrigger } from '@/components/search-trigger';
 import { useLeague } from '@/lib/use-league';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 
@@ -44,7 +37,6 @@ interface AppShellProps {
  * should use `PageShell` instead — it composes AppShell + PageHeader.
  */
 export function AppShell({ topNavSlot, children }: AppShellProps) {
-  const [theme] = useTheme();
   // Each tab slot consumes useSearchParams (either via useLeague or via
   // a router push) — wrap in Suspense so prerendering succeeds.
   const tab = (
@@ -68,10 +60,20 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
   );
 
   return (
-    <>
+    // h-screen + flex-col: AppRail is flex-shrink-0, the row below gets the
+    // remaining height via flex-1 so overflow-hidden + overflow-y-auto on
+    // the main column works exactly as before.
+    <div className="h-screen bg-bg text-ink flex flex-col">
+      {/* Global top app rail — present on every breakpoint.
+          gamesSlot threads the desktop league control (LeagueTabs) into the rail.
+          gamesSlotMobile threads the mobile league control (MobileLeagueSelect)
+          into the rail on <lg, replacing the old below-rail MobileIntraHeader strip.
+          When a page hides the switcher (empty span via topNavSlot), both slots
+          resolve to that empty span — hide behavior is preserved for free. */}
+      <AppRail gamesSlot={tab} gamesSlotMobile={mobileTab} />
+
       {/* ── Mobile (<lg) ── */}
-      <div className="lg:hidden min-h-screen bg-bg text-ink pb-[88px]">
-        <MobileHeader theme={theme} leagueSlot={mobileTab} />
+      <div className="lg:hidden flex-1 overflow-y-auto pb-[88px]">
         {children}
         <Suspense fallback={SUSPENSE_FALLBACK}>
           <MobileBottomNav />
@@ -79,26 +81,17 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
       </div>
 
       {/* ── Desktop (lg+) ── */}
-      <div className="hidden lg:flex h-screen overflow-hidden bg-bg text-ink">
+      <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
         <Suspense fallback={SUSPENSE_FALLBACK}>
           <SidebarNav />
         </Suspense>
         <main className="flex-1 overflow-y-auto flex flex-col">
-          {/* Top bar: league tabs stay visually centered (absolute), avatar
-              anchors the right edge so the chrome matches the home page. */}
-          <div className="relative flex-shrink-0 h-[60px] px-8 flex items-center border-b border-hairline bg-bg">
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="pointer-events-auto">{tab}</div>
-            </div>
-            <div className="ml-auto flex items-center gap-3">
-              <SearchTrigger size={32} />
-              <AccountChip size={32} />
-            </div>
-          </div>
+          {/* League scope bar removed — the switcher now lives in the
+              global AppRail (gamesSlot) so no duplicate bar here. */}
           <div className="flex-1">{children}</div>
         </main>
       </div>
-    </>
+    </div>
   );
 }
 
@@ -144,32 +137,6 @@ export function PageShell({
         {children}
       </div>
     </AppShell>
-  );
-}
-
-function MobileHeader({
-  theme,
-  leagueSlot,
-}: {
-  theme: 'field' | 'broadcast';
-  leagueSlot: React.ReactNode;
-}) {
-  return (
-    <header className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-hairline">
-      <Link href="/" aria-label="The Layout — home" className="flex-shrink-0">
-        <LogoStrikeInline
-          accentColor="rgb(var(--accent))"
-          theme={theme === 'broadcast' ? 'dark' : 'light'}
-          size={0.95}
-        />
-      </Link>
-      <div className="flex items-center gap-2.5 flex-shrink-0">
-        {leagueSlot}
-        <SearchTrigger size={28} />
-        <ThemeToggle />
-        <AccountChip size={28} />
-      </div>
-    </header>
   );
 }
 

@@ -13,13 +13,12 @@ import {
 import { gameUiState } from '@/lib/ufa/format';
 import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
-import { getToday } from '@/lib/today';
-import { HomeNav } from '@/components/home/home-nav';
+import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
 import { PlaybookTile, FantasyTile } from '@/components/home/sub-app-tiles';
 import { GameGridSection } from '@/components/home/game-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
-import { MobileTabBar } from '@/components/home/mobile-tab-bar';
+import { SiteFooter } from '@/components/site-footer';
 
 export const revalidate = 60;
 
@@ -30,7 +29,6 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const today = getToday();
   const year = currentSeasonYear();
 
   const [gamesRes, seasonRes, standingsRes, teamStatsRes] = await Promise.allSettled([
@@ -97,14 +95,10 @@ export default async function HomePage() {
   const countLabel = (n: number, noun: string) =>
     `${n} ${n === 1 ? noun : `${noun}s`}`;
 
-  // Derive a week label from the featured game when possible (e.g. "WK 4").
-  const weekLabel = featured?.week
-    ? featured.week.replace(/^week-?/i, 'Wk ')
-    : undefined;
-
   return (
     <div className="min-h-screen bg-bg text-ink pb-20 lg:pb-0">
-      <HomeNav today={today} weekLabel={weekLabel ? `${weekLabel.toUpperCase()}` : undefined} />
+      {/* Global top rail — app switching + logo + account */}
+      <AppRail />
 
       {/* HERO BENTO — primary game on the left, sub-app tiles stacked right */}
       <div className="px-5 lg:px-12 pt-6 lg:pt-9 pb-5 lg:pb-6 grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-5">
@@ -114,6 +108,12 @@ export default async function HomePage() {
           <FantasyTile />
         </div>
       </div>
+
+      <StandingsStrip
+        standings={standings}
+        teamStats={teamStats}
+        seasonLabel={`UFA · ${year}`}
+      />
 
       <GameGridSection
         title="Up next"
@@ -127,13 +127,7 @@ export default async function HomePage() {
         games={recent}
       />
 
-      <StandingsStrip
-        standings={standings}
-        teamStats={teamStats}
-        seasonLabel={`UFA · ${year}`}
-      />
-
-      <MobileTabBar />
+      <SiteFooter />
     </div>
   );
 }

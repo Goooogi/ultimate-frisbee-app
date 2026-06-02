@@ -7,13 +7,16 @@
 
 import Link from 'next/link';
 import { listRankedTeams } from '@/lib/usau/data';
+import type { UsauLevel } from '@/lib/league';
 
 export async function UsauTeamsRanked({
   genderDivision,
+  competitionLevel,
 }: {
   genderDivision?: 'Men' | 'Women' | 'Mixed';
+  competitionLevel?: UsauLevel;
 }) {
-  const { season, teams } = await listRankedTeams({ genderDivision });
+  const { season, teams } = await listRankedTeams({ genderDivision, competitionLevel });
 
   if (teams.length === 0) {
     return (

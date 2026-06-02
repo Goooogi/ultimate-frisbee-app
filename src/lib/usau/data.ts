@@ -1301,20 +1301,52 @@ export interface RankedTeam {
  * @param season the season to rank by. Defaults to the most recent season
  *   that has a Nationals event with placement data.
  */
+type RankableLevel = 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' | 'MASTERS' | 'GRAND_MASTERS';
+
 export async function listRankedTeams(opts?: {
   genderDivision?: 'Men' | 'Women' | 'Mixed';
+  competitionLevel?: RankableLevel;
   season?: number;
 }): Promise<{ season: number; teams: RankedTeam[] }> {
   const db = await supabase();
+  const compLevel: RankableLevel = opts?.competitionLevel ?? 'CLUB';
 
-  // Find the most recent season with Nationals data (or use the override).
+  // For College championships USAU uses event-name patterns like
+  // "D-I College Championships" / "D-III College Championships". The
+  // Club Nationals events match a different phrase ("USA Ultimate Club
+  // Nationals"). We use a level-specific regex so we don't accidentally
+  // pick a different level's event when finding "the most recent
+  // Nationals season" for this filter.
+  const championshipNameLike: Record<RankableLevel, string> = {
+    CLUB: '%Nationals%',
+    COLLEGE_D1: '%D-I College Championship%',
+    COLLEGE_D3: '%D-III College Championship%',
+    MASTERS: '%Masters Championship%',
+    GRAND_MASTERS: '%Grand Masters Championship%',
+  };
+  // Regionals naming varies the same way: Club regions are named
+  // "Mid-Atlantic Regional Championship"; College has "D-I College
+  // Regionals", "D-III College Regionals"; Masters/GM use their own
+  // qualifier names. We match the level-appropriate phrase plus a
+  // generic "Regional" fallback so seed-by-Regionals still works for
+  // levels where we don't yet know the exact naming.
+  const regionalsNameLike: Record<RankableLevel, string> = {
+    CLUB: '%Regional%',
+    COLLEGE_D1: '%D-I College Regional%',
+    COLLEGE_D3: '%D-III College Regional%',
+    MASTERS: '%Masters%Regional%',
+    GRAND_MASTERS: '%Grand Masters%Regional%',
+  };
+
+  // Find the most recent season with that level's Nationals data
+  // (or use the override).
   let season = opts?.season;
   if (season == null) {
-    // Pick the newest season we have an event named "...Nationals..." for.
     const { data: seasons } = await db
       .from('usau_events')
       .select('season')
-      .ilike('name', '%Nationals%')
+      .eq('competition_level', compLevel)
+      .ilike('name', championshipNameLike[compLevel])
       .order('season', { ascending: false })
       .limit(1);
     season = seasons?.[0]?.season;
@@ -1323,16 +1355,24 @@ export async function listRankedTeams(opts?: {
     return { season: new Date().getUTCFullYear() - 1, teams: [] };
   }
 
-  // Pull every event for that season with name like Nationals, and every
-  // event with name like Regional. Build placement maps.
+  // Pull every Nationals + Regionals event for this (season, level).
   const { data: events } = await db
     .from('usau_events')
     .select('id, usau_slug, name')
     .eq('season', season)
-    .or('name.ilike.%Nationals%,name.ilike.%Regional%');
+    .eq('competition_level', compLevel)
+    .or(
+      `name.ilike.${championshipNameLike[compLevel]},name.ilike.${regionalsNameLike[compLevel]}`,
+    );
   const eventsList = events ?? [];
+  // Identify Nationals/Championship events by the level's championship phrase
+  // so College's "Championships" doesn't collide with Club's "Nationals".
+  const champRegex = new RegExp(
+    championshipNameLike[compLevel].replace(/%/g, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    'i',
+  );
   const nationalsIds = new Set(
-    eventsList.filter((e) => /nationals/i.test(e.name)).map((e) => e.id),
+    eventsList.filter((e) => champRegex.test(e.name)).map((e) => e.id),
   );
   const slugById = new Map(eventsList.map((e) => [e.id, e.usau_slug] as const));
 
