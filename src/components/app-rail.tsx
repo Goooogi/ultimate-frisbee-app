@@ -206,7 +206,17 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
 
   return (
     <header
-      className="sticky top-0 z-50 flex items-center gap-2 lg:gap-4 px-4 lg:px-6 h-[52px] border-b border-hairline bg-bg/95 backdrop-blur"
+      className={[
+        'sticky top-0 z-50 flex items-center gap-2 lg:gap-4 h-[52px] border-b border-hairline bg-bg/95 backdrop-blur',
+        // Mobile: tighter horizontal padding (px-3 = 12px) so the row fits 360px
+        // viewports. Desktop keeps the original px-6. Safe-area insets ensure
+        // content clears notches and rounded corners on real devices.
+        //   360px viewport, px-3: 360 - 24 = 336px usable
+        //   Items (Games page): logo ~85 + dropdown ~75 + league pill ~68
+        //                       + theme ~30 + account ~30 + 4×gap-2 (32) = 320px
+        //   Budget used: 320 / 336 = 95% — 16px of headroom on the smallest phones.
+        'px-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] lg:px-6',
+      ].join(' ')}
       aria-label="App navigation"
     >
       {/* Logo — occupies a fixed-width zone on desktop so the sub-app links
@@ -214,7 +224,8 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
           sits at 220px from the viewport edge; the rail's lg:px-6 (24px) +
           this 180px zone + the header's gap-4 (16px) = 220px, landing the
           first app link exactly on the content column's left edge.
-          On mobile (<lg) the width collapses to auto to keep the rail tight. */}
+          On mobile (<lg) the width collapses to auto to keep the rail tight.
+          flex-shrink-0 prevents the logo from squeezing at narrow widths. */}
       <div className="flex-shrink-0 flex items-center lg:w-[180px]">
         <Link href="/" aria-label="The Layout — home" className="flex-shrink-0">
           <LogoStrikeInline
@@ -281,13 +292,14 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
         })}
       </nav>
 
-      {/* Mobile dropdown switcher (<lg) */}
-      <div className="flex lg:hidden items-center">
+      {/* Mobile dropdown switcher (<lg) — flex-shrink-0 so the label text
+          never compresses; the spacer absorbs all available slack instead. */}
+      <div className="flex lg:hidden items-center flex-shrink-0">
         <MobileSubAppDropdown activeApp={activeApp} />
       </div>
 
-      {/* Spacer */}
-      <div className="flex-1" />
+      {/* Spacer — the ONLY element allowed to flex/shrink on mobile */}
+      <div className="flex-1 min-w-0" />
 
       {/* League switcher slot — desktop only, games sub-app only */}
       {showGamesSlot && (
@@ -297,22 +309,22 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
       )}
 
       {/* League switcher slot — mobile only, games sub-app only.
-          MobileLeagueSelect is content-width (~60px) and its dropdown uses
+          MobileLeagueSelect is content-width (~68px) and its dropdown uses
           absolute z-[60] so it escapes the rail without clipping.
-          Width math at 375px (px-4 → 343px usable, gap-2):
-            logo ~95px + sub-app ~70px + spacer + league ~60px + ThemeToggle ~30px + AccountChip ~30px
-            = ~285px fixed + 4×8px gaps = ~317px — clear 343px budget. */}
+          flex-shrink-0 keeps the pill full-size; squeeze goes to the spacer.
+          Width math at 360px (px-3 → 336px usable, gap-2 × 4 = 32px gaps):
+            logo ~85px + sub-app ~75px + league ~68px + theme ~30px + account ~30px
+            = 288px fixed + 32px gaps = 320px — 16px headroom at 360px. */}
       {showGamesSlotMobile && (
-        <div className="flex lg:hidden items-center">
+        <div className="flex lg:hidden items-center flex-shrink-0">
           {gamesSlotMobile}
         </div>
       )}
 
-      {/* Right controls.
-          SearchTrigger is hidden on mobile (<lg) — the rail at 375px fits:
-          logo + sub-app dropdown + spacer + league pill + ThemeToggle + AccountChip.
-          Adding search would push it over. Search remains available on desktop. */}
-      <div className="flex items-center gap-2">
+      {/* Right controls — all flex-shrink-0 so they never compress into the
+          available space; the spacer div is the only flex item that absorbs
+          squeeze. SearchTrigger stays desktop-only to preserve mobile budget. */}
+      <div className="flex items-center gap-2 flex-shrink-0">
         <div className="hidden lg:flex">
           <SearchTrigger size={30} />
         </div>

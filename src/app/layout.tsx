@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Antonio, Inter, Inter_Tight } from 'next/font/google';
 import './globals.css';
 import { ThemeBootstrap } from '@/components/theme-bootstrap';
@@ -28,6 +28,21 @@ const antonio = Antonio({
 export const metadata: Metadata = {
   title: 'The Layout · Ultimate Frisbee',
   description: 'Live Ultimate Frisbee scores from the UFA, USAU Club, and International ultimate.',
+};
+
+// Without an explicit viewport, mobile browsers assume a ~980px layout width
+// and scale the page down (or let it overflow) — which broke scaling across
+// phone models and clipped the right-edge controls. width=device-width +
+// initial-scale=1 makes the layout viewport match the device. viewport-fit
+// cover lets us use env(safe-area-inset-*) on notched phones.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#F4F2EC' },
+    { media: '(prefers-color-scheme: dark)', color: '#0A0A09' },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

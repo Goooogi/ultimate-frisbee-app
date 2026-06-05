@@ -14,6 +14,7 @@
 // value coming from the UI.
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '@/lib/auth/auth-provider';
 
 type Mode = 'signin' | 'signup';
@@ -49,6 +50,9 @@ export function AuthModal({
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const emailRef = useRef<HTMLInputElement | null>(null);
+  // Portal target only exists in the browser; gate render until mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Reset on open + focus the email field.
   useEffect(() => {
@@ -77,7 +81,7 @@ export function AuthModal({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, dismissible, onDismiss]);
 
-  if (!open) return null;
+  if (!open || !mounted) return null;
 
   const isSignup = mode === 'signup';
 
@@ -143,12 +147,16 @@ export function AuthModal({
     }
   }
 
-  return (
+  // Portal to <body> so the overlay escapes the AppRail's stacking context
+  // (the rail is sticky + backdrop-blur, which traps any z-index set on a
+  // descendant — AccountChip, which renders this modal, lives inside it).
+  // z-[100] sits above the rail's z-50 so the whole screen dims uniformly.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="auth-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-ink/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6 bg-ink/40 backdrop-blur-sm"
       onPointerDown={(e) => {
         if (dismissible && e.target === e.currentTarget) onDismiss?.();
       }}
@@ -328,7 +336,8 @@ export function AuthModal({
           )}
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

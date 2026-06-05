@@ -40,6 +40,14 @@ html, body {
   color: rgb(var(--ink));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Global horizontal overflow guard — prevents any too-wide child element
+     from creating a horizontal scrollbar that clips right-edge content (e.g.
+     AccountChip in the AppRail). overflow-x:hidden is safe alongside
+     position:sticky as long as we do NOT set overflow-y here (which would
+     form a new stacking/scroll context and break sticky children). */
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
 }
 
 /* Tabular numerals for scores + clocks */

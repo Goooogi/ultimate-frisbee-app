@@ -126,7 +126,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
 
   return (
     <article
-      className="relative overflow-hidden p-9 lg:min-h-[480px] flex flex-col justify-between"
+      className="relative overflow-hidden p-5 sm:p-9 lg:min-h-[480px] flex flex-col justify-between"
       style={{ background: buildHeroBackground(away, home), color: STADIUM.text }}
     >
       <div
@@ -160,8 +160,8 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
           </div>
         </div>
 
-        {/* score block */}
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-7 items-center my-3">
+        {/* score block — gap-4 on mobile keeps the 3-col layout within 320px */}
+        <div className="grid grid-cols-[1fr_auto_1fr] gap-4 sm:gap-7 items-center my-3">
           <TeamColumn
             slug={away.id}
             abbr={away.abbr}
@@ -220,7 +220,7 @@ function truncate(s: string, n: number) {
 
 function EmptyHero() {
   return (
-    <div className="bg-[#0F1B2E] text-[#F4F2EB] p-9 lg:min-h-[480px] flex flex-col items-center justify-center gap-4 text-center">
+    <div className="bg-[#0F1B2E] text-[#F4F2EB] p-5 sm:p-9 lg:min-h-[480px] flex flex-col items-center justify-center gap-4 text-center">
       <span className="font-mono text-[11px] tracking-[0.18em]" style={{ color: STADIUM.textMuted }}>
         OFFSEASON
       </span>
@@ -271,7 +271,7 @@ function TeamColumn({
         </div>
       </div>
       <div
-        className="font-display italic font-bold text-[72px] lg:text-[96px] leading-[0.95] tracking-[-0.04em] tabular"
+        className="font-display italic font-bold text-[52px] sm:text-[72px] lg:text-[96px] leading-[0.95] tracking-[-0.04em] tabular"
         style={{ color: winner ? ACCENT : STADIUM.text }}
       >
         {showScore ? score : '–'}
