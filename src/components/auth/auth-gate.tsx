@@ -24,17 +24,25 @@ interface AuthGateProps {
   headline?: string;
   /** Subhead shown on the landing. */
   subhead?: string;
+  /** Prefill the auth modal's email (e.g. the address a team invite was sent
+   *  to). When set, the modal opens in CREATE-ACCOUNT mode with the email
+   *  filled in — new invitees don't retype it. */
+  initialEmail?: string;
   children: React.ReactNode;
 }
 
 export function AuthGate({
   headline = 'Pull up your playbook.',
   subhead = 'Sign in to save plays, switch teams, and pick up exactly where you left off.',
+  initialEmail,
   children,
 }: AuthGateProps) {
   const { user, loading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
-  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  // Invitees (initialEmail set) default to create-account; everyone else to sign-in.
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>(
+    initialEmail ? 'signup' : 'signin',
+  );
   const [theme] = useTheme();
 
   if (loading) {
@@ -134,6 +142,7 @@ export function AuthGate({
         open={authOpen}
         dismissible
         initialMode={authMode}
+        initialEmail={initialEmail}
         onDismiss={() => setAuthOpen(false)}
         headline={authMode === 'signup' ? 'Make it yours.' : headline}
       />

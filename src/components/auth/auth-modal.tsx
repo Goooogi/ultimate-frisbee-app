@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/lib/auth/auth-provider';
 
-type Mode = 'signin' | 'signup';
+type Mode = 'signin' | 'signup' | 'reset';
 
 interface AuthModalProps {
   open: boolean;
@@ -28,6 +28,9 @@ interface AuthModalProps {
    *  being asked to sign in. */
   headline?: string;
   subhead?: string;
+  /** Prefill the email field (e.g. the address a team invite was sent to).
+   *  Used by the invite-accept flow so new users don't retype their email. */
+  initialEmail?: string;
 }
 
 export function AuthModal({
@@ -37,9 +40,13 @@ export function AuthModal({
   onDismiss,
   headline,
   subhead,
+  initialEmail,
 }: AuthModalProps) {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, resetPassword } = useAuth();
   const [mode, setMode] = useState<Mode>(initialMode);
+  // Tracks whether the reset-password email was successfully sent so we can
+  // show the "check your inbox" confirmation state inside the modal.
+  const [resetSent, setResetSent] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -58,7 +65,7 @@ export function AuthModal({
   useEffect(() => {
     if (!open) return;
     setMode(initialMode);
-    setEmail('');
+    setEmail(initialEmail ?? '');
     setPassword('');
     setConfirmPassword('');
     setDisplayName('');
@@ -67,9 +74,14 @@ export function AuthModal({
     setError(null);
     setInfo(null);
     setSubmitting(false);
-    const t = setTimeout(() => emailRef.current?.focus(), 30);
+    setResetSent(false);
+    // Focus the email field — unless it's prefilled (invite flow), in which
+    // case leave focus alone so the user lands on the next empty field.
+    const t = setTimeout(() => {
+      if (!initialEmail) emailRef.current?.focus();
+    }, 30);
     return () => clearTimeout(t);
-  }, [open, initialMode]);
+  }, [open, initialMode, initialEmail]);
 
   // Esc dismisses only when allowed.
   useEffect(() => {
@@ -84,6 +96,7 @@ export function AuthModal({
   if (!open || !mounted) return null;
 
   const isSignup = mode === 'signup';
+  const isReset = mode === 'reset';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -96,6 +109,27 @@ export function AuthModal({
       setError('Email is required.');
       return;
     }
+
+    // Reset mode: validate email format, then send the link.
+    if (isReset) {
+      // Basic email format check before hitting the network.
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
+        setError('Please enter a valid email address.');
+        return;
+      }
+      setSubmitting(true);
+      const result = await resetPassword(trimmedEmail);
+      setSubmitting(false);
+      if (result.error) {
+        setError(result.error);
+        return;
+      }
+      // ANTI-ENUMERATION: always show the same generic message regardless of
+      // whether the email is registered. Never say "we found your account".
+      setResetSent(true);
+      return;
+    }
+
     if (password.length < 8) {
       setError('Password must be at least 8 characters.');
       return;
@@ -115,7 +149,7 @@ export function AuthModal({
       if (phoneInput) {
         const e164 = toE164(phoneInput);
         if (!e164) {
-          setError('Phone must include country code (e.g. +1 555 123 4567).');
+          setError('Enter a 10-digit US number, or include a country code (e.g. +44…) for international.');
           return;
         }
         normalizedPhone = e164;
@@ -174,167 +208,254 @@ export function AuthModal({
             id="auth-modal-title"
             className="m-0 font-display italic font-bold text-[32px] leading-[0.95] tracking-[-0.03em] text-ink"
           >
-            {headline ?? (isSignup ? 'Make it yours.' : 'Welcome back.')}
+            {headline ??
+              (isReset
+                ? 'Reset your password.'
+                : isSignup
+                  ? 'Make it yours.'
+                  : 'Welcome back.')}
           </h2>
           <p className="text-[13px] text-muted font-tight leading-snug">
             {subhead ??
-              (isSignup
-                ? 'Create an account to save plays, swap teams, and pick up where you left off.'
-                : 'Sign in to load your playbook and keep building from anywhere.')}
+              (isReset
+                ? "Enter your email and we'll send you a link to set a new password."
+                : isSignup
+                  ? 'Create an account to save plays, swap teams, and pick up where you left off.'
+                  : 'Sign in to load your playbook and keep building from anywhere.')}
           </p>
         </div>
 
-        {/* Mode toggle */}
-        <div className="px-6 pb-2">
-          <div className="grid grid-cols-2 gap-0 bg-surface border border-border rounded-md overflow-hidden">
-            <ModeButton active={!isSignup} onClick={() => setMode('signin')}>
-              Sign in
-            </ModeButton>
-            <ModeButton active={isSignup} onClick={() => setMode('signup')}>
-              Create account
-            </ModeButton>
+        {/* Mode toggle — hidden during reset flow */}
+        {!isReset && (
+          <div className="px-6 pb-2">
+            <div className="grid grid-cols-2 gap-0 bg-surface border border-border rounded-md overflow-hidden">
+              <ModeButton active={!isSignup} onClick={() => setMode('signin')}>
+                Sign in
+              </ModeButton>
+              <ModeButton active={isSignup} onClick={() => setMode('signup')}>
+                Create account
+              </ModeButton>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Fields */}
         <div className="px-6 py-4 flex flex-col gap-3.5">
-          {isSignup && (
-            <Field label="Display name" optional>
-              <input
-                type="text"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="What should we call you?"
-                autoComplete="name"
-                spellCheck={false}
-                maxLength={60}
-                className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
-              />
-            </Field>
-          )}
+          {/* ── Reset mode: confirmation state (after link sent) ─────────── */}
+          {isReset && resetSent ? (
+            <>
+              <div
+                role="status"
+                className="text-[13px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-3 leading-snug"
+              >
+                Check your inbox — if{' '}
+                <span className="font-bold">{email.trim().toLowerCase()}</span>{' '}
+                has an account, we&apos;ve sent a reset link. It expires in 1 hour.
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('signin');
+                  setResetSent(false);
+                  setError(null);
+                }}
+                className="text-[12px] font-semibold font-tight text-muted hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm text-left"
+              >
+                ← Back to sign in
+              </button>
+            </>
+          ) : (
+            <>
+              {/* ── Signup-only field ───────────────────────────────────── */}
+              {isSignup && (
+                <Field label="Display name" optional>
+                  <input
+                    type="text"
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="What should we call you?"
+                    autoComplete="name"
+                    spellCheck={false}
+                    maxLength={60}
+                    className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
+                  />
+                </Field>
+              )}
 
-          <Field label="Email">
-            <input
-              ref={emailRef}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoComplete="email"
-              required
-              spellCheck={false}
-              className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
-            />
-          </Field>
+              {/* ── Email (all modes) ───────────────────────────────────── */}
+              <Field label="Email">
+                <input
+                  ref={emailRef}
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  required
+                  spellCheck={false}
+                  className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
+                />
+              </Field>
 
-          {isSignup && (
-            <Field label="Phone" optional hint="Include country code">
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+1 555 123 4567"
-                autoComplete="tel"
-                inputMode="tel"
-                spellCheck={false}
-                maxLength={20}
-                className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors tabular"
-              />
-            </Field>
-          )}
+              {/* ── Signup phone ────────────────────────────────────────── */}
+              {isSignup && (
+                <Field label="Phone" optional hint="US number or +country code">
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+1 555 123 4567"
+                    autoComplete="tel"
+                    inputMode="tel"
+                    spellCheck={false}
+                    maxLength={20}
+                    className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors tabular"
+                  />
+                </Field>
+              )}
 
-          <Field
-            label="Password"
-            hint={isSignup ? '8+ characters' : undefined}
-          >
-            <PasswordInput
-              value={password}
-              onChange={setPassword}
-              placeholder={isSignup ? 'Pick something strong' : 'Your password'}
-              autoComplete={isSignup ? 'new-password' : 'current-password'}
-              show={showPassword}
-              onToggleShow={() => setShowPassword((v) => !v)}
-            />
-          </Field>
+              {/* ── Password (signin + signup, not reset) ───────────────── */}
+              {!isReset && (
+                <div className="flex flex-col gap-1">
+                  <Field
+                    label="Password"
+                    hint={isSignup ? '8+ characters' : undefined}
+                  >
+                    <PasswordInput
+                      value={password}
+                      onChange={setPassword}
+                      placeholder={isSignup ? 'Pick something strong' : 'Your password'}
+                      autoComplete={isSignup ? 'new-password' : 'current-password'}
+                      show={showPassword}
+                      onToggleShow={() => setShowPassword((v) => !v)}
+                    />
+                  </Field>
+                  {/* Forgot password — signin only, right-aligned under the field */}
+                  {!isSignup && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('reset');
+                          setError(null);
+                          setInfo(null);
+                          setResetSent(false);
+                        }}
+                        className="text-[12px] text-muted hover:text-ink font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm min-h-[44px] flex items-center"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
-          {isSignup && (
-            <Field label="Confirm password">
-              <PasswordInput
-                value={confirmPassword}
-                onChange={setConfirmPassword}
-                placeholder="Type it again"
-                autoComplete="new-password"
-                show={showPassword}
-                onToggleShow={() => setShowPassword((v) => !v)}
-                mismatch={confirmPassword.length > 0 && confirmPassword !== password}
-              />
-            </Field>
-          )}
+              {/* ── Confirm password (signup only) ──────────────────────── */}
+              {isSignup && (
+                <Field label="Confirm password">
+                  <PasswordInput
+                    value={confirmPassword}
+                    onChange={setConfirmPassword}
+                    placeholder="Type it again"
+                    autoComplete="new-password"
+                    show={showPassword}
+                    onToggleShow={() => setShowPassword((v) => !v)}
+                    mismatch={confirmPassword.length > 0 && confirmPassword !== password}
+                  />
+                </Field>
+              )}
 
-          {error && (
-            <div
-              role="alert"
-              className="text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
-            >
-              {error}
-            </div>
-          )}
-          {info && !error && (
-            <div
-              role="status"
-              className="text-[12px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-2"
-            >
-              {info}
-            </div>
+              {/* ── Error / info banners ────────────────────────────────── */}
+              {error && (
+                <div
+                  role="alert"
+                  className="text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
+                >
+                  {error}
+                </div>
+              )}
+              {info && !error && (
+                <div
+                  role="status"
+                  className="text-[12px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-2"
+                >
+                  {info}
+                </div>
+              )}
+            </>
           )}
         </div>
 
-        {/* Footer / CTA */}
-        <div className="px-6 pb-6 flex flex-col gap-3">
-          <button
-            type="submit"
-            disabled={submitting}
-            className={[
-              'inline-flex items-center justify-center gap-2 w-full py-3 rounded-md cursor-pointer',
-              'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
-              'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
-              'disabled:opacity-60 disabled:cursor-not-allowed',
-            ].join(' ')}
-          >
-            {submitting
-              ? isSignup
-                ? 'Creating account…'
-                : 'Signing in…'
-              : isSignup
-                ? 'Create account'
-                : 'Sign in'}
-          </button>
-
-          <p className="text-center text-[11px] text-faint font-tight">
-            {isSignup ? 'Already have an account?' : "Don't have one yet?"}{' '}
+        {/* Footer / CTA — hidden once the reset email has been sent */}
+        {!(isReset && resetSent) && (
+          <div className="px-6 pb-6 flex flex-col gap-3">
             <button
-              type="button"
-              onClick={() => {
-                setMode(isSignup ? 'signin' : 'signup');
-                setError(null);
-                setInfo(null);
-              }}
-              className="text-ink font-semibold hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+              type="submit"
+              disabled={submitting}
+              className={[
+                'inline-flex items-center justify-center gap-2 w-full py-3 rounded-md cursor-pointer',
+                'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
+                'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
+                'disabled:opacity-60 disabled:cursor-not-allowed',
+              ].join(' ')}
             >
-              {isSignup ? 'Sign in' : 'Create one'}
+              {submitting
+                ? isReset
+                  ? 'Sending…'
+                  : isSignup
+                    ? 'Creating account…'
+                    : 'Signing in…'
+                : isReset
+                  ? 'Send reset link'
+                  : isSignup
+                    ? 'Create account'
+                    : 'Sign in'}
             </button>
-          </p>
 
-          {dismissible && (
-            <button
-              type="button"
-              onClick={onDismiss}
-              className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint hover:text-ink font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
-            >
-              Maybe later
-            </button>
-          )}
-        </div>
+            {/* Reset mode: show "back to sign in" link instead of mode toggle */}
+            {isReset ? (
+              <p className="text-center text-[11px] text-faint font-tight">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('signin');
+                    setError(null);
+                    setInfo(null);
+                    setResetSent(false);
+                  }}
+                  className="text-ink font-semibold hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                >
+                  ← Back to sign in
+                </button>
+              </p>
+            ) : (
+              <p className="text-center text-[11px] text-faint font-tight">
+                {isSignup ? 'Already have an account?' : "Don't have one yet?"}{' '}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode(isSignup ? 'signin' : 'signup');
+                    setError(null);
+                    setInfo(null);
+                  }}
+                  className="text-ink font-semibold hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                >
+                  {isSignup ? 'Sign in' : 'Create one'}
+                </button>
+              </p>
+            )}
+
+            {dismissible && (
+              <button
+                type="button"
+                onClick={onDismiss}
+                className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint hover:text-ink font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+              >
+                Maybe later
+              </button>
+            )}
+          </div>
+        )}
       </form>
     </div>,
     document.body,
@@ -487,15 +608,30 @@ function EyeOffGlyph() {
   );
 }
 
-// Normalize a free-form phone input to E.164 (+ followed by digits only).
-// Returns null when the result wouldn't match the DB CHECK constraint
-// `^\+[1-9]\d{1,14}$`. We don't try to guess a country code — if the user
-// typed bare digits with no leading "+" we reject, since assuming a default
-// region is a mistake we'd regret.
+// Normalize a free-form phone input to E.164 (+ followed by digits only) to
+// satisfy the DB CHECK constraint `^\+[1-9]\d{1,14}$`.
+//
+// The user should NOT have to type a country code or "+". We default to US
+// (+1) for bare US-style numbers and only require an explicit "+" for non-US
+// international numbers:
+//   "630-465-8434"   (10 digits)            → +16304658434
+//   "16304658434"    (11 digits, leading 1) → +16304658434
+//   "+44 20 7946..." (explicit intl)        → respected as typed
+// Returns null only if the input can't be coerced into a valid E.164 number.
 function toE164(raw: string): string | null {
-  const cleaned = raw.replace(/[\s().-]/g, '');
-  if (!cleaned.startsWith('+')) return null;
-  const digits = cleaned.slice(1);
-  if (!/^[1-9]\d{1,14}$/.test(digits)) return null;
-  return `+${digits}`;
+  const cleaned = raw.replace(/[\s().\-]/g, '');
+
+  // Explicit international: keep the user's country code as-is.
+  if (cleaned.startsWith('+')) {
+    const digits = cleaned.slice(1);
+    return /^[1-9]\d{1,14}$/.test(digits) ? `+${digits}` : null;
+  }
+
+  // Bare digits — assume US/Canada (+1).
+  if (!/^\d+$/.test(cleaned)) return null;
+  if (cleaned.length === 10) return `+1${cleaned}`;            // 6304658434
+  if (cleaned.length === 11 && cleaned.startsWith('1')) {      // 16304658434
+    return `+${cleaned}`;
+  }
+  return null;
 }

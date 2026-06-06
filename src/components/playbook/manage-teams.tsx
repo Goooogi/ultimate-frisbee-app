@@ -27,6 +27,7 @@ import {
   type TeamRole,
 } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
+import { sendInviteEmail } from '@/app/playbook/teams/actions';
 
 interface ScopeShellProps {
   teams: Team[];
@@ -133,18 +134,27 @@ export function ManageTeams() {
       try {
         setError(null);
         const { token } = await createInvite(teamID, email, role);
-        // Build the share link from the runtime origin so it works in dev + prod.
-        const link =
-          typeof window !== 'undefined'
-            ? `${window.location.origin}/playbook/invite/${token}`
-            : `/playbook/invite/${token}`;
-        // Copy to clipboard if available; fall back to a prompt otherwise.
+
+        // Attempt to send via Resend. If it fails, fall back to copy-link so
+        // the invite (already created in the DB) is still usable.
         try {
-          await navigator.clipboard.writeText(link);
-          alert(`Invite link copied to clipboard:\n${link}`);
-        } catch {
-          window.prompt('Copy this invite link and send it to your player:', link);
+          await sendInviteEmail({ teamId: teamID, email, role, token });
+          alert(`Invite emailed to ${email}.`);
+        } catch (emailErr) {
+          // Email failed — the token still exists. Surface the link manually.
+          const link = `${window.location.origin}/playbook/invite/${token}`;
+          const errMsg =
+            emailErr instanceof Error ? emailErr.message : 'Could not send the email automatically.';
+          const note = `Couldn't send the email automatically — here's the link to share:\n\n${link}\n\n(${errMsg})`;
+          try {
+            await navigator.clipboard.writeText(link);
+            alert(`${note}\n\nLink copied to clipboard.`);
+          } catch {
+            window.prompt(note, link);
+          }
+          console.warn('[manage-teams] sendInviteEmail failed, fell back to copy-link', emailErr);
         }
+
         setInvitingTeamID(null);
         await refresh();
       } catch (err) {

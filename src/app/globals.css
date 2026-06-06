@@ -26,8 +26,12 @@
   --surface: 20 20 18;        /* #141412 */
   --surface-hi: 27 27 24;     /* #1B1B18 */
   --ink: 244 242 235;         /* #F4F2EB */
-  --muted: 134 132 125;       /* derived from rgba(244,242,235,0.55) over bg */
-  --faint: 78 77 73;          /* derived from rgba(244,242,235,0.32) over bg */
+  /* Secondary text brightened for legibility on the near-black bg. The old
+     overlay-derived values (#86847D / #4E4D49) washed out against #0A0A09 —
+     faint was only ~2.3:1 (failed). These read clearly: muted ~9.3:1,
+     faint ~5.7:1. Field (light) theme is unchanged. */
+  --muted: 180 178 170;       /* #B4B2AA */
+  --faint: 140 138 130;       /* #8C8A82 */
   --border: 28 28 25;         /* derived from rgba(244,242,235,0.08) */
   --hairline: 22 22 19;       /* derived from rgba(244,242,235,0.05) */
   --live: 217 255 58;         /* #D9FF3A — volt (broadcast uses accent for live too) */
@@ -40,17 +44,43 @@ html, body {
   color: rgb(var(--ink));
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  /* Global horizontal overflow guard — prevents any too-wide child element
-     from creating a horizontal scrollbar that clips right-edge content (e.g.
-     AccountChip in the AppRail). overflow-x:hidden is safe alongside
-     position:sticky as long as we do NOT set overflow-y here (which would
-     form a new stacking/scroll context and break sticky children). */
-  overflow-x: hidden;
   width: 100%;
   max-width: 100%;
+}
+
+/* Horizontal-overflow guard — prevents a too-wide child from creating a
+   horizontal scrollbar that clips right-edge content (e.g. AccountChip in the
+   rail). IMPORTANT: apply overflow-x:hidden ONLY to <html>, NOT <body>.
+   Setting it on <body> turns body into the page's scroll container, which
+   breaks `position: sticky` on document-flow pages (home/Fantasy) — the rail
+   would scroll away instead of pinning. Clipping on <html> avoids that:
+   sticky children still resolve against the viewport. */
+html {
+  overflow-x: hidden;
 }
 
 /* Tabular numerals for scores + clocks */
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+/* GAMES dropdown fade+slide-in animation.
+   Respects prefers-reduced-motion — when motion is reduced we skip the
+   transform but keep the opacity fade so the panel still feels intentional. */
+@keyframes gamesDropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  @keyframes gamesDropdownIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
 }

@@ -70,7 +70,10 @@ export function MobileBottomNav() {
             <span
               className={[
                 'text-[10px] font-bold tracking-[0.1em] uppercase font-tight',
-                active ? 'text-ink' : 'text-faint',
+                // Active tab uses the accent (lime on Broadcast, coral on Field).
+                // Inactive uses muted (not faint) so labels stay clearly legible
+                // while still reading as secondary to the accent-colored active tab.
+                active ? 'text-accent' : 'text-muted',
               ].join(' ')}
             >
               {tab.label}
@@ -93,7 +96,7 @@ function Icon({
   kind: Tab['icon'];
   active: boolean;
 }) {
-  const c = active ? 'text-ink' : 'text-faint';
+  const c = active ? 'text-ink' : 'text-muted';
   const ball = active ? 'text-accent' : c;
   switch (kind) {
     case 'games':

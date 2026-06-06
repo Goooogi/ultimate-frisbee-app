@@ -1303,6 +1303,120 @@ export interface RankedTeam {
  */
 type RankableLevel = 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' | 'MASTERS' | 'GRAND_MASTERS';
 
+// Per-level ILIKE patterns identifying a level's Nationals/Championship event,
+// so College's "Championships" doesn't collide with Club's "Nationals".
+const CHAMPIONSHIP_NAME_LIKE: Record<RankableLevel, string> = {
+  CLUB: '%Nationals%',
+  COLLEGE_D1: '%D-I College Championship%',
+  COLLEGE_D3: '%D-III College Championship%',
+  MASTERS: '%Masters Championship%',
+  GRAND_MASTERS: '%Grand Masters Championship%',
+};
+function championshipNameLikeFor(level: RankableLevel): string {
+  return CHAMPIONSHIP_NAME_LIKE[level];
+}
+
+/**
+ * Fraction of the previous completed season's competing-team count that the
+ * IN-PROGRESS season must reach (teams that have played ≥1 game) before we
+ * start ranking by the current season instead of the last completed Nationals.
+ *
+ * Rationale: a single early-season tournament (e.g. one "Tune Up" with 8 teams)
+ * isn't enough to rank the whole field. USAU's full field isn't even known
+ * until Sectionals. Using the prior season's total team count as a stable,
+ * known denominator, we wait until ~80% of that many distinct teams have
+ * actually played this season — which naturally trips around Sectionals when
+ * the bulk of the field registers and plays.
+ *
+ * NOTE / FUTURE WORK — USAU RANKING ALGORITHM:
+ * Once we cross this threshold we currently still order by entry seed (see the
+ * banner in usau-teams-ranked.tsx). The REAL goal is to implement USAU's
+ * official ranking algorithm (the rating-based system that weights each game's
+ * result by opponent strength and score differential, iterated to convergence)
+ * to produce true in-season rankings from game results. When that lands it
+ * replaces the seed-ordering AND can supersede this crude threshold with a
+ * proper "enough connected results to rate" check. See vault: "USAU rating
+ * algorithm formula" in the data-sources memory.
+ */
+const CURRENT_SEASON_RANK_THRESHOLD = 0.8;
+
+/**
+ * Pick the season to rank for a level:
+ *   1. If the IN-PROGRESS season (the newest season with ANY events) has had
+ *      ≥ CURRENT_SEASON_RANK_THRESHOLD × (prior season's competing-team count)
+ *      distinct teams play at least one game, use the in-progress season.
+ *   2. Otherwise fall back to the most recent season whose Nationals event has
+ *      actually been PLAYED (has participating teams). We can't just take
+ *      MAX(season) of Nationals events — USAU schedules next season's Nationals
+ *      far in advance, so a future, unplayed event row (0 teams) would win and
+ *      render the page empty.
+ * Returns null if nothing qualifies.
+ */
+async function resolveRankableSeason(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  compLevel: RankableLevel,
+): Promise<number | null> {
+  // Distinct teams that have played ≥1 event in a given (season, level).
+  const teamsPlayedInSeason = async (s: number): Promise<number> => {
+    const { data } = await db
+      .from('usau_event_teams')
+      .select('team_id, usau_events!inner(season, competition_level)')
+      .eq('usau_events.season', s)
+      .eq('usau_events.competition_level', compLevel);
+    const ids = new Set<string>();
+    for (const r of (data ?? []) as Array<{ team_id: string }>) ids.add(r.team_id);
+    return ids.size;
+  };
+
+  // Most recent season that has a PLAYED Nationals event (the safe fallback).
+  const { data: natsEvents } = await db
+    .from('usau_events')
+    .select('id, season')
+    .eq('competition_level', compLevel)
+    .ilike('name', championshipNameLikeFor(compLevel))
+    .order('season', { ascending: false })
+    .limit(12);
+
+  let completedNatsSeason: number | null = null;
+  for (const ev of (natsEvents ?? []) as Array<{ id: string; season: number }>) {
+    const { count } = await db
+      .from('usau_event_teams')
+      .select('team_id', { count: 'exact', head: true })
+      .eq('event_id', ev.id);
+    if ((count ?? 0) > 0) {
+      completedNatsSeason = ev.season;
+      break;
+    }
+  }
+
+  // Newest season with any events at all (the in-progress season, if later).
+  const { data: newestEvent } = await db
+    .from('usau_events')
+    .select('season')
+    .eq('competition_level', compLevel)
+    .order('season', { ascending: false })
+    .limit(1);
+  const newestSeason: number | null = newestEvent?.[0]?.season ?? null;
+
+  // If there's a season newer than the last completed Nationals, test the 80%
+  // threshold against the prior (completed) season's team count.
+  if (
+    newestSeason != null &&
+    completedNatsSeason != null &&
+    newestSeason > completedNatsSeason
+  ) {
+    const denom = await teamsPlayedInSeason(completedNatsSeason);
+    const played = await teamsPlayedInSeason(newestSeason);
+    if (denom > 0 && played >= denom * CURRENT_SEASON_RANK_THRESHOLD) {
+      return newestSeason;
+    }
+  }
+
+  // Fall back to the last completed Nationals season (or newest as last resort).
+  return completedNatsSeason ?? newestSeason;
+}
+
 export async function listRankedTeams(opts?: {
   genderDivision?: 'Men' | 'Women' | 'Mixed';
   competitionLevel?: RankableLevel;
@@ -1317,13 +1431,7 @@ export async function listRankedTeams(opts?: {
   // Nationals"). We use a level-specific regex so we don't accidentally
   // pick a different level's event when finding "the most recent
   // Nationals season" for this filter.
-  const championshipNameLike: Record<RankableLevel, string> = {
-    CLUB: '%Nationals%',
-    COLLEGE_D1: '%D-I College Championship%',
-    COLLEGE_D3: '%D-III College Championship%',
-    MASTERS: '%Masters Championship%',
-    GRAND_MASTERS: '%Grand Masters Championship%',
-  };
+  const championshipNameLike = CHAMPIONSHIP_NAME_LIKE;
   // Regionals naming varies the same way: Club regions are named
   // "Mid-Atlantic Regional Championship"; College has "D-I College
   // Regionals", "D-III College Regionals"; Masters/GM use their own
@@ -1338,19 +1446,9 @@ export async function listRankedTeams(opts?: {
     GRAND_MASTERS: '%Grand Masters%Regional%',
   };
 
-  // Find the most recent season with that level's Nationals data
-  // (or use the override).
-  let season = opts?.season;
-  if (season == null) {
-    const { data: seasons } = await db
-      .from('usau_events')
-      .select('season')
-      .eq('competition_level', compLevel)
-      .ilike('name', championshipNameLike[compLevel])
-      .order('season', { ascending: false })
-      .limit(1);
-    season = seasons?.[0]?.season;
-  }
+  // Decide which season to rank.
+  const season =
+    opts?.season != null ? opts.season : await resolveRankableSeason(db, compLevel);
   if (season == null) {
     return { season: new Date().getUTCFullYear() - 1, teams: [] };
   }

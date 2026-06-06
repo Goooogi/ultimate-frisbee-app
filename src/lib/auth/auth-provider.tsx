@@ -25,6 +25,28 @@ interface AuthState {
     options?: { displayName?: string; phone?: string },
   ) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signOut: () => Promise<void>;
+  /**
+   * Sends a password-reset email via Supabase.
+   *
+   * ANTI-ENUMERATION: always resolves with {} on success regardless of
+   * whether the email is registered — Supabase already doesn't error for
+   * unknown addresses, and we swallow all non-transport errors here so the
+   * caller always shows the same generic "if that email has an account…"
+   * message. The only errors returned are genuine transport failures.
+   *
+   * redirectTo uses window.location.origin. Supabase validates this against
+   * the dashboard Redirect-URLs allowlist, so an attacker cannot redirect
+   * the recovery token to an external domain — the allowlist is the security
+   * control (add ${SITE_URL}/reset-password there before deploying).
+   */
+  resetPassword: (email: string) => Promise<{ error?: string }>;
+  /**
+   * Updates the authenticated user's password. Called from /reset-password
+   * after Supabase has established a PASSWORD_RECOVERY session from the link.
+   * Returns {} on success or { error: message } on failure (Supabase gives
+   * actionable messages like "Password should be at least 8 characters").
+   */
+  updatePassword: (newPassword: string) => Promise<{ error?: string }>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -114,6 +136,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
   }, [supabase]);
 
+  const resetPassword = useCallback<AuthState['resetPassword']>(async (email) => {
+    // redirectTo must be on the Supabase dashboard Redirect-URLs allowlist.
+    // Using window.location.origin (not a hardcoded value) so it works across
+    // environments (prod, staging, localhost) without code changes.
+    const redirectTo =
+      typeof window !== 'undefined'
+        ? `${window.location.origin}/reset-password`
+        : undefined;
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+    // ANTI-ENUMERATION: swallow all errors except genuine transport failures.
+    // Supabase does not error when the email is unknown, but we also don't
+    // want to surface any other distinguishing error to the caller. If there
+    // is a real transport failure (network down, misconfigured SMTP) we pass
+    // a generic message so the user knows something went wrong without
+    // learning whether the email is registered.
+    if (error) {
+      // Only surface errors that indicate an actual send failure, never ones
+      // that could reveal whether the email exists.
+      const isTransportFailure =
+        error.message.toLowerCase().includes('smtp') ||
+        error.message.toLowerCase().includes('sending') ||
+        error.message.toLowerCase().includes('network');
+      if (isTransportFailure) {
+        return { error: 'Could not send the reset email. Please try again.' };
+      }
+      // All other errors (unknown email, rate-limit hints, etc.) are silenced.
+    }
+    return {};
+  }, [supabase]);
+
+  const updatePassword = useCallback<AuthState['updatePassword']>(async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) return { error: error.message };
+    return {};
+  }, [supabase]);
+
   const value = useMemo<AuthState>(() => {
     const user: SessionUser | null = session?.user
       ? {
@@ -125,7 +185,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           profile,
         }
       : null;
-    return { user, loading, signIn, signUp, signOut };
+    return { user, loading, signIn, signUp, signOut, resetPassword, updatePassword };
   }, [session, profile, loading, signIn, signUp, signOut]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

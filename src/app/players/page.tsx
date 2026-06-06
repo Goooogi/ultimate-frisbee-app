@@ -20,6 +20,35 @@ import { listUsauPlayers, type UsauPlayerListRow } from '@/lib/usau/data';
 import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
 import { PlayersSearchList } from '@/components/players/players-search-list';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { SortControl } from '@/components/sort-control';
+
+// Fields the UFA API actually sorts on (verified live). Any ?sort= value not
+// in this set falls back to 'scores' so arbitrary strings never reach the API.
+const UFA_SORT_FIELDS = new Set([
+  'goals',
+  'assists',
+  'scores',
+  'hockeyAssists',
+  'completions',
+  'throwaways',
+  'drops',
+  'blocks',
+  'plusMinus',
+  'gamesPlayed',
+]);
+
+const UFA_SORT_OPTIONS = [
+  { value: 'scores', label: 'Scores' },
+  { value: 'goals', label: 'Goals' },
+  { value: 'assists', label: 'Assists' },
+  { value: 'hockeyAssists', label: 'Hockey Assists' },
+  { value: 'completions', label: 'Completions' },
+  { value: 'throwaways', label: 'Throwaways' },
+  { value: 'drops', label: 'Drops' },
+  { value: 'blocks', label: 'Blocks' },
+  { value: 'plusMinus', label: '+/−' },
+  { value: 'gamesPlayed', label: 'Games' },
+];
 
 export const revalidate = 600;
 
@@ -28,7 +57,7 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; league?: string; div?: string };
+  searchParams: { year?: string; league?: string; div?: string; sort?: string; dir?: string };
 }
 
 export default async function PlayersPage({ searchParams }: Props) {
@@ -53,16 +82,22 @@ export default async function PlayersPage({ searchParams }: Props) {
     );
   }
 
-  // UFA: pull leaders for the selected year. Sort by goals + assists (scores).
+  // UFA: pull leaders for the selected year. Sort via API (server-side).
   const currentYear = currentSeasonYear();
   const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
+
+  // Validate sort/dir against the allowlist — never forward arbitrary user input.
+  const rawSort = searchParams.sort ?? '';
+  const sort = UFA_SORT_FIELDS.has(rawSort) ? rawSort : 'scores';
+  const rawDir = searchParams.dir ?? '';
+  const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
+
   const [stats, champions] = await Promise.all([
-    getAllPlayerStats({ year, per: 'total' }).catch(() => [] as UfaPlayerStat[]),
+    getAllPlayerStats({ year, per: 'total', sort, dir }).catch(() => [] as UfaPlayerStat[]),
     getUfaChampionsByYear([year]).catch(() => new Map<number, string>()),
   ]);
-  const ranked = [...stats]
-    .sort((a, b) => (b.scores ?? 0) - (a.scores ?? 0))
-    .slice(0, 200);
+  // API returns rows already sorted; just cap at 200.
+  const ranked = stats.slice(0, 200);
   // Champion of the year the list is showing. Single-season list scopes
   // the trophy chip to "this year's reigning champ" rather than career
   // history (full career is on the player profile).
@@ -72,7 +107,16 @@ export default async function PlayersPage({ searchParams }: Props) {
     <PageShell
       title="Players"
       eyebrow={`UFA · ${year}`}
-      controls={<YearSelector currentYear={year} />}
+      controls={
+        <>
+          <YearSelector currentYear={year} />
+          <SortControl
+            options={UFA_SORT_OPTIONS}
+            currentSort={sort}
+            currentDir={dir}
+          />
+        </>
+      }
     >
       <PlayersSearchList
         mode={{ kind: 'ufa', stats: ranked, championTeamIds, year }}

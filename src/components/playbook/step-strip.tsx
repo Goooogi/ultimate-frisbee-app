@@ -31,7 +31,7 @@ export function StepStrip({ steps, currentIndex, onSelect, onAdd, onDelete }: St
           type="button"
           onClick={onAdd}
           className={[
-            'flex-shrink-0 inline-flex items-center gap-1 px-3 h-9 rounded-md border-2 border-dashed border-border',
+            'flex-shrink-0 inline-flex items-center gap-1 px-3 h-11 lg:h-9 rounded-md border-2 border-dashed border-border',
             'text-muted hover:text-ink hover:border-ink transition-colors cursor-pointer',
             'text-[10px] font-bold tracking-[0.16em] uppercase font-tight',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
@@ -71,7 +71,7 @@ function StepChip({
         onClick={onSelect}
         aria-current={active ? 'true' : undefined}
         aria-label={`Step ${index + 1}`}
-        className="flex items-center gap-1.5 pl-2 pr-2.5 h-9 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md"
+        className="flex items-center gap-1.5 pl-2 pr-2.5 h-11 lg:h-9 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md"
       >
         <span
           aria-hidden="true"
@@ -99,7 +99,7 @@ function StepChip({
             onDelete();
           }}
           aria-label={`Delete step ${index + 1}`}
-          className="pr-2 pl-1 h-9 text-[14px] font-bold leading-none text-faint hover:text-accent opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer"
+          className="pr-2 pl-1 h-11 lg:h-9 text-[14px] font-bold leading-none text-faint hover:text-accent opacity-60 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity cursor-pointer"
         >
           ×
         </button>

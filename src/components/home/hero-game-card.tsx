@@ -23,7 +23,10 @@ const STADIUM = {
   text: '#F4F2EB',
   textMuted: 'rgba(244,242,235,0.55)',
 };
-const ACCENT = '#FF3D00';
+// Theme accent as a CSS-var reference so the hero's accent bits (live dot,
+// LIVE status, winner score, field-line arc) follow the active theme — coral
+// on Field, lime on Broadcast — even though the card's bg is always-dark.
+const ACCENT = 'rgb(var(--accent))';
 
 /** Parse a 3- or 6-digit hex color to its [r,g,b] channels (0–255). */
 function hexToRgb(hex: string): [number, number, number] {
@@ -144,7 +147,10 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
         <div>
           <div className="inline-flex items-center gap-2.5 mb-2">
             {state.isLive ? (
-              <span className="w-[7px] h-[7px] rounded-full bg-[#FF3D00] shadow-[0_0_0_3px_rgba(255,61,0,0.2)]" />
+              <span
+                className="w-[7px] h-[7px] rounded-full bg-accent"
+                style={{ boxShadow: '0 0 0 3px rgb(var(--accent) / 0.2)' }}
+              />
             ) : (
               <span className="w-[7px] h-[7px] rounded-full bg-[rgba(244,242,235,0.4)]" />
             )}
@@ -320,12 +326,16 @@ function CTA({
   href: string;
   external?: boolean;
 }) {
+  // Primary CTA (Watch live) uses the theme ACCENT token so it follows the
+  // active theme — coral on Field, lime on Broadcast — even though the hero
+  // card's background is intentionally always-dark. accent-ink is the readable
+  // on-accent text color per theme (white on coral, near-black on lime).
   const cls = primary
-    ? 'bg-[#FF3D00] text-[#0E0E0C]'
+    ? 'bg-accent text-accent-ink'
     : dark
       ? 'bg-[rgba(244,242,235,0.10)] text-[#F4F2EB] border border-[rgba(244,242,235,0.18)]'
       : 'bg-white text-[#0E0E0C] border border-[#E5E1D6]';
-  const cls2 = 'inline-flex items-center gap-2 px-4 py-2.5 font-sans text-[11px] font-bold tracking-[0.12em] uppercase cursor-pointer transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#FF3D00]';
+  const cls2 = 'inline-flex items-center gap-2 px-4 py-2.5 font-sans text-[11px] font-bold tracking-[0.12em] uppercase cursor-pointer transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
   if (external) {
     return (
       <a

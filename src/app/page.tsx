@@ -15,7 +15,7 @@ import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
-import { PlaybookTile, FantasyTile } from '@/components/home/sub-app-tiles';
+import { LeaguesPanel } from '@/components/home/leagues-panel';
 import { GameGridSection } from '@/components/home/game-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
 import { SiteFooter } from '@/components/site-footer';
@@ -25,7 +25,7 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: 'The Layout · Ultimate Frisbee',
   description:
-    'Live UFA scores, the Playbook, and Fantasy — Ultimate Frisbee, three ways.',
+    'Live scores, standings, and stats for UFA, USAU, and more — The Layout.',
 };
 
 export default async function HomePage() {
@@ -103,10 +103,7 @@ export default async function HomePage() {
       {/* HERO BENTO — primary game on the left, sub-app tiles stacked right */}
       <div className="px-5 lg:px-12 pt-6 lg:pt-9 pb-5 lg:pb-6 grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-5">
         <HeroGameCard game={featured} awayRecord={awayRec} homeRecord={homeRec} />
-        <div className="grid grid-rows-[1fr_1fr] gap-5">
-          <PlaybookTile />
-          <FantasyTile />
-        </div>
+        <LeaguesPanel />
       </div>
 
       <StandingsStrip

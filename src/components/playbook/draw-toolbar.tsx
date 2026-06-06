@@ -44,7 +44,7 @@ export function DrawToolbar({ tool, onToolChange, onClear, canClear }: DrawToolb
             aria-label={t.label}
             title={t.label}
             className={[
-              'inline-flex items-center justify-center w-9 h-9 rounded-full cursor-pointer transition-colors',
+              'inline-flex items-center justify-center w-11 h-11 lg:w-9 lg:h-9 rounded-full cursor-pointer transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active
                 ? 'bg-ink text-bg'
@@ -66,7 +66,7 @@ export function DrawToolbar({ tool, onToolChange, onClear, canClear }: DrawToolb
             aria-label="Clear drawings on this step"
             title="Clear drawings"
             className={[
-              'inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors',
+              'inline-flex items-center justify-center w-11 h-11 lg:w-9 lg:h-9 rounded-full transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               canClear
                 ? 'text-muted hover:text-accent hover:bg-surface cursor-pointer'

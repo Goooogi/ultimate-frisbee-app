@@ -17,6 +17,8 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from './auth-modal';
+import { useTheme } from '@/lib/use-theme';
+import type { Theme } from '@/lib/theme';
 
 interface AccountChipProps {
   /** Avatar diameter when signed in. */
@@ -33,6 +35,7 @@ export function AccountChip({
   className = '',
 }: AccountChipProps) {
   const { user, loading, signOut } = useAuth();
+  const [theme, setTheme] = useTheme();
   const [menuOpen, setMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -69,44 +72,60 @@ export function AccountChip({
     );
   }
 
-  // ── Signed out: "Sign in" pill ───────────────────────────────────────────
+  // ── Signed out: icon button that opens a small popover ──────────────────
+  // The popover has Sign in + Appearance (theme toggle) so mobile users can
+  // switch theme even when not signed in (desktop gets ThemeToggle in the rail).
   if (!user) {
     return (
-      <>
+      <div ref={wrapRef} className={`relative inline-flex ${className}`}>
         <button
           type="button"
-          onClick={() => {
-            setAuthMode('signin');
-            setAuthOpen(true);
-          }}
-          aria-label="Sign in or create account"
+          aria-label="Sign in or open account menu"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
           className={[
-            'inline-flex items-center gap-1.5 rounded-full cursor-pointer',
+            'inline-flex items-center justify-center rounded-full cursor-pointer',
             'bg-ink text-bg hover:opacity-90 transition-opacity',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-            'text-[10px] font-bold tracking-[0.16em] uppercase font-tight',
-            // Compact icon-only on mobile, full pill on >=sm.
-            compactOnMobile
-              ? 'p-0 sm:px-3 sm:py-1.5'
-              : 'px-3 py-1.5',
-            className,
           ].join(' ')}
-          style={
-            compactOnMobile
-              ? {
-                  // Keep the icon-only state square at the avatar size.
-                  minWidth: size,
-                  minHeight: size,
-                }
-              : undefined
-          }
+          style={{ width: size, height: size }}
         >
-          <SignInGlyph
-            size={Math.round(size * 0.45)}
-            className={compactOnMobile ? 'sm:hidden mx-auto' : 'hidden'}
-          />
-          <span className={compactOnMobile ? 'hidden sm:inline' : ''}>Sign in</span>
+          <SignInGlyph size={Math.round(size * 0.45)} />
         </button>
+
+        {menuOpen && (
+          <div
+            role="menu"
+            className="absolute right-0 top-full mt-2 z-40 w-52 border border-border bg-bg rounded-md shadow-lg overflow-hidden"
+          >
+            {/* Sign in */}
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenuOpen(false);
+                setAuthMode('signin');
+                setAuthOpen(true);
+              }}
+              className={[
+                'w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+                'text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
+                'focus-visible:outline-none focus-visible:bg-surface',
+              ].join(' ')}
+            >
+              Sign in
+            </button>
+
+            {/* Appearance / theme toggle */}
+            <div className="px-3 py-2.5 flex items-center justify-between border-t border-hairline">
+              <span className="text-[11px] font-bold tracking-[0.16em] uppercase font-tight text-muted">
+                Appearance
+              </span>
+              <ThemeToggleInline theme={theme} setTheme={setTheme} />
+            </div>
+          </div>
+        )}
 
         <AuthModal
           open={authOpen}
@@ -114,7 +133,7 @@ export function AccountChip({
           initialMode={authMode}
           onDismiss={() => setAuthOpen(false)}
         />
-      </>
+      </div>
     );
   }
 
@@ -165,6 +184,15 @@ export function AccountChip({
               Admin
             </Link>
           )}
+
+          {/* Appearance / theme toggle row */}
+          <div className="px-3 py-2.5 flex items-center justify-between border-b border-hairline">
+            <span className="text-[11px] font-bold tracking-[0.16em] uppercase font-tight text-muted">
+              Appearance
+            </span>
+            <ThemeToggleInline theme={theme} setTheme={setTheme} />
+          </div>
+
           <button
             type="button"
             role="menuitem"
@@ -203,5 +231,71 @@ function SignInGlyph({ size = 14, className = '' }: { size?: number; className?:
       <circle cx="8" cy="5.5" r="2.5" />
       <path d="M3 13.5c0-2.5 2.24-4 5-4s5 1.5 5 4" />
     </svg>
+  );
+}
+
+// ─── Inline theme toggle used inside the account popovers ─────────────────────
+// A compact field/broadcast switch — reads and writes the same theme state as
+// the rail ThemeToggle, but styled to sit inside a menu row.
+
+function ThemeToggleInline({
+  theme,
+  setTheme,
+}: {
+  theme: Theme;
+  setTheme: (t: Theme) => void;
+}) {
+  const isField = theme === 'field';
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(isField ? 'broadcast' : 'field')}
+      aria-label={`Switch to ${isField ? 'Broadcast' : 'Field'} theme`}
+      title={`Switch to ${isField ? 'Broadcast' : 'Field'} theme`}
+      className={[
+        'inline-flex items-center justify-center w-8 h-8 rounded-full',
+        'border border-border text-muted hover:text-ink hover:border-ink',
+        'transition-colors duration-150 cursor-pointer',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+      ].join(' ')}
+    >
+      {isField ? (
+        // Sun — currently Field/light, click to go dark
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <circle cx="8" cy="8" r="3" />
+          <line x1="8" y1="1" x2="8" y2="3" />
+          <line x1="8" y1="13" x2="8" y2="15" />
+          <line x1="1" y1="8" x2="3" y2="8" />
+          <line x1="13" y1="8" x2="15" y2="8" />
+          <line x1="3.05" y1="3.05" x2="4.46" y2="4.46" />
+          <line x1="11.54" y1="11.54" x2="12.95" y2="12.95" />
+          <line x1="12.95" y1="3.05" x2="11.54" y2="4.46" />
+          <line x1="4.46" y1="11.54" x2="3.05" y2="12.95" />
+        </svg>
+      ) : (
+        // Moon — currently Broadcast/dark, click to go light
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M13 9A6 6 0 0 1 7 3a6 6 0 1 0 6 6z" />
+        </svg>
+      )}
+    </button>
   );
 }

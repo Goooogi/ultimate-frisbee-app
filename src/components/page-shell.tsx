@@ -1,16 +1,16 @@
 'use client';
 
 // Unified page chrome for every non-home route — single layout regardless of
-// theme. The light/dark toggle in the sidebar swaps CSS variables only, not
-// the layout itself.
+// theme. The light/dark toggle swaps CSS variables only, not the layout itself.
 //
-// Desktop (lg+): AppRail (top, global, carries league switcher via gamesSlot) + SidebarNav (left, intra-Games) + main column.
-// Mobile (<lg): AppRail (top, carries league switcher via gamesSlotMobile in rail) + content + MobileBottomNav.
+// Desktop (lg+): AppRail (52px, top) + GamesSubnav (44px, secondary bar with
+//   sub-page tabs + league switcher) + main column, full-width (no sidebar).
+// Mobile (<lg): AppRail (top, carries league switcher via gamesSlotMobile) + content + MobileBottomNav.
 //   The league pill lives IN the AppRail on mobile — no separate below-rail strip.
 
 import { Suspense } from 'react';
 import { AppRail } from '@/components/app-rail';
-import { SidebarNav } from '@/components/sidebar-nav';
+import { GamesSubnav } from '@/components/games-subnav';
 import { LeagueTabs } from '@/components/league-tabs';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { MobileLeagueSelect } from '@/components/mobile-league-select';
@@ -60,17 +60,19 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
   );
 
   return (
-    // h-screen + flex-col: AppRail is flex-shrink-0, the row below gets the
-    // remaining height via flex-1 so overflow-hidden + overflow-y-auto on
-    // the main column works exactly as before.
+    // h-screen + flex-col: AppRail (flex-shrink-0) + GamesSubnav (flex-shrink-0)
+    // then the content area gets the remaining height via flex-1.
     <div className="h-screen bg-bg text-ink flex flex-col">
       {/* Global top app rail — present on every breakpoint.
-          gamesSlot threads the desktop league control (LeagueTabs) into the rail.
-          gamesSlotMobile threads the mobile league control (MobileLeagueSelect)
-          into the rail on <lg, replacing the old below-rail MobileIntraHeader strip.
-          When a page hides the switcher (empty span via topNavSlot), both slots
-          resolve to that empty span — hide behavior is preserved for free. */}
-      <AppRail gamesSlot={tab} gamesSlotMobile={mobileTab} />
+          gamesSlotMobile threads the mobile league control into the rail on <lg.
+          gamesSlot is kept in the interface but the rail no longer renders it on
+          desktop — the league switcher moved to GamesSubnav below the rail. */}
+      <AppRail gamesSlotMobile={mobileTab} />
+
+      {/* ── Desktop secondary nav bar (lg+) ── sits directly under the 52px rail.
+          Receives the same `tab` node AppRail previously used for gamesSlot.
+          flex-shrink-0 keeps it from being compressed by the scrolling main. */}
+      <GamesSubnav leagueSlot={tab} />
 
       {/* ── Mobile (<lg) ── */}
       <div className="lg:hidden flex-1 overflow-y-auto pb-[88px]">
@@ -80,14 +82,9 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
         </Suspense>
       </div>
 
-      {/* ── Desktop (lg+) ── */}
+      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. ── */}
       <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
-        <Suspense fallback={SUSPENSE_FALLBACK}>
-          <SidebarNav />
-        </Suspense>
         <main className="flex-1 overflow-y-auto flex flex-col">
-          {/* League scope bar removed — the switcher now lives in the
-              global AppRail (gamesSlot) so no duplicate bar here. */}
           <div className="flex-1">{children}</div>
         </main>
       </div>

@@ -14,14 +14,29 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
 import { useAuth } from '@/lib/auth/auth-provider';
-import { acceptInvite } from '@/lib/playbook/data';
+import { acceptInvite, previewInvite } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
 
 export function InviteAcceptClient({ token }: { token: string }) {
+  // Look up the email this invite was sent to so a new user's signup form is
+  // prefilled (and AuthGate opens in create-account mode). null while loading
+  // or for an invalid/expired token — the gate just won't prefill.
+  const [invitedEmail, setInvitedEmail] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    previewInvite(token).then((res) => {
+      if (!cancelled) setInvitedEmail(res?.email ?? null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   return (
     <AuthGate
       headline="You've been invited."
       subhead="Sign in or create an account with the same email the invite was sent to."
+      initialEmail={invitedEmail ?? undefined}
     >
       <Acceptor token={token} />
     </AuthGate>

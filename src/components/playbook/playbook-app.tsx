@@ -611,6 +611,54 @@ export function PlaybookApp() {
         />
       </div>
 
+      {/* Mobile-only: persistent play management bar above the field card.
+          On desktop (lg+) this is redundant with the sidebar PlayList, so we hide it. */}
+      <div className="lg:hidden flex items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+            {plays.length === 1 ? '1 play' : `${plays.length} plays`}
+          </span>
+          {plays.length > 1 && (
+            <span className="text-[10px] text-faint/50 font-tight">· {currentPlay.name || 'Untitled'}</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {plays.length > 1 && (
+            <select
+              value={currentID ?? ''}
+              onChange={(e) => handleSelectPlay(e.target.value)}
+              aria-label="Switch play"
+              className={[
+                'text-[10px] font-bold tracking-[0.14em] uppercase font-tight',
+                'bg-surface border border-border rounded px-2 h-11',
+                'text-ink appearance-none pr-6 max-w-[120px] truncate',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              ].join(' ')}
+            >
+              {plays.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name || 'Untitled'}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={handleOpenCreateDialog}
+            className={[
+              'inline-flex items-center gap-1.5 px-3 h-11 rounded-md border-2 border-dashed border-border',
+              'text-muted hover:text-ink hover:border-ink transition-colors cursor-pointer',
+              'text-[10px] font-bold tracking-[0.16em] uppercase font-tight flex-shrink-0',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            ].join(' ')}
+            aria-label="Create a new play"
+          >
+            <span className="text-[14px] leading-none font-bold" aria-hidden="true">+</span>
+            New play
+          </button>
+        </div>
+      </div>
+
       <div className="flex flex-col bg-bg border border-hairline rounded-sm overflow-hidden">
         <div className="relative bg-surface px-2 py-2 lg:py-2">
           <div className="flex justify-end pr-2 pb-1 lg:pb-1.5">
@@ -630,10 +678,10 @@ export function PlaybookApp() {
                 className={[
                   'w-full',
                   fieldType === 'horizontal'
-                    ? 'max-w-[760px]'
+                    ? 'max-w-[760px] max-h-[55vw]'
                     : fieldType === 'half'
-                      ? 'max-w-[640px]'
-                      : 'max-w-[480px] lg:max-w-[560px] xl:max-w-[280px]',
+                      ? 'max-w-[640px] max-h-[45dvh] md:max-h-[60dvh]'
+                      : 'max-w-[480px] max-h-[46dvh] md:max-h-[60dvh] md:max-w-[560px] lg:max-w-[560px] xl:max-w-[280px]',
                   'lg:max-h-[calc(100vh-380px)] xl:max-h-[min(60vh,440px)]',
                 ].join(' ')}
                 style={{ aspectRatio: fieldAspect }}
@@ -670,7 +718,7 @@ export function PlaybookApp() {
           </p>
         </div>
 
-        <div className="xl:hidden">
+        <div className="md:hidden">
           <StepStrip
             steps={currentPlay.steps}
             currentIndex={currentStepIndex}
@@ -711,10 +759,10 @@ export function PlaybookApp() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_180px] gap-5 xl:gap-5 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_180px] gap-5 items-start">
             {editor}
 
-            <aside className="hidden xl:block sticky top-[72px]">
+            <aside className="hidden md:block sticky top-[72px]">
               <StepRail
                 steps={currentPlay.steps}
                 currentIndex={currentStepIndex}

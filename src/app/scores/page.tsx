@@ -9,7 +9,7 @@ import { gameUiState } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
 import { getCurrentEvent, getEvent, type UsauEventSummary } from '@/lib/usau/data';
-import { parseDivisionParam } from '@/lib/league';
+import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
 
 export const revalidate = 30;
 
@@ -20,13 +20,21 @@ interface Props {
 export default async function HomePage({ searchParams }: Props) {
   // USAU division filter persists across pages via ?div=. Default 'Men'.
   const division = parseDivisionParam(searchParams.div);
-  // Fetch UFA + USAU in parallel so switching tabs is instant.
+  const league = parseLeagueParam(searchParams.league);
+
+  // Only the USAU view consumes usauEvent (FeedPage renders it solely when
+  // league==='usau'). The USAU lookup is a multi-query Supabase chain
+  // (getCurrentEvent → getEvent) that previously ran on EVERY scores render
+  // inside Promise.all — so the default UFA view blocked on data it never
+  // showed, causing slow/stalled loads. Gate it on the active league so UFA
+  // renders as fast as its own ~fast API call. (Mirrors how /schedule gates
+  // its USAU fetch.) Switching to USAU re-fetches on that navigation.
   const [games, usauEvent] = await Promise.all([
     getCurrentGames().catch((err) => {
       console.error('Failed to fetch UFA current games:', err);
       return [] as UfaGame[];
     }),
-    loadCurrentEvent(division),
+    league === 'usau' ? loadCurrentEvent(division) : Promise.resolve<UsauEventSummary | null>(null),
   ]);
   const today = getToday();
   return <FeedPage games={sortForFeed(games)} today={today} usauEvent={usauEvent} />;

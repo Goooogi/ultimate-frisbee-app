@@ -199,17 +199,21 @@ function UfaList({
     'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted border-b border-border whitespace-nowrap text-right';
   return (
     <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-      <table className="w-full min-w-[640px] border-collapse">
+      <table className="w-full min-w-[860px] border-collapse">
         <thead>
           <tr>
             <th className={`${thBase} text-left`} scope="col">Player</th>
-            <th className={thBase} scope="col">GP</th>
-            <th className={thBase} scope="col">G</th>
-            <th className={thBase} scope="col">A</th>
-            <th className={thBase} scope="col">Scr</th>
-            <th className={thBase} scope="col">+/−</th>
-            <th className={thBase} scope="col">Blk</th>
-            <th className={thBase} scope="col">Cmp%</th>
+            <th className={thBase} scope="col" title="Games Played">GP</th>
+            <th className={thBase} scope="col" title="Goals">G</th>
+            <th className={thBase} scope="col" title="Assists">A</th>
+            <th className={thBase} scope="col" title="Hockey Assists">HA</th>
+            <th className={thBase} scope="col" title="Scores (Goals + Assists)">Scr</th>
+            <th className={thBase} scope="col" title="Completions">Cmp</th>
+            <th className={thBase} scope="col" title="Completion %">Cmp%</th>
+            <th className={thBase} scope="col" title="Throwaways">TA</th>
+            <th className={thBase} scope="col" title="Drops">D</th>
+            <th className={thBase} scope="col" title="Blocks">Blk</th>
+            <th className={thBase} scope="col" title="Plus / Minus">+/−</th>
           </tr>
         </thead>
         <tbody>
@@ -240,10 +244,14 @@ function UfaList({
                 <Cell value={p.gamesPlayed} />
                 <Cell value={p.goals} />
                 <Cell value={p.assists} />
+                <Cell value={p.hockeyAssists} />
                 <Cell value={p.scores} bold />
-                <Cell value={signed(p.plusMinus)} />
-                <Cell value={p.blocks} />
+                <Cell value={p.completions} />
                 <Cell value={p.completionPercentage ? `${p.completionPercentage}%` : '—'} />
+                <Cell value={p.throwaways} />
+                <Cell value={p.drops} />
+                <Cell value={p.blocks} />
+                <Cell value={signed(p.plusMinus)} />
               </tr>
             );
           })}

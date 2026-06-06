@@ -14,7 +14,8 @@ import { useTheme } from '@/lib/use-theme';
 
 const LINKS: Array<{ label: string; href: string; tag?: 'beta' | 'soon' }> = [
   { label: 'GAMES',     href: '/scores' },
-  { label: 'PLAYBOOK',  href: '/playbook', tag: 'beta' },
+  { label: 'PLAYBOOK',  href: '/playbook' },
+  { label: '12-0',      href: '/12-0' },
   { label: 'FANTASY',   href: '/fantasy',  tag: 'soon' },
   { label: 'STANDINGS', href: '/teams' },
 ];

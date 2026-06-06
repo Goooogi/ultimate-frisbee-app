@@ -32,7 +32,7 @@ interface PlaybookShellProps {
 }
 
 const NAV: Array<{ label: string; href: string; match: string; tag?: 'beta' | 'soon' }> = [
-  { label: 'Plays', href: '/playbook', match: '/playbook', tag: 'beta' },
+  { label: 'Plays', href: '/playbook', match: '/playbook' },
   { label: 'Film', href: '/playbook/film', match: '/playbook/film', tag: 'soon' },
 ];
 
@@ -48,7 +48,7 @@ export function PlaybookShell({
   const currentTeam = teams.find((t) => t.id === currentTeamID);
 
   return (
-    <div className="h-screen bg-bg text-ink flex flex-col">
+    <div className="h-[100dvh] bg-bg text-ink flex flex-col">
       {/* Global top app rail */}
       <AppRail />
 

@@ -262,6 +262,29 @@ export async function revokeInvite(inviteID: string): Promise<void> {
   if (error) throw error;
 }
 
+/** Look up the email + team name an invite token was sent to, so the accept
+ *  page can prefill the signup form. Returns null for invalid/expired/used
+ *  tokens (the UI just won't prefill). Calls the SECURITY DEFINER RPC
+ *  preview_team_invite, which exposes only the email + team name. */
+export async function previewInvite(
+  token: string,
+): Promise<{ email: string; teamName: string } | null> {
+  const supabase = createClient();
+  // Cast: preview_team_invite is newer than the generated database.types.ts,
+  // so the rpc name + return shape aren't in the union yet. Regenerate types
+  // to drop this cast.
+  const { data, error } = await (
+    supabase.rpc as unknown as (
+      fn: string,
+      args: Record<string, unknown>,
+    ) => Promise<{ data: { email: string; team_name: string }[] | null; error: unknown }>
+  )('preview_team_invite', { p_token: token });
+  if (error) return null;
+  const row = data?.[0];
+  if (!row) return null;
+  return { email: row.email, teamName: row.team_name };
+}
+
 export async function acceptInvite(token: string): Promise<{
   teamID: string;
   teamName: string;
