@@ -44,6 +44,8 @@ export interface UfaSeasonStint {
     plusMinus: number;
     completions: number;
     throwsAttempted: number;
+    hucksCompleted: number;
+    hucksAttempted: number;
   };
   /** Per-game log; populated when game data is available. */
   games: UfaPlayerGameRow[];
@@ -318,6 +320,8 @@ function sumUfaRows(rows: UfaPlayerSeasonRow[]): UfaSeasonStint['totals'] {
       acc.blocks += r.blocks;
       acc.completions += r.completions;
       acc.throwsAttempted += r.throwsAttempted;
+      acc.hucksCompleted += r.hucksCompleted;
+      acc.hucksAttempted += r.hucksAttempted;
       acc.plusMinus += r.goals + r.assists + r.blocks - r.throwaways - r.drops - r.stalls;
       return acc;
     },
@@ -329,6 +333,8 @@ function sumUfaRows(rows: UfaPlayerSeasonRow[]): UfaSeasonStint['totals'] {
       plusMinus: 0,
       completions: 0,
       throwsAttempted: 0,
+      hucksCompleted: 0,
+      hucksAttempted: 0,
     },
   );
 }

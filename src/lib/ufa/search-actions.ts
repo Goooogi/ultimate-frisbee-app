@@ -11,8 +11,10 @@
 // upstream caches each page for 1h via the call() helper, so repeated
 // searches within the same hour are cheap.
 
-import { getAllPlayerStats } from '@/lib/ufa/client';
+import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
+import { search as searchUsau, type SearchResult } from '@/lib/usau/data';
+import { namesMatch } from '@/lib/name-match';
 
 /**
  * Search the year's full UFA leaderboard for players whose name includes
@@ -39,4 +41,48 @@ export async function searchUfaPlayers(
   } catch {
     return [];
   }
+}
+
+/**
+ * Unified search across USAU (teams + players) AND UFA players. The client
+ * search bar calls THIS (not the USAU-only search()) so UFA-only players —
+ * e.g. a UFA "Ben Harris" with no USAU row — are findable. This lives in a
+ * 'use server' module because it pulls the server-only UFA client.
+ *
+ * Dedupe: a UFA player who is the SAME human as a USAU result (cross-league
+ * name rule, handling Ben Harris ↔ Benjamin Harris) is dropped — the USAU
+ * row already opens the unified /players/[id] profile which merges both careers.
+ */
+export async function searchAll(query: string, limit = 8): Promise<SearchResult[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+
+  const usau = await searchUsau(q, limit);
+
+  let ufaResults: SearchResult[] = [];
+  try {
+    const ufa = await searchUfaPlayers(q, currentSeasonYear(), limit * 3);
+    const usauPlayerNames = usau.filter((r) => r.kind === 'player').map((r) => r.name);
+    const seen = new Set<string>();
+    for (const p of ufa) {
+      const key = p.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Same human as a USAU result already shown? Skip (profile merges them).
+      if (usauPlayerNames.some((n) => namesMatch(n, p.name))) continue;
+      ufaResults.push({ kind: 'player', id: p.playerID, name: p.name, hint: 'UFA' });
+    }
+  } catch {
+    ufaResults = [];
+  }
+
+  const merged = [...usau, ...ufaResults];
+  const lower = q.toLowerCase();
+  merged.sort((a, b) => {
+    const ap = a.name.toLowerCase().startsWith(lower) ? 0 : 1;
+    const bp = b.name.toLowerCase().startsWith(lower) ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return a.name.localeCompare(b.name);
+  });
+  return merged.slice(0, limit * 2);
 }

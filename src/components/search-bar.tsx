@@ -5,12 +5,13 @@
 // searches as you type (≥2 chars, 200ms debounce), and anchors a results
 // dropdown directly below the input.
 //
-// Reuses search() + SearchResult from lib/usau/data — same function and
-// results shape the SearchModal uses. SearchGlyph is imported from there too.
+// Uses searchAll() (UFA + USAU) — a server action — so UFA-only players are
+// findable. SearchResult shape + SearchGlyph come from the USAU/modal modules.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { search, type SearchResult } from '@/lib/usau/data';
+import { type SearchResult } from '@/lib/usau/data';
+import { searchAll } from '@/lib/ufa/search-actions';
 import { SearchGlyph } from '@/components/search-modal';
 
 export function SearchBar() {
@@ -37,7 +38,7 @@ export function SearchBar() {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const r = await search(q, 8);
+        const r = await searchAll(q, 8);
         if (!cancelled) {
           setResults(r);
           setHighlight(0);

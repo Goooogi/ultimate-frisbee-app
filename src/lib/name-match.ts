@@ -64,13 +64,42 @@ export function namesMatch(a: string, b: string): boolean {
   if (!ta || !tb) return false;
   if (ta.surname !== tb.surname) return false;
 
-  // Pick shorter side; its givens must be a subset of longer side's.
+  // Pick shorter side; each of its givens must match SOME given on the longer
+  // side, where "match" = exact OR an abbreviation prefix (Ben ⊂ Benjamin,
+  // Dan ⊂ Daniel, Matt ⊂ Matthew). Each longer-side given can be claimed once.
   const [shorter, longer] = ta.givens.length <= tb.givens.length ? [ta, tb] : [tb, ta];
-  const longerSet = new Set(longer.givens);
+  const used = new Array(longer.givens.length).fill(false);
   for (const g of shorter.givens) {
-    if (!longerSet.has(g)) return false;
+    let matched = false;
+    for (let i = 0; i < longer.givens.length; i++) {
+      if (used[i]) continue;
+      if (givenMatches(g, longer.givens[i])) {
+        used[i] = true;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) return false;
   }
   return true;
+}
+
+/**
+ * True if given-name `a` matches `b` as the same first/middle name, allowing
+ * abbreviation by PREFIX. The shorter token must be a prefix of the longer and
+ * be ≥3 chars, so we don't over-match short stems ("jo" → Joseph/John/Joshua).
+ * Surname equality is already required by the caller, keeping this conservative.
+ *
+ *   "ben"  ↔ "benjamin"  → true     "matt" ↔ "matthew" → true
+ *   "dan"  ↔ "daniel"    → true     "ben"  ↔ "ben"     → true (exact)
+ *   "jo"   ↔ "joseph"    → false (prefix < 3)
+ *   "bob"  ↔ "robert"    → false (non-prefix nickname, out of scope)
+ */
+function givenMatches(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shortG, longG] = a.length <= b.length ? [a, b] : [b, a];
+  if (shortG.length < 3) return false;
+  return longG.startsWith(shortG);
 }
 
 /**

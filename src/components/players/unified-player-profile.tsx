@@ -198,6 +198,9 @@ function UfaStintRow({ stint }: { stint: UfaSeasonStint }) {
   const cmpPct = stint.totals.throwsAttempted
     ? (stint.totals.completions / stint.totals.throwsAttempted) * 100
     : 0;
+  const huckPct = stint.totals.hucksAttempted
+    ? (stint.totals.hucksCompleted / stint.totals.hucksAttempted) * 100
+    : 0;
   return (
     <details className="group [&[open]>summary]:bg-surface-hi">
       <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
@@ -224,6 +227,14 @@ function UfaStintRow({ stint }: { stint: UfaSeasonStint }) {
             { label: 'G', value: stint.totals.goals },
             { label: 'A', value: stint.totals.assists },
             { label: '+/−', value: signed(stint.totals.plusMinus) },
+            { label: 'BLK', value: stint.totals.blocks },
+            {
+              label: 'HCK',
+              value: stint.totals.hucksAttempted
+                ? `${stint.totals.hucksCompleted}/${stint.totals.hucksAttempted}`
+                : '—',
+            },
+            { label: 'HCK%', value: huckPct ? `${huckPct.toFixed(0)}%` : '—' },
             { label: 'CMP', value: cmpPct ? `${cmpPct.toFixed(0)}%` : '—' },
           ]}
         />
@@ -375,7 +386,7 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
   const tdBase = 'px-2 py-2 text-[12px] border-b border-hairline whitespace-nowrap font-tight';
 
   return (
-    <table className="w-full min-w-[640px] border-collapse">
+    <table className="w-full min-w-[760px] border-collapse">
       <thead>
         <tr>
           <th scope="col" className={`${thBase} text-left`}>Date</th>
@@ -387,6 +398,8 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
           <th scope="col" className={`${thBase} text-right`}>Blk</th>
           <th scope="col" className={`${thBase} text-right`}>Cmp</th>
           <th scope="col" className={`${thBase} text-right`}>Cmp%</th>
+          <th scope="col" className={`${thBase} text-right`} title="Hucks completed / attempted">Hck</th>
+          <th scope="col" className={`${thBase} text-right`} title="Huck completion %">Hck%</th>
         </tr>
       </thead>
       <tbody>
@@ -396,6 +409,7 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
           const result = parseResult(g);
           const pm = g.goals + g.assists + g.blocks - g.throwaways - g.drops - g.stalls;
           const cmpPct = g.throwsAttempted ? (g.completions / g.throwsAttempted) * 100 : 0;
+          const huckPct = g.hucksAttempted ? (g.hucksCompleted / g.hucksAttempted) * 100 : 0;
           return (
             <tr key={g.gameID} className="hover:bg-surface-hi transition-colors duration-100">
               <td className={`${tdBase} text-left text-faint tabular`}>{date}</td>
@@ -438,6 +452,12 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
               </td>
               <td className={`${tdBase} text-right tabular text-muted`}>
                 {cmpPct ? `${cmpPct.toFixed(0)}%` : '—'}
+              </td>
+              <td className={`${tdBase} text-right tabular text-muted`}>
+                {g.hucksAttempted ? `${g.hucksCompleted}/${g.hucksAttempted}` : '—'}
+              </td>
+              <td className={`${tdBase} text-right tabular text-muted`}>
+                {huckPct ? `${huckPct.toFixed(0)}%` : '—'}
               </td>
             </tr>
           );

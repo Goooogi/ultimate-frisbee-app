@@ -8,7 +8,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { search, type SearchResult } from '@/lib/usau/data';
+import { type SearchResult } from '@/lib/usau/data';
+import { searchAll } from '@/lib/ufa/search-actions';
 
 interface Props {
   open: boolean;
@@ -53,7 +54,7 @@ export function SearchModal({ open, onClose }: Props) {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const r = await search(q, 8);
+        const r = await searchAll(q, 8);
         if (!cancelled) {
           setResults(r);
           setHighlight(0);
