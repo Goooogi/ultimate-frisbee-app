@@ -1,5 +1,5 @@
 /**
- * 12-0 backfill script — v2
+ * 12-0 backfill script — v3
  * ─────────────────────────────────────────────────────────────────────────────
  * Populates twelve_oh_players and twelve_oh_baseline from the live UFA API.
  * IDEMPOTENT: re-runnable at any time (upserts by primary key). Safe to run
@@ -16,7 +16,7 @@
  * key is restricted to read-only by RLS. Service role key must NEVER be
  * exposed to the frontend or committed. Load it from .env.local.
  *
- * YEARS COVERED (v2)
+ * YEARS COVERED (v3)
  * ──────────────────
  * 2012-2019 + 2021-2025. Skip 2020 (COVID, no season).
  * Pre-2021 seasons have no yards data (yardsThrown/yardsReceived always 0
@@ -24,6 +24,11 @@
  * dimensions — they are neither penalized nor inflated, just missing those
  * two inputs. The resulting raw scores compare cleanly to post-2021 seasons
  * because the overall mean/std includes both eras.
+ *
+ * UNLIKE yards, drops/throwaways/callahans/pointsPlayed ARE present in the
+ * UFA API for all years including pre-2021. No special zero-treatment needed
+ * for these four fields — they participate in the baseline and z-scores
+ * uniformly across all years.
  *
  * TWO-PASS ALGORITHM
  * ──────────────────
@@ -72,6 +77,7 @@ import {
   computeRawScore,
   normalizeScore,
   COMPLETION_PCT_MIN_COMPLETIONS,
+  CALLAHANS_WINSORIZE_MAX,
   type Baseline,
   type PlayerSeasonStats,
 } from '../src/lib/twelve-oh/rating.js';
@@ -139,6 +145,10 @@ interface UfaPlayerStatRaw {
   hucksCompleted: number;
   huckPercentage: string;
   throwaways: number;
+  // v3 additions — present in UFA API for all years (2012+)
+  drops: number;
+  callahans: number;
+  pointsPlayed: number;
   [k: string]: unknown;
 }
 
@@ -216,11 +226,12 @@ interface CollectedSeason {
 }
 
 async function main() {
-  console.log('=== 12-0 Backfill v2 ===');
+  console.log('=== 12-0 Backfill v3 ===');
   console.log(`Years: ${BACKFILL_YEARS.join(', ')}`);
   console.log(`Min games played: ${MIN_GAMES_PLAYED}`);
   console.log(`Completion % threshold: ${COMPLETION_PCT_MIN_COMPLETIONS} completions`);
-  console.log('Pre-2021 seasons: yards z-scores = 0 (no yards data in API)\n');
+  console.log('Pre-2021 seasons: yards z-scores = 0 (no yards data in API)');
+  console.log('All years: drops/throwaways/callahans/pointsPlayed present in API\n');
 
   // ── PASS 1: Collect all qualifying player-seasons ──────────────────────────
   console.log('PASS 1: Fetching rosters from UFA API...');
@@ -300,6 +311,15 @@ async function main() {
     .map((c) => parseFloat(c.raw.completionPercentage))
     .filter(isFinite);
 
+  // v3: drops/throwaways/callahans/pointsPlayed — all present for all years.
+  // Callahans are winsorized at CALLAHANS_WINSORIZE_MAX before baseline
+  // computation so outlier seasons don't inflate the std and compress the
+  // z-distribution for typical players with 0-2 callahans.
+  const drops         = collected.map((c) => c.raw.drops ?? 0);
+  const throwaways    = collected.map((c) => c.raw.throwaways ?? 0);
+  const callahansRaw  = collected.map((c) => Math.min(c.raw.callahans ?? 0, CALLAHANS_WINSORIZE_MAX));
+  const pointsPlayed  = collected.map((c) => c.raw.pointsPlayed ?? 0);
+
   const mGoals   = mean(goals);   const sGoals   = std(goals, mGoals);
   const mAssists = mean(assists); const sAssists = std(assists, mAssists);
   const mBlocks  = mean(blocks);  const sBlocks  = std(blocks, mBlocks);
@@ -308,6 +328,10 @@ async function main() {
   const mYR      = mean(yardsReceived); const sYR = std(yardsReceived, mYR);
   const mPM      = mean(plusMinus);     const sPM = std(plusMinus, mPM);
   const mCP      = mean(highVolumeCompPct); const sCP = std(highVolumeCompPct, mCP);
+  const mDrops   = mean(drops);        const sDrops   = std(drops, mDrops);
+  const mTA      = mean(throwaways);   const sTA      = std(throwaways, mTA);
+  const mCal     = mean(callahansRaw); const sCal     = std(callahansRaw, mCal);
+  const mPP      = mean(pointsPlayed); const sPP      = std(pointsPlayed, mPP);
 
   console.log(`  goals:          mean=${mGoals.toFixed(2)}, std=${sGoals.toFixed(2)}`);
   console.log(`  assists:        mean=${mAssists.toFixed(2)}, std=${sAssists.toFixed(2)}`);
@@ -316,7 +340,11 @@ async function main() {
   console.log(`  yardsThrown:    mean=${mYT.toFixed(2)}, std=${sYT.toFixed(2)} (n=${yardsThrown.length} seasons with yards)`);
   console.log(`  yardsReceived:  mean=${mYR.toFixed(2)}, std=${sYR.toFixed(2)}`);
   console.log(`  plusMinus:      mean=${mPM.toFixed(2)}, std=${sPM.toFixed(2)}`);
-  console.log(`  completionPct:  mean=${mCP.toFixed(2)}, std=${sCP.toFixed(2)} (n=${highVolumeCompPct.length} high-vol throwers)\n`);
+  console.log(`  completionPct:  mean=${mCP.toFixed(2)}, std=${sCP.toFixed(2)} (n=${highVolumeCompPct.length} high-vol throwers)`);
+  console.log(`  drops:          mean=${mDrops.toFixed(2)}, std=${sDrops.toFixed(2)}`);
+  console.log(`  throwaways:     mean=${mTA.toFixed(2)}, std=${sTA.toFixed(2)}`);
+  console.log(`  callahans:      mean=${mCal.toFixed(2)}, std=${sCal.toFixed(2)} (winsorized at ${CALLAHANS_WINSORIZE_MAX})`);
+  console.log(`  pointsPlayed:   mean=${mPP.toFixed(2)}, std=${sPP.toFixed(2)}\n`);
 
   // Build interim baseline without percentile anchors (those come from raw scores)
   const baselinePartial: Omit<Baseline,
@@ -333,6 +361,10 @@ async function main() {
     meanYardsReceived: mYR,    stdYardsReceived: sYR,
     meanPlusMinus: mPM,        stdPlusMinus: sPM,
     meanCompletionPct: mCP,    stdCompletionPct: sCP,
+    meanDrops: mDrops,         stdDrops: sDrops,
+    meanThrowaways: mTA,       stdThrowaways: sTA,
+    meanCallahans: mCal,       stdCallahans: sCal,
+    meanPointsPlayed: mPP,     stdPointsPlayed: sPP,
   };
 
   // ── PASS 2: Compute raw scores, derive percentile anchors ─────────────────
@@ -361,6 +393,11 @@ async function main() {
       plusMinus: c.raw.plusMinus ?? 0,
       completions: c.raw.completions ?? 0,
       completionPercentage: c.raw.completionPercentage ?? '0',
+      // v3: all present for all years
+      drops: c.raw.drops ?? 0,
+      throwaways: c.raw.throwaways ?? 0,
+      callahans: c.raw.callahans ?? 0,
+      pointsPlayed: c.raw.pointsPlayed ?? 0,
     };
     const zScores = computeZScores(stats, tempBaseline);
     const rawScore = computeRawScore(zScores);
@@ -428,6 +465,11 @@ async function main() {
         mean_yards_received: mYR,     std_yards_received: sYR,
         mean_plus_minus: mPM,         std_plus_minus: sPM,
         mean_completion_pct: mCP,     std_completion_pct: sCP,
+        // v3 additions
+        mean_drops: mDrops,           std_drops: sDrops,
+        mean_throwaways: mTA,         std_throwaways: sTA,
+        mean_callahans: mCal,         std_callahans: sCal,
+        mean_points_played: mPP,      std_points_played: sPP,
         raw_score_min: rawMin,
         raw_score_max: rawMax,
         raw_score_p5: rawP5,
@@ -487,6 +529,10 @@ async function main() {
       hucks_completed: c.raw.hucksCompleted ?? 0,
       huck_pct: isFinite(huckPctNum) ? huckPctNum : null,
       turnovers: c.raw.throwaways ?? 0,
+      // v3 additions
+      drops: c.raw.drops ?? 0,
+      callahans: c.raw.callahans ?? 0,
+      points_played: c.raw.pointsPlayed ?? 0,
       z_goals: zScores.zGoals,
       z_assists: zScores.zAssists,
       z_blocks: zScores.zBlocks,
@@ -495,8 +541,12 @@ async function main() {
       z_yards_received: zScores.zYardsReceived,
       z_plus_minus: zScores.zPlusMinus,
       z_completion_pct: zScores.zCompletionPct,
+      z_drops: zScores.zDrops,
+      z_throwaways: zScores.zThrowaways,
+      z_callahans: zScores.zCallahans,
+      z_points_played: zScores.zPointsPlayed,
       player_score: playerScore,
-      backfill_version: 2,
+      backfill_version: 3,
       updated_at: new Date().toISOString(),
     };
   });
@@ -540,10 +590,12 @@ async function main() {
     console.log(`  ${rank}  ${name}  ${abbr}  ${yr}  ${g}  ${a}  ${b}  ${score}`);
   });
 
-  // Score distribution from DB
+  // Score distribution from DB — use a high limit to get all rows (default cap is 1000).
+  // With 8k+ rows this is fine; revisit if the dataset ever exceeds 50k rows.
   const { data: distData } = await db
     .from('twelve_oh_players')
-    .select('player_score');
+    .select('player_score')
+    .limit(20000);
   const allScores = (distData ?? []).map((r) => Number(r.player_score)).sort((a, b) => a - b);
   const totalRows = allScores.length;
 
@@ -581,6 +633,25 @@ async function main() {
     console.log('\nJake Felton 2025 DET check (should be Star tier, ~68-87):');
     feltonRows.forEach((p) => {
       console.log(`  ${p.name} (${p.team_abbr} ${p.year}): score=${Number(p.player_score).toFixed(1)}, G=${p.goals}, A=${p.assists}, B=${p.blocks}`);
+    });
+  }
+
+  // Jagt check — was the v2 lone 100; should still be near top under v3.
+  // Also shows raw turnover impact on a high-usage star.
+  const { data: jagtRows } = await db
+    .from('twelve_oh_players')
+    .select('name, team_abbr, year, goals, assists, blocks, turnovers, drops, points_played, player_score, z_drops, z_throwaways, z_points_played')
+    .ilike('name', '%jagt%')
+    .order('player_score', { ascending: false })
+    .limit(5);
+  if (jagtRows && jagtRows.length > 0) {
+    console.log('\nBen Jagt — top seasons under v3 (high-usage star; verify not tanked by turnovers):');
+    jagtRows.forEach((p) => {
+      const score = Number(p.player_score).toFixed(1);
+      const zTA = p.z_throwaways != null ? Number(p.z_throwaways).toFixed(2) : 'n/a';
+      const zD  = p.z_drops      != null ? Number(p.z_drops).toFixed(2)      : 'n/a';
+      const zPP = p.z_points_played != null ? Number(p.z_points_played).toFixed(2) : 'n/a';
+      console.log(`  ${p.name} (${p.team_abbr} ${p.year}): score=${score}, G=${p.goals}, A=${p.assists}, TA=${p.turnovers}(z=${zTA}), D=${p.drops}(z=${zD}), PP=${p.points_played}(z=${zPP})`);
     });
   }
 
@@ -668,6 +739,10 @@ async function main() {
   console.log(`  meanYardsReceived: ${mYR.toFixed(4)},     stdYardsReceived: ${sYR.toFixed(4)},`);
   console.log(`  meanPlusMinus: ${mPM.toFixed(4)},         stdPlusMinus: ${sPM.toFixed(4)},`);
   console.log(`  meanCompletionPct: ${mCP.toFixed(4)},     stdCompletionPct: ${sCP.toFixed(4)},`);
+  console.log(`  meanDrops: ${mDrops.toFixed(4)},          stdDrops: ${sDrops.toFixed(4)},`);
+  console.log(`  meanThrowaways: ${mTA.toFixed(4)},        stdThrowaways: ${sTA.toFixed(4)},`);
+  console.log(`  meanCallahans: ${mCal.toFixed(4)},        stdCallahans: ${sCal.toFixed(4)},`);
+  console.log(`  meanPointsPlayed: ${mPP.toFixed(4)},      stdPointsPlayed: ${sPP.toFixed(4)},`);
   console.log(`  rawAtP0:   ${rawAtP0.toFixed(4)},`);
   console.log(`  rawAtP50:  ${rawAtP50.toFixed(4)},`);
   console.log(`  rawAtP75:  ${rawAtP75.toFixed(4)},`);
@@ -681,7 +756,7 @@ async function main() {
   console.log(`  rawScoreMax: ${rawMax.toFixed(4)},`);
   console.log(`  rawScoreP5: ${rawP5.toFixed(4)},`);
   console.log(`  rawScoreP95: ${rawP95.toFixed(4)},`);
-  console.log('\nBackfill v2 complete.');
+  console.log('\nBackfill v3 complete.');
 }
 
 main().catch((err) => {

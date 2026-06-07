@@ -11,6 +11,8 @@ interface LeagueRow {
   abbr: string;
   subtitle?: string;
   href: string | null; // null = coming soon / disabled
+  /** Logo image in /public. When set, shown instead of the abbr monogram. */
+  img?: string;
 }
 
 // UFA and USAU use ?league=ufa / ?league=usau query params.
@@ -23,6 +25,7 @@ const LEAGUE_ROWS: LeagueRow[] = [
     abbr: 'UFA',
     subtitle: 'Ultimate Frisbee Association',
     href: '/scores?league=ufa',
+    img: '/UFA-red.png',
   },
   {
     id: 'usau',
@@ -30,6 +33,7 @@ const LEAGUE_ROWS: LeagueRow[] = [
     abbr: 'USA',
     subtitle: 'USA Ultimate',
     href: '/scores?league=usau',
+    img: '/USAU-logo.png',
   },
   {
     id: 'wul',
@@ -97,7 +101,7 @@ export function LeaguesPanel() {
                   !isLast ? 'border-b border-hairline' : '',
                 ].join(' ')}
               >
-                <LeagueMark abbr={row.abbr} disabled />
+                <LeagueMark abbr={row.abbr} img={row.img} disabled />
                 <span className="flex-1 min-w-0">
                   <span className="block text-[13px] font-semibold text-faint font-tight leading-tight truncate">
                     {row.label}
@@ -127,7 +131,7 @@ export function LeaguesPanel() {
                   'group',
                 ].join(' ')}
               >
-                <LeagueMark abbr={row.abbr} />
+                <LeagueMark abbr={row.abbr} img={row.img} />
                 <span className="flex-1 min-w-0">
                   <span className="block text-[13px] font-semibold text-ink font-tight leading-tight truncate">
                     {row.label}
@@ -152,7 +156,29 @@ export function LeaguesPanel() {
 // A compact rounded-square badge showing the league abbreviation.
 // Uses CSS-var tokens so it adapts to both field and broadcast themes.
 
-function LeagueMark({ abbr, disabled = false }: { abbr: string; disabled?: boolean }) {
+function LeagueMark({
+  abbr,
+  img,
+  disabled = false,
+}: {
+  abbr: string;
+  img?: string;
+  disabled?: boolean;
+}) {
+  // Real logo: white tile so the mark reads on both field + broadcast themes
+  // (same treatment as TeamLogo). object-contain keeps the logo's aspect ratio.
+  if (img) {
+    return (
+      <span
+        aria-hidden="true"
+        className="inline-flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 overflow-hidden bg-white border border-[rgb(var(--ink)/0.12)]"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={img} alt="" className="w-full h-full object-contain p-0.5" />
+      </span>
+    );
+  }
+  // Fallback: abbreviation monogram (WUL / PUL / INTL / Worlds).
   return (
     <span
       aria-hidden="true"

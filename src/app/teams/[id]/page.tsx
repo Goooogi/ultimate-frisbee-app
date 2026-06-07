@@ -10,6 +10,7 @@ import {
   getAllGamesByYears,
   getCurrentGames,
   getAllPlayerStats,
+  getGameRoster,
   currentSeasonYear,
 } from '@/lib/ufa/client';
 import { teamMeta } from '@/lib/ufa/teams';
@@ -84,6 +85,27 @@ export default async function TeamPage({ params }: Props) {
       return tb - ta; // most recent first
     })
     .slice(0, 6);
+
+  // Jersey numbers: the player-stats endpoint has no jersey field, but each
+  // game's roster-report does. Pull the most recent PLAYED game's roster and
+  // map playerID → jerseyNumber. Numbers are stable within a season, so the
+  // latest game is a good source. Degrades gracefully to {} on any failure.
+  const jerseyByPlayer = new Map<string, string>();
+  const latestGame = recentFinals[0];
+  if (latestGame) {
+    try {
+      const roster = await getGameRoster(latestGame.gameID);
+      const ourSide =
+        latestGame.homeTeamID === id ? roster.home : roster.away;
+      for (const r of ourSide) {
+        if (r.jerseyNumber != null && r.jerseyNumber !== '') {
+          jerseyByPlayer.set(r.playerID, String(r.jerseyNumber));
+        }
+      }
+    } catch {
+      // No jersey data — roster table falls back to row index.
+    }
+  }
 
   // Find this team's standing row.
   const standing = standings.find((s) => s.teamID === id);
@@ -203,20 +225,31 @@ export default async function TeamPage({ params }: Props) {
               <span className="text-faint tabular">{players.length}</span>
             </h2>
             <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-              <table className="w-full min-w-[400px] border-collapse">
+              <table className="w-full min-w-[600px] border-collapse">
                 <thead>
                   <tr>
-                    {['#', 'Player', 'G', 'A', '+/−', 'CMP%'].map((h, i) => (
+                    {[
+                      { label: '#',    title: 'Jersey number',             left: true  },
+                      { label: 'Player', title: 'Player',                   left: true  },
+                      { label: 'G',    title: 'Goals',                     left: false },
+                      { label: 'A',    title: 'Assists',                   left: false },
+                      { label: 'Blk',  title: 'Blocks',                    left: false },
+                      { label: 'D',    title: 'Drops',                     left: false },
+                      { label: 'CMP',  title: 'Completions / Attempts',    left: false },
+                      { label: 'CMP%', title: 'Completion %',              left: false },
+                      { label: '+/−',  title: 'Plus / Minus',              left: false },
+                    ].map((h) => (
                       <th
-                        key={h}
+                        key={h.label}
                         scope="col"
+                        title={h.title}
                         className={[
                           'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
                           'border-b border-border whitespace-nowrap',
-                          i <= 1 ? 'text-left' : 'text-right',
+                          h.left ? 'text-left' : 'text-right',
                         ].join(' ')}
                       >
-                        {h}
+                        {h.label}
                       </th>
                     ))}
                   </tr>
@@ -224,9 +257,15 @@ export default async function TeamPage({ params }: Props) {
                 <tbody>
                   {players.map((p, i) => {
                     const cmp = parseFloat(p.completionPercentage as string) || 0;
+                    const completions = p.completions ?? 0;
+                    const attempts = completions + (p.throwaways ?? 0);
+                    const cmpStr = completions > 0 ? `${completions}/${attempts}` : '—';
+                    // Real jersey number from the latest game roster; fall back
+                    // to the row index when the player wasn't on that report.
+                    const jersey = jerseyByPlayer.get(p.playerID);
                     return (
                       <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">{i + 1}</td>
+                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">{jersey ?? i + 1}</td>
                         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
                           <Link href={`/players/${p.playerID}`} className="hover:text-accent transition-colors duration-150">
                             {p.name}
@@ -234,10 +273,13 @@ export default async function TeamPage({ params }: Props) {
                         </td>
                         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.goals ?? '—'}</td>
                         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.assists ?? '—'}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{formatPlusMinus(p.plusMinus)}</td>
+                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.blocks ?? '—'}</td>
+                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.drops ?? '—'}</td>
+                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{cmpStr}</td>
                         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
                           {cmp > 0 ? `${cmp.toFixed(1)}%` : '—'}
                         </td>
+                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{formatPlusMinus(p.plusMinus)}</td>
                       </tr>
                     );
                   })}

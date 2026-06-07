@@ -69,6 +69,11 @@ interface DbBaselineRow {
   mean_yards_received: number | string; std_yards_received: number | string;
   mean_plus_minus: number | string;     std_plus_minus: number | string;
   mean_completion_pct: number | string; std_completion_pct: number | string;
+  // v3 additions
+  mean_drops: number | string | null;         std_drops: number | string | null;
+  mean_throwaways: number | string | null;    std_throwaways: number | string | null;
+  mean_callahans: number | string | null;     std_callahans: number | string | null;
+  mean_points_played: number | string | null; std_points_played: number | string | null;
   raw_score_min: number | string;
   raw_score_max: number | string;
   raw_score_p5: number | string;
@@ -217,15 +222,22 @@ export async function getBaseline(): Promise<Baseline | null> {
     meanPlusMinus: Number(row.mean_plus_minus),  stdPlusMinus: Number(row.std_plus_minus),
     meanCompletionPct: Number(row.mean_completion_pct),
     stdCompletionPct: Number(row.std_completion_pct),
+    // v3 additions — fall back to BAKED_BASELINE if DB columns not yet populated
+    // (i.e. if this baseline row predates the v3 backfill run).
+    meanDrops: row.mean_drops != null ? Number(row.mean_drops) : BAKED_BASELINE.meanDrops,
+    stdDrops: row.std_drops != null ? Number(row.std_drops) : BAKED_BASELINE.stdDrops,
+    meanThrowaways: row.mean_throwaways != null ? Number(row.mean_throwaways) : BAKED_BASELINE.meanThrowaways,
+    stdThrowaways: row.std_throwaways != null ? Number(row.std_throwaways) : BAKED_BASELINE.stdThrowaways,
+    meanCallahans: row.mean_callahans != null ? Number(row.mean_callahans) : BAKED_BASELINE.meanCallahans,
+    stdCallahans: row.std_callahans != null ? Number(row.std_callahans) : BAKED_BASELINE.stdCallahans,
+    meanPointsPlayed: row.mean_points_played != null ? Number(row.mean_points_played) : BAKED_BASELINE.meanPointsPlayed,
+    stdPointsPlayed: row.std_points_played != null ? Number(row.std_points_played) : BAKED_BASELINE.stdPointsPlayed,
     rawScoreMin: Number(row.raw_score_min),
     rawScoreMax: Number(row.raw_score_max),
     rawScoreP5: Number(row.raw_score_p5),
     rawScoreP95: Number(row.raw_score_p95),
-    // Piecewise normalization anchors (v2) are not yet stored in the DB — the
-    // twelve_oh_baseline table only has the legacy min/max/p5/p95 columns.
-    // Fall back to BAKED_BASELINE which is updated manually after each backfill.
-    // These values are sufficient for client-side scoring; getBaseline() is only
-    // used for server-side diagnostics and the leaderboard page.
+    // Piecewise normalization anchors are not stored in the DB — fall back to
+    // BAKED_BASELINE (updated manually after each backfill run).
     rawAtP0:   BAKED_BASELINE.rawAtP0,
     rawAtP50:  BAKED_BASELINE.rawAtP50,
     rawAtP75:  BAKED_BASELINE.rawAtP75,

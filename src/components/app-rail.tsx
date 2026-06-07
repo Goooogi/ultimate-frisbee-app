@@ -42,7 +42,8 @@ import {
 } from '@/lib/league';
 import { activeTeams } from '@/lib/ufa/teams';
 import { TeamLogo } from '@/components/team-logo';
-import type { RankedTeam } from '@/lib/usau/data';
+// Shape returned by listTopUsauTeams (lightweight mega-menu preview).
+type TopUsauTeam = { id: string; name: string; nationalsPlacement: number | null };
 
 // ─── Sub-app definitions ──────────────────────────────────────────────────────
 
@@ -188,7 +189,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   // first time USAU is hovered). Cached in state for the session lifetime of
   // this component instance (the rail is mounted once at the top of every page
   // so this is effectively app-session caching).
-  const [usauTeams, setUsauTeams] = useState<RankedTeam[] | null>(null);
+  const [usauTeams, setUsauTeams] = useState<TopUsauTeam[] | null>(null);
   const [usauLoading, setUsauLoading] = useState(false);
   const [usauError, setUsauError] = useState(false);
   const usauFetchedRef = useRef(false); // guard against double-fetch
@@ -201,9 +202,11 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
     usauFetchedRef.current = true;
     setUsauLoading(true);
     try {
-      const { listRankedTeams } = await import('@/lib/usau/data');
-      const { teams } = await listRankedTeams({ competitionLevel: 'CLUB', genderDivision: 'Men' });
-      if (usauMountedRef.current) setUsauTeams(teams.slice(0, 16));
+      // Lightweight preview query (one round trip) — NOT the full ranking
+      // engine. Just the top-16 names + placement for the dropdown.
+      const { listTopUsauTeams } = await import('@/lib/usau/data');
+      const teams = await listTopUsauTeams({ genderDivision: 'Men', limit: 16 });
+      if (usauMountedRef.current) setUsauTeams(teams);
     } catch {
       if (usauMountedRef.current) setUsauError(true);
     } finally {

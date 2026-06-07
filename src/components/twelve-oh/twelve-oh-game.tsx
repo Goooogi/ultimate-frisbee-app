@@ -23,6 +23,7 @@ type GameMode = 'classic' | 'ultiq';
 // ─── Constants ─────────────────────────────────────────────────────────────
 
 const ROSTER_SIZE = 7;
+const MAX_SKIPS = 1;            // a player may skip (re-spin without picking) only once per game
 const SPIN_DURATION_MS = 1300;  // slot-machine cycle time
 const SPIN_CYCLES = 18;         // how many random items to flash through
 
@@ -422,6 +423,7 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
   const [currentTeamYear, setCurrentTeamYear] = useState<TwelveOhTeamYear | null>(null);
   const [currentRoster, setCurrentRoster] = useState<TwelveOhPlayer[]>([]);
   const [spinning, setSpinning] = useState(false);
+  const [skipsUsed, setSkipsUsed] = useState(0);
   const [rosterError, setRosterError] = useState<string | null>(null);
   // Whether we are animating (controls the spin hook)
   const [animating, setAnimating] = useState(false);
@@ -502,11 +504,16 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
     [roster, draftedKeys],
   );
 
-  // Re-spin without picking.
+  // Re-spin without picking. Capped at MAX_SKIPS per game so you can't just
+  // re-roll until you land on an all-time-great team.
   const handleRespin = useCallback(() => {
-    setPhase('spin');
-    setCurrentTeamYear(null);
-    setCurrentRoster([]);
+    setSkipsUsed((n) => {
+      if (n >= MAX_SKIPS) return n; // no-op once exhausted
+      setPhase('spin');
+      setCurrentTeamYear(null);
+      setCurrentRoster([]);
+      return n + 1;
+    });
   }, []);
 
   // Play again — full reset, return to mode select so the user can re-choose.
@@ -517,8 +524,9 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
     setMode(null);
     setPhase('mode-select');
     setSpinning(false);
-    setAnimating(false);
+    setSkipsUsed(0);
     setRosterError(null);
+    setAnimating(false);
   }, []);
 
   // Spin animation hook — only active when animating=true.
@@ -544,20 +552,21 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      {/* ── Page header ─────────────────────────────────────────────────── */}
-      <div className="border-b border-hairline px-4 py-4 sm:px-6">
-        <div className="max-w-2xl mx-auto">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <h1 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
-                12-0
-              </h1>
-              <p className="text-[12px] text-muted font-tight mt-1 max-w-[280px]">
-                Spin for a team and season. Draft 7 players. Can you go undefeated?
-              </p>
-            </div>
-            {/* Draft progress — hidden on mode-select (no picks yet, no noise) */}
-            {phase !== 'mode-select' && (
+      {/* ── Page header — hidden on mode-select (the intro screen has its own
+          12-0 hero, so this top ribbon is redundant there). During play it
+          carries the draft-progress counter + roster tray. ─────────────── */}
+      {phase !== 'mode-select' && (
+        <div className="border-b border-hairline px-4 py-4 sm:px-6">
+          <div className="max-w-2xl mx-auto">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
+                  12-0
+                </h1>
+                <p className="text-[12px] text-muted font-tight mt-1 max-w-[280px]">
+                  Spin for a team and season. Draft 7 players. Can you go undefeated?
+                </p>
+              </div>
               <div className="flex-shrink-0 flex flex-col items-end">
                 <span className="font-display text-2xl font-bold text-ink leading-none tabular">
                   {picksMade}<span className="text-faint text-xl">/{ROSTER_SIZE}</span>
@@ -566,17 +575,17 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
                   Drafted
                 </span>
               </div>
+            </div>
+
+            {/* Roster tray — only shown once drafting has begun */}
+            {picksMade > 0 && (
+              <div className="mt-4">
+                <RosterTray roster={roster} />
+              </div>
             )}
           </div>
-
-          {/* Roster tray — only shown once drafting has begun */}
-          {phase !== 'mode-select' && picksMade > 0 && (
-            <div className="mt-4">
-              <RosterTray roster={roster} />
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       {/* ── Phase content ────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
@@ -902,31 +911,41 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
                   </div>
                 </div>
 
-                {/* Skip / re-spin */}
-                <button
-                  type="button"
-                  onClick={handleRespin}
-                  className={[
-                    'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg',
-                    'text-[11px] font-bold tracking-[0.1em] uppercase font-tight text-muted',
-                    'border border-border hover:border-accent/40 hover:text-ink',
-                    'transition-colors duration-150',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                    'cursor-pointer min-h-[44px]',
-                  ].join(' ')}
-                >
-                  {/* Re-spin icon */}
-                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                    <path
-                      d="M10 6A4 4 0 1 1 6 2v2m0-2h2M6 2 4 4"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  Skip
-                </button>
+                {/* Skip / re-spin — capped at MAX_SKIPS per game */}
+                {(() => {
+                  const skipsLeft = MAX_SKIPS - skipsUsed;
+                  const canSkip = skipsLeft > 0;
+                  return (
+                    <button
+                      type="button"
+                      onClick={handleRespin}
+                      disabled={!canSkip}
+                      aria-label={canSkip ? `Skip this team (${skipsLeft} skip left)` : 'No skips left'}
+                      className={[
+                        'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg',
+                        'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
+                        'border transition-colors duration-150',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        'min-h-[44px]',
+                        canSkip
+                          ? 'text-muted border-border hover:border-accent/40 hover:text-ink cursor-pointer'
+                          : 'text-faint border-hairline opacity-60 cursor-not-allowed',
+                      ].join(' ')}
+                    >
+                      {/* Re-spin icon */}
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                        <path
+                          d="M10 6A4 4 0 1 1 6 2v2m0-2h2M6 2 4 4"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      {canSkip ? `Skip · ${skipsLeft} left` : 'No skips left'}
+                    </button>
+                  );
+                })()}
               </div>
 
               {/* Instruction line */}

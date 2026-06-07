@@ -437,14 +437,43 @@ export function championFor(
 }
 
 /** Distinct seasons we have any event for, newest first. */
+/** Lightweight top-N USAU club teams for the nav mega-menu PREVIEW (id + name
+ *  + Nationals placement only), via the top_usau_club_teams RPC — ONE round
+ *  trip, no ranking engine. Do NOT use for the real ranked Teams page; that's
+ *  listRankedTeams(). */
+export async function listTopUsauTeams(opts?: {
+  genderDivision?: 'Men' | 'Women' | 'Mixed';
+  limit?: number;
+}): Promise<Array<{ id: string; name: string; nationalsPlacement: number | null }>> {
+  const db = await supabase();
+  // Cast: these RPCs are newer than the generated database.types.ts, so the
+  // function-name union doesn't include them yet. Regenerate types to drop it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rpc = db.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: any; error: unknown }>;
+  const { data, error } = await rpc('top_usau_club_teams', {
+    p_gender_division: opts?.genderDivision ?? 'Men',
+    p_limit: opts?.limit ?? 16,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<{ id: string; name: string; nationals_placement: number | null }>).map(
+    (r) => ({ id: r.id, name: r.name, nationalsPlacement: r.nationals_placement }),
+  );
+}
+
 export async function listSeasons(): Promise<number[]> {
   const db = await supabase();
-  const { data, error } = await db
-    .from('usau_events')
-    .select('season')
-    .order('season', { ascending: false });
+  // Distinct seasons via the pre-aggregated RPC. The naive
+  // `.select('season')` over usau_events hit supabase-js's 1000-row cap —
+  // with ~2000+ event rows ordered season-DESC, only the newest ~2-3 seasons
+  // survived the cap, so the dropdown showed only 2024–2026 even though we
+  // have data back to 2018. The RPC returns one row per distinct season.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rpc = db.rpc as unknown as (fn: string) => Promise<{ data: any; error: unknown }>;
+  const { data, error } = await rpc('distinct_usau_seasons');
   if (error) throw error;
-  return Array.from(new Set((data ?? []).map((r) => r.season)));
+  return ((data ?? []) as Array<{ season: number }>)
+    .map((r) => r.season)
+    .sort((a, b) => b - a);
 }
 
 // ─── Teams ─────────────────────────────────────────────────────────────
