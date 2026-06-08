@@ -91,7 +91,36 @@ function ContentTile({ item, onClick }: { item: PlayerContentItem; onClick: () =
     );
   }
 
-  // Video file or external link — show a poster with a play badge.
+  // Generic link — render as a clickable card that opens the URL in a new tab.
+  if (item.kind === 'link' && item.external_url) {
+    const displayHost = (() => {
+      try { return new URL(item.external_url).hostname.replace(/^www\./, ''); } catch { return item.external_url; }
+    })();
+    return (
+      <a
+        href={item.external_url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="group relative aspect-square overflow-hidden rounded-sm bg-surface border border-hairline flex flex-col items-center justify-center gap-1.5 px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer hover:bg-bg transition-colors"
+      >
+        {/* Link glyph */}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-faint group-hover:text-ink transition-colors flex-shrink-0">
+          <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+          <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+        </svg>
+        <span className="text-[10px] font-tight text-muted group-hover:text-ink transition-colors truncate max-w-full text-center">
+          {displayHost}
+        </span>
+        {item.caption && (
+          <span className="absolute inset-x-0 bottom-0 px-2 py-1 text-[10px] text-muted bg-surface/90 truncate font-tight text-center">
+            {item.caption}
+          </span>
+        )}
+      </a>
+    );
+  }
+
+  // Video file or external video link — show a poster with a play badge.
   return (
     <button
       type="button"
@@ -153,6 +182,22 @@ function Lightbox({ item, onClose }: { item: PlayerContentItem; onClose: () => v
               allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
             />
+          </div>
+        )}
+        {item.kind === 'link' && item.external_url && (
+          <div className="flex flex-col items-center gap-4 max-w-[min(90vw,480px)] text-center">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-faint flex-shrink-0">
+              <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+            </svg>
+            <a
+              href={item.external_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-bg text-[13px] font-tight underline underline-offset-2 hover:opacity-80 break-all"
+            >
+              {item.external_url}
+            </a>
           </div>
         )}
         {item.caption && (

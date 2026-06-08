@@ -44,9 +44,11 @@ import {
   listPlays,
   renamePlay as apiRenamePlay,
   replaceSteps,
+  setPlayVideo,
   touchPlay,
   type Team,
 } from '@/lib/playbook/data';
+import { PlayVideoPanel } from './play-video-panel';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { formatSupabaseError } from '@/lib/supabase/errors';
 import type {
@@ -455,6 +457,19 @@ export function PlaybookApp() {
     setScope(next);
   }, []);
 
+  // ── video helpers ────────────────────────────────────────────────────────
+  // Optimistic local-state update for attach/remove. The actual Supabase write
+  // is performed by setPlayVideo (passed as `onSave` to PlayVideoPanel).
+  const handleVideoChange = useCallback(
+    (url: string | null) => {
+      if (!currentID) return;
+      setPlays((all) =>
+        all.map((p) => (p.id === currentID ? { ...p, videoUrl: url } : p)),
+      );
+    },
+    [currentID],
+  );
+
   // PlaybookShell still takes a flat team list + currentTeamID; we
   // translate Scope -> currentTeamID at the boundary.
   const currentTeamID = scope.kind === 'team' ? scope.teamID : undefined;
@@ -550,6 +565,16 @@ export function PlaybookApp() {
   const currentTeam = teams.find((t) => t.id === currentTeamID);
   const scopeLabel =
     scope.kind === 'personal' ? 'Personal' : (currentTeam?.shortName ?? 'TEAM');
+
+  // Edit permission: personal plays are always editable (the user is the owner).
+  // Team plays are editable if the user's role is owner or coach; members
+  // can view and run the playback but cannot attach or remove videos.
+  // If the role isn't known (edge case), we optimistically allow edits and let
+  // RLS reject unauthorized writes with an error surfaced by PlayVideoPanel.
+  const canEdit =
+    scope.kind === 'personal' ||
+    (currentTeam?.role === 'owner' || currentTeam?.role === 'coach') ||
+    !currentTeam;
   const stepNumLabel = `Step · ${pad2(currentStepIndex + 1)}`;
 
   const saveLabel =
@@ -737,6 +762,14 @@ export function PlaybookApp() {
           onSpeedChange={setSpeed}
         />
       </div>
+
+      <PlayVideoPanel
+        playID={currentPlay.id}
+        videoUrl={currentPlay.videoUrl}
+        canEdit={canEdit}
+        onVideoChange={handleVideoChange}
+        onSave={setPlayVideo}
+      />
     </div>
   );
 

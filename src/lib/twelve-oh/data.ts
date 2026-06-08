@@ -49,6 +49,10 @@ interface DbPlayerRow {
   yards_thrown: number;
   yards_received: number;
   plus_minus: number;
+  drops: number;
+  turnovers: number;      // = throwaways
+  callahans: number;
+  points_played: number;
   player_score: number | string;
 }
 
@@ -97,7 +101,8 @@ export interface TwelveOhPlayer {
   teamSlug: string;
   teamAbbr: string;
   year: number;
-  // Display stats
+  // Display stats — ALL stats that feed the rating, so the pick screen can
+  // show exactly what determines a player's score.
   gamesPlayed: number;
   goals: number;
   assists: number;
@@ -107,6 +112,10 @@ export interface TwelveOhPlayer {
   yardsThrown: number;
   yardsReceived: number;
   plusMinus: number;
+  drops: number;
+  throwaways: number;             // stored as `turnovers` in the DB
+  callahans: number;
+  pointsPlayed: number;
   // Rating
   playerScore: number;            // 0–100
 }
@@ -161,6 +170,7 @@ export async function getRoster(
       'player_id, name, team_slug, team_abbr, year, ' +
       'games_played, goals, assists, blocks, hockey_assists, ' +
       'completion_pct, yards_thrown, yards_received, plus_minus, ' +
+      'drops, turnovers, callahans, points_played, ' +
       'player_score',
     )
     .eq('team_slug', teamSlug)
@@ -184,6 +194,10 @@ export async function getRoster(
     yardsThrown: r.yards_thrown,
     yardsReceived: r.yards_received,
     plusMinus: r.plus_minus,
+    drops: r.drops ?? 0,
+    throwaways: r.turnovers ?? 0,
+    callahans: r.callahans ?? 0,
+    pointsPlayed: r.points_played ?? 0,
     playerScore: Number(r.player_score),
   }));
 }
@@ -265,6 +279,7 @@ export async function topPlayers(limit = 25): Promise<TwelveOhPlayer[]> {
       'player_id, name, team_slug, team_abbr, year, ' +
       'games_played, goals, assists, blocks, hockey_assists, ' +
       'completion_pct, yards_thrown, yards_received, plus_minus, ' +
+      'drops, turnovers, callahans, points_played, ' +
       'player_score',
     )
     .order('player_score', { ascending: false })
@@ -287,6 +302,10 @@ export async function topPlayers(limit = 25): Promise<TwelveOhPlayer[]> {
     yardsThrown: r.yards_thrown,
     yardsReceived: r.yards_received,
     plusMinus: r.plus_minus,
+    drops: r.drops ?? 0,
+    throwaways: r.turnovers ?? 0,
+    callahans: r.callahans ?? 0,
+    pointsPlayed: r.points_played ?? 0,
     playerScore: Number(r.player_score),
   }));
 }

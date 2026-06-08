@@ -64,18 +64,26 @@ export function parseEmbed(raw: string): EmbedInfo | null {
   return null;
 }
 
+// YouTube video IDs are exactly 11 chars of [A-Za-z0-9_-]. Validating the shape
+// guards against a crafted path segment ending up interpolated into the embed
+// URL (defense-in-depth; not exploitable as XSS in an iframe src, but keeps junk
+// out of the DB and out of any future non-React rendering context).
+function validYoutubeId(id: string | null): string | null {
+  return id && /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+}
+
 function extractYoutubeId(url: URL): string | null {
   if (url.hostname.endsWith('youtu.be')) {
     const id = url.pathname.replace(/^\//, '').split('/')[0];
-    return id || null;
+    return validYoutubeId(id || null);
   }
   if (url.pathname === '/watch') {
-    return url.searchParams.get('v');
+    return validYoutubeId(url.searchParams.get('v'));
   }
   // /embed/{id}, /shorts/{id}, /live/{id}
   const segments = url.pathname.split('/').filter(Boolean);
   if (segments.length >= 2 && ['embed', 'shorts', 'live', 'v'].includes(segments[0])) {
-    return segments[1] || null;
+    return validYoutubeId(segments[1] || null);
   }
   return null;
 }

@@ -15,6 +15,7 @@
 //     editor never has to think about which bucket a play came from.
 
 import { createClient } from '@/lib/supabase/client';
+import { parseEmbed } from '@/lib/player-content/embed';
 import type { Json } from '@/lib/supabase/database.types';
 import type {
   DiscPos,
@@ -319,7 +320,7 @@ export async function listPlays(
     .from('pb_plays')
     .select(
       `
-      id, name, formation, field_type, owner_id, team_id, created_at, updated_at,
+      id, name, formation, field_type, video_url, owner_id, team_id, created_at, updated_at,
       pb_play_steps (
         id, position, duration_ms, note, payload
       )
@@ -383,7 +384,7 @@ export async function createPlay(input: {
   const { data: play, error } = await supabase
     .from('pb_plays')
     .insert(insertRow)
-    .select('id, name, formation, field_type, owner_id, team_id, created_at, updated_at')
+    .select('id, name, formation, field_type, video_url, owner_id, team_id, created_at, updated_at')
     .single();
   if (error) throw error;
 
@@ -507,6 +508,7 @@ interface PlayRow {
   name: string;
   formation: string;
   field_type: string;
+  video_url?: string | null;
   owner_id: string | null;
   team_id: string | null;
   created_at: string;
@@ -533,8 +535,68 @@ function playRowToPlay(row: PlayRow): Play {
     name: row.name,
     formation: row.formation as FormationID,
     fieldType: row.field_type as FieldType,
+    videoUrl: row.video_url ?? null,
     steps,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
   };
+}
+
+/**
+ * Attach or clear a reference video on a play.
+ *
+ * Accepted values for `raw`:
+ *   - A YouTube/Vimeo watch URL → validated via parseEmbed; stored as the
+ *     canonical watch URL so it round-trips cleanly.
+ *   - A storage path prefixed with "storage:" (e.g. "storage:uid/play-ts.mp4")
+ *     → stored as-is; these come from our own upload flow and are trusted.
+ *   - null / empty / whitespace → clears the video_url column.
+ *
+ * Throws if the value is non-empty, does NOT start with "storage:", and
+ * parseEmbed returns null (junk URL).
+ * RLS enforces write permission server-side (owner or team editor).
+ */
+export const STORAGE_VIDEO_PREFIX = 'storage:';
+
+export async function setPlayVideo(playID: string, raw: string | null): Promise<void> {
+  // Treat blank strings as a clear request.
+  const trimmed = raw?.trim() ?? '';
+  let stored: string | null = null;
+
+  const supabase = createClient();
+
+  if (trimmed !== '') {
+    if (trimmed.startsWith(STORAGE_VIDEO_PREFIX)) {
+      // Storage path from our own upload flow. Do NOT trust it blindly: the
+      // playbook-videos bucket allows any authenticated user to read any object,
+      // so without this check a user could attach SOMEONE ELSE's uploaded file
+      // to their own play by passing a foreign storage path. Enforce that the
+      // path's owner-folder ({uid}/…) matches the caller — they can only attach
+      // files they uploaded themselves.
+      const objectPath = trimmed.slice(STORAGE_VIDEO_PREFIX.length);
+      const ownerFolder = objectPath.split('/')[0];
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not signed in.');
+      if (ownerFolder !== user.id) {
+        throw new Error('Invalid video reference.');
+      }
+      stored = trimmed;
+    } else {
+      const info = parseEmbed(trimmed);
+      if (!info) {
+        throw new Error('Paste a YouTube or Vimeo link');
+      }
+      // Store the canonical watch URL (not the embed URL) so it round-trips
+      // cleanly and can be re-parsed by parseEmbed on read.
+      stored = info.watchUrl;
+    }
+  }
+
+  const { error } = await supabase
+    .from('pb_plays')
+    .update({ video_url: stored })
+    .eq('id', playID);
+  if (error) throw error;
 }

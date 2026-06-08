@@ -64,6 +64,7 @@ export type Database = {
           owner_id: string | null
           team_id: string | null
           updated_at: string
+          video_url: string | null
         }
         Insert: {
           created_at?: string
@@ -75,6 +76,7 @@ export type Database = {
           owner_id?: string | null
           team_id?: string | null
           updated_at?: string
+          video_url?: string | null
         }
         Update: {
           created_at?: string
@@ -86,6 +88,7 @@ export type Database = {
           owner_id?: string | null
           team_id?: string | null
           updated_at?: string
+          video_url?: string | null
         }
         Relationships: [
           {
@@ -852,7 +855,7 @@ export type Database = {
     }
     Enums: {
       pb_team_role: "owner" | "coach" | "member"
-      player_content_kind: "image" | "video" | "video_link"
+      player_content_kind: "image" | "video" | "video_link" | "link"
       player_content_status: "pending" | "approved" | "rejected"
       usau_competition_level:
         | "CLUB"

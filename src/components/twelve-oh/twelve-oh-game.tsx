@@ -257,13 +257,22 @@ function PlayerCard({
               )}
             </div>
 
-            {/* Key stats row */}
-            <div className="grid grid-cols-5 gap-1">
-              <StatCell label="G" value={player.goals} />
-              <StatCell label="A" value={player.assists} />
-              <StatCell label="Blk" value={player.blocks} />
+            {/* Full stat grid — all 12 rank stats, 2 rows of 6 */}
+            <div className="grid grid-cols-6 gap-x-0.5 gap-y-1.5">
+              {/* Row 1: offense + defense */}
+              <StatCell label="G"    value={player.goals} />
+              <StatCell label="A"    value={player.assists} />
+              <StatCell label="HA"   value={player.hockeyAssists} />
+              <StatCell label="Blk"  value={player.blocks} />
+              <StatCell label="Cal"  value={player.callahans} />
+              <StatCell label="+/−"  value={player.plusMinus > 0 ? `+${player.plusMinus}` : player.plusMinus} />
+              {/* Row 2: throwing + negatives + usage */}
               <StatCell label="Cmp%" value={fmtPct(player.completionPct)} />
-              <StatCell label="ThYd" value={player.yardsThrown.toLocaleString()} />
+              <StatCell label="ThY"  value={player.yardsThrown.toLocaleString()} />
+              <StatCell label="RcY"  value={player.yardsReceived.toLocaleString()} />
+              <StatCell label="Drp"  value={player.drops}      negative />
+              <StatCell label="TA"   value={player.throwaways} negative />
+              <StatCell label="PP"   value={player.pointsPlayed} />
             </div>
           </div>
         </div>
@@ -272,13 +281,31 @@ function PlayerCard({
   );
 }
 
-function StatCell({ label, value }: { label: string; value: string | number }) {
+function StatCell({
+  label,
+  value,
+  negative = false,
+}: {
+  label: string;
+  value: string | number;
+  negative?: boolean;
+}) {
   return (
     <div className="flex flex-col items-center gap-0.5">
-      <span className="text-[10px] font-bold tabular text-ink leading-none">
+      <span
+        className={[
+          'text-[10px] font-bold tabular leading-none',
+          negative ? 'text-live/70' : 'text-ink',
+        ].join(' ')}
+      >
         {value}
       </span>
-      <span className="text-[8px] font-tight text-faint uppercase tracking-[0.08em] leading-none">
+      <span
+        className={[
+          'text-[8px] font-tight uppercase tracking-[0.08em] leading-none',
+          negative ? 'text-live/50' : 'text-faint',
+        ].join(' ')}
+      >
         {label}
       </span>
     </div>
@@ -957,14 +984,21 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
 
               {/* Stat legend — Classic only */}
               {!isUltIQ && (
-                <div className="flex items-center gap-3 text-[9px] font-bold tracking-[0.1em] uppercase text-faint font-tight border-b border-hairline pb-2 -mt-1">
+                <div className="flex flex-wrap gap-x-2.5 gap-y-1 text-[9px] font-bold tracking-[0.08em] uppercase text-faint font-tight border-b border-hairline pb-2 -mt-1">
                   <span>Score</span>
-                  <span>·</span>
-                  <span>G = Goals</span>
-                  <span>A = Assists</span>
-                  <span>Blk = Blocks</span>
-                  <span>Cmp% = Completion</span>
-                  <span>ThYd = Throw Yds</span>
+                  <span aria-hidden="true">·</span>
+                  <span>G=Goals</span>
+                  <span>A=Assists</span>
+                  <span>HA=Hockey&nbsp;Assists</span>
+                  <span>Blk=Blocks</span>
+                  <span>Cal=Callahans</span>
+                  <span>+/−=Plus&nbsp;Minus</span>
+                  <span>Cmp%=Completion</span>
+                  <span>ThY=Throw&nbsp;Yds</span>
+                  <span>RcY=Rec&nbsp;Yds</span>
+                  <span className="text-live/60">Drp=Drops</span>
+                  <span className="text-live/60">TA=Throwaways</span>
+                  <span>PP=Points&nbsp;Played</span>
                 </div>
               )}
 

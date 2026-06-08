@@ -7,7 +7,7 @@
 //   - 'usau' → player_ref = usau_players.id (uuid)
 
 export type PlayerKind = 'ufa' | 'usau';
-export type PlayerContentKind = 'image' | 'video' | 'video_link';
+export type PlayerContentKind = 'image' | 'video' | 'video_link' | 'link';
 export type PlayerContentStatus = 'pending' | 'approved' | 'rejected';
 
 export interface PlayerContentRow {

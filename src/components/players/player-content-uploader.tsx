@@ -99,7 +99,7 @@ export function PlayerContentUploader({
             Upload file
           </TabButton>
           <TabButton active={tab === 'link'} onClick={() => setTab('link')}>
-            Video link
+            Content link
           </TabButton>
         </div>
         <button
@@ -275,7 +275,23 @@ function FileUploadForm({
   );
 }
 
-// ── External video link ────────────────────────────────────────────────
+// ── External content link (any valid http/https URL) ──────────────────
+
+/**
+ * Validates that `raw` is a syntactically valid http(s) URL.
+ * Returns the URL object on success, null on failure.
+ * Rejects javascript:, data:, and any non-http(s) scheme.
+ */
+function parseValidUrl(raw: string): URL | null {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  return u;
+}
 
 function LinkForm({
   playerKind,
@@ -295,28 +311,53 @@ function LinkForm({
   const [status, setStatus] = useState<'idle' | 'saving' | 'done' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
 
-  const parsed = url.trim() ? parseEmbed(url) : null;
-  const canSubmit = !!parsed && status !== 'saving';
+  const trimmed = url.trim();
+  const validUrl = trimmed ? parseValidUrl(trimmed) : null;
+  // Detect YouTube/Vimeo for the embed hint and storage kind.
+  const embedInfo = validUrl ? parseEmbed(trimmed) : null;
+  const canSubmit = !!validUrl && status !== 'saving';
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!parsed) {
-      setError('Paste a YouTube or Vimeo URL.');
+    if (!validUrl) {
+      setError('Enter a valid https:// URL.');
       return;
     }
     setStatus('saving');
     setError(null);
 
     const supabase = createClient();
-    const { error: insertError } = await supabase.from('player_content').insert({
-      player_kind: playerKind,
-      player_ref: playerRef,
-      player_display_name: playerDisplayName,
-      kind: 'video_link',
-      external_url: parsed.watchUrl,
-      caption: caption.trim() || null,
-      uploaded_by: uploaderId,
-    });
+
+    // Call insert in each branch separately so TS sees a concrete type per
+    // path (Supabase's RejectExcessProperties doesn't accept a discriminated
+    // union in a single variable).
+    let insertError: { message?: string } | null = null;
+
+    if (embedInfo) {
+      // Recognized YouTube/Vimeo embed → store as video_link.
+      const { error } = await supabase.from('player_content').insert({
+        player_kind: playerKind,
+        player_ref: playerRef,
+        player_display_name: playerDisplayName,
+        kind: 'video_link' as const,
+        external_url: embedInfo.watchUrl,
+        caption: caption.trim() || null,
+        uploaded_by: uploaderId,
+      });
+      insertError = error;
+    } else {
+      // Generic valid URL → store as a link card.
+      const { error } = await supabase.from('player_content').insert({
+        player_kind: playerKind,
+        player_ref: playerRef,
+        player_display_name: playerDisplayName,
+        kind: 'link' as const,
+        external_url: trimmed,
+        caption: caption.trim() || null,
+        uploaded_by: uploaderId,
+      });
+      insertError = error;
+    }
 
     if (insertError) {
       setStatus('error');
@@ -334,23 +375,28 @@ function LinkForm({
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <label className="flex flex-col gap-2">
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-          YouTube or Vimeo URL
+          Content URL
         </span>
         <input
           type="url"
           value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          placeholder="https://www.youtube.com/watch?v=…"
+          onChange={(e) => { setUrl(e.target.value); setError(null); }}
+          placeholder="https://… (video, article, highlight, etc.)"
           className="w-full px-3 py-2 rounded-md bg-bg border border-border text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent"
         />
-        {url && !parsed && (
-          <span className="text-[11px] text-red-500 font-tight">
-            Not a recognized YouTube or Vimeo URL.
+        {trimmed && !validUrl && (
+          <span className="text-[11px] text-live font-tight">
+            Enter a valid https:// URL.
           </span>
         )}
-        {parsed && (
+        {embedInfo && (
           <span className="text-[11px] text-faint font-tight">
-            Detected {parsed.provider} video · ID {parsed.videoId}
+            Detected {embedInfo.provider} video — will embed in the gallery.
+          </span>
+        )}
+        {validUrl && !embedInfo && (
+          <span className="text-[11px] text-faint font-tight">
+            Link will be saved as a content card.
           </span>
         )}
       </label>
@@ -358,7 +404,7 @@ function LinkForm({
       <CaptionField value={caption} onChange={setCaption} />
 
       {error && (
-        <p role="alert" className="text-[12px] text-red-500 font-tight">
+        <p role="alert" className="text-[12px] text-live font-tight">
           {error}
         </p>
       )}

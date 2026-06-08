@@ -90,6 +90,9 @@ export interface Play {
   steps: Step[];
   createdAt: number;
   updatedAt: number;
+  /** Optional YouTube or Vimeo reference video URL (stored as the raw watch
+   *  URL, rendered via parseEmbed). Null when no video is attached. */
+  videoUrl?: string | null;
 }
 
 export const PLAYER_COUNT = 7;
