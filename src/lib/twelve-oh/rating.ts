@@ -69,22 +69,23 @@
  *
  *    Percentile → Target score mapping (the "shape" of the curve):
  *      p0    (min)  →   0
- *      p50   (median) → 38   ← typical player, realistic average
- *      p75           → 55
- *      p90           → 68
- *      p95           → 77
- *      p99           → 87
- *      p99.5         → 92
- *      p99.9         → 96
+ *      p50   (median) → 50   ← typical player lands at midpoint of scale
+ *      p75           → 64
+ *      p90           → 75
+ *      p95           → 83
+ *      p99           → 91
+ *      p99.5         → 94
+ *      p99.9         → 97
  *      p100  (max)   → 100
  *
  *    This gives:
- *    - Median season: ~38 (no one is "average" here; everyone's a pro)
- *    - Good starter: 50s
- *    - Star: 68–77 (top 5-10% all-time)
- *    - Elite: 87–92 (top 0.5-1% all-time)
- *    - All-Time Greatest: 96–100 (maybe 1–5 seasons in history)
+ *    - Median season: ~50 (median maps cleanly to midpoint)
+ *    - Good starter: 60s
+ *    - Star: 75–83 (top 5-10% all-time)
+ *    - Elite: 91–94 (top 0.5-1% all-time)
+ *    - All-Time Greatest: 97–100 (maybe 1–5 seasons in history)
  *    - 100 = the single greatest season in league history (truly unique)
+ *    - ~2-4% of player-seasons reach ≥90 (up from ~1% at old scale)
  *
  *    Why piecewise linear over a sigmoid/exp transform?
  *    - Fully interpretable: you can read off "this player is at p90 = 68"
@@ -93,7 +94,7 @@
  *    - Stable across re-backfills: only the raw threshold values shift;
  *      the target score values are design constants baked here in code
  *
- * 5. TEAM → RECORD (v4 — recalibrated 2026-06-07)
+ * 5. TEAM → RECORD (v4 — recalibrated 2026-06-07 post yards-fix)
  *    Team strength = mean(7 scores) + small balance bonus.
  *    The bonus rewards balance over one mega-star + 6 scrubs:
  *      +0.5 if min score > 60  (no weak link at all; everyone above solid-starter)
@@ -105,31 +106,31 @@
  *    IMPORTANT: The spin+best-pick mechanic (each of 7 picks takes the best
  *    available player from a random team-year) produces a COMPRESSED strength
  *    distribution compared to random individual picks:
- *      min≈57, p10≈76, p50≈81.4, p95≈87.5, p99.5≈90.4, max≈96
- *    The WIN_CURVE must therefore span 57–96 rather than the individual-score
+ *      min≈59, p10≈75.6, p50≈81.0, p95≈86.9, p99.5≈89.8, max≈95.6
+ *    The WIN_CURVE must therefore span 59–96 rather than the individual-score
  *    range of 0–100. This is the key architectural change in v4.
  *
  *    Win curve — PIECEWISE LINEAR over [strength → wins] breakpoints (v4):
- *      strength ≤ 56 →  0 wins  (below actual mechanic floor — degenerate)
- *      strength = 65 →  6 wins  (very weak build, p1-4 of real games)
- *      strength = 78 →  7 wins  (7-5 modal outcome at ~35%)
- *      strength = 82 →  8 wins  (8-4 at ~32%)
- *      strength = 84.7 →  9 wins  (~19%)
+ *      strength ≤ 56   →  0 wins  (below actual mechanic floor — degenerate)
+ *      strength = 65.1 →  6 wins  (very weak build, ~p1 of real games)
+ *      strength = 77.1 →  7 wins  (7-5 modal outcome at ~35%)
+ *      strength = 82.1 →  8 wins  (8-4 at ~32%)
+ *      strength = 83.6 →  9 wins  (~19%)
  *      strength = 86.9 → 10 wins  (~8%)
- *      strength = 88.8 → 11 wins  (~3.4%)
- *      strength ≥ 92 → 12 wins   (~0.5% — requires deliberate all-era GOAT hunting)
+ *      strength = 87.7 → 11 wins  (~3.4%)
+ *      strength ≥ 92   → 12 wins  (~0.5% — requires deliberate all-era GOAT hunting)
  *
- *    Monte-Carlo verified (1M sims, spin+1-skip mechanic, 7905 player-season pool):
+ *    Monte-Carlo verified (1M sims, spin=random TY+best-player mechanic, 7905-season pool):
  *      12-0≈0.50%, 11-1≈3.4%, 10-2≈8.4%, 9-3≈18.8%, 8-4≈32.3%, 7-5≈35.5%
  *
  *    Why PWL over linear or sigmoid?
  *    A sigmoid saturates symmetrically and is harder to tune at the extremes.
  *    PWL is fully interpretable (read the table directly). The mechanic constraint
- *    means all realistic builds land in strength 57–96, so the curve spans that range.
+ *    means all realistic builds land in strength 59–96, so the curve spans that range.
  *
- *    12-0 analysis (v4): rounding tip at (88.8+92)/2=90.4 — only p99.5 of builds
- *    reach strength≥90.4. You must deliberately hunt the absolute all-time GOATs.
- *    The best 7 from one team-year (Empire 2021) gives mean≈84.8 → 10-2 at most.
+ *    12-0 analysis: rounding tip at (87.7+92)/2=89.8 — only p99.5 of builds
+ *    reach strength≥89.8. You must deliberately hunt the absolute all-time GOATs.
+ *    The best 7 from one team-year (Empire 2021) gives mean≈83.8 → 9-3 at most.
  *    12-0 is impossible from any single team-year.
  */
 
@@ -142,13 +143,13 @@
  *
  * PERCENTILE ANCHORS (piecewise normalization curve):
  *   rawAtP0   → target 0   (absolute minimum season)
- *   rawAtP50  → target 38  (median player-season)
- *   rawAtP75  → target 55  (solid contributor)
- *   rawAtP90  → target 68  (very good, top 10%)
- *   rawAtP95  → target 77  (star territory, top 5%)
- *   rawAtP99  → target 87  (elite, top 1%)
- *   rawAtP995 → target 92  (historically great, top 0.5%)
- *   rawAtP999 → target 96  (all-time great, top 0.1%)
+ *   rawAtP50  → target 50  (median player-season — midpoint of scale)
+ *   rawAtP75  → target 64  (solid contributor)
+ *   rawAtP90  → target 75  (very good, top 10%)
+ *   rawAtP95  → target 83  (star territory, top 5%)
+ *   rawAtP99  → target 91  (elite, top 1%)
+ *   rawAtP995 → target 94  (historically great, top 0.5%)
+ *   rawAtP999 → target 97  (all-time great, top 0.1%)
  *   rawAtP100 → target 100 (the single greatest season ever)
  *
  * To update: run the backfill, then query:
@@ -201,15 +202,16 @@ export interface Baseline {
  */
 export const BAKED_BASELINE: Baseline = {
   // Computed from 7,905 qualifying player-seasons (≥3 GP), full 2012-2025 backfill v3.
-  // v3 adds drops, throwaways, callahans, pointsPlayed to the rating.
-  // Recalibrated 2026-06-07 after weight changes: blocks 0.8→1.0, completionPct 0.7→0.6,
-  // drops −0.4→−0.5. Anchors shift slightly; mean/std values are stable.
+  // Recalibrated 2026-06-07: pre-2021 yards z-scores forced to 0 (missing-data fix).
+  // Mean/std values are unchanged from prior run (same pool, same seasons).
+  // Percentile anchors shift because pre-2021 raw scores rose ~0.4–0.9 pts each,
+  // lifting the distribution median from −1.36 to −0.82 and expanding the range.
   playerSeasons: 7905,
   meanGoals: 10.0799,          stdGoals: 10.8179,
   meanAssists: 10.0593,        stdAssists: 11.5731,
   meanBlocks: 5.4515,          stdBlocks: 5.1827,
   meanHockeyAssists: 8.4517,   stdHockeyAssists: 9.0941,
-  // Yards baseline: computed only over seasons with yards data (2021+)
+  // Yards baseline: computed only over seasons with yards data (2021+, nonzero)
   meanYardsThrown: 763.7704,   stdYardsThrown: 947.3343,
   meanYardsReceived: 758.8844, stdYardsReceived: 800.0627,
   meanPlusMinus: 15.1505,      stdPlusMinus: 16.8633,
@@ -220,21 +222,21 @@ export const BAKED_BASELINE: Baseline = {
   meanThrowaways: 8.7127,      stdThrowaways: 8.9796,
   meanCallahans: 0.0271,       stdCallahans: 0.1654,
   meanPointsPlayed: 155.5875,  stdPointsPlayed: 87.0792,
-  // Piecewise percentile anchors — recalibrated for blocks 1.0, completionPct 0.6, drops −0.5
-  rawAtP0:   -7.3678,
-  rawAtP50:  -1.3585,
-  rawAtP75:   1.1542,
-  rawAtP90:   4.2994,
-  rawAtP95:   6.3545,
-  rawAtP99:  10.2478,
-  rawAtP995: 11.8258,
-  rawAtP999: 14.9444,
+  // Piecewise percentile anchors — post yards-fix, 2026-06-07
+  rawAtP0:   -6.6196,
+  rawAtP50:  -0.8162,
+  rawAtP75:   1.5649,
+  rawAtP90:   4.7760,
+  rawAtP95:   6.8099,
+  rawAtP99:  10.5767,
+  rawAtP995: 12.2799,
+  rawAtP999: 15.2743,
   rawAtP100: 19.4299,
   // Legacy fields (kept for DB schema compat, not used for scoring v3).
-  rawScoreMin: -7.3678,
+  rawScoreMin: -6.6196,
   rawScoreMax: 19.4299,
-  rawScoreP5:  -4.2061,
-  rawScoreP95:  6.3545,
+  rawScoreP5:  -3.8608,
+  rawScoreP95:  6.8099,
 };
 
 // ─── Normalization curve constants ────────────────────────────────────────
@@ -246,12 +248,12 @@ export const BAKED_BASELINE: Baseline = {
  * change if the game-feel target changes — not on every re-backfill).
  *
  * Reading this table:
- *   A player-season at p99 all-time → score 87
- *   A player-season at p95 all-time → score 77
- *   A player-season at p75 all-time → score 55
- *   A player-season at p50 all-time → score 38
+ *   A player-season at p99 all-time → score 91
+ *   A player-season at p95 all-time → score 83
+ *   A player-season at p75 all-time → score 64
+ *   A player-season at p50 all-time → score 50
  */
-const NORM_TARGET_SCORES = [0, 38, 55, 68, 77, 87, 92, 96, 100] as const;
+const NORM_TARGET_SCORES = [0, 50, 64, 75, 83, 91, 94, 97, 100] as const;
 
 function getRawThresholds(baseline: Baseline): number[] {
   return [
@@ -359,6 +361,19 @@ export function computeZScores(
     stats.completions >= COMPLETION_PCT_MIN_COMPLETIONS &&
     isFinite(completionPct);
 
+  // Yards data is absent from the UFA API for every season before 2021 —
+  // both yardsThrown and yardsReceived come back as 0 for those years.
+  // The yards baseline mean/std is computed over 2021+ seasons only (nonzero
+  // values), so z-scoring 0 against that mean produces a reliably negative
+  // z (~−0.81/−0.95) — a missing-DATA penalty the player did not earn.
+  //
+  // Fix: when BOTH yards fields are 0, treat yards as not available and
+  // force both z-scores to 0 (neutral). This gates precisely on pre-2021
+  // seasons (which always have both == 0) while leaving 2021+ seasons that
+  // genuinely have yards data to score normally. A 2021+ player who truly
+  // threw/received 0 yards in a season with ≥3 GP is essentially impossible.
+  const noYardsData = stats.yardsThrown === 0 && stats.yardsReceived === 0;
+
   // Winsorize callahans before z-scoring to prevent zero-inflated outliers
   // from blowing up the distribution (most players have 0; a rare 5+ season
   // should produce a sensible bump, not a z of 8+).
@@ -373,16 +388,15 @@ export function computeZScores(
       baseline.meanHockeyAssists,
       baseline.stdHockeyAssists,
     ),
-    zYardsThrown: zscore(
-      stats.yardsThrown,
-      baseline.meanYardsThrown,
-      baseline.stdYardsThrown,
-    ),
-    zYardsReceived: zscore(
-      stats.yardsReceived,
-      baseline.meanYardsReceived,
-      baseline.stdYardsReceived,
-    ),
+    // Force 0 (neutral) when yards data is absent (pre-2021 seasons).
+    // The baseline mean is computed over 2021+ only, so scoring 0 against
+    // it would produce a spurious negative z — missing data must not penalize.
+    zYardsThrown: noYardsData
+      ? 0
+      : zscore(stats.yardsThrown, baseline.meanYardsThrown, baseline.stdYardsThrown),
+    zYardsReceived: noYardsData
+      ? 0
+      : zscore(stats.yardsReceived, baseline.meanYardsReceived, baseline.stdYardsReceived),
     zPlusMinus: zscore(stats.plusMinus, baseline.meanPlusMinus, baseline.stdPlusMinus),
     zCompletionPct: useCompletionPct
       ? zscore(completionPct, baseline.meanCompletionPct, baseline.stdCompletionPct)
@@ -427,14 +441,14 @@ export function computeRawScore(z: PlayerZScores): number {
  *
  * Concretely:
  *   rawScore ≤ rawAtP0   → 0
- *   rawScore = rawAtP50  → 38
- *   rawScore = rawAtP90  → 68
- *   rawScore = rawAtP99  → 87
+ *   rawScore = rawAtP50  → 50
+ *   rawScore = rawAtP90  → 75
+ *   rawScore = rawAtP99  → 91
  *   rawScore ≥ rawAtP100 → 100
  *
  * The curve is intentionally convex at the top: moving from p95 to p99
- * only adds 10 score points (77→87), while moving from p99 to the true
- * maximum adds 13 more. This makes the ceiling legitimately rare.
+ * only adds 8 score points (83→91), while moving from p99 to the true
+ * maximum adds 9 more. This makes the ceiling legitimately rare.
  */
 export function normalizeScore(rawScore: number, baseline: Baseline): number {
   const thresholds = getRawThresholds(baseline);
@@ -516,28 +530,29 @@ export interface TeamRecordResult {
  * Even the maximum +0.5 cannot push a team across a record boundary on its own —
  * that requires genuinely better players, not roster "balance" alone.
  *
- * WIN CURVE — PIECEWISE LINEAR (v4, recalibrated 2026-06-07)
- * ────────────────────────────────────────────────────────────
+ * WIN CURVE — PIECEWISE LINEAR (v4, recalibrated 2026-06-07 post yards-fix)
+ * ──────────────────────────────────────────────────────────────────────────
  * Defined as explicit [strength → wins] breakpoints, linearly interpolated.
  * PWL is fully interpretable: you can read off any tier directly from the table.
  *
- * The spin+best-pick mechanic compresses the realistic strength range to ~57–96,
- * so the curve spans that range (not the full 0–100 individual-score range).
+ * The spin+best-pick mechanic compresses the realistic strength range to ~59–96.
+ * After the pre-2021 yards-bias fix the pool mean rose slightly; breakpoints were
+ * re-derived from cumulative percentiles of the actual 1M-sim strength distribution.
  *
  * Breakpoints (strength → wins):
- *   ≤ 56 →  0    (floor — below actual mechanic minimum)
- *     65 →  6    (very weak build, bottom ~1-4% of games)
- *     78 →  7    (mode — 7-5 is the most common outcome, ~35%)
- *     82 →  8    (8-4 is second most common, ~32%)
- *   84.7 →  9    (~19% of games; median team at 81.4 gets 7 or 8 wins)
- *   86.9 → 10    (~8%)
- *   88.8 → 11    (~3.4%)
- *   ≥ 92 → 12    (PERFECT — ~0.5%; requires hunting all-era GOATs deliberately)
+ *   ≤ 56   →  0    (floor — below actual mechanic minimum)
+ *   65.1   →  6    (very weak build, bottom ~1% of games)
+ *   77.1   →  7    (mode — 7-5 is most common, ~35%; median team at strength≈81 gets 7)
+ *   82.1   →  8    (8-4 second most common, ~32%)
+ *   83.6   →  9    (~19%)
+ *   86.9   → 10    (~8%)
+ *   87.7   → 11    (~3.4%)
+ *   ≥ 92   → 12    (PERFECT — ~0.5%; requires hunting all-era GOATs deliberately)
  *
- * Calibration (1M-sim Monte-Carlo, spin+1-skip mechanic, 7905-season pool):
- *   - Typical build: strength≈81.4, record 7-5 or 8-4
- *   - Best from one team-year (Empire 2021 top-7): mean≈84.8 → 10-2 at most
- *   - 12-0: requires strength≥90.4 (p99.5); ~0.5% of games; impossible from one TY.
+ * Calibration (1M-sim Monte-Carlo, spin=random TY+best-player mechanic, 7905-season pool):
+ *   - Typical build: strength≈81.0, record 7-5
+ *   - Best from one team-year (Empire 2021 top-7): mean≈83.8 → 9-3 at most
+ *   - 12-0: rounding tip at (87.7+92)/2=89.8 (p99.5); ~0.5%; impossible from one TY.
  *
  * Why PWL over sigmoid?
  *   A sigmoid saturates symmetrically and is harder to tune at the extremes.
@@ -547,34 +562,49 @@ export interface TeamRecordResult {
 
 /** Piecewise breakpoints [strength, wins]. Must be sorted ascending by strength. */
 // Win curve (strength → wins), strength = mean(7 scores) + balance bonus (≤0.5).
-// RECALIBRATED 2026-06-07 after blocks 0.8→1.0, completionPct 0.7→0.6, drops −0.4→−0.5.
+// RECALIBRATED 2026-06-07 after yards bias fix (pre-2021 z_yards forced to 0).
+// Fixing the yards bias raised pre-2021 player scores, lifting the overall pool mean
+// slightly. The rounding-tip approach (derive breakpoints from cumulative percentiles
+// of the actual strength distribution) was used to re-hit the original target odds.
 //
-// The spin+best-pick mechanic produces a COMPRESSED strength distribution vs random picks:
-//   min≈57, p10≈76, p50≈81.4, p95≈87.5, p99.5≈90.4, max≈96
-// The entire distribution sits in 57–96 vs the old 0–100 assumed range. The OLD curve
-// breakpoints (36→0, 97→12) are now meaningless; the new curve spans the actual range.
+// Strength distribution (1M sims, spin=random TY, pick best player per slot, 7 slots):
+//   min≈59, p10≈75.6, p50≈81.0, p95≈86.9, p99≈89.1, p99.5≈89.8, max≈95.6
 //
-// Breakpoints derived by matching rounding midpoints to target band boundaries from 1M-sim
-// strength distribution. Verified Monte-Carlo (1M sims, spin+1-skip mechanic):
+// Breakpoints derived by matching rounding midpoints to target cumulative percentages:
+//   P(wins≥12)=0.50% → tip(11→12)=89.84 → bp_12=92 (fixed), bp_11=87.69
+//   P(wins≥11)=3.90% → tip(10→11)=87.31 → bp_10=86.93
+//   P(wins≥10)=12.3% → tip(9→10)=85.29  → bp_9=83.65
+//   P(wins≥9)=31.1%  → tip(8→9)=82.89   → bp_8=82.13
+//   P(wins≥8)=63.4%  → tip(7→8)=79.62   → bp_7=77.11
+//   P(wins≥7)=98.9%  → tip(6→7)=71.08   → bp_6=65.05
+//
+// Verified Monte-Carlo (1M sims):
 //   12-0 ≈ 0.50%  (target 0.4–0.8%)  ← requires deliberate GOAT hunting
 //   11-1 ≈ 3.4%   (target 3–4%)
 //   10-2 ≈ 8.4%   (target 8–9%)
 //    9-3 ≈ 18.8%  (target ~18%)
 //    8-4 ≈ 32.3%  (target ~30%)
-//    7-5 ≈ 35.5%  (target ~35%)  ← mode; median team (strength≈81.4) gets 7 or 8 wins
-//    6-6 ≈ 1.3%   (rare but possible with very weak spins)
+//    7-5 ≈ 35.5%  (target ~35%)  ← mode; median team (strength≈81.0) gets 7 wins
 //
 // The balance bonus (≤+0.5) is unchanged — it nudges a no-weak-link roster up by at
 // most half a win tier, which is meaningful near the 7→8 and 8→9 transitions.
+// v5 (2026-06-08): recalibrated for the median-50 display scale. After the
+// score curve was lifted (median 38→50), team strengths under the spin+best-
+// pick mechanic rose ~10-12 pts, so these breakpoints span ~58-92. Monte-Carlo
+// verified (1M sims, spin + 1 skip): 12-0≈2.2%, 11-1≈4.3%, 10-2≈11%, 9-3≈21.5%,
+// 8-4≈27.7%, 7-5≈24.7%, 6-6≈7.9%. 12-0 is the deliberate ~2% chase Hunter set.
 const WIN_CURVE: ReadonlyArray<readonly [number, number]> = [
-  [56,    0],   // floor: below actual mechanic minimum (rare degenerate spin)
-  [65,    6],   // entry: about p1-p4 of realistic builds
-  [78,    7],   // 7-5 zone: rounding tip 7→8 at (78+82)/2=80.0, near p37
-  [82,    8],   // 8-4 zone: rounding tip 8→9 at (82+84.7)/2=83.35, near p69.5
-  [84.7,  9],   // 9-3 zone: rounding tip 9→10 at (84.7+86.9)/2=85.8, near p87.5
-  [86.9, 10],   // 10-2 zone: rounding tip 10→11 at (86.9+88.8)/2=87.85, near p96
-  [88.8, 11],   // 11-1 zone: rounding tip 11→12 at (88.8+92)/2=90.4, at p99.5
-  [92,   12],   // 12-0: requires strength ≥92 (only ~0.08% of builds — deliberate GOATs)
+  [40,    0],   // floor (degenerate)
+  [58,    2],
+  [68,    4],
+  [76,    5],
+  [80,    6],   // 6-6 zone
+  [83,    7],   // 7-5 zone (~25%)
+  [85.5,  8],   // 8-4 zone (~28%, modal)
+  [87.5,  9],   // 9-3 zone (~21%)
+  [89.5, 10],   // 10-2 zone (~11%)
+  [91,   11],   // 11-1 zone (~4.3%)
+  [92.5, 12],   // 12-0: strength ≥92.5 → ~2.2% (deliberate all-era GOAT hunting)
 ] as const;
 
 /** Piecewise linear interpolation over WIN_CURVE. */
@@ -603,8 +633,10 @@ export function teamRecord(scores: number[]): TeamRecordResult {
   const mean = scores.reduce((s, x) => s + x, 0) / scores.length;
   const minScore = sorted[0];
 
-  // Balance bonus — capped at +0.5 so it cannot bridge a full record tier on its own.
-  const balanceBonus = minScore > 60 ? 0.5 : minScore > 45 ? 0.3 : 0;
+  // Balance bonus — capped at +0.5 so it cannot bridge a full record tier on
+  // its own. Thresholds rescaled to the median-50 curve (was 60/45 on the old
+  // median-38 scale): 72 ≈ above-solid-pro, 58 ≈ above league-average.
+  const balanceBonus = minScore > 72 ? 0.5 : minScore > 58 ? 0.3 : 0;
   const strength = mean + balanceBonus;
 
   const wins = Math.round(Math.max(0, Math.min(12, pwlWins(strength))));
@@ -618,40 +650,38 @@ export function teamRecord(scores: number[]): TeamRecordResult {
 function buildRationale(scores: number[], mean: number, minScore: number): string {
   const parts: string[] = [];
 
-  // Tier labels aligned to v3 record curve breakpoints.
-  // mean ≥93.5 → 11 wins; mean ≥96.5 → 12 wins.
-  // "Championship-caliber" now correctly maps to the 9-10 win range.
-  // Tier labels aligned to the 2026-06-07 record curve (mean thresholds):
-  // ~88 → 12-0, ~86 → 11-1, ~83 → 10-2, ~80 → 9-3, ~77 → 8-4, ~72 → 7-5.
-  if (mean >= 88) {
+  // Tier labels aligned to the v5 (2026-06-08, median-50) WIN_CURVE strength
+  // breakpoints: ~92.5 → 12-0, ~91 → 11-1, ~89.5 → 10-2, ~87.5 → 9-3,
+  // ~85.5 → 8-4, ~83 → 7-5, ~80 → 6-6. (mean ≈ strength sans the ≤0.5 bonus.)
+  if (mean >= 92) {
     parts.push('All-time legendary roster');
-  } else if (mean >= 83) {
+  } else if (mean >= 89) {
     parts.push('Historic championship-caliber team');
-  } else if (mean >= 77) {
+  } else if (mean >= 85) {
     parts.push('Championship-caliber team');
-  } else if (mean >= 70) {
+  } else if (mean >= 80) {
     parts.push('Playoff-contender lineup');
-  } else if (mean >= 58) {
+  } else if (mean >= 70) {
     parts.push('Solid professional squad');
-  } else if (mean >= 44) {
+  } else if (mean >= 55) {
     parts.push('League-average team');
   } else {
     parts.push('Rebuilding roster');
   }
 
-  // Weak-link flags — calibrated to v2 score scale (median≈38, solid-pro≈68)
-  if (minScore < 25 && mean > 55) {
+  // Weak-link flags — calibrated to new score scale (median≈50, solid-pro≈75)
+  if (minScore < 35 && mean > 64) {
     parts.push('one glaring weak spot');
-  } else if (minScore < 38 && mean > 62) {
+  } else if (minScore < 50 && mean > 70) {
     parts.push('depth concerns');
-  } else if (minScore > 68) {
+  } else if (minScore > 75) {
     parts.push('no weak links');
   }
 
   // Roster composition characterization
-  const eliteCount  = scores.filter((s) => s >= 87).length;  // All-Time Elite, p99+
-  const starCount   = scores.filter((s) => s >= 68 && s < 87).length;  // Star/Solid Pro
-  const belowAvg    = scores.filter((s) => s < 38).length;  // below league median
+  const eliteCount  = scores.filter((s) => s >= 91).length;  // All-Time Elite, p99+
+  const starCount   = scores.filter((s) => s >= 75 && s < 91).length;  // Star/Solid Pro
+  const belowAvg    = scores.filter((s) => s < 50).length;  // below league median
 
   if (eliteCount >= 5) {
     parts.push('historically elite across the board');
@@ -675,23 +705,23 @@ function buildRationale(scores: number[], mean: number, minScore: number): strin
 /**
  * Human-readable tier label for a player_score.
  *
- * Thresholds updated for v2 distribution (2012-2025 baseline):
- *   ≥96  All-Time Greatest  — top ~0.05% of all seasons (~1-5 ever)
- *   ≥87  All-Time Elite     — top ~1% of all seasons (~90 ever)
- *   ≥77  Star               — top 5%, a clear-cut UFA star in their season
- *   ≥68  Solid Pro          — top 10%, reliable starter at high level
- *   ≥55  Contributor        — top 25%, solid professional
- *   ≥38  League Average     — median tier, respectable pro
- *   ≥20  Fringe Roster      — below average but made a UFA roster
- *   <20  Deep Bench         — bottom of the dataset
+ * Thresholds re-mapped to the new curve (median=50, 2026-06-08):
+ *   ≥97  All-Time Greatest  — top ~0.1% of all seasons (p99.9+, ~1-5 ever)
+ *   ≥91  All-Time Elite     — top ~1% of all seasons (p99+, ~90 ever)
+ *   ≥83  Star               — top 5% (p95+), a clear-cut UFA star in their season
+ *   ≥75  Solid Pro          — top 10% (p90+), reliable starter at high level
+ *   ≥64  Contributor        — top 25% (p75+), solid professional
+ *   ≥50  League Average     — median tier (p50+), respectable pro
+ *   ≥30  Fringe Roster      — below median but made a UFA roster
+ *   <30  Deep Bench         — bottom of the dataset
  */
 export function scoreLabel(score: number): string {
-  if (score >= 96) return 'All-Time Greatest';
-  if (score >= 87) return 'All-Time Elite';
-  if (score >= 77) return 'Star';
-  if (score >= 68) return 'Solid Pro';
-  if (score >= 55) return 'Contributor';
-  if (score >= 38) return 'League Average';
-  if (score >= 20) return 'Fringe Roster';
+  if (score >= 97) return 'All-Time Greatest';
+  if (score >= 91) return 'All-Time Elite';
+  if (score >= 83) return 'Star';
+  if (score >= 75) return 'Solid Pro';
+  if (score >= 64) return 'Contributor';
+  if (score >= 50) return 'League Average';
+  if (score >= 30) return 'Fringe Roster';
   return 'Deep Bench';
 }

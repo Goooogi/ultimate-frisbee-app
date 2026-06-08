@@ -28,15 +28,15 @@ const SPIN_DURATION_MS = 1300;  // slot-machine cycle time
 const SPIN_CYCLES = 18;         // how many random items to flash through
 
 // Badge color by tier (mapped to Tailwind token classes)
-// Thresholds mirror scoreLabel() tiers in rating.ts (recalibrated to the
-// full-history distribution): ≥96 All-Time Greatest, ≥87 All-Time Elite,
-// ≥77 Star, ≥68 Solid Pro, ≥55 Contributor, ≥38 League Average, ≥20 Fringe.
+// Thresholds mirror scoreLabel() tiers in rating.ts (new curve, median=50):
+// ≥97 All-Time Greatest, ≥91 All-Time Elite, ≥83 Star, ≥75 Solid Pro,
+// ≥64 Contributor, ≥50 League Average, ≥30 Fringe, <30 Deep Bench.
 function badgeClasses(score: number): string {
-  if (score >= 87) return 'bg-accent text-accent-ink';                    // Elite / Greatest
-  if (score >= 77) return 'bg-accent/20 text-accent';                     // Star
-  if (score >= 68) return 'bg-surface text-ink border border-border';     // Solid Pro
-  if (score >= 55) return 'bg-surface text-muted border border-hairline'; // Contributor
-  if (score >= 38) return 'bg-surface text-faint border border-hairline'; // League Average
+  if (score >= 91) return 'bg-accent text-accent-ink';                    // Elite / Greatest
+  if (score >= 83) return 'bg-accent/20 text-accent';                     // Star
+  if (score >= 75) return 'bg-surface text-ink border border-border';     // Solid Pro
+  if (score >= 64) return 'bg-surface text-muted border border-hairline'; // Contributor
+  if (score >= 50) return 'bg-surface text-faint border border-hairline'; // League Average
   return 'bg-surface text-faint border border-hairline opacity-75';       // Fringe / Deep Bench
 }
 

@@ -282,21 +282,18 @@ async function main() {
   // ── Compute baseline ───────────────────────────────────────────────────────
   console.log('Computing all-time baseline (mean/std per stat)...');
 
-  // Pre-2021 seasons have yardsThrown=0/undefined from the API.
-  // We exclude zero/undefined yards from the yards baseline distribution so
-  // those seasons don't drag the mean to 0. The pre-2021 player z-scores
-  // for yards will be negative (0 vs a positive mean), but that reflects
-  // reality: we simply cannot credit yards we don't have. Importantly, since
-  // the baseline is computed over ALL seasons including the zeros, the yards
-  // z-scores for pre-2021 players are consistently negative by the same
-  // amount — they're not disadvantaged relative to each other.
+  // Pre-2021 seasons have yardsThrown=yardsReceived=0 from the UFA API —
+  // yards data simply does not exist for those years.
+  // The yards baseline mean/std is computed over seasons that have real yards
+  // data (yardsThrown > 0), so the mean is ~763 yards. If we z-scored a
+  // pre-2021 player's 0 against that mean we would get z ≈ −0.81/−0.95 —
+  // a missing-DATA penalty the player did not earn.
   //
-  // Alternative considered: exclude pre-2021 from the yards baseline entirely
-  // (filter yardsThrown > 0 for both mean and std). We do this for the mean
-  // only — using only seasons with real yards data so the mean reflects what
-  // a "real" yards season looks like. This means pre-2021 players score ~0
-  // on yards vs a positive mean, giving a mild negative z. This is correct:
-  // we can't know their yards totals, so we give them no credit.
+  // The fix lives in computeZScores (rating.ts): when both yardsThrown==0
+  // AND yardsReceived==0, force zYardsThrown = zYardsReceived = 0 (neutral).
+  // This gates precisely on pre-2021 seasons. We still compute the yards
+  // baseline over nonzero seasons so 2021+ z-scores reflect the real
+  // distribution of yards among players who actually have yards data.
   const goals         = collected.map((c) => c.raw.goals ?? 0);
   const assists       = collected.map((c) => c.raw.assists ?? 0);
   const blocks        = collected.map((c) => c.raw.blocks ?? 0);
@@ -385,9 +382,9 @@ async function main() {
       assists: c.raw.assists ?? 0,
       blocks: c.raw.blocks ?? 0,
       hockeyAssists: c.raw.hockeyAssists ?? 0,
-      // Pre-2021: yardsThrown/yardsReceived are undefined in API → treat as 0.
-      // z-score of 0 vs positive mean → slight negative, which is correct
-      // (we have no yards data, so no yards credit).
+      // Pre-2021: yardsThrown/yardsReceived are 0 from the API (no data).
+      // computeZScores detects both==0 and returns zYards* = 0 (neutral)
+      // rather than z-scoring 0 against the 2021+-only baseline mean (~763).
       yardsThrown: c.raw.yardsThrown ?? 0,
       yardsReceived: c.raw.yardsReceived ?? 0,
       plusMinus: c.raw.plusMinus ?? 0,
@@ -489,13 +486,13 @@ async function main() {
 
   // Verify the curve gives sensible anchor scores
   console.log('  Curve verification (spot-check against percentile anchors):');
-  console.log(`    p50  raw=${rawAtP50.toFixed(3)} → score=${normalizeScore(rawAtP50, baseline).toFixed(1)} (target: 38)`);
-  console.log(`    p75  raw=${rawAtP75.toFixed(3)} → score=${normalizeScore(rawAtP75, baseline).toFixed(1)} (target: 55)`);
-  console.log(`    p90  raw=${rawAtP90.toFixed(3)} → score=${normalizeScore(rawAtP90, baseline).toFixed(1)} (target: 68)`);
-  console.log(`    p95  raw=${rawAtP95.toFixed(3)} → score=${normalizeScore(rawAtP95, baseline).toFixed(1)} (target: 77)`);
-  console.log(`    p99  raw=${rawAtP99.toFixed(3)} → score=${normalizeScore(rawAtP99, baseline).toFixed(1)} (target: 87)`);
-  console.log(`    p99.5 raw=${rawAtP995.toFixed(3)} → score=${normalizeScore(rawAtP995, baseline).toFixed(1)} (target: 92)`);
-  console.log(`    p99.9 raw=${rawAtP999.toFixed(3)} → score=${normalizeScore(rawAtP999, baseline).toFixed(1)} (target: 96)`);
+  console.log(`    p50  raw=${rawAtP50.toFixed(3)} → score=${normalizeScore(rawAtP50, baseline).toFixed(1)} (target: 50)`);
+  console.log(`    p75  raw=${rawAtP75.toFixed(3)} → score=${normalizeScore(rawAtP75, baseline).toFixed(1)} (target: 64)`);
+  console.log(`    p90  raw=${rawAtP90.toFixed(3)} → score=${normalizeScore(rawAtP90, baseline).toFixed(1)} (target: 75)`);
+  console.log(`    p95  raw=${rawAtP95.toFixed(3)} → score=${normalizeScore(rawAtP95, baseline).toFixed(1)} (target: 83)`);
+  console.log(`    p99  raw=${rawAtP99.toFixed(3)} → score=${normalizeScore(rawAtP99, baseline).toFixed(1)} (target: 91)`);
+  console.log(`    p99.5 raw=${rawAtP995.toFixed(3)} → score=${normalizeScore(rawAtP995, baseline).toFixed(1)} (target: 94)`);
+  console.log(`    p99.9 raw=${rawAtP999.toFixed(3)} → score=${normalizeScore(rawAtP999, baseline).toFixed(1)} (target: 97)`);
   console.log(`    max  raw=${rawAtP100.toFixed(3)} → score=${normalizeScore(rawAtP100, baseline).toFixed(1)} (target: 100)`);
 
   console.log('\nUpserting player rows...');
@@ -603,25 +600,27 @@ async function main() {
   console.log(`  Total rows: ${totalRows}`);
   console.log(`  Min:    ${allScores[0]?.toFixed(1)}`);
   console.log(`  p25:    ${percentile(allScores, 25).toFixed(1)}`);
-  console.log(`  Median: ${percentile(allScores, 50).toFixed(1)}  (target: ~38)`);
-  console.log(`  p75:    ${percentile(allScores, 75).toFixed(1)}  (target: ~55)`);
-  console.log(`  p90:    ${percentile(allScores, 90).toFixed(1)}  (target: ~68)`);
-  console.log(`  p95:    ${percentile(allScores, 95).toFixed(1)}  (target: ~77)`);
-  console.log(`  p99:    ${percentile(allScores, 99).toFixed(1)}  (target: ~87)`);
+  console.log(`  Median: ${percentile(allScores, 50).toFixed(1)}  (target: ~50)`);
+  console.log(`  p75:    ${percentile(allScores, 75).toFixed(1)}  (target: ~64)`);
+  console.log(`  p90:    ${percentile(allScores, 90).toFixed(1)}  (target: ~75)`);
+  console.log(`  p95:    ${percentile(allScores, 95).toFixed(1)}  (target: ~83)`);
+  console.log(`  p99:    ${percentile(allScores, 99).toFixed(1)}  (target: ~91)`);
   console.log(`  Max:    ${allScores[allScores.length - 1]?.toFixed(1)}`);
 
   // Ceiling saturation check — the whole point of v2
   const ge99  = allScores.filter((s) => s >= 99).length;
-  const ge96  = allScores.filter((s) => s >= 96).length;
-  const ge92  = allScores.filter((s) => s >= 92).length;
-  const ge87  = allScores.filter((s) => s >= 87).length;
-  const ge77  = allScores.filter((s) => s >= 77).length;
+  const ge97  = allScores.filter((s) => s >= 97).length;
+  const ge94  = allScores.filter((s) => s >= 94).length;
+  const ge91  = allScores.filter((s) => s >= 91).length;
+  const ge90  = allScores.filter((s) => s >= 90).length;
+  const ge83  = allScores.filter((s) => s >= 83).length;
   console.log('\nCeiling saturation (key question: how rare is the top?):');
-  console.log(`  ≥99 ("near-perfect"):    ${ge99}   (target: 0-1 all-time)`);
-  console.log(`  ≥96 (All-Time Greatest): ${ge96}   (target: ~1-5 all-time)`);
-  console.log(`  ≥92 (p99.5+ era):        ${ge92}  (target: ~45 all-time)`);
-  console.log(`  ≥87 (All-Time Elite):    ${ge87}  (target: ~1% = ~${Math.round(totalRows * 0.01)})`);
-  console.log(`  ≥77 (Star):              ${ge77}  (target: ~5% = ~${Math.round(totalRows * 0.05)})`);
+  console.log(`  ≥99 ("near-perfect"):      ${ge99}   (target: 0-1 all-time)`);
+  console.log(`  ≥97 (All-Time Greatest):   ${ge97}   (target: ~1-5 all-time)`);
+  console.log(`  ≥94 (p99.5+ era):          ${ge94}  (target: ~45 all-time)`);
+  console.log(`  ≥91 (All-Time Elite, p99): ${ge91}  (target: ~1% = ~${Math.round(totalRows * 0.01)})`);
+  console.log(`  ≥90 (near-Elite):          ${ge90}  (user target: 2–4% = ~${Math.round(totalRows * 0.02)}–${Math.round(totalRows * 0.04)})`);
+  console.log(`  ≥83 (Star, p95):           ${ge83}  (target: ~5% = ~${Math.round(totalRows * 0.05)})`);
 
   // Felton 2025 check (user's named example — should be Star, not 100)
   const { data: feltonRows } = await db
@@ -653,6 +652,57 @@ async function main() {
       const zPP = p.z_points_played != null ? Number(p.z_points_played).toFixed(2) : 'n/a';
       console.log(`  ${p.name} (${p.team_abbr} ${p.year}): score=${score}, G=${p.goals}, A=${p.assists}, TA=${p.turnovers}(z=${zTA}), D=${p.drops}(z=${zD}), PP=${p.points_played}(z=${zPP})`);
     });
+  }
+
+  // Kyle Henke 2019 — the canonical pre-2021 bias example.
+  // Under the old code he was penalized ~2-4 score pts by spurious negative
+  // yards z-scores. Under the fix his yards z should be exactly 0.
+  const { data: henkeRows } = await db
+    .from('twelve_oh_players')
+    .select('name, team_abbr, year, goals, assists, blocks, player_score, z_yards_thrown, z_yards_received, z_goals, z_assists, z_blocks')
+    .ilike('name', '%henke%')
+    .eq('year', 2019);
+  if (henkeRows && henkeRows.length > 0) {
+    console.log('\nKyle Henke 2019 (pre-2021 bias canary — yards z should now be 0):');
+    henkeRows.forEach((p) => {
+      const score    = Number(p.player_score).toFixed(1);
+      const zYT      = p.z_yards_thrown  != null ? Number(p.z_yards_thrown).toFixed(3)  : 'n/a';
+      const zYR      = p.z_yards_received != null ? Number(p.z_yards_received).toFixed(3) : 'n/a';
+      console.log(`  ${p.name} (${p.team_abbr} ${p.year}): score=${score}, G=${p.goals}, A=${p.assists}, B=${p.blocks}`);
+      console.log(`    z_yards_thrown=${zYT}  z_yards_received=${zYR}  (both should be 0.000)`);
+    });
+  }
+
+  // Per-year average score — proves the era gap is gone.
+  // Pre-2021 avg should be close to 2021+ avg (both near 38 median).
+  console.log('\nAverage player_score BY YEAR (era-gap check — pre-2021 ≈ 2021+):');
+  const { data: allYearRows } = await db
+    .from('twelve_oh_players')
+    .select('year, player_score')
+    .limit(20000);
+
+  const yearBuckets = new Map<number, number[]>();
+  for (const row of (allYearRows ?? [])) {
+    const yr = row.year as number;
+    if (!yearBuckets.has(yr)) yearBuckets.set(yr, []);
+    yearBuckets.get(yr)!.push(Number(row.player_score));
+  }
+  const sortedYears = [...yearBuckets.keys()].sort((a, b) => a - b);
+  console.log('  Year   N    Avg   Min   Max');
+  console.log('  ────  ───  ─────  ────  ────');
+  let preSumAvg = 0; let preCount = 0;
+  let postSumAvg = 0; let postCount = 0;
+  for (const yr of sortedYears) {
+    const ys = yearBuckets.get(yr)!;
+    const avg = ys.reduce((s, x) => s + x, 0) / ys.length;
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    console.log(`  ${yr}  ${String(ys.length).padStart(3)}  ${avg.toFixed(1).padStart(5)}  ${minY.toFixed(1).padStart(4)}  ${maxY.toFixed(1).padStart(4)}`);
+    if (yr < 2021) { preSumAvg += avg; preCount++; } else { postSumAvg += avg; postCount++; }
+  }
+  if (preCount > 0 && postCount > 0) {
+    console.log(`\n  Pre-2021  avg-of-avgs: ${(preSumAvg / preCount).toFixed(1)}  (should be close to 2021+ avg)`);
+    console.log(`  2021+     avg-of-avgs: ${(postSumAvg / postCount).toFixed(1)}`);
   }
 
   // ── Win distribution simulations ─────────────────────────────────────────
