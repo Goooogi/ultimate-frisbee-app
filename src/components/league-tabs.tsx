@@ -24,7 +24,7 @@ export function LeagueTabs({ active, onChange, compact = false }: LeagueTabsProp
     >
       {LEAGUES.map((l) => {
         const on = l.id === active;
-        // Only INTL is still a stub; UFA + USAU are both wired up.
+        // INTL is the only remaining stub; UFA, USAU, and PUL are all wired up.
         const disabled = l.id === 'intl';
         return (
           <button
