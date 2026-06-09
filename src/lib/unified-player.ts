@@ -1,13 +1,18 @@
 // Unified player profile data layer.
 //
-// Combines UFA + USAU careers under one identity. Identity match is by
+// Combines UFA + USAU + PUL careers under one identity. Identity match is by
 // lowercased display name — the same v1 rule we use elsewhere (see
 // memory/project_usau_player_identity.md). Two real humans with the same
 // name will merge; acceptable until we build the canonical-identity layer.
 //
-// The page accepts either a UFA slug (e.g. "tdecraene") or a USAU UUID;
-// we anchor on whichever the URL gives us, resolve the human's name, then
-// fetch the OTHER league's data via name match.
+// The page accepts a UFA slug (e.g. "tdecraene"), a USAU UUID, or a PUL UUID.
+// We anchor on whichever the URL gives us, resolve the human's name, then
+// fetch the OTHER leagues' data via name match.
+//
+// UUID DISAMBIGUATION NOTE: Both USAU and PUL use v4 UUIDs as player ids,
+// so looksLikeUsauUuid() returns true for PUL ids too. The resolver handles
+// this by trying USAU first; if that misses, it tries PUL. See the uuid
+// anchor-resolution block in getUnifiedPlayerProfile.
 
 import 'server-only';
 import {
@@ -26,6 +31,14 @@ import {
   looksLikeUsauUuid,
   type UsauPlayerSummary,
 } from '@/lib/usau/data';
+import {
+  getPulPlayer,
+  getPulPlayerCareerByName,
+  findPulPlayerNameByName,
+  listPulTeams,
+  type PulTeam,
+  type PulPlayerCareer,
+} from '@/lib/pul/data';
 import { namesMatch } from '@/lib/name-match';
 
 // ── Output shape ─────────────────────────────────────────────────────────
@@ -65,7 +78,37 @@ export interface UsauSeasonStint {
   events: UsauPlayerSummary['teamHistory'][number]['events'];
 }
 
-export type SeasonStint = UfaSeasonStint | UsauSeasonStint;
+/**
+ * PUL (Premier Ultimate League) stint — one season with one team.
+ * PUL has no per-game API; stats are season totals only.
+ *
+ * teamName, teamLogoUrl, and teamAccentColor are resolved from the pul_teams
+ * table at build time (batched — not fetched per-stint).
+ */
+export interface PulSeasonStint {
+  league: 'pul';
+  season: number;
+  teamId: string;
+  teamName: string;
+  teamCity: string;
+  teamLogoUrl: string | null;
+  teamAccentColor: string | null;
+  jerseyNumber: string;
+  pronouns: string | null;
+  stats: {
+    gamesPlayed: number;
+    goals: number;
+    assists: number;
+    blocks: number;
+    turnovers: number;
+    touches: number;
+    oPoints: number;
+    dPoints: number;
+    plusMinus: number;
+  };
+}
+
+export type SeasonStint = UfaSeasonStint | UsauSeasonStint | PulSeasonStint;
 
 export interface UnifiedYear {
   year: number;
@@ -73,15 +116,26 @@ export interface UnifiedYear {
 }
 
 export interface UnifiedPlayerProfile {
-  /** The anchor id the URL used. UFA slug or USAU UUID. */
+  /** The anchor id the URL used. UFA slug, USAU UUID, or PUL UUID. */
   anchorId: string;
   /** Which side the URL anchored on. */
-  anchorLeague: 'ufa' | 'usau';
+  anchorLeague: 'ufa' | 'usau' | 'pul';
   displayName: string;
+  /** Pronouns resolved from PUL data when available; null otherwise. */
+  pronouns: string | null;
   /** Year-by-year, newest first. */
   years: UnifiedYear[];
-  /** Combined hero stats — UFA career totals when present, otherwise
-   *  USAU event totals. Both leagues feed in additively where possible. */
+  /**
+   * Combined hero stats — UFA + USAU feed in additively.
+   *
+   * PUL is kept as a SEPARATE sub-block (see `pul` field below) rather than
+   * being added into the UFA/USAU career totals. Rationale: PUL is a
+   * women's/open semi-pro league whose seasons overlap USAU Club Nationals;
+   * a player may accumulate goals in both simultaneously. Mixing PUL goals
+   * into the same counter as USAU goals would double-count effort in
+   * overlapping weeks. The UI can render PUL totals from the `pul` block and
+   * keep them visually distinct.
+   */
   career: {
     /** UFA games played + USAU events-played (kept separate to avoid
      *  conflating "ultimate game" with "tournament event"). */
@@ -94,6 +148,21 @@ export interface UnifiedPlayerProfile {
     completions: number;
     throwsAttempted: number;
   };
+  /**
+   * PUL career sub-totals. Null when the player has no PUL history.
+   * Reported separately from `career` to avoid double-counting overlapping
+   * competitive periods.
+   */
+  pul: {
+    seasonsPlayed: number;
+    gamesPlayed: number;
+    goals: number;
+    assists: number;
+    blocks: number;
+    turnovers: number;
+    touches: number;
+    plusMinus: number;
+  } | null;
   championYearsUfa: number[];
   championYearsUsau: number[];
 }
@@ -101,51 +170,114 @@ export interface UnifiedPlayerProfile {
 // ── Builder ──────────────────────────────────────────────────────────────
 
 /**
- * Builds a unified profile for either a UFA slug or USAU UUID. Both leagues
- * are queried in parallel; whichever isn't matched returns an empty slice.
+ * Builds a unified profile for a UFA slug, USAU UUID, or PUL UUID. All three
+ * leagues are resolved in parallel where possible; a failure in any
+ * cross-league lookup degrades gracefully (that league's stints are omitted).
+ *
+ * UUID DISAMBIGUATION:
+ *   Both USAU and PUL use v4 UUIDs. When the anchor looks like a UUID we try
+ *   USAU first (existing behavior, no regression for USAU links). If USAU
+ *   returns nothing, we try PUL. This is a sequential fallback, not parallel,
+ *   to keep the logic simple and correct without a race condition on the
+ *   anchor-league determination.
  *
  * Cost: 1 UFA scrape + 1 UFA season fetch + N UFA game-log fetches (one
- * per year) + 1 USAU profile fetch. Each cached for 1h–24h via the existing
- * library defaults — same as the previous standalone code paths.
+ * per year) + 1 USAU profile fetch + 1 PUL career fetch + 1 PUL teams fetch.
+ * Each upstream call is cached 1h–24h via the existing library defaults.
  */
 export async function getUnifiedPlayerProfile(
   anchorId: string,
 ): Promise<UnifiedPlayerProfile | null> {
-  const anchorLeague: 'ufa' | 'usau' = looksLikeUsauUuid(anchorId) ? 'usau' : 'ufa';
+  // ── Anchor resolution ───────────────────────────────────────────────────
+  // Determine which league owns this id and pull the display name from it.
+  // After this block we have: anchorLeague, anchorName, and the anchor-side
+  // data object (sideUsau or sidePulCareer) already fetched.
 
-  // Resolve display name from the anchor side first; we need it to find
-  // the OTHER side via name match.
-  const [anchorName, sideUsau, sideUfa] = await (async () => {
-    if (anchorLeague === 'ufa') {
-      const info = await getPlayerInfo(anchorId).catch(() => null);
-      const ufa = await buildUfaSide(anchorId).catch(() => null);
-      const usauId = info?.name ? await findUsauPlayerByName(info.name).catch(() => null) : null;
-      const usau = usauId ? await getUsauPlayerProfile(usauId).catch(() => null) : null;
-      return [info?.name ?? null, usau, ufa] as const;
+  let anchorLeague: 'ufa' | 'usau' | 'pul';
+  let anchorName: string | null = null;
+  let anchorUsau: UsauPlayerSummary | null = null;
+  let anchorPulCareer: PulPlayerCareer | null = null;
+
+  if (!looksLikeUsauUuid(anchorId)) {
+    // ── UFA slug anchor ────────────────────────────────────────────────
+    anchorLeague = 'ufa';
+    const info = await getPlayerInfo(anchorId).catch(() => null);
+    anchorName = info?.name ?? null;
+  } else {
+    // ── UUID anchor — try USAU first, then PUL ─────────────────────────
+    // Both USAU and PUL use v4 UUIDs. We check USAU first (existing
+    // behavior preserves all current /players/{usau-uuid} links).
+    const usauProfile = await getUsauPlayerProfile(anchorId).catch(() => null);
+    if (usauProfile) {
+      anchorLeague = 'usau';
+      anchorName = usauProfile.displayName ?? null;
+      anchorUsau = usauProfile;
+    } else {
+      // USAU miss — try PUL.
+      const pulPlayer = await getPulPlayer(anchorId).catch(() => null);
+      if (pulPlayer) {
+        anchorLeague = 'pul';
+        anchorName = pulPlayer.playerName;
+        // We need the full career (all seasons) for a PUL anchor, not just
+        // the one row. Fetch by name so we get every season's stint.
+        anchorPulCareer = await getPulPlayerCareerByName(pulPlayer.playerName).catch(() => null);
+        anchorName = anchorPulCareer?.playerName ?? pulPlayer.playerName;
+      } else {
+        // UUID matches neither USAU nor PUL — unresolvable.
+        return null;
+      }
     }
-    const usau = await getUsauPlayerProfile(anchorId).catch(() => null);
-    // No name → UFA-slug index exists, so for the reverse direction we
-    // walk this season's UFA leaderboard and find an EXACT name match.
-    // This costs 1-3 page hits (each cached for 1h via the call() helper)
-    // — acceptable for a profile-page render. Falls back to no UFA side
-    // when there's no match for the year.
-    const ufaSlug = usau?.displayName ? await findUfaSlugByName(usau.displayName).catch(() => null) : null;
-    const ufa = ufaSlug ? await buildUfaSide(ufaSlug).catch(() => null) : null;
-    return [usau?.displayName ?? null, usau, ufa] as const;
-  })();
+  }
 
   if (!anchorName) return null;
 
-  // Merge into a Map<year, stints[]>.
+  // ── Fetch all three sides in parallel ──────────────────────────────────
+  // Each lookup is independent once we have a display name. Failures are
+  // caught per-league so one bad network call doesn't kill the whole profile.
+  const [sideUfa, sideUsau, sidePulCareer, teamMap] = await Promise.all([
+    // UFA side
+    (anchorLeague === 'ufa'
+      ? buildUfaSide(anchorId)
+      : findUfaSlugByName(anchorName).then((slug) =>
+          slug ? buildUfaSide(slug) : null,
+        )
+    ).catch(() => null),
+
+    // USAU side
+    (anchorLeague === 'usau'
+      ? Promise.resolve(anchorUsau)
+      : findUsauPlayerByName(anchorName).then((id) =>
+          id ? getUsauPlayerProfile(id) : null,
+        )
+    ).catch(() => null),
+
+    // PUL side
+    (anchorLeague === 'pul'
+      ? Promise.resolve(anchorPulCareer)
+      : findPulPlayerNameByName(anchorName).then((name) =>
+          name ? getPulPlayerCareerByName(name) : null,
+        )
+    ).catch(() => null),
+
+    // PUL team metadata — fetched once, used for all PUL stints.
+    // listPulTeams() returns all 13 teams; we build a Map for O(1) lookup.
+    listPulTeams()
+      .then((teams) => new Map<string, PulTeam>(teams.map((t) => [t.id, t])))
+      .catch(() => new Map<string, PulTeam>()),
+  ] as const);
+
+  // ── Merge into a Map<year, stints[]> ───────────────────────────────────
+
   const yearMap = new Map<number, SeasonStint[]>();
 
   if (sideUfa) {
-    for (const stint of sideUfa.stints) {
-      const list = yearMap.get(stint.year) ?? [];
-      list.push(stint.stint);
-      yearMap.set(stint.year, list);
+    for (const { year, stint } of sideUfa.stints) {
+      const list = yearMap.get(year) ?? [];
+      list.push(stint);
+      yearMap.set(year, list);
     }
   }
+
   if (sideUsau) {
     for (const stint of sideUsau.teamHistory) {
       const list = yearMap.get(stint.season) ?? [];
@@ -162,11 +294,45 @@ export async function getUnifiedPlayerProfile(
     }
   }
 
+  if (sidePulCareer) {
+    for (const pulStint of sidePulCareer.stints) {
+      const list = yearMap.get(pulStint.season) ?? [];
+      const team = teamMap.get(pulStint.player.teamId);
+      list.push({
+        league: 'pul',
+        season: pulStint.season,
+        teamId: pulStint.player.teamId,
+        teamName: team?.name ?? pulStint.player.teamId,
+        teamCity: team?.city ?? '',
+        teamLogoUrl: team?.logoUrl ?? null,
+        teamAccentColor: team?.accentColor ?? null,
+        jerseyNumber: pulStint.player.jerseyNumber,
+        pronouns: pulStint.player.pronouns,
+        stats: {
+          gamesPlayed: pulStint.player.gamesPlayed,
+          goals: pulStint.player.goals,
+          assists: pulStint.player.assists,
+          blocks: pulStint.player.blocks,
+          turnovers: pulStint.player.turnovers,
+          touches: pulStint.player.touches,
+          oPoints: pulStint.player.oPoints,
+          dPoints: pulStint.player.dPoints,
+          plusMinus: pulStint.player.plusMinus,
+        },
+      });
+      yearMap.set(pulStint.season, list);
+    }
+  }
+
   const years: UnifiedYear[] = Array.from(yearMap.entries())
     .sort((a, b) => b[0] - a[0])
     .map(([year, stints]) => ({ year, stints: sortStintsForYear(stints) }));
 
-  // Career aggregates.
+  // ── Career aggregates ───────────────────────────────────────────────────
+  // UFA + USAU add into the shared `career` block (same as before).
+  // PUL is reported separately in the `pul` sub-block to avoid conflating
+  // stats from potentially overlapping competitive periods.
+
   const career = {
     ufaGamesPlayed: 0,
     usauEventsPlayed: 0,
@@ -177,6 +343,7 @@ export async function getUnifiedPlayerProfile(
     completions: 0,
     throwsAttempted: 0,
   };
+
   for (const year of years) {
     for (const s of year.stints) {
       if (s.league === 'ufa') {
@@ -187,22 +354,45 @@ export async function getUnifiedPlayerProfile(
         career.plusMinus += s.totals.plusMinus;
         career.completions += s.totals.completions;
         career.throwsAttempted += s.totals.throwsAttempted;
-      } else {
+      } else if (s.league === 'usau') {
         career.usauEventsPlayed += s.events.length;
         for (const ev of s.events) {
           career.goals += ev.goals ?? 0;
           career.assists += ev.assists ?? 0;
         }
       }
+      // PUL stints intentionally not added to `career` — see `pul` block.
     }
   }
+
+  // PUL career sub-block. Use the pre-aggregated career from the data layer
+  // rather than re-summing from the year-map to keep this clean.
+  const pulCareerBlock = sidePulCareer
+    ? {
+        seasonsPlayed: sidePulCareer.career.seasonsPlayed,
+        gamesPlayed: sidePulCareer.career.gamesPlayed,
+        goals: sidePulCareer.career.goals,
+        assists: sidePulCareer.career.assists,
+        blocks: sidePulCareer.career.blocks,
+        turnovers: sidePulCareer.career.turnovers,
+        touches: sidePulCareer.career.touches,
+        plusMinus: sidePulCareer.career.plusMinus,
+      }
+    : null;
+
+  // Pronouns: PUL data is the only league that tracks them. Surface when found.
+  const pronouns =
+    sidePulCareer?.pronouns ??
+    (anchorPulCareer?.pronouns ?? null);
 
   return {
     anchorId,
     anchorLeague,
     displayName: anchorName,
+    pronouns,
     years,
     career,
+    pul: pulCareerBlock,
     championYearsUfa: sideUfa?.championYears ?? [],
     championYearsUsau: sideUsau?.championYears ?? [],
   };
@@ -359,10 +549,12 @@ function deriveUsauChip(_stint: UsauPlayerSummary['teamHistory'][number]): strin
 // ── Ordering ─────────────────────────────────────────────────────────────
 
 function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
-  // UFA stints come first (active pro league with games); USAU stints
-  // (tournament-style) below. Stable inside each league.
-  return [...stints].sort((a, b) => {
-    if (a.league === b.league) return 0;
-    return a.league === 'ufa' ? -1 : 1;
-  });
+  // Ordering priority within a year: UFA (pro, per-game data) → PUL (semi-pro,
+  // season totals) → USAU (club/college, tournament-style). Stable within each.
+  const leagueOrder: Record<SeasonStint['league'], number> = {
+    ufa: 0,
+    pul: 1,
+    usau: 2,
+  };
+  return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }

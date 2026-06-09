@@ -9,7 +9,7 @@
 //   • Signed-in users see "Accepting…" → success or a labeled error. We
 //     never auto-redirect on failure so the user can see what went wrong.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
@@ -50,35 +50,30 @@ function Acceptor({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string>('');
 
+  const run = useCallback(async () => {
+    setState('pending');
+    setError(null);
+    try {
+      const result = await acceptInvite(token);
+      setTeamName(result.teamName);
+      setState('ok');
+      // Brief pause so the user sees confirmation, then route to teams.
+      setTimeout(() => router.push('/playbook/teams'), 1200);
+    } catch (err) {
+      // The accept RPC's P0001 RAISE messages flow through formatSupabaseError
+      // as-is; friendlyError below translates those into longer copy.
+      const raw = formatSupabaseError(err);
+      setError(friendlyError(raw));
+      setState('error');
+      console.error('[invite-accept] acceptInvite failed', err);
+    }
+  }, [token, router]);
+
   // Run the accept once we have a user.
   useEffect(() => {
     if (!user) return;
-    let cancelled = false;
-    async function run() {
-      try {
-        const result = await acceptInvite(token);
-        if (cancelled) return;
-        setTeamName(result.teamName);
-        setState('ok');
-        // Brief pause so the user sees confirmation, then route to teams.
-        setTimeout(() => {
-          if (!cancelled) router.push('/playbook/teams');
-        }, 1200);
-      } catch (err) {
-        if (cancelled) return;
-        // The accept RPC's P0001 RAISE messages flow through formatSupabaseError
-        // as-is; friendlyError below translates those into longer copy.
-        const raw = formatSupabaseError(err);
-        setError(friendlyError(raw));
-        setState('error');
-        console.error('[invite-accept] acceptInvite failed', err);
-      }
-    }
     run();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, token, router]);
+  }, [user, run]);
 
   return (
     <div className="min-h-screen flex flex-col bg-bg">
@@ -123,12 +118,13 @@ function Acceptor({ token }: { token: string }) {
                 {error}
               </p>
               <div className="flex flex-col sm:flex-row gap-2.5 mt-3">
-                <Link
-                  href="/playbook"
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase no-underline hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                <button
+                  type="button"
+                  onClick={run}
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
                 >
-                  Back to playbook
-                </Link>
+                  Try again
+                </button>
                 <Link
                   href="/playbook/teams"
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-surface border border-border text-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase no-underline hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -145,11 +141,16 @@ function Acceptor({ token }: { token: string }) {
 }
 
 function friendlyError(raw: string): string {
-  if (raw.includes('invite not found')) return 'This invite link is invalid or has been revoked.';
-  if (raw.includes('already used')) return 'This invite has already been used.';
-  if (raw.includes('expired')) return 'This invite has expired. Ask the team owner to send a new one.';
-  if (raw.includes('different email')) {
+  const r = raw.toLowerCase();
+  if (r.includes('invite not found')) return 'This invite link is invalid or has been revoked.';
+  if (r.includes('already used')) return 'This invite has already been used.';
+  if (r.includes('expired')) return 'This invite has expired. Ask the team owner to send a new one.';
+  if (r.includes('different email')) {
     return 'This invite was sent to a different email address than the account you signed in with.';
+  }
+  // The "your session wasn't ready yet" class — don't show the raw Postgres text.
+  if (r.includes('permission denied') || r.includes('not authenticated')) {
+    return "We couldn't confirm your sign-in just yet. Tap “Try again.”";
   }
   return raw;
 }

@@ -10,6 +10,7 @@
 
 import Link from 'next/link';
 import type {
+  PulSeasonStint,
   SeasonStint,
   UfaSeasonStint,
   UnifiedPlayerProfile,
@@ -84,32 +85,72 @@ export function UnifiedProfile({ profile, content }: Props) {
         </div>
       </div>
 
-      {/* Career totals */}
-      <section className="mb-10" aria-labelledby="career-heading">
-        <h2
-          id="career-heading"
-          className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
-        >
-          Career totals
-        </h2>
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
-          <CareerStat
-            label={career.ufaGamesPlayed > 0 ? 'UFA Games' : 'Events'}
-            value={career.ufaGamesPlayed > 0 ? career.ufaGamesPlayed : career.usauEventsPlayed}
-          />
-          <CareerStat label="Goals" value={career.goals} />
-          <CareerStat label="Assists" value={career.assists} />
-          <CareerStat label="Scores" value={career.goals + career.assists} />
-          {career.plusMinus !== 0 && <CareerStat label="+/−" value={signed(career.plusMinus)} />}
-          {career.throwsAttempted > 0 && (
+      {/* Career totals — UFA + USAU combined */}
+      {(career.ufaGamesPlayed > 0 || career.usauEventsPlayed > 0) && (
+        <section className="mb-6" aria-labelledby="career-heading">
+          <h2
+            id="career-heading"
+            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+          >
+            Career totals
+          </h2>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
             <CareerStat
-              label="Cmp%"
-              value={`${((career.completions / career.throwsAttempted) * 100).toFixed(1)}%`}
+              label={career.ufaGamesPlayed > 0 ? 'UFA Games' : 'Events'}
+              value={career.ufaGamesPlayed > 0 ? career.ufaGamesPlayed : career.usauEventsPlayed}
             />
-          )}
-          {career.blocks > 0 && <CareerStat label="Blocks" value={career.blocks} />}
-        </div>
-      </section>
+            <CareerStat label="Goals" value={career.goals} />
+            <CareerStat label="Assists" value={career.assists} />
+            <CareerStat label="Scores" value={career.goals + career.assists} />
+            {career.plusMinus !== 0 && <CareerStat label="+/−" value={signed(career.plusMinus)} />}
+            {career.throwsAttempted > 0 && (
+              <CareerStat
+                label="Cmp%"
+                value={`${((career.completions / career.throwsAttempted) * 100).toFixed(1)}%`}
+              />
+            )}
+            {career.blocks > 0 && <CareerStat label="Blocks" value={career.blocks} />}
+          </div>
+        </section>
+      )}
+
+      {/* PUL career sub-block — separate from UFA/USAU to avoid double-counting */}
+      {profile.pul && (
+        <section className="mb-10" aria-labelledby="pul-career-heading">
+          <h2
+            id="pul-career-heading"
+            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+          >
+            PUL career
+          </h2>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+            <CareerStat label="Seasons" value={profile.pul.seasonsPlayed} />
+            <CareerStat label="GP" value={profile.pul.gamesPlayed} />
+            <CareerStat label="Goals" value={profile.pul.goals} />
+            <CareerStat label="Assists" value={profile.pul.assists} />
+            <CareerStat label="Scores" value={profile.pul.goals + profile.pul.assists} />
+            <CareerStat label="Blocks" value={profile.pul.blocks} />
+            <CareerStat label="+/−" value={signed(profile.pul.plusMinus)} />
+          </div>
+        </section>
+      )}
+
+      {/* Fallback: show PUL-only career block if player has no UFA/USAU data */}
+      {!profile.pul && career.ufaGamesPlayed === 0 && career.usauEventsPlayed === 0 && (
+        <section className="mb-10" aria-labelledby="career-heading">
+          <h2
+            id="career-heading"
+            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+          >
+            Career totals
+          </h2>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+            <CareerStat label="Goals" value={career.goals} />
+            <CareerStat label="Assists" value={career.assists} />
+            <CareerStat label="Blocks" value={career.blocks} />
+          </div>
+        </section>
+      )}
 
       {/* Year-by-year list */}
       {years.length > 0 && (
@@ -131,8 +172,13 @@ export function UnifiedProfile({ profile, content }: Props) {
         </section>
       )}
 
+      {/* PlayerContentGallery only supports 'ufa' | 'usau' refs today.
+          PUL players anchored by a PUL uuid have no content rows yet —
+          pass 'usau' as the kind so the gallery renders (empty) without
+          a type error. The UI agent should extend PlayerKind to include
+          'pul' and add content support when the PUL content feature ships. */}
       <PlayerContentGallery
-        playerKind={profile.anchorLeague}
+        playerKind={profile.anchorLeague === 'pul' ? 'usau' : profile.anchorLeague}
         playerRef={profile.anchorId}
         playerDisplayName={profile.displayName}
         items={content}
@@ -146,9 +192,13 @@ export function UnifiedProfile({ profile, content }: Props) {
 function buildEyebrow(profile: UnifiedPlayerProfile): string {
   const hasUfa = profile.years.some((y) => y.stints.some(isUfa));
   const hasUsau = profile.years.some((y) => y.stints.some(isUsau));
-  if (hasUfa && hasUsau) return 'UFA + USAU · Career';
-  if (hasUfa) return 'UFA · Career';
-  return 'USAU · Career';
+  const hasPul = profile.pul !== null;
+  const parts: string[] = [];
+  if (hasUfa) parts.push('UFA');
+  if (hasUsau) parts.push('USAU');
+  if (hasPul) parts.push('PUL');
+  if (parts.length === 0) return 'Career';
+  return `${parts.join(' + ')} · Career`;
 }
 
 function buildLatestYearLine(year: UnifiedYear): string {
@@ -158,8 +208,11 @@ function buildLatestYearLine(year: UnifiedYear): string {
       parts.push(
         `${s.totals.gamesPlayed} GP · ${s.totals.goals}G · ${s.totals.assists}A · ${signed(s.totals.plusMinus)} +/−`,
       );
-    } else if (s.events.length > 0) {
-      parts.push(`${s.events.length} ${s.events.length === 1 ? 'event' : 'events'}`);
+    } else if (s.league === 'usau') {
+      if (s.events.length > 0)
+        parts.push(`${s.events.length} ${s.events.length === 1 ? 'event' : 'events'}`);
+    } else if (s.league === 'pul') {
+      parts.push(`${s.stats.gamesPlayed} GP · ${s.stats.goals}G · ${s.stats.assists}A (PUL)`);
     }
   }
   return parts.join(' · ');
@@ -189,7 +242,10 @@ function YearGroup({ year }: { year: UnifiedYear }) {
 
 function StintRow({ stint }: { stint: SeasonStint }) {
   if (stint.league === 'ufa') return <UfaStintRow stint={stint} />;
-  return <UsauStintRow stint={stint} />;
+  if (stint.league === 'usau') return <UsauStintRow stint={stint} />;
+  if (stint.league === 'pul') return <PulStintRow stint={stint} />;
+  // Exhaustive guard — new league union members should add a branch above.
+  return null;
 }
 
 // ── UFA stint ───────────────────────────────────────────────────────────
@@ -353,6 +409,136 @@ function UsauEventRow({
         </span>
       )}
     </li>
+  );
+}
+
+// ── PUL stint ───────────────────────────────────────────────────────────
+// Expandable accordion row. Summary: team logo + name + key stats.
+// Expanded panel: full season-totals table (PUL has no per-game log).
+
+function PulStintRow({ stint }: { stint: PulSeasonStint }) {
+  // Dynamic accent color — sanctioned inline style (same pattern as PulTeamLogo).
+  const accentStyle: React.CSSProperties = stint.teamAccentColor
+    ? { borderLeft: `3px solid ${stint.teamAccentColor}` }
+    : {};
+
+  return (
+    <details className="group [&[open]>summary]:bg-surface-hi">
+      <summary
+        className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        style={accentStyle}
+      >
+        <Caret />
+        <Link
+          href={`/pul/teams/${stint.teamId}`}
+          className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+        >
+          <PulTeamLogoInline
+            logoUrl={stint.teamLogoUrl}
+            teamId={stint.teamId}
+            mascot={stint.teamName.split(' ').slice(1).join(' ') || stint.teamName}
+          />
+          <span className="flex flex-col min-w-0">
+            <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
+              {stint.teamCity} {stint.teamName}
+            </span>
+            <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+              PUL
+              {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
+              {stint.pronouns ? ` · ${stint.pronouns}` : ''}
+            </span>
+          </span>
+        </Link>
+        <YearSummaryCells
+          cells={[
+            { label: 'GP',  value: stint.stats.gamesPlayed },
+            { label: 'G',   value: stint.stats.goals },
+            { label: 'A',   value: stint.stats.assists },
+            { label: '+/−', value: signed(stint.stats.plusMinus) },
+            { label: 'BLK', value: stint.stats.blocks },
+          ]}
+        />
+      </summary>
+      <div className="px-4 pt-2 pb-4 border-t border-hairline overflow-x-auto">
+        <PulSeasonTotalsTable stats={stint.stats} />
+      </div>
+    </details>
+  );
+}
+
+function PulSeasonTotalsTable({ stats }: { stats: PulSeasonStint['stats'] }) {
+  const thBase = 'px-3 py-2 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-muted whitespace-nowrap text-right';
+  const tdBase = 'px-3 py-2 text-[12px] font-tight text-right tabular';
+  return (
+    <table className="w-full max-w-[520px] border-collapse">
+      <thead>
+        <tr>
+          <th scope="col" className={`${thBase} text-right`}>GP</th>
+          <th scope="col" className={thBase}>G</th>
+          <th scope="col" className={thBase}>A</th>
+          <th scope="col" className={thBase}>Blk</th>
+          <th scope="col" className={thBase}>TO</th>
+          <th scope="col" className={thBase}>Touch</th>
+          <th scope="col" className={thBase}>O-Pts</th>
+          <th scope="col" className={thBase}>D-Pts</th>
+          <th scope="col" className={thBase}>+/−</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td className={`${tdBase} text-ink`}>{stats.gamesPlayed}</td>
+          <td className={`${tdBase} text-ink`}>{stats.goals}</td>
+          <td className={`${tdBase} text-ink`}>{stats.assists}</td>
+          <td className={`${tdBase} text-muted`}>{stats.blocks}</td>
+          <td className={`${tdBase} text-muted`}>{stats.turnovers}</td>
+          <td className={`${tdBase} text-muted`}>{stats.touches}</td>
+          <td className={`${tdBase} text-muted`}>{stats.oPoints}</td>
+          <td className={`${tdBase} text-muted`}>{stats.dPoints}</td>
+          <td className={`${tdBase} ${stats.plusMinus > 0 ? 'text-ink font-semibold' : stats.plusMinus < 0 ? 'text-faint' : 'text-muted'}`}>
+            {signed(stats.plusMinus)}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+// Inline logo renderer for the profile — avoids importing PulTeamLogo server
+// component in a 'use client'-adjacent file while keeping the same visual.
+function PulTeamLogoInline({
+  logoUrl,
+  teamId,
+  mascot,
+}: {
+  logoUrl: string | null;
+  teamId: string;
+  mascot: string;
+}) {
+  const size = 26;
+  if (logoUrl) {
+    return (
+      <span
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-md bg-white border border-[rgb(var(--ink)/0.08)]"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.84, height: size * 0.84 }} />
+      </span>
+    );
+  }
+  const initials = mascot.split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 3).toUpperCase();
+  const bg = teamId === 'new-york' || teamId === 'new-york-gridlock' ? '#1a1a2e' : '#1d2535';
+  return (
+    <span
+      className="inline-flex items-center justify-center flex-shrink-0 rounded-md"
+      style={{ width: size, height: size, background: bg }}
+      aria-hidden="true"
+    >
+      <span className="font-display font-bold text-white" style={{ fontSize: Math.max(8, size * 0.3), letterSpacing: '0.04em' }}>
+        {initials}
+      </span>
+    </span>
   );
 }
 

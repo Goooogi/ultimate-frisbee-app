@@ -7,7 +7,7 @@
 //
 // Three-layer accordion structure:
 //   Layer 1 — sub-apps: GAMES (expandable) · PLAYBOOK (link) · FANTASY (disabled)
-//   Layer 2 — leagues: UFA (expandable) · USAU (expandable) · WUL/PUL (disabled)
+//   Layer 2 — leagues: UFA (expandable) · USAU (expandable) · WUL (direct link) · PUL (disabled)
 //   Layer 3 — sub-pages: Scores · Schedule · Teams · Players (links with ?league=qs)
 //
 // Accordion default-open state: opens to the branch that matches the current URL
@@ -39,9 +39,14 @@ interface MegaLeague {
 const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'ufa',  label: 'UFA',  real: true  },
   { id: 'usau', label: 'USAU', real: true  },
-  { id: 'wul',  label: 'WUL',  real: false },
-  { id: 'pul',  label: 'PUL',  real: false },
+  { id: 'pul',  label: 'PUL',  real: true  }, // real=true: expandable with 4 sub-page links
+  { id: 'wul',  label: 'WUL',  real: false }, // WUL: direct link only
 ];
+
+// WUL navigates directly. PUL is now expandable (real=true above).
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
+  wul: '/wul/teams',
+};
 
 interface GamesNavItem {
   label: string;
@@ -154,7 +159,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const initialGamesOpen = activeApp === 'games';
   // Only open the league accordion if we're already in a real games page.
   const initialLeagueOpen: MegaLeagueId | null = initialGamesOpen
-    ? (urlLeague === 'usau' ? 'usau' : 'ufa')
+    ? (urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' ? 'pul' : 'ufa')
     : null;
 
   const [gamesOpen, setGamesOpen] = useState(initialGamesOpen);
@@ -168,7 +173,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
       const league = searchParams.get('league')
         ? parseLeagueParam(searchParams.get('league'))
         : (inferLeagueFromPath(pathname) ?? 'ufa');
-      setOpenLeague(league === 'usau' ? 'usau' : 'ufa');
+      setOpenLeague(league === 'usau' ? 'usau' : league === 'pul' ? 'pul' : 'ufa');
     } else {
       setOpenLeague(null);
     }
@@ -212,6 +217,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // ── league qs helper (mirrors GamesDropdown) ────────────────────────────
   function leagueQsFor(lid: MegaLeagueId): string {
     if (lid === 'usau') return buildLeagueQs('usau', urlDivision);
+    if (lid === 'pul') return buildLeagueQs('pul', null);
     return buildLeagueQs('ufa', urlDivision);
   }
 
@@ -334,6 +340,25 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
               {MEGA_LEAGUES.map((league) => {
                 const isDisabled = !league.real;
                 const isLeagueOpen = openLeague === league.id;
+                const directHref = MEGA_LEAGUE_DIRECT_HREFS[league.id];
+
+                // Direct-link league (WUL) — navigates on tap, no sub-page expand.
+                if (directHref) {
+                  return (
+                    <Link
+                      key={league.id}
+                      href={directHref}
+                      onClick={onClose}
+                      className={[
+                        subRowBase,
+                        'text-ink hover:bg-surface no-underline w-full',
+                        'border-b border-hairline last:border-0',
+                      ].join(' ')}
+                    >
+                      {league.label}
+                    </Link>
+                  );
+                }
 
                 if (isDisabled) {
                   return (

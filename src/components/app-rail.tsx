@@ -44,6 +44,8 @@ import { activeTeams } from '@/lib/ufa/teams';
 import { TeamLogo } from '@/components/team-logo';
 // Shape returned by listTopUsauTeams (lightweight mega-menu preview).
 type TopUsauTeam = { id: string; name: string; nationalsPlacement: number | null };
+// Shape returned by listTopPulTeams.
+type TopPulTeam = { id: string; name: string; city: string; logoUrl: string | null };
 
 // ─── Sub-app definitions ──────────────────────────────────────────────────────
 
@@ -125,9 +127,15 @@ interface MegaLeague {
 const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'ufa',  label: 'UFA',  real: true  },
   { id: 'usau', label: 'USAU', real: true  },
-  { id: 'wul',  label: 'WUL',  real: false },
-  { id: 'pul',  label: 'PUL',  real: false },
+  { id: 'pul',  label: 'PUL',  real: true  }, // real=true: two-pane preview with sub-page links + team grid
+  { id: 'wul',  label: 'WUL',  real: false }, // WUL: direct link only
 ];
+
+// WUL has a real page but isn't part of the league-switching system.
+// Tapping WUL navigates directly; PUL now shows the full two-pane preview.
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
+  wul: '/wul/teams',
+};
 
 // ─── UFA division order + labels ──────────────────────────────────────────────
 
@@ -182,7 +190,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   // NOT navigate. Hovering a league row sets it; clicking a sub-page/team link
   // navigates (with that league's qs) and closes the menu.
   const [previewLeague, setPreviewLeague] = useState<MegaLeagueId>(
-    urlLeague === 'usau' ? 'usau' : 'ufa',
+    urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' ? 'pul' : 'ufa',
   );
 
   // USAU top-16 teams — fetched lazily once when the dropdown first opens (or
@@ -194,8 +202,19 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   const [usauError, setUsauError] = useState(false);
   const usauFetchedRef = useRef(false); // guard against double-fetch
 
-  const usauMountedRef = useRef(true);
-  useEffect(() => () => { usauMountedRef.current = false; }, []);
+  // PUL teams — same lazy-fetch + session-cache pattern as USAU.
+  const [pulTeams, setPulTeams] = useState<TopPulTeam[] | null>(null);
+  const [pulLoading, setPulLoading] = useState(false);
+  const [pulError, setPulError] = useState(false);
+  const pulFetchedRef = useRef(false);
+
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
+
+  // Keep a single mounted ref shared by both fetch callbacks so we don't need
+  // two separate refs (usauMountedRef / pulMountedRef). The component is
+  // mounted once for the entire app session so this is safe.
+  const usauMountedRef = mountedRef;
 
   const fetchUsauTeams = useCallback(async () => {
     if (usauFetchedRef.current) return;
@@ -212,23 +231,37 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
     } finally {
       if (usauMountedRef.current) setUsauLoading(false);
     }
+  }, [usauMountedRef]);
+
+  const fetchPulTeams = useCallback(async () => {
+    if (pulFetchedRef.current) return;
+    pulFetchedRef.current = true;
+    setPulLoading(true);
+    try {
+      const { listTopPulTeams } = await import('@/lib/pul/data');
+      const teams = await listTopPulTeams();
+      if (mountedRef.current) setPulTeams(teams);
+    } catch {
+      if (mountedRef.current) setPulError(true);
+    } finally {
+      if (mountedRef.current) setPulLoading(false);
+    }
   }, []);
 
   const isActive = activeApp === 'games';
 
   // Reset preview league to match URL when the dropdown opens.
   const handleOpen = useCallback(() => {
-    setPreviewLeague(urlLeague === 'usau' ? 'usau' : 'ufa');
+    setPreviewLeague(urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' ? 'pul' : 'ufa');
     setOpen(true);
   }, [urlLeague]);
 
-  // Lazily trigger USAU fetch when dropdown opens with USAU previewed, or when
-  // user hovers USAU for the first time.
+  // Lazily trigger USAU/PUL fetch when dropdown opens with that league previewed,
+  // or when the user first hovers that league row.
   useEffect(() => {
-    if (open && previewLeague === 'usau') {
-      fetchUsauTeams();
-    }
-  }, [open, previewLeague, fetchUsauTeams]);
+    if (open && previewLeague === 'usau') fetchUsauTeams();
+    if (open && previewLeague === 'pul') fetchPulTeams();
+  }, [open, previewLeague, fetchUsauTeams, fetchPulTeams]);
 
   // Close on Esc.
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -259,9 +292,9 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   }, [pathname]);
 
   // Build the league qs for a given mega-league's sub-page links.
-  // WUL/PUL are not real LeagueIds so we only build qs for ufa/usau.
   function leagueQsFor(lid: MegaLeagueId): string {
     if (lid === 'usau') return buildLeagueQs('usau', urlDivision);
+    if (lid === 'pul') return buildLeagueQs('pul', null);
     return buildLeagueQs('ufa', urlDivision);
   }
 
@@ -334,6 +367,44 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
               {MEGA_LEAGUES.map((league) => {
                 const isPreview = previewLeague === league.id;
                 const isDisabled = !league.real;
+                const directHref = MEGA_LEAGUE_DIRECT_HREFS[league.id];
+
+                // Direct-link league (e.g. WUL) — navigates on click rather
+                // than previewing sub-pages in the right pane. Styled like a
+                // real league row so it doesn't read as disabled.
+                if (directHref) {
+                  return (
+                    <Link
+                      key={league.id}
+                      href={directHref}
+                      role="menuitem"
+                      onClick={() => setOpen(false)}
+                      className={[
+                        'w-full flex items-center justify-between px-4 py-2.5 text-left',
+                        'text-[12px] font-bold tracking-[0.12em] uppercase font-tight',
+                        'transition-colors duration-150 no-underline',
+                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+                        'text-ink hover:bg-surface',
+                      ].join(' ')}
+                    >
+                      {league.label}
+                      <svg
+                        className="w-2.5 h-2.5 flex-shrink-0 opacity-40"
+                        viewBox="0 0 10 10"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path
+                          d="M3.5 2L6.5 5L3.5 8"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </Link>
+                  );
+                }
 
                 if (isDisabled) {
                   return (
@@ -361,10 +432,12 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                     onMouseEnter={() => {
                       setPreviewLeague(league.id);
                       if (league.id === 'usau') fetchUsauTeams();
+                      if (league.id === 'pul') fetchPulTeams();
                     }}
                     onFocus={() => {
                       setPreviewLeague(league.id);
                       if (league.id === 'usau') fetchUsauTeams();
+                      if (league.id === 'pul') fetchPulTeams();
                     }}
                     className={[
                       'w-full flex items-center justify-between px-4 py-2.5 text-left',
@@ -402,8 +475,8 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
 
             {/* ── RIGHT: content pane ────────────────────────────────────── */}
             <div className="flex-1 min-w-0 p-4">
-              {/* Sub-page link row — always visible for real leagues */}
-              {(previewLeague === 'ufa' || previewLeague === 'usau') && (
+              {/* Sub-page link row — visible for all real leagues */}
+              {(previewLeague === 'ufa' || previewLeague === 'usau' || previewLeague === 'pul') && (
                 <div className="flex items-center gap-1 mb-4 pb-3 border-b border-hairline">
                   {GAMES_NAV_ITEMS.map((item) => {
                     const active = isGamesNavActive(pathname, item);
@@ -521,15 +594,63 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                 </div>
               )}
 
-              {/* ── WUL / PUL: coming soon ──────────────────────────── */}
-              {(previewLeague === 'wul' || previewLeague === 'pul') && (
+              {/* ── PUL: 13 teams in a 2-column grid (lazy fetch) ─────── */}
+              {previewLeague === 'pul' && (
+                <div>
+                  <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">
+                    Teams
+                  </p>
+                  {pulLoading && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      {Array.from({ length: 8 }).map((_, i) => (
+                        <div key={i} className="h-7 rounded bg-surface animate-pulse" />
+                      ))}
+                    </div>
+                  )}
+                  {!pulLoading && pulError && (
+                    <div className="py-3 text-[12px] text-muted">
+                      Couldn&apos;t load teams —{' '}
+                      <Link
+                        href="/teams?league=pul"
+                        onClick={() => setOpen(false)}
+                        className="text-ink underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                      >
+                        browse all
+                      </Link>
+                    </div>
+                  )}
+                  {!pulLoading && !pulError && pulTeams && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                      {pulTeams.map((team) => (
+                        <Link
+                          key={team.id}
+                          href={`/pul/teams/${team.id}`}
+                          role="menuitem"
+                          onClick={() => setOpen(false)}
+                          className={[
+                            'flex items-center gap-2 px-1 py-1 rounded',
+                            'text-[12px] font-medium font-tight text-ink',
+                            'transition-colors duration-150 no-underline',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                            'hover:bg-surface',
+                          ].join(' ')}
+                        >
+                          <PulTeamLogoMini logoUrl={team.logoUrl} city={team.city} />
+                          <span className="truncate">{team.city}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── WUL: navigate directly (directHref handles it) ─────── */}
+              {previewLeague === 'wul' && (
                 <div className="flex items-center justify-center py-8 text-center">
                   <p className="text-[13px] text-muted leading-relaxed">
-                    Coming soon —{' '}
-                    <span className="font-bold text-ink">
-                      {previewLeague === 'wul' ? 'WUL' : 'PUL'}
-                    </span>{' '}
-                    support is on the way.
+                    Click{' '}
+                    <span className="font-bold text-ink">WUL</span>{' '}
+                    in the left rail to view the teams page.
                   </p>
                 </div>
               )}
@@ -538,6 +659,39 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── PUL team logo mini — used in the mega-menu team grid ────────────────────
+// A lightweight inline renderer that doesn't import PulTeamLogo (to avoid
+// pulling in the full component just for a 20px tile). Uses a white tile for
+// logo URLs and a dark monogram square for null — matching PulTeamLogo's look.
+
+function PulTeamLogoMini({ logoUrl, city }: { logoUrl: string | null; city: string }) {
+  const size = 20;
+  if (logoUrl) {
+    return (
+      <span
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-sm bg-white border border-[rgb(var(--ink)/0.08)]"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.84, height: size * 0.84 }} />
+      </span>
+    );
+  }
+  const initials = city.split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 2).toUpperCase();
+  return (
+    <span
+      className="inline-flex items-center justify-center flex-shrink-0 rounded-sm"
+      style={{ width: size, height: size, background: '#1d2535' }}
+      aria-hidden="true"
+    >
+      <span className="font-display font-bold text-white" style={{ fontSize: 7, letterSpacing: '0.03em' }}>
+        {initials}
+      </span>
+    </span>
   );
 }
 

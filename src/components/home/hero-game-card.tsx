@@ -166,7 +166,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
           </div>
         </div>
 
-        {/* score block — gap-4 on mobile keeps the 3-col layout within 320px */}
+        {/* matchup block — gap-4 on mobile keeps the 3-col layout within 320px */}
         <div className="grid grid-cols-[1fr_auto_1fr] gap-4 sm:gap-7 items-center my-3">
           <TeamColumn
             slug={away.id}
@@ -177,13 +177,19 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
             winner={state.awayWin}
             loser={state.homeWin}
             showScore={state.hasScore || state.isLive || state.isFinal}
+            isUpcoming={state.isUpcoming}
           />
-          <div
-            className="font-display italic font-semibold text-[22px]"
-            style={{ color: STADIUM.textMuted }}
-          >
-            vs
-          </div>
+          {/* "vs" only for upcoming — live/final let the scores carry the separator */}
+          {state.isUpcoming ? (
+            <div
+              className="font-display italic font-semibold text-[22px]"
+              style={{ color: STADIUM.textMuted }}
+            >
+              vs
+            </div>
+          ) : (
+            <div aria-hidden="true" />
+          )}
           <TeamColumn
             slug={home.id}
             abbr={home.abbr}
@@ -194,6 +200,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
             winner={state.homeWin}
             loser={state.awayWin}
             showScore={state.hasScore || state.isLive || state.isFinal}
+            isUpcoming={state.isUpcoming}
           />
         </div>
 
@@ -250,6 +257,7 @@ function TeamColumn({
   winner,
   loser,
   showScore,
+  isUpcoming = false,
 }: {
   slug: string;
   abbr: string;
@@ -260,6 +268,7 @@ function TeamColumn({
   winner: boolean;
   loser: boolean;
   showScore: boolean;
+  isUpcoming?: boolean;
 }) {
   const meta = teamMeta(slug);
   return (
@@ -276,13 +285,24 @@ function TeamColumn({
           </div>
         </div>
       </div>
+      {/* Score block: only render when there is an actual score to show.
+          Upcoming games have no score — suppress the block entirely so there
+          is no dead 52px "–" placeholder eating vertical space. */}
+      {showScore && (
+        <div
+          className="font-display italic font-bold text-[52px] sm:text-[72px] lg:text-[96px] leading-[0.95] tracking-[-0.04em] tabular"
+          style={{ color: winner ? ACCENT : STADIUM.text }}
+        >
+          {score}
+        </div>
+      )}
+      {/* Team name: hidden on mobile for upcoming games (abbr+record already
+          identifies the team; no score = nothing to anchor the name below).
+          Always visible on sm+ and whenever there's a score to show. */}
       <div
-        className="font-display italic font-bold text-[52px] sm:text-[72px] lg:text-[96px] leading-[0.95] tracking-[-0.04em] tabular"
-        style={{ color: winner ? ACCENT : STADIUM.text }}
+        className={`font-sans text-[11px] font-medium${isUpcoming ? ' hidden sm:block' : ''}`}
+        style={{ color: STADIUM.textMuted }}
       >
-        {showScore ? score : '–'}
-      </div>
-      <div className="font-sans text-[11px] font-medium" style={{ color: STADIUM.textMuted }}>
         {name}
       </div>
     </div>

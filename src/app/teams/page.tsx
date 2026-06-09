@@ -15,6 +15,8 @@ import { TeamLogo } from '@/components/team-logo';
 import { UsauTeamsRanked } from '@/components/usau/usau-teams-ranked';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import { PulTeamLogo } from '@/components/pul-team-logo';
+import { listPulTeams, type PulTeam } from '@/lib/pul/data';
 import {
   parseDivisionParam,
   parseLeagueParam,
@@ -29,7 +31,7 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; league?: string; div?: string; level?: string };
+  searchParams: { year?: string; league?: string; div?: string; level?: string; season?: string };
 }
 
 const DIVISIONS = ['East', 'Central', 'South', 'West'] as const;
@@ -37,6 +39,27 @@ type Division = (typeof DIVISIONS)[number];
 
 export default async function TeamsPage({ searchParams }: Props) {
   const league = parseLeagueParam(searchParams.league);
+
+  // PUL branch: 13 PUL teams in a card grid. Season-agnostic team list.
+  if (league === 'pul') {
+    const teams = await listPulTeams().catch((): PulTeam[] => []);
+    return (
+      <PageShell
+        title="Teams"
+        eyebrow="PUL · Premier Ultimate League"
+      >
+        {teams.length === 0 ? (
+          <EmptyState message="Could not load PUL teams. Try refreshing the page." />
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {teams.map((team) => (
+              <PulTeamCard key={team.id} team={team} />
+            ))}
+          </div>
+        )}
+      </PageShell>
+    );
+  }
 
   // USAU branch: ranked team list. No year selector (USAU's notion of
   // year is implicit in the source data, last-completed-Nationals).
@@ -258,5 +281,31 @@ function EmptyState({ message }: { message: string }) {
       </div>
       <div className="text-[13px] text-faint max-w-sm">{message}</div>
     </div>
+  );
+}
+
+// ── PUL team card ─────────────────────────────────────────────────────────────
+
+function PulTeamCard({ team }: { team: PulTeam }) {
+  return (
+    <Link
+      href={`/pul/teams/${team.id}`}
+      className={[
+        'flex flex-col items-center gap-3 bg-surface border border-border p-4 rounded-md',
+        'text-ink no-underline',
+        'hover:border-[rgb(var(--ink)/0.3)] hover:bg-surface-hi transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+      ].join(' ')}
+    >
+      <PulTeamLogo team={team} size={56} />
+      <div className="text-center min-w-0 w-full">
+        <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight truncate">
+          {team.city}
+        </p>
+        <p className="text-[15px] font-bold font-tight text-ink leading-tight truncate mt-0.5">
+          {team.mascot}
+        </p>
+      </div>
+    </Link>
   );
 }

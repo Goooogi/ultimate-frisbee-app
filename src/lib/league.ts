@@ -7,7 +7,7 @@
 
 import type { LeagueId } from '@/lib/data';
 
-const VALID: LeagueId[] = ['ufa', 'usau', 'intl'];
+const VALID: LeagueId[] = ['ufa', 'usau', 'pul', 'intl'];
 
 export const DEFAULT_LEAGUE: LeagueId = 'ufa';
 
@@ -107,7 +107,12 @@ export function parseLeagueParam(value: string | null | undefined): LeagueId {
 export function inferLeagueFromPath(pathname: string | null | undefined): LeagueId | null {
   if (!pathname) return null;
   if (pathname.startsWith('/usau/')) return 'usau';
-  // /players/{id} — UUID shape implies USAU player; non-UUID is UFA.
+  // /players/{id} — UUID shape could be either a USAU player or a PUL player
+  // (both leagues use v4 UUIDs as player ids). We return 'usau' here so the
+  // nav tab highlights correctly for the common case; the actual anchor
+  // disambiguation (USAU vs PUL) is handled inside getUnifiedPlayerProfile,
+  // which tries USAU first and falls back to PUL on a miss. A PUL-uuid link
+  // will resolve correctly even though this function returns 'usau'.
   const playerMatch = pathname.match(/^\/players\/([^/?#]+)/);
   if (playerMatch) {
     if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(playerMatch[1])) {

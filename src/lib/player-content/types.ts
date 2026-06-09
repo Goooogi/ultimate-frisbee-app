@@ -1,12 +1,15 @@
 // Player content — user-uploaded photos, videos, and external video links
 // attached to a player profile. See migration player_content_and_admin_role.
 //
-// player_kind discriminates the FK target since UFA and USAU live in
+// player_kind discriminates the FK target since UFA, USAU and PUL live in
 // different sources:
 //   - 'ufa'  → player_ref = UFA slug (string id used in /players/{slug})
 //   - 'usau' → player_ref = usau_players.id (uuid)
+//   - 'pul'  → player_ref = pul_players.id (uuid; most-recent season's row)
+// player_kind is a plain text column (no DB CHECK), so adding a value here
+// needs no migration.
 
-export type PlayerKind = 'ufa' | 'usau';
+export type PlayerKind = 'ufa' | 'usau' | 'pul';
 export type PlayerContentKind = 'image' | 'video' | 'video_link' | 'link';
 export type PlayerContentStatus = 'pending' | 'approved' | 'rejected';
 

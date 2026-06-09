@@ -292,11 +292,49 @@ export async function acceptInvite(token: string): Promise<{
   role: TeamRole;
 }> {
   const supabase = createClient();
-  const { data, error } = await supabase.rpc('accept_team_invite', { p_token: token });
-  if (error) throw error;
-  const row = (data as { team_id: string; team_name: string; role: TeamRole }[])[0];
-  if (!row) throw new Error('Invite could not be accepted.');
-  return { teamID: row.team_id, teamName: row.team_name, role: row.role };
+
+  // Right after signup the user object can flip to truthy a beat BEFORE the
+  // session JWT is attached to the supabase client's request headers. If the
+  // RPC fires in that window it runs as the `anon` role (which lacks EXECUTE on
+  // accept_team_invite) → "permission denied for function" → the accept fails
+  // and the new member is never added. Wait for a real session first, then
+  // retry the RPC a couple of times on transient auth/permission errors.
+  await waitForSession(supabase);
+
+  let lastError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { data, error } = await supabase.rpc('accept_team_invite', { p_token: token });
+    if (!error) {
+      const row = (data as { team_id: string; team_name: string; role: TeamRole }[])[0];
+      if (!row) throw new Error('Invite could not be accepted.');
+      return { teamID: row.team_id, teamName: row.team_name, role: row.role };
+    }
+    lastError = error;
+    // Only retry the transient "not authenticated yet" class of error; real
+    // errors (expired / wrong email / already used) should fail fast.
+    const msg = (error.message ?? '').toLowerCase();
+    const transient =
+      msg.includes('permission denied') ||
+      msg.includes('not authenticated') ||
+      error.code === '42501';
+    if (!transient) throw error;
+    await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    // Refresh the session before the next try.
+    await supabase.auth.getSession();
+  }
+  throw lastError ?? new Error('Invite could not be accepted.');
+}
+
+/** Wait (up to ~2s) for an authenticated session so RPCs run as `authenticated`,
+ *  not `anon`. Returns once a session exists or the timeout elapses. */
+async function waitForSession(
+  supabase: ReturnType<typeof createClient>,
+): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
 }
 
 // ─── plays ─────────────────────────────────────────────────────────────────

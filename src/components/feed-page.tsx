@@ -49,6 +49,8 @@ function FeedPageInner({ games, today, usauEvent }: FeedPageProps) {
           <UfaFeed games={games} today={today} counts={counts} />
         ) : league === 'usau' ? (
           <UsauFeed event={usauEvent} />
+        ) : league === 'pul' ? (
+          <PulComingSoon page="scores" />
         ) : null}
       </div>
     </AppShell>
@@ -331,6 +333,30 @@ function EmptyState() {
       <div className="text-[13px] text-faint max-w-sm">
         The UFA isn&rsquo;t showing anything on the slate right now.
         Check back during the regular season (April&ndash;August).
+      </div>
+    </div>
+  );
+}
+
+function PulComingSoon({ page }: { page: 'scores' | 'schedule' }) {
+  const label = page === 'scores' ? 'game scores' : 'schedule';
+  return (
+    <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
+      <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight mb-3">
+        PUL · Premier Ultimate League
+      </div>
+      <div className="text-[18px] font-bold font-tight text-ink mb-2 leading-tight">
+        {page === 'scores' ? 'Game scores coming soon' : 'Schedule coming soon'}
+      </div>
+      <div className="text-[13px] text-muted font-tight max-w-[480px] leading-relaxed">
+        PUL {label} aren&rsquo;t available yet. Player and team stats are available now under{' '}
+        <Link href="/teams?league=pul" className="text-ink underline underline-offset-2 hover:text-accent transition-colors">
+          Teams
+        </Link>{' '}
+        and{' '}
+        <Link href="/players?league=pul" className="text-ink underline underline-offset-2 hover:text-accent transition-colors">
+          Players
+        </Link>.
       </div>
     </div>
   );
