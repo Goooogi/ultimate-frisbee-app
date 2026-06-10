@@ -38,6 +38,7 @@ import {
 import { FIELD_GEOM } from '@/lib/playbook/field';
 import { DEFAULT_STEP_MS } from '@/lib/playbook/types';
 import {
+  copyPlay as apiCopyPlay,
   createPlay as apiCreatePlay,
   deletePlay as apiDeletePlay,
   listMyTeams,
@@ -65,6 +66,11 @@ import type {
 
 type Scope = { kind: 'personal' } | { kind: 'team'; teamID: string };
 
+// A place a play can be copied to, with a human label for the menu.
+export type CopyDestination =
+  | { kind: 'personal'; label: string }
+  | { kind: 'team'; teamID: string; label: string };
+
 const SAVE_DEBOUNCE_MS = 600;
 
 export function PlaybookApp() {
@@ -88,6 +94,9 @@ export function PlaybookApp() {
   // Save state — surfaces "saving…" / "saved just now" / "save failed".
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastError, setLastError] = useState<string | null>(null);
+  // Transient confirmation after a play is copied to another playbook.
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
+  const copyNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [tool, setTool] = useState<DrawTool>('cursor');
@@ -400,6 +409,52 @@ export function PlaybookApp() {
     [plays, currentID],
   );
 
+  // Copy a play into another playbook (personal ↔ team, team → team). The
+  // original stays put. If the destination is the scope we're currently
+  // viewing, the copy appears at the top of the list immediately; otherwise we
+  // just confirm where it went.
+  const handleCopyPlay = useCallback(
+    async (id: string, target: CopyDestination) => {
+      const source = plays.find((p) => p.id === id);
+      try {
+        setLastError(null);
+        const created = await apiCopyPlay(
+          id,
+          target.kind === 'personal'
+            ? { scope: 'personal' }
+            : { scope: 'team', teamID: target.teamID },
+        );
+
+        const destName = target.label;
+
+        // Show it in the list now if we're viewing the destination scope.
+        const targetIsCurrentScope =
+          (target.kind === 'personal' && scope.kind === 'personal') ||
+          (target.kind === 'team' &&
+            scope.kind === 'team' &&
+            target.teamID === scope.teamID);
+        if (targetIsCurrentScope) {
+          setPlays((all) => [created, ...all]);
+        }
+
+        if (copyNoticeTimer.current) clearTimeout(copyNoticeTimer.current);
+        setCopyNotice(`Copied "${source?.name || 'play'}" to ${destName}.`);
+        copyNoticeTimer.current = setTimeout(() => setCopyNotice(null), 4000);
+      } catch (err) {
+        setLastError(formatSupabaseError(err, 'Copy play'));
+        console.error('[playbook-app] copyPlay failed', err);
+      }
+    },
+    [plays, scope],
+  );
+
+  useEffect(
+    () => () => {
+      if (copyNoticeTimer.current) clearTimeout(copyNoticeTimer.current);
+    },
+    [],
+  );
+
   // ── playback ─────────────────────────────────────────────────────────────
   const playbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearTimer = useCallback(() => {
@@ -486,6 +541,36 @@ export function PlaybookApp() {
     [handleSwitchScope],
   );
 
+  // Destinations a play can be copied to: the personal playbook plus every team
+  // the user can edit (owner/coach). Members' teams are omitted because RLS
+  // would reject inserting a play there. Excludes the scope being copied FROM
+  // is handled per-play in the menu (can't copy to where it already lives).
+  const copyDestinations = useMemo<CopyDestination[]>(() => {
+    const editableTeams = teams.filter(
+      (t) => t.role === 'owner' || t.role === 'coach',
+    );
+    return [
+      { kind: 'personal', label: 'My Playbook' },
+      ...editableTeams.map((t) => ({
+        kind: 'team' as const,
+        teamID: t.id,
+        label: t.name,
+      })),
+    ];
+  }, [teams]);
+
+  // Filter out the current scope so the menu never offers "copy to where it
+  // already is". (Plays in the list all share the current scope.)
+  const copyTargetsForCurrentScope = useMemo<CopyDestination[]>(
+    () =>
+      copyDestinations.filter((d) =>
+        scope.kind === 'personal'
+          ? d.kind !== 'personal'
+          : !(d.kind === 'team' && d.teamID === scope.teamID),
+      ),
+    [copyDestinations, scope],
+  );
+
   // Sidebar plays list is the same in every render path — pre-compute it
   // so loading / empty / editor states can share it.
   const sidebarList = (
@@ -495,6 +580,8 @@ export function PlaybookApp() {
       onSelect={handleSelectPlay}
       onCreate={handleOpenCreateDialog}
       onDelete={handleDeletePlay}
+      copyTargets={copyTargetsForCurrentScope}
+      onCopy={handleCopyPlay}
     />
   );
 
@@ -518,7 +605,6 @@ export function PlaybookApp() {
         teams={teams}
         currentTeamID={currentTeamID}
         onSwitchTeam={handleShellSwitchTeam}
-        pageTitle="Plays · Editor"
         playsNavExtras={sidebarList}
       >
         <div className="px-4 pt-16 pb-12 lg:px-6 lg:pt-24 lg:pb-12">
@@ -778,7 +864,6 @@ export function PlaybookApp() {
       teams={teams}
       currentTeamID={currentTeamID}
       onSwitchTeam={handleShellSwitchTeam}
-      pageTitle={scope.kind === 'personal' ? 'Personal · Editor' : `${currentTeam?.shortName ?? 'Team'} · Editor`}
       playsNavExtras={sidebarList}
     >
       <div className="px-2 pt-2 pb-6 md:px-3 lg:px-6 lg:pt-3 lg:pb-3">
@@ -789,6 +874,15 @@ export function PlaybookApp() {
               className="mb-3 text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
             >
               {lastError}
+            </div>
+          )}
+
+          {copyNotice && (
+            <div
+              role="status"
+              className="mb-3 text-[12px] font-medium font-tight text-ink bg-accent/10 border border-accent/30 rounded px-3 py-2"
+            >
+              {copyNotice}
             </div>
           )}
 
@@ -821,6 +915,8 @@ export function PlaybookApp() {
                   onSelect={handleSelectPlay}
                   onCreate={handleOpenCreateDialog}
                   onDelete={handleDeletePlay}
+                  copyTargets={copyTargetsForCurrentScope}
+                  onCopy={handleCopyPlay}
                 />
               </div>
             </details>

@@ -41,7 +41,11 @@ import {
   parseLeagueParam,
 } from '@/lib/league';
 import { activeTeams } from '@/lib/ufa/teams';
+import { allWulTeams, type WulTeamMeta } from '@/lib/wul/teams';
 import { TeamLogo } from '@/components/team-logo';
+
+// WUL teams are static — build the grid list once at module load.
+const WUL_TEAMS_LIST: WulTeamMeta[] = allWulTeams();
 // Shape returned by listTopUsauTeams (lightweight mega-menu preview).
 type TopUsauTeam = { id: string; name: string; nationalsPlacement: number | null };
 // Shape returned by listTopPulTeams.
@@ -78,6 +82,8 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/g/',       'games'],
   ['/g',        'games'],
   ['/usau',     'games'],
+  ['/pul',      'games'],
+  ['/wul',      'games'],
 ];
 
 function detectSubApp(pathname: string): SubApp | null {
@@ -128,14 +134,21 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'ufa',  label: 'UFA',  real: true  },
   { id: 'usau', label: 'USAU', real: true  },
   { id: 'pul',  label: 'PUL',  real: true  }, // real=true: two-pane preview with sub-page links + team grid
-  { id: 'wul',  label: 'WUL',  real: false }, // WUL: direct link only
+  { id: 'wul',  label: 'WUL',  real: true  }, // real=true: preview pane with team grid (teams-only — no scores/schedule/players yet)
 ];
 
-// WUL has a real page but isn't part of the league-switching system.
-// Tapping WUL navigates directly; PUL now shows the full two-pane preview.
-const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
-  wul: '/wul/teams',
-};
+// Direct-link leagues navigate on click instead of showing a preview pane.
+// (None currently — WUL was promoted to a full preview league.)
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
+
+// Pick which league the dropdown previews when it opens. WUL/PUL have their own
+// /wul,/pul routes (not a ?league= param), so detect them by path first.
+function initialPreviewLeague(pathname: string, urlLeague: string): MegaLeagueId {
+  if (pathname.startsWith('/wul')) return 'wul';
+  if (pathname.startsWith('/pul') || urlLeague === 'pul') return 'pul';
+  if (urlLeague === 'usau') return 'usau';
+  return 'ufa';
+}
 
 // ─── UFA division order + labels ──────────────────────────────────────────────
 
@@ -190,7 +203,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   // NOT navigate. Hovering a league row sets it; clicking a sub-page/team link
   // navigates (with that league's qs) and closes the menu.
   const [previewLeague, setPreviewLeague] = useState<MegaLeagueId>(
-    urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' ? 'pul' : 'ufa',
+    initialPreviewLeague(pathname, urlLeague),
   );
 
   // USAU top-16 teams — fetched lazily once when the dropdown first opens (or
@@ -252,9 +265,9 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
 
   // Reset preview league to match URL when the dropdown opens.
   const handleOpen = useCallback(() => {
-    setPreviewLeague(urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' ? 'pul' : 'ufa');
+    setPreviewLeague(initialPreviewLeague(pathname, urlLeague));
     setOpen(true);
-  }, [urlLeague]);
+  }, [pathname, urlLeague]);
 
   // Lazily trigger USAU/PUL fetch when dropdown opens with that league previewed,
   // or when the user first hovers that league row.
@@ -322,7 +335,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
             : 'text-ink border-b-2 border-transparent pb-[2px]',
         ].join(' ')}
       >
-        GAMES
+        The League
         {/* Inline SVG chevron — rotates when open */}
         <svg
           className={[
@@ -505,6 +518,30 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                 </div>
               )}
 
+              {/* WUL sub-page row — only Teams exists today (no scores/
+                  schedule/players until the league's API is available). */}
+              {previewLeague === 'wul' && (
+                <div className="flex items-center gap-1 mb-4 pb-3 border-b border-hairline">
+                  <Link
+                    href="/wul/teams"
+                    role="menuitem"
+                    aria-current={pathname.startsWith('/wul/teams') ? 'page' : undefined}
+                    onClick={() => setOpen(false)}
+                    className={[
+                      'px-3 py-1.5 rounded',
+                      'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
+                      'transition-colors duration-150 no-underline',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                      pathname.startsWith('/wul/teams')
+                        ? 'text-ink bg-surface'
+                        : 'text-ink hover:bg-surface',
+                    ].join(' ')}
+                  >
+                    Teams
+                  </Link>
+                </div>
+              )}
+
               {/* ── UFA: 4-division team grid ──────────────────────────── */}
               {previewLeague === 'ufa' && (
                 <div className="grid grid-cols-4 gap-x-4 gap-y-0">
@@ -644,14 +681,34 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                 </div>
               )}
 
-              {/* ── WUL: navigate directly (directHref handles it) ─────── */}
+              {/* ── WUL: 8 franchises in a 2-column grid (static) ─────────
+                  No team-detail routes exist yet, so every tile (and the
+                  Teams sub-link above) lands on /wul/teams. */}
               {previewLeague === 'wul' && (
-                <div className="flex items-center justify-center py-8 text-center">
-                  <p className="text-[13px] text-muted leading-relaxed">
-                    Click{' '}
-                    <span className="font-bold text-ink">WUL</span>{' '}
-                    in the left rail to view the teams page.
+                <div>
+                  <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">
+                    Teams
                   </p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                    {WUL_TEAMS_LIST.map((team) => (
+                      <Link
+                        key={team.id}
+                        href="/wul/teams"
+                        role="menuitem"
+                        onClick={() => setOpen(false)}
+                        className={[
+                          'flex items-center gap-2 px-1 py-1 rounded',
+                          'text-[12px] font-medium font-tight text-ink',
+                          'transition-colors duration-150 no-underline',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                          'hover:bg-surface',
+                        ].join(' ')}
+                      >
+                        <WulTeamLogoMini team={team} />
+                        <span className="truncate">{team.city}</span>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -690,6 +747,38 @@ function PulTeamLogoMini({ logoUrl, city }: { logoUrl: string | null; city: stri
     >
       <span className="font-display font-bold text-white" style={{ fontSize: 7, letterSpacing: '0.03em' }}>
         {initials}
+      </span>
+    </span>
+  );
+}
+
+// ─── WUL team logo mini — used in the mega-menu team grid ────────────────────
+// Mirrors WulTeamLogo from /wul/teams: a white tile for logo paths, otherwise a
+// colored monogram (team primary bg + accent overlay + white abbreviation).
+
+function WulTeamLogoMini({ team }: { team: WulTeamMeta }) {
+  const size = 20;
+  if (team.logo) {
+    return (
+      <span
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-sm bg-white border border-[rgb(var(--ink)/0.08)]"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={team.logo} alt="" className="object-contain" style={{ width: size * 0.84, height: size * 0.84 }} />
+      </span>
+    );
+  }
+  return (
+    <span
+      className="inline-flex items-center justify-center flex-shrink-0 relative overflow-hidden rounded-sm"
+      style={{ width: size, height: size, background: team.primary }}
+      aria-hidden="true"
+    >
+      <span className="absolute inset-0" style={{ background: team.accent, opacity: 0.15 }} />
+      <span className="relative z-10 font-display font-bold text-white" style={{ fontSize: 7, letterSpacing: '0.03em' }}>
+        {team.abbr}
       </span>
     </span>
   );

@@ -40,13 +40,12 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'ufa',  label: 'UFA',  real: true  },
   { id: 'usau', label: 'USAU', real: true  },
   { id: 'pul',  label: 'PUL',  real: true  }, // real=true: expandable with 4 sub-page links
-  { id: 'wul',  label: 'WUL',  real: false }, // WUL: direct link only
+  { id: 'wul',  label: 'WUL',  real: true  }, // real=true: expandable, but Teams-only (no scores/schedule/players yet)
 ];
 
-// WUL navigates directly. PUL is now expandable (real=true above).
-const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
-  wul: '/wul/teams',
-};
+// Direct-link leagues navigate on tap instead of expanding. (None currently —
+// WUL was promoted to an expandable league with a single Teams sub-link.)
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
 
 interface GamesNavItem {
   label: string;
@@ -60,6 +59,12 @@ const GAMES_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Schedule', href: '/schedule', match: '/schedule' },
   { label: 'Teams',    href: '/teams',    match: '/teams',    aliases: ['/usau/teams'] },
   { label: 'Players',  href: '/players',  match: '/players' },
+];
+
+// WUL only has a Teams page today, so its expand shows just this one link
+// rather than the full Scores/Schedule/Teams/Players set.
+const WUL_NAV_ITEMS: GamesNavItem[] = [
+  { label: 'Teams', href: '/wul/teams', match: '/wul/teams' },
 ];
 
 function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {
@@ -82,6 +87,8 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/g/',       'games'],
   ['/g',        'games'],
   ['/usau',     'games'],
+  ['/pul',      'games'],
+  ['/wul',      'games'],
 ];
 
 function detectSubApp(pathname: string): SubApp | null {
@@ -158,8 +165,12 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
 
   const initialGamesOpen = activeApp === 'games';
   // Only open the league accordion if we're already in a real games page.
+  // WUL/PUL have their own /wul,/pul routes (not a ?league= param), so detect
+  // them by path before falling back to the qs-driven league.
   const initialLeagueOpen: MegaLeagueId | null = initialGamesOpen
-    ? (urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' ? 'pul' : 'ufa')
+    ? (pathname.startsWith('/wul')
+        ? 'wul'
+        : urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' || pathname.startsWith('/pul') ? 'pul' : 'ufa')
     : null;
 
   const [gamesOpen, setGamesOpen] = useState(initialGamesOpen);
@@ -170,10 +181,16 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     const app = detectSubApp(pathname);
     setGamesOpen(app === 'games');
     if (app === 'games') {
-      const league = searchParams.get('league')
-        ? parseLeagueParam(searchParams.get('league'))
-        : (inferLeagueFromPath(pathname) ?? 'ufa');
-      setOpenLeague(league === 'usau' ? 'usau' : league === 'pul' ? 'pul' : 'ufa');
+      if (pathname.startsWith('/wul')) {
+        setOpenLeague('wul');
+      } else if (pathname.startsWith('/pul')) {
+        setOpenLeague('pul');
+      } else {
+        const league = searchParams.get('league')
+          ? parseLeagueParam(searchParams.get('league'))
+          : (inferLeagueFromPath(pathname) ?? 'ufa');
+        setOpenLeague(league === 'usau' ? 'usau' : league === 'pul' ? 'pul' : 'ufa');
+      }
     } else {
       setOpenLeague(null);
     }
@@ -321,7 +338,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             ].join(' ')}
           >
             <span className="flex items-center gap-2">
-              GAMES
+              The League
               {activeApp === 'games' && (
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" aria-hidden="true" />
               )}
@@ -402,12 +419,13 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       />
                     </button>
 
-                    {/* Sub-pages for this league */}
+                    {/* Sub-pages for this league. WUL has its own /wul/*
+                        routes (Teams only) and takes no ?league= qs. */}
                     {isLeagueOpen && (
                       <div className="bg-bg">
-                        {GAMES_NAV_ITEMS.map((item) => {
+                        {(league.id === 'wul' ? WUL_NAV_ITEMS : GAMES_NAV_ITEMS).map((item) => {
                           const active = isGamesNavActive(pathname, item);
-                          const qs = leagueQsFor(league.id);
+                          const qs = league.id === 'wul' ? '' : leagueQsFor(league.id);
                           return (
                             <Link
                               key={item.href}

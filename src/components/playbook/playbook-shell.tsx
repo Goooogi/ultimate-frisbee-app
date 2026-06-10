@@ -23,7 +23,9 @@ interface PlaybookShellProps {
   teams: Team[];
   currentTeamID?: string;
   onSwitchTeam: (id: string) => void;
-  /** Optional override for the top bar's left edge — defaults to the page name. */
+  /** Label for the desktop top bar's left edge. When omitted, the top bar is
+   *  not rendered at all (e.g. the play editor, which already shows the scope
+   *  in the sidebar TeamSwitcher and a breadcrumb in its own header). */
   pageTitle?: string;
   /** Renders indented under the "Plays" nav item on desktop. Use for things
    *  like the saved-plays list — only mounted on lg+. */
@@ -40,7 +42,7 @@ export function PlaybookShell({
   teams,
   currentTeamID,
   onSwitchTeam,
-  pageTitle = 'The Playbook',
+  pageTitle,
   playsNavExtras,
   children,
 }: PlaybookShellProps) {
@@ -137,11 +139,13 @@ export function PlaybookShell({
         {/* Main column. The top bar uses `sticky top-0` so it stays pinned
             inside main's scroll container as the user reads down the page. */}
         <main className="flex-1 overflow-y-auto flex flex-col">
-          <div className="sticky top-0 z-10 flex-shrink-0 h-[56px] px-6 flex items-center border-b border-hairline bg-bg">
-            <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-              {pageTitle}
-            </span>
-          </div>
+          {pageTitle && (
+            <div className="sticky top-0 z-10 flex-shrink-0 h-[56px] px-6 flex items-center border-b border-hairline bg-bg">
+              <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                {pageTitle}
+              </span>
+            </div>
+          )}
           <div className="flex-1">{children}</div>
         </main>
       </div>

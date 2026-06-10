@@ -458,6 +458,102 @@ export async function deletePlay(playID: string): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Copy a play into another scope (personal ↔ team, or team → team). Creates a
+ * brand-new play row in the target scope and duplicates every step. The
+ * original is left untouched.
+ *
+ * Permissions are enforced entirely by RLS:
+ *   - reading the source requires view rights (own it, or member of its team)
+ *   - inserting into the target requires insert rights (it's your personal
+ *     playbook, OR you're an owner/coach of the target team)
+ * A caller without target-insert rights gets a row-level-security error.
+ *
+ * Returns the newly-created play (with its duplicated steps).
+ */
+export async function copyPlay(
+  playID: string,
+  target: { scope: 'personal' } | { scope: 'team'; teamID: string },
+): Promise<Play> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  // 1. Load the source play + its steps (RLS gates this to plays we can view).
+  const { data: src, error: srcErr } = await supabase
+    .from('pb_plays')
+    .select(
+      `
+      name, formation, field_type, video_url,
+      pb_play_steps ( position, duration_ms, note, payload )
+    `,
+    )
+    .eq('id', playID)
+    .single();
+  if (srcErr) throw srcErr;
+  if (!src) throw new Error('Play not found.');
+
+  // 2. Insert the new play in the target scope. Mirrors createPlay's XOR shape;
+  //    created_by must be the caller for the insert policy to pass. Insert is
+  //    called in each branch separately so TS sees a concrete row type per path
+  //    (Supabase's RejectExcessProperties rejects a discriminated union in one
+  //    variable — same reason createPlay/LinkForm split their inserts).
+  const sharedCols = {
+    name: src.name,
+    formation: src.formation,
+    field_type: src.field_type,
+    video_url: src.video_url ?? null,
+    created_by: user.id,
+  };
+  const returnCols =
+    'id, name, formation, field_type, video_url, owner_id, team_id, created_at, updated_at';
+
+  const { data: play, error: playErr } =
+    target.scope === 'personal'
+      ? await supabase
+          .from('pb_plays')
+          .insert({ ...sharedCols, owner_id: user.id, team_id: null })
+          .select(returnCols)
+          .single()
+      : await supabase
+          .from('pb_plays')
+          .insert({ ...sharedCols, owner_id: null, team_id: target.teamID })
+          .select(returnCols)
+          .single();
+  if (playErr) throw playErr;
+
+  // 3. Duplicate the steps into the new play, preserving order.
+  const srcSteps = (src.pb_play_steps ?? [])
+    .slice()
+    .sort((a, b) => a.position - b.position);
+
+  if (srcSteps.length === 0) {
+    return playRowToPlay({ ...play, pb_play_steps: [] });
+  }
+
+  const stepRows = srcSteps.map((s, i) => ({
+    play_id: play.id,
+    position: i,
+    duration_ms: s.duration_ms,
+    note: s.note,
+    payload: s.payload as Json,
+  }));
+
+  const { data: steps, error: stepsErr } = await supabase
+    .from('pb_play_steps')
+    .insert(stepRows)
+    .select('id, position, duration_ms, note, payload');
+  if (stepsErr) {
+    // Roll back the new play so we don't leave a stepless orphan.
+    await supabase.from('pb_plays').delete().eq('id', play.id);
+    throw stepsErr;
+  }
+
+  return playRowToPlay({ ...play, pb_play_steps: steps });
+}
+
 // ─── steps ─────────────────────────────────────────────────────────────────
 
 /**
