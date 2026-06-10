@@ -9,7 +9,7 @@
 //   • Signed-in users see "Accepting…" → success or a labeled error. We
 //     never auto-redirect on failure so the user can see what went wrong.
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
@@ -50,7 +50,20 @@ function Acceptor({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string>('');
 
-  const run = useCallback(async () => {
+  // The auto-run effect can fire more than once for a fresh signup (auth
+  // provider re-renders as the session/profile settle; React Strict Mode
+  // double-invokes effects in dev). The FIRST accept succeeds and marks the
+  // invite accepted; a SECOND call then hits the now-accepted invite and the
+  // RPC raises 'invite already used' — surfacing a false error flash even
+  // though the user actually joined. This ref ensures the auto-run fires at
+  // most once. (The explicit "Try again" button bypasses it via run(true).)
+  const autoRanRef = useRef(false);
+
+  const run = useCallback(async (manual = false) => {
+    if (!manual) {
+      if (autoRanRef.current) return;
+      autoRanRef.current = true;
+    }
     setState('pending');
     setError(null);
     try {
@@ -69,7 +82,8 @@ function Acceptor({ token }: { token: string }) {
     }
   }, [token, router]);
 
-  // Run the accept once we have a user.
+  // Run the accept once we have a user. The ref guard inside run() makes this
+  // idempotent across the extra re-renders a fresh signup triggers.
   useEffect(() => {
     if (!user) return;
     run();
@@ -120,7 +134,7 @@ function Acceptor({ token }: { token: string }) {
               <div className="flex flex-col sm:flex-row gap-2.5 mt-3">
                 <button
                   type="button"
-                  onClick={run}
+                  onClick={() => run(true)}
                   className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
                 >
                   Try again

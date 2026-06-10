@@ -20,14 +20,16 @@ import {
   leaveTeam,
   listMyTeams,
   listPendingInvites,
+  listTeamMembers,
   renameTeam,
   revokeInvite,
   type PendingInvite,
   type Team,
+  type TeamMember,
   type TeamRole,
 } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
-import { sendInviteEmail } from '@/app/playbook/teams/actions';
+import { sendInviteEmail, resendInviteEmail } from '@/app/playbook/teams/actions';
 
 interface ScopeShellProps {
   teams: Team[];
@@ -43,7 +45,13 @@ export function ManageTeams() {
 
   const [showCreate, setShowCreate] = useState(false);
   const [invitingTeamID, setInvitingTeamID] = useState<string | null>(null);
+  const [resendingInviteID, setResendingInviteID] = useState<string | null>(null);
   const [scopeID, setScopeID] = useState<string | undefined>(undefined);
+
+  // Roster expand/collapse state.
+  // rosterCache: undefined = never fetched, 'loading' = in flight, TeamMember[] = loaded.
+  const [expandedRosters, setExpandedRosters] = useState<Set<string>>(new Set());
+  const [rosterCache, setRosterCache] = useState<Record<string, TeamMember[] | 'loading'>>({});
 
   // Re-load teams + pending invites for every owned/coach team.
   const refresh = useCallback(async () => {
@@ -179,6 +187,66 @@ export function ManageTeams() {
     [refresh],
   );
 
+  const handleResendInvite = useCallback(
+    async (inviteID: string, email: string) => {
+      if (resendingInviteID) return; // guard against double-clicks mid-send
+      try {
+        setError(null);
+        setResendingInviteID(inviteID);
+        await resendInviteEmail({ inviteId: inviteID });
+        alert(`Invite re-sent to ${email}.`);
+      } catch (err) {
+        setError(formatSupabaseError(err, 'Resend invite'));
+        console.error('[manage-teams] resendInviteEmail failed', err);
+      } finally {
+        setResendingInviteID(null);
+      }
+    },
+    [resendingInviteID],
+  );
+
+  const handleToggleRoster = useCallback(
+    async (teamID: string) => {
+      const isOpen = expandedRosters.has(teamID);
+      if (isOpen) {
+        // Collapse — just toggle; keep the cache so re-expand is instant.
+        setExpandedRosters((prev) => {
+          const next = new Set(prev);
+          next.delete(teamID);
+          return next;
+        });
+        return;
+      }
+
+      // Expand.
+      setExpandedRosters((prev) => new Set(prev).add(teamID));
+
+      // Only fetch if we don't already have data.
+      if (rosterCache[teamID] !== undefined) return;
+
+      setRosterCache((prev) => ({ ...prev, [teamID]: 'loading' }));
+      try {
+        const members = await listTeamMembers(teamID);
+        setRosterCache((prev) => ({ ...prev, [teamID]: members }));
+      } catch (err) {
+        console.error('[manage-teams] listTeamMembers failed', err);
+        // Remove 'loading' so the UI doesn't stay stuck; collapse too.
+        setRosterCache((prev) => {
+          const next = { ...prev };
+          delete next[teamID];
+          return next;
+        });
+        setExpandedRosters((prev) => {
+          const next = new Set(prev);
+          next.delete(teamID);
+          return next;
+        });
+        setError('Could not load roster.');
+      }
+    },
+    [expandedRosters, rosterCache],
+  );
+
   const owned = teams.filter((t) => t.role === 'owner');
   const coaching = teams.filter((t) => t.role === 'coach');
   const memberOf = teams.filter((t) => t.role === 'member');
@@ -260,6 +328,11 @@ export function ManageTeams() {
                 onInviteSubmit={handleInvite}
                 onInviteCancel={() => setInvitingTeamID(null)}
                 onRevokeInvite={handleRevokeInvite}
+                onResendInvite={handleResendInvite}
+                resendingInviteID={resendingInviteID}
+                expandedRosters={expandedRosters}
+                rosterCache={rosterCache}
+                onToggleRoster={handleToggleRoster}
               />
 
               <TeamSection
@@ -281,6 +354,11 @@ export function ManageTeams() {
                 onInviteSubmit={handleInvite}
                 onInviteCancel={() => setInvitingTeamID(null)}
                 onRevokeInvite={handleRevokeInvite}
+                onResendInvite={handleResendInvite}
+                resendingInviteID={resendingInviteID}
+                expandedRosters={expandedRosters}
+                rosterCache={rosterCache}
+                onToggleRoster={handleToggleRoster}
               />
 
               <TeamSection
@@ -313,6 +391,11 @@ function TeamSection({
   onInviteSubmit,
   onInviteCancel,
   onRevokeInvite,
+  onResendInvite,
+  resendingInviteID,
+  expandedRosters,
+  rosterCache,
+  onToggleRoster,
 }: {
   heading: string;
   empty: string;
@@ -323,6 +406,11 @@ function TeamSection({
   onInviteSubmit?: (teamID: string, email: string, role: 'coach' | 'member') => void;
   onInviteCancel?: () => void;
   onRevokeInvite?: (inviteID: string) => void;
+  onResendInvite?: (inviteID: string, email: string) => void;
+  resendingInviteID?: string | null;
+  expandedRosters?: Set<string>;
+  rosterCache?: Record<string, TeamMember[] | 'loading'>;
+  onToggleRoster?: (teamID: string) => void;
 }) {
   return (
     <section>
@@ -335,6 +423,19 @@ function TeamSection({
         <ul className="flex flex-col gap-2">
           {teams.map((t) => {
             const invites = invitesByTeam?.[t.id] ?? [];
+            const isExpanded = expandedRosters?.has(t.id) ?? false;
+            const rosterEntry = rosterCache?.[t.id];
+            const rosterMembers = Array.isArray(rosterEntry) ? rosterEntry : null;
+            const isLoadingRoster = rosterEntry === 'loading';
+
+            // Sort order: owner first, then coaches, then members; stable within each tier by joinedAt.
+            const ROLE_ORDER: Record<TeamRole, number> = { owner: 0, coach: 1, member: 2 };
+            const sortedMembers = rosterMembers
+              ? [...rosterMembers].sort(
+                  (a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.joinedAt - b.joinedAt,
+                )
+              : null;
+
             return (
               <li key={t.id}>
                 <div className="flex items-center gap-3 px-3 py-3 rounded-md border border-border bg-bg hover:border-ink transition-colors">
@@ -350,12 +451,63 @@ function TeamSection({
                       {t.name}
                     </div>
                     <div className="text-[11px] font-medium text-faint font-tight mt-0.5">
-                      {t.memberCount} {t.memberCount === 1 ? 'member' : 'members'}
+                      {onToggleRoster ? (
+                        <button
+                          type="button"
+                          onClick={() => onToggleRoster(t.id)}
+                          aria-expanded={isExpanded}
+                          className="cursor-pointer underline-offset-2 hover:text-ink hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                        >
+                          {t.memberCount} {t.memberCount === 1 ? 'member' : 'members'}
+                        </button>
+                      ) : (
+                        <span>
+                          {t.memberCount} {t.memberCount === 1 ? 'member' : 'members'}
+                        </span>
+                      )}
                       {invites.length > 0 && ` · ${invites.length} pending`}
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 flex-wrap justify-end">{renderActions(t)}</div>
                 </div>
+
+                {isExpanded && (
+                  <ul className="mt-1.5 ml-12 flex flex-col gap-1">
+                    {isLoadingRoster && (
+                      <li className="flex items-center gap-3 px-3 py-2 border border-hairline bg-surface rounded">
+                        <span className="text-[12px] text-faint font-tight font-medium">
+                          Loading members…
+                        </span>
+                      </li>
+                    )}
+                    {sortedMembers?.map((m) => {
+                      const displayName =
+                        m.displayName ??
+                        (m.email.includes('@') ? m.email.split('@')[0] : m.email);
+                      return (
+                        <li
+                          key={m.userID}
+                          className="flex items-center gap-3 px-3 py-2 border border-hairline bg-surface rounded"
+                        >
+                          <span
+                            className={[
+                              'text-[10px] font-bold tracking-[0.16em] uppercase font-tight flex-shrink-0',
+                              m.role === 'owner' ? 'text-accent' : 'text-faint',
+                            ].join(' ')}
+                          >
+                            {m.role}
+                          </span>
+                          <span className="text-[12px] font-medium text-ink font-tight truncate min-w-0 flex-1">
+                            {displayName}
+                          </span>
+                          <span className="text-[11px] text-muted font-tight truncate min-w-0 hidden sm:block">
+                            {m.email}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
 
                 {invites.length > 0 && onRevokeInvite && (
                   <ul className="mt-1.5 ml-12 flex flex-col gap-1">
@@ -373,6 +525,15 @@ function TeamSection({
                         <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted font-tight">
                           {inv.role}
                         </span>
+                        {onResendInvite && (
+                          <SmallButton
+                            onClick={() => onResendInvite(inv.id, inv.email)}
+                            variant="ghost"
+                            disabled={resendingInviteID === inv.id}
+                          >
+                            {resendingInviteID === inv.id ? 'Sending…' : 'Resend'}
+                          </SmallButton>
+                        )}
                         <SmallButton onClick={() => onRevokeInvite(inv.id)} variant="ghost">
                           Revoke
                         </SmallButton>
@@ -537,14 +698,16 @@ function SmallButton({
   onClick,
   variant = 'ghost',
   type = 'button',
+  disabled = false,
 }: {
   children: React.ReactNode;
   onClick: () => void;
   variant?: 'primary' | 'ghost' | 'danger';
   type?: 'button' | 'submit';
+  disabled?: boolean;
 }) {
   const base =
-    'inline-flex items-center px-2.5 py-1.5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded';
+    'inline-flex items-center px-2.5 py-1.5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded disabled:opacity-50 disabled:pointer-events-none';
   const variantCls =
     variant === 'primary'
       ? 'bg-ink text-bg hover:opacity-90 border border-ink'
@@ -552,7 +715,12 @@ function SmallButton({
         ? 'bg-transparent text-faint hover:text-live border border-transparent'
         : 'bg-transparent text-muted hover:text-ink border border-border';
   return (
-    <button type={type} onClick={onClick} className={`${base} ${variantCls}`}>
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`${base} ${disabled ? '' : 'cursor-pointer'} ${variantCls}`}
+    >
       {children}
     </button>
   );

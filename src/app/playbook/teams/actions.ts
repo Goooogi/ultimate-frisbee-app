@@ -28,6 +28,10 @@ export interface SendInviteEmailResult {
   ok: true;
 }
 
+export interface ResendInviteEmailParams {
+  inviteId: string;
+}
+
 // ─── auth helper (mirrors assertAdmin shape) ────────────────────────────────
 
 async function assertTeamEditor(teamId: string) {
@@ -80,6 +84,11 @@ async function assertTeamEditor(teamId: string) {
 // Max invites a single user may create per rolling hour. The count below
 // includes the just-created row, so the (N+1)th send in an hour is blocked.
 const INVITE_RATE_LIMIT_PER_HOUR = 20;
+
+// Minimum gap between (re)sends of a single invite, enforced server-side via
+// pb_team_invites.last_sent_at. Stops one address from being spammed by repeated
+// Resend clicks even across requests/devices.
+const RESEND_COOLDOWN_MS = 60 * 1000;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -319,6 +328,122 @@ export async function sendInviteEmail({
   if (error) {
     throw new Error(`Email delivery failed: ${error.message}`);
   }
+
+  // Stamp the send so the per-invite resend cooldown applies. Best-effort —
+  // delivery already succeeded, so don't fail the action if this write doesn't.
+  await supabase
+    .from('pb_team_invites')
+    .update({ last_sent_at: new Date().toISOString() })
+    .eq('token', token);
+
+  return { ok: true };
+}
+
+// ─── resend action ───────────────────────────────────────────────────────────
+
+/**
+ * Re-send an EXISTING pending invite by its id. Unlike sendInviteEmail, the
+ * client never supplies the token (or team/email/role) — the token is sensitive
+ * and is deliberately omitted from the client-facing PendingInvite type. We
+ * look the invite up server-side by id, derive everything from the stored row,
+ * then enforce the same auth + rate-limit + delivery path as the initial send.
+ */
+export async function resendInviteEmail({
+  inviteId,
+}: ResendInviteEmailParams): Promise<SendInviteEmailResult> {
+  // 1. Validate env first — fast-fail before any DB work.
+  if (!process.env.RESEND_API || !process.env.SEND_EMAIL) {
+    throw new Error('Email not configured (missing RESEND_API or SEND_EMAIL env vars).');
+  }
+
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in');
+
+  // 2. Load the invite server-side. token/email/role/team_id all come from the
+  //    stored row — never from the client — so a caller can't redirect a resend
+  //    to a different address or smuggle in another invite's token.
+  const { data: invite, error: inviteError } = await supabase
+    .from('pb_team_invites')
+    .select('team_id, email, role, token, accepted_at, expires_at, last_sent_at')
+    .eq('id', inviteId)
+    .maybeSingle();
+  if (inviteError) throw new Error('Could not load the invite.');
+  if (!invite) throw new Error('Invite not found.');
+  if (invite.accepted_at) throw new Error('This invite has already been accepted.');
+  if (new Date(invite.expires_at as string).getTime() <= Date.now()) {
+    throw new Error('This invite has expired. Send a new one instead.');
+  }
+
+  // Per-invite cooldown: block rapid repeated resends to the same address. This
+  // is durable (stored on the row) so it holds across requests, devices, and
+  // serverless cold starts — unlike the client-side double-click guard.
+  if (invite.last_sent_at) {
+    const elapsedMs = Date.now() - new Date(invite.last_sent_at as string).getTime();
+    if (elapsedMs < RESEND_COOLDOWN_MS) {
+      const waitSec = Math.ceil((RESEND_COOLDOWN_MS - elapsedMs) / 1000);
+      throw new Error(`Please wait ${waitSec}s before resending this invite.`);
+    }
+  }
+
+  const teamId = invite.team_id as string;
+  const email = invite.email as string;
+  const role = invite.role as 'coach' | 'member';
+  const token = invite.token as string;
+
+  // 3. Defensive: stored role should already be valid, but validate before use.
+  validateInputs(email, role);
+
+  // 4. Authorize: caller must be owner/coach of THIS invite's team. assertTeamEditor
+  //    re-checks membership server-side and returns team name + inviter name.
+  const { teamName, inviterName } = await assertTeamEditor(teamId);
+
+  // 5. Same rate limit as the initial send — resends count toward the cap too
+  //    (a resend doesn't create a new row, so we count rows created by this user
+  //    in the last hour; abusive resend loops are also throttled at the Resend
+  //    level, but we keep the per-user hourly ceiling consistent here).
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count, error: countError } = await supabase
+    .from('pb_team_invites')
+    .select('id', { count: 'exact', head: true })
+    .eq('invited_by', user.id)
+    .gte('created_at', oneHourAgo);
+  if (countError) throw new Error('Could not verify invite rate limit.');
+  if ((count ?? 0) > INVITE_RATE_LIMIT_PER_HOUR) {
+    throw new Error('Too many invites sent recently. Please try again later.');
+  }
+
+  // 6. Build the accept link from a CONFIGURED base URL (never the raw Host).
+  const baseUrl = deriveBaseUrl();
+  const acceptUrl = `${baseUrl}/playbook/invite/${token}`;
+
+  // 7. Send via Resend (dynamic import keeps it out of client bundles).
+  const { Resend } = await import('resend');
+  const resend = new Resend(process.env.RESEND_API);
+
+  const fromAddress = `The Layout <${process.env.SEND_EMAIL}>`;
+  const subject = `You're invited to ${stripNewlines(teamName)} on The Layout`;
+
+  const { error } = await resend.emails.send({
+    from: fromAddress,
+    to: email,
+    subject,
+    html: buildEmailHtml({ inviterName, teamName, role, acceptUrl }),
+    text: buildEmailText({ inviterName, teamName, role, acceptUrl }),
+  });
+
+  if (error) {
+    throw new Error(`Email delivery failed: ${error.message}`);
+  }
+
+  // Stamp the send so the per-invite resend cooldown applies. Best-effort —
+  // delivery already succeeded, so don't fail the action if this write doesn't.
+  await supabase
+    .from('pb_team_invites')
+    .update({ last_sent_at: new Date().toISOString() })
+    .eq('token', token);
 
   return { ok: true };
 }

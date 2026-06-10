@@ -38,6 +38,11 @@ interface Props {
 
 type Tab = 'file' | 'link';
 
+// Cap how many files can be submitted in one batch. Client-side guard only —
+// the durable enforcement would be a per-user pending-quota DB trigger, which
+// is tracked as a follow-up. This stops accidental/abusive 100+ file batches.
+const MAX_FILES = 10;
+
 export function PlayerContentUploader({
   playerKind,
   playerRef,
@@ -99,7 +104,7 @@ export function PlayerContentUploader({
             Upload file
           </TabButton>
           <TabButton active={tab === 'link'} onClick={() => setTab('link')}>
-            Content link
+            Upload link
           </TabButton>
         </div>
         <button
@@ -155,106 +160,174 @@ function FileUploadForm({
   onSubmitted: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [caption, setCaption] = useState('');
   const [status, setStatus] = useState<'idle' | 'uploading' | 'done' | 'error'>('idle');
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function pickFile(next: File | null) {
+  const allowedMime = [...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME] as readonly string[];
+
+  /** Validate a single file; returns an error string or null if it's fine. */
+  function validateFile(f: File): string | null {
+    if (f.size > MAX_FILE_BYTES) {
+      return `${f.name} is too large (max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB).`;
+    }
+    if (!allowedMime.includes(f.type)) {
+      return `${f.name} isn't a supported type. Use JPG / PNG / WEBP / GIF / MP4 / WEBM / MOV.`;
+    }
+    return null;
+  }
+
+  function pickFiles(next: FileList | null) {
     setError(null);
-    if (!next) {
-      setFile(null);
+    setProgress(null);
+    if (!next || next.length === 0) {
+      setFiles([]);
       return;
     }
-    if (next.size > MAX_FILE_BYTES) {
-      setError(`File too large (max ${Math.round(MAX_FILE_BYTES / 1024 / 1024)} MB).`);
+    const picked = Array.from(next);
+    if (picked.length > MAX_FILES) {
+      setError(`Select up to ${MAX_FILES} files at a time.`);
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
-    const allowed = [...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME] as readonly string[];
-    if (!allowed.includes(next.type)) {
-      setError('File type not supported. Use JPG / PNG / WEBP / GIF / MP4 / WEBM / MOV.');
-      return;
+    // Reject the whole batch if any file is invalid, so the user knows exactly
+    // what's wrong rather than having some silently dropped.
+    for (const f of picked) {
+      const err = validateFile(f);
+      if (err) {
+        setError(err);
+        setFiles([]);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+        return;
+      }
     }
-    setFile(next);
+    setFiles(picked);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) return;
+    if (files.length === 0) return;
     setStatus('uploading');
     setError(null);
+    setProgress({ done: 0, total: files.length });
 
     const supabase = createClient();
-    const ext = guessExtension(file);
-    const objectPath = `${uploaderId}/${playerKind}-${playerRef}/${crypto.randomUUID()}${ext}`;
+    const failures: string[] = [];
+    let succeeded = 0;
 
-    const { error: uploadError } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .upload(objectPath, file, {
-        cacheControl: '3600',
-        contentType: file.type,
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const ext = guessExtension(file);
+      const objectPath = `${uploaderId}/${playerKind}-${playerRef}/${crypto.randomUUID()}${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(STORAGE_BUCKET)
+        .upload(objectPath, file, {
+          cacheControl: '3600',
+          contentType: file.type,
+        });
+      if (uploadError) {
+        failures.push(`${file.name}: ${uploadError.message || 'upload failed'}`);
+        setProgress({ done: i + 1, total: files.length });
+        continue;
+      }
+
+      const kind = (ALLOWED_VIDEO_MIME as readonly string[]).includes(file.type)
+        ? 'video'
+        : 'image';
+
+      const { error: insertError } = await supabase.from('player_content').insert({
+        player_kind: playerKind,
+        player_ref: playerRef,
+        player_display_name: playerDisplayName,
+        kind,
+        storage_path: objectPath,
+        mime_type: file.type,
+        file_size_bytes: file.size,
+        caption: caption.trim() || null,
+        uploaded_by: uploaderId,
       });
-    if (uploadError) {
-      setStatus('error');
-      setError(uploadError.message || 'Upload failed.');
-      return;
+
+      if (insertError) {
+        // Roll back this file's storage object so we don't leave orphans.
+        await supabase.storage.from(STORAGE_BUCKET).remove([objectPath]);
+        failures.push(`${file.name}: ${insertError.message || 'could not save'}`);
+        setProgress({ done: i + 1, total: files.length });
+        continue;
+      }
+
+      succeeded += 1;
+      setProgress({ done: i + 1, total: files.length });
     }
 
-    const kind = (ALLOWED_VIDEO_MIME as readonly string[]).includes(file.type)
-      ? 'video'
-      : 'image';
-
-    const { error: insertError } = await supabase.from('player_content').insert({
-      player_kind: playerKind,
-      player_ref: playerRef,
-      player_display_name: playerDisplayName,
-      kind,
-      storage_path: objectPath,
-      mime_type: file.type,
-      file_size_bytes: file.size,
-      caption: caption.trim() || null,
-      uploaded_by: uploaderId,
-    });
-
-    if (insertError) {
-      // Roll back the storage object so we don't leave orphans.
-      await supabase.storage.from(STORAGE_BUCKET).remove([objectPath]);
+    if (failures.length > 0) {
+      // Partial or total failure. Already-uploaded files stay as valid pending
+      // submissions — we only report what didn't make it.
       setStatus('error');
-      setError(insertError.message || 'Could not save submission.');
+      setError(
+        succeeded > 0
+          ? `${succeeded} of ${files.length} submitted. Failed: ${failures.join('; ')}`
+          : `Upload failed: ${failures.join('; ')}`,
+      );
+      if (succeeded > 0) onSubmitted();
       return;
     }
 
     setStatus('done');
-    setFile(null);
+    setFiles([]);
     setCaption('');
+    setProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     onSubmitted();
   }
+
+  const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <label className="flex flex-col gap-2">
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-          File
+          Files
         </span>
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           accept={[...ALLOWED_IMAGE_MIME, ...ALLOWED_VIDEO_MIME].join(',')}
-          onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+          onChange={(e) => pickFiles(e.target.files)}
           className="block w-full text-[12px] text-ink font-tight file:mr-3 file:py-2 file:px-3 file:rounded-full file:border-0 file:text-[10px] file:font-bold file:uppercase file:tracking-[0.16em] file:bg-ink file:text-bg file:cursor-pointer hover:file:opacity-90"
         />
-        {file && (
-          <span className="text-[11px] text-faint font-tight">
-            {file.name} · {(file.size / 1024 / 1024).toFixed(1)} MB
-          </span>
+        {files.length > 0 && (
+          <ul className="flex flex-col gap-0.5">
+            {files.map((f, idx) => (
+              <li
+                key={`${f.name}-${idx}`}
+                className="text-[11px] text-faint font-tight truncate"
+              >
+                {f.name} · {(f.size / 1024 / 1024).toFixed(1)} MB
+              </li>
+            ))}
+            {files.length > 1 && (
+              <li className="text-[11px] text-muted font-tight mt-0.5">
+                {files.length} files · {(totalBytes / 1024 / 1024).toFixed(1)} MB total
+              </li>
+            )}
+          </ul>
         )}
       </label>
 
       <CaptionField value={caption} onChange={setCaption} />
+      {files.length > 1 && (
+        <p className="text-[10px] text-faint font-tight -mt-1">
+          The caption applies to all {files.length} files.
+        </p>
+      )}
 
       {error && (
-        <p role="alert" className="text-[12px] text-red-500 font-tight">
+        <p role="alert" className="text-[12px] text-live font-tight">
           {error}
         </p>
       )}
@@ -265,10 +338,16 @@ function FileUploadForm({
         </p>
         <button
           type="submit"
-          disabled={!file || status === 'uploading'}
+          disabled={files.length === 0 || status === 'uploading'}
           className="inline-flex items-center rounded-full px-4 py-2 bg-ink text-bg text-[10px] font-bold tracking-[0.16em] uppercase font-tight hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-opacity cursor-pointer"
         >
-          {status === 'uploading' ? 'Uploading…' : 'Submit for review'}
+          {status === 'uploading'
+            ? progress
+              ? `Uploading ${progress.done}/${progress.total}…`
+              : 'Uploading…'
+            : files.length > 1
+              ? `Submit ${files.length} for review`
+              : 'Submit for review'}
         </button>
       </div>
     </form>
