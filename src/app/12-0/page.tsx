@@ -12,6 +12,12 @@ export const metadata: Metadata = {
   description: 'Spin for a UFA team and season. Draft 7 players. Can you go 12-0?',
 };
 
+// Render at request time, not build time. This page reads from Supabase
+// (listTeamYears); static prerender would query the DB during `next build`,
+// which fails the build whenever Supabase isn't reachable at build time (e.g. a
+// fresh deploy before env vars are configured). Dynamic = data is always live.
+export const dynamic = 'force-dynamic';
+
 export default async function TwelveOhPage() {
   const teamYears = await listTeamYears();
 

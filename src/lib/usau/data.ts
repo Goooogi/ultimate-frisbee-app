@@ -12,6 +12,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 
 type DB = SupabaseClient<Database>;
 
@@ -20,8 +21,8 @@ let _client: DB | null = null;
 async function supabase(): Promise<DB> {
   if (_client) return _client;
   _client = createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl(),
+    supabaseAnonKey(),
     { auth: { persistSession: false } },
   );
   return _client;

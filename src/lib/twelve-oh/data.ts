@@ -7,6 +7,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { BAKED_BASELINE, type Baseline } from './rating';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 
 // ─── Client ────────────────────────────────────────────────────────────────
 // twelve_oh_* tables are not in database.types.ts yet (generated types are
@@ -22,8 +23,8 @@ let _client: AnyClient | null = null;
 function supabase(): AnyClient {
   if (_client) return _client;
   _client = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl(),
+    supabaseAnonKey(),
     { auth: { persistSession: false } },
   );
   return _client;

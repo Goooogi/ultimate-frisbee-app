@@ -1,12 +1,20 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { hasSupabaseEnv, supabaseUrl, supabaseAnonKey } from './env';
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
+  // No Supabase env configured (e.g. first deploy before vars are set) — skip
+  // the session refresh rather than constructing a client against a placeholder
+  // and making a doomed auth call on every request.
+  if (!hasSupabaseEnv()) {
+    return supabaseResponse;
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl(),
+    supabaseAnonKey(),
     {
       cookies: {
         getAll() {

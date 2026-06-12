@@ -9,6 +9,7 @@
 // usau/data.ts and twelve-oh/data.ts.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -18,8 +19,8 @@ let _client: AnyClient | null = null;
 function supabase(): AnyClient {
   if (_client) return _client;
   _client = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl(),
+    supabaseAnonKey(),
     { auth: { persistSession: false } },
   );
   return _client;
