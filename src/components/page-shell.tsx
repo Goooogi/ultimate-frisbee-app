@@ -11,10 +11,7 @@
 import { Suspense } from 'react';
 import { AppRail } from '@/components/app-rail';
 import { GamesSubnav } from '@/components/games-subnav';
-import { LeagueTabs } from '@/components/league-tabs';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
-import { MobileLeagueSelect } from '@/components/mobile-league-select';
-import { useLeague } from '@/lib/use-league';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 
 // Hooks like useSearchParams() must be wrapped in Suspense for Next 14
@@ -24,9 +21,9 @@ import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 const SUSPENSE_FALLBACK = null;
 
 interface AppShellProps {
-  /** Override the slim top bar's right-edge content. Defaults to a stateful
-   * <LeagueTabs> so /scores can pass its own controlled instance if it wants
-   * to share state with elsewhere on the page. */
+  /** Optional content for the slim top bar's right edge. The in-page league
+   * switcher was retired (league switching lives in the AppRail mega-menu), so
+   * this defaults to empty; pass a node only if a page needs its own control. */
   topNavSlot?: React.ReactNode;
   children: React.ReactNode;
 }
@@ -37,27 +34,20 @@ interface AppShellProps {
  * should use `PageShell` instead — it composes AppShell + PageHeader.
  */
 export function AppShell({ topNavSlot, children }: AppShellProps) {
-  // Each tab slot consumes useSearchParams (either via useLeague or via
-  // a router push) — wrap in Suspense so prerendering succeeds.
-  const tab = (
-    <Suspense fallback={SUSPENSE_FALLBACK}>
-      {topNavSlot ?? <DefaultLeagueTabs />}
-    </Suspense>
-  );
+  // The in-page league switcher has been retired — league switching now lives
+  // in the "The League" mega-menu in the top AppRail, so showing pills/dropdown
+  // here too is redundant. We only render a top-nav slot when a page explicitly
+  // passes one (some pages still use it for their own controls). With no slot,
+  // the GamesSubnav just shows its sub-page tabs (Scores/Schedule/Teams/Players).
+  const tab = topNavSlot ? (
+    <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
+  ) : null;
 
-  // On mobile the league switcher lives inside the header as a compact
-  // dropdown (saves vertical space + thumb-friendly). The desktop pill
-  // tabs stay on lg+. Custom topNavSlot wins on both sizes — when a
-  // caller passes one (e.g. /players/{id} passes an empty span to hide
-  // the switcher entirely because the unified profile combines leagues),
-  // we render that slot everywhere.
+  // Mobile mirrors desktop: only a caller-provided slot renders; no default
+  // league dropdown.
   const mobileTab = topNavSlot ? (
     <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
-  ) : (
-    <Suspense fallback={SUSPENSE_FALLBACK}>
-      <MobileLeagueSelect />
-    </Suspense>
-  );
+  ) : null;
 
   return (
     // h-screen + flex-col: AppRail (flex-shrink-0) + GamesSubnav (flex-shrink-0)
@@ -92,14 +82,6 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
   );
 }
 
-function DefaultLeagueTabs() {
-  // Backed by ?league=… in the URL so the active league survives navigation.
-  // Every page that uses AppShell without overriding topNavSlot now reads
-  // + writes the same state.
-  const [active, setActive] = useLeague();
-  return <LeagueTabs active={active} onChange={setActive} />;
-}
-
 interface PageShellProps {
   /** Big page title shown above content. */
   title: string;
@@ -109,7 +91,8 @@ interface PageShellProps {
   eyebrow?: string;
   /** Optional right-side controls in the page header (filter dropdowns, year selector, etc.). */
   controls?: React.ReactNode;
-  /** Optional override for the top-bar slot. Defaults to the league switcher. */
+  /** Optional content for the top-bar slot. Empty by default (the league
+   *  switcher was retired — see AppShell). */
   topNavSlot?: React.ReactNode;
   /** Optional breadcrumb trail rendered above the title. Shallowest first;
    *  last entry is the current page (rendered as plain text). */
