@@ -10,17 +10,31 @@ import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
 import { getCurrentEvent, getEvent, type UsauEventSummary } from '@/lib/usau/data';
 import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
+import { PageShell } from '@/components/page-shell';
+import { PulScores } from '@/components/pul/pul-scores';
+import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
 
 export const revalidate = 30;
 
 interface Props {
-  searchParams: { league?: string; div?: string };
+  searchParams: { league?: string; div?: string; season?: string };
 }
 
 export default async function HomePage({ searchParams }: Props) {
   // USAU division filter persists across pages via ?div=. Default 'Men'.
   const division = parseDivisionParam(searchParams.div);
   const league = parseLeagueParam(searchParams.league);
+
+  // ── PUL branch ────────────────────────────────────────────────────────────
+  if (league === 'pul') {
+    const season = parseInt(searchParams.season ?? String(PUL_CURRENT_SEASON), 10) || PUL_CURRENT_SEASON;
+    return (
+      <PageShell title="Scores" eyebrow={`PUL · ${season} Season`}>
+        <PulScores season={season} />
+      </PageShell>
+    );
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Only the USAU view consumes usauEvent (FeedPage renders it solely when
   // league==='usau'). The USAU lookup is a multi-query Supabase chain

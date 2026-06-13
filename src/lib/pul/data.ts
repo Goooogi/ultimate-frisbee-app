@@ -372,3 +372,130 @@ export async function findPulPlayerNameByName(
   }
   return null;
 }
+
+// ─── Games (schedule + scores) ───────────────────────────────────────────────
+
+export interface PulGameTeamSide {
+  teamId: string;
+  abbrev: string;
+  /** Resolved from pul_teams; null if the team row is missing. */
+  city: string | null;
+  mascot: string | null;
+  logoUrl: string | null;
+  score: number | null; // null until the game is final
+}
+
+export interface PulGame {
+  id: string;            // '{season}/{week}/{AWAY}-vs-{HOME}'
+  season: number;
+  weekLabel: string;     // 'week-7' | 'semifinals' | 'finals'
+  weekNum: number | null;
+  status: 'scheduled' | 'final';
+  gameDate: string | null; // ISO yyyy-mm-dd
+  gameTime: string | null;
+  location: string | null;
+  away: PulGameTeamSide;
+  home: PulGameTeamSide;
+}
+
+interface DbGameRow {
+  id: string;
+  season: number;
+  week_label: string;
+  week_num: number | null;
+  away_team_id: string;
+  home_team_id: string;
+  away_abbrev: string;
+  home_abbrev: string;
+  game_date: string | null;
+  game_time: string | null;
+  location: string | null;
+  away_score: number | null;
+  home_score: number | null;
+  status: string;
+}
+
+/** Distinct seasons that have GAME data, newest first (drives the games season switcher). */
+export async function listPulGameSeasons(): Promise<number[]> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('pul_games')
+    .select('season')
+    .order('season', { ascending: false });
+  if (error) throw error;
+  const seen = new Set<number>();
+  for (const row of (data ?? []) as unknown as { season: number }[]) seen.add(row.season);
+  return [...seen].sort((a, b) => b - a);
+}
+
+/**
+ * All games for a season, chronological (date asc; playoffs after weeks via a
+ * stable ordering), with each side's team identity + logo resolved.
+ *
+ * `onlyFinal: true` returns only completed games (for the Scores view); omit it
+ * (Schedule view) to get the full fixture list including upcoming games.
+ */
+export async function listPulGames(opts: {
+  season: number;
+  onlyFinal?: boolean;
+}): Promise<PulGame[]> {
+  const db = supabase();
+
+  let q = db
+    .from('pul_games')
+    .select(
+      'id, season, week_label, week_num, away_team_id, home_team_id, away_abbrev, home_abbrev, game_date, game_time, location, away_score, home_score, status',
+    )
+    .eq('season', opts.season);
+  if (opts.onlyFinal) q = q.eq('status', 'final');
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const rows = (data ?? []) as unknown as DbGameRow[];
+
+  // Resolve team identities once (small table) rather than a join per row.
+  const teams = await listPulTeams();
+  const byId = new Map(teams.map((t) => [t.id, t]));
+
+  const side = (teamId: string, abbrev: string, score: number | null): PulGameTeamSide => {
+    const t = byId.get(teamId);
+    return {
+      teamId,
+      abbrev,
+      city: t?.city ?? null,
+      mascot: t?.mascot ?? null,
+      logoUrl: t?.logoUrl ?? null,
+      score,
+    };
+  };
+
+  const games: PulGame[] = rows.map((r) => ({
+    id: r.id,
+    season: r.season,
+    weekLabel: r.week_label,
+    weekNum: r.week_num,
+    status: r.status === 'final' ? 'final' : 'scheduled',
+    gameDate: r.game_date,
+    gameTime: r.game_time,
+    location: r.location,
+    away: side(r.away_team_id, r.away_abbrev, r.away_score),
+    home: side(r.home_team_id, r.home_abbrev, r.home_score),
+  }));
+
+  // Order: by date asc (nulls last), then regular-season weeks before playoffs,
+  // then playoff order semifinals → finals.
+  const playoffRank = (label: string): number =>
+    label === 'finals' ? 2 : label === 'semifinals' ? 1 : 0;
+  games.sort((a, b) => {
+    const da = a.gameDate ?? '9999-12-31';
+    const dbb = b.gameDate ?? '9999-12-31';
+    if (da !== dbb) return da.localeCompare(dbb);
+    const pa = playoffRank(a.weekLabel);
+    const pb = playoffRank(b.weekLabel);
+    if (pa !== pb) return pa - pb;
+    return (a.weekNum ?? 0) - (b.weekNum ?? 0);
+  });
+
+  return games;
+}

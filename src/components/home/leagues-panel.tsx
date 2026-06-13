@@ -48,7 +48,7 @@ const LEAGUE_ROWS: LeagueRow[] = [
     label: 'PUL',
     abbr: 'PUL',
     subtitle: 'Premier Ultimate League',
-    href: '/pul/teams',
+    href: '/scores?league=pul',
     img: '/PUL.webp',
   },
   {

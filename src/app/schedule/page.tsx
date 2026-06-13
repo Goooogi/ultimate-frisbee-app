@@ -6,7 +6,6 @@
 // server-rendered — no client component needed for collapse state.
 
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import { getCurrentGames, getAllGamesByYears, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
@@ -15,6 +14,8 @@ import { YearSelector } from '@/components/year-selector';
 import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { PulSchedule } from '@/components/pul/pul-schedule';
+import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
 
 export const revalidate = 300;
 
@@ -23,19 +24,20 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; league?: string; div?: string };
+  searchParams: { year?: string; season?: string; league?: string; div?: string };
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
   const league = parseLeagueParam(searchParams.league);
 
   if (league === 'pul') {
+    const season = parseInt(searchParams.season ?? String(PUL_CURRENT_SEASON), 10) || PUL_CURRENT_SEASON;
     return (
       <PageShell
         title="Schedule"
-        eyebrow="PUL · Premier Ultimate League"
+        eyebrow={`PUL · ${season} Season`}
       >
-        <PulComingSoon page="schedule" />
+        <PulSchedule season={season} />
       </PageShell>
     );
   }
@@ -331,30 +333,6 @@ function EmptyState({ year }: { year: number }) {
       </div>
       <div className="text-[13px] text-faint max-w-sm">
         No games scheduled for the {year} season yet. Check back during the regular season.
-      </div>
-    </div>
-  );
-}
-
-function PulComingSoon({ page }: { page: 'scores' | 'schedule' }) {
-  const label = page === 'scores' ? 'game scores' : 'schedule';
-  return (
-    <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-      <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight mb-3">
-        PUL · Premier Ultimate League
-      </div>
-      <div className="text-[18px] font-bold font-tight text-ink mb-2 leading-tight">
-        {page === 'scores' ? 'Game scores coming soon' : 'Schedule coming soon'}
-      </div>
-      <div className="text-[13px] text-muted font-tight max-w-[480px] leading-relaxed">
-        PUL {label} aren&rsquo;t available yet. Player and team stats are available now under{' '}
-        <Link href="/teams?league=pul" className="text-ink underline underline-offset-2 hover:text-accent transition-colors">
-          Teams
-        </Link>{' '}
-        and{' '}
-        <Link href="/players?league=pul" className="text-ink underline underline-offset-2 hover:text-accent transition-colors">
-          Players
-        </Link>.
       </div>
     </div>
   );
