@@ -449,9 +449,12 @@ export async function listTopUsauTeams(opts?: {
   const db = await supabase();
   // Cast: these RPCs are newer than the generated database.types.ts, so the
   // function-name union doesn't include them yet. Regenerate types to drop it.
+  // NOTE: must call db.rpc(...) directly (bound) — extracting it into a local
+  // `const rpc = db.rpc` detaches `this`, and supabase-js's rpc() then reads
+  // `this.rest` → "Cannot read properties of undefined (reading 'rest')".
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rpc = db.rpc as unknown as (fn: string, args?: Record<string, unknown>) => Promise<{ data: any; error: unknown }>;
-  const { data, error } = await rpc('top_usau_club_teams', {
+  const rpcDb = db as unknown as { rpc: (fn: string, args?: Record<string, unknown>) => Promise<{ data: any; error: unknown }> };
+  const { data, error } = await rpcDb.rpc('top_usau_club_teams', {
     p_gender_division: opts?.genderDivision ?? 'Men',
     p_limit: opts?.limit ?? 16,
   });
@@ -468,9 +471,11 @@ export async function listSeasons(): Promise<number[]> {
   // with ~2000+ event rows ordered season-DESC, only the newest ~2-3 seasons
   // survived the cap, so the dropdown showed only 2024–2026 even though we
   // have data back to 2018. The RPC returns one row per distinct season.
+  // Call db.rpc(...) DIRECTLY (bound) — a detached `const rpc = db.rpc` loses
+  // `this` and supabase-js reads `this.rest` → "reading 'rest'" TypeError.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rpc = db.rpc as unknown as (fn: string) => Promise<{ data: any; error: unknown }>;
-  const { data, error } = await rpc('distinct_usau_seasons');
+  const rpcDb = db as unknown as { rpc: (fn: string) => Promise<{ data: any; error: unknown }> };
+  const { data, error } = await rpcDb.rpc('distinct_usau_seasons');
   if (error) throw error;
   return ((data ?? []) as Array<{ season: number }>)
     .map((r) => r.season)
