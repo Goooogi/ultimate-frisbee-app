@@ -13,15 +13,20 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { listEvents, listSeasons, type UsauEventCard } from '@/lib/usau/data';
+import { listEvents, listSeasons, type UsauEventCard, type CompetitionLevel } from '@/lib/usau/data';
 import type { UsauDivision } from '@/lib/league';
 
 interface Props {
-  /** Optional gender division filter. When omitted, all divisions show. */
+  /** Optional gender division filter. When omitted, all divisions show
+   *  (and events without scraped teams still appear). */
   division?: UsauDivision;
+  /** Competition level to list (Club, College D-I, etc.). Required so the
+   *  schedule shows the full calendar for that level, not just events that
+   *  happen to have teams scraped. */
+  competitionLevel?: CompetitionLevel;
 }
 
-export function UsauSchedule({ division }: Props = {}) {
+export function UsauSchedule({ division, competitionLevel }: Props = {}) {
   const [seasons, setSeasons] = useState<number[]>([]);
   const [season, setSeason] = useState<number | null>(null);
   const [events, setEvents] = useState<UsauEventCard[]>([]);
@@ -48,11 +53,12 @@ export function UsauSchedule({ division }: Props = {}) {
     if (season == null) return;
     setLoading(true);
     let cancelled = false;
-    // No competitionLevel filter — schedule shows everything we have for
-    // the season (Club, College D-I/D-III, HS, MS, Masters, etc.). The
-    // upcoming section auto-pins the most relevant event regardless of
-    // level. Division filter is applied server-side via listEvents().
-    listEvents({ season, limit: 500, genderDivision: division })
+    // Filter to the selected competition level (default Club) so we show the
+    // FULL calendar for that level — including events whose teams aren't
+    // scraped yet. genderDivision is optional: when undefined, every event at
+    // the level shows; when set, it narrows to events with scraped teams in
+    // that division (the only ones we can attribute a gender to).
+    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel })
       .then((e) => !cancelled && setEvents(e))
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
@@ -61,7 +67,7 @@ export function UsauSchedule({ division }: Props = {}) {
     return () => {
       cancelled = true;
     };
-  }, [season, division]);
+  }, [season, division, competitionLevel]);
 
   const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
 

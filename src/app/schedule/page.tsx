@@ -11,9 +11,9 @@ import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
 import { YearSelector } from '@/components/year-selector';
-import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
+import { parseDivisionParam, parseLeagueParam, parseLevelParam, levelLabel } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
-import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
 import { PulSchedule } from '@/components/pul/pul-schedule';
 import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
 
@@ -24,7 +24,7 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; season?: string; league?: string; div?: string };
+  searchParams: { year?: string; season?: string; league?: string; div?: string; level?: string };
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
@@ -43,14 +43,18 @@ export default async function SchedulePage({ searchParams }: Props) {
   }
 
   if (league === 'usau') {
-    const division = parseDivisionParam(searchParams.div);
+    const level = parseLevelParam(searchParams.level);
+    // Division is OPTIONAL on the schedule: absent ?div ⇒ show all divisions
+    // (and events without scraped teams). Only narrow when a div is present.
+    const division = searchParams.div ? parseDivisionParam(searchParams.div) : undefined;
+    const eyebrow = `USAU · ${levelLabel(level)}${division ? ` · ${division}` : ''}`;
     return (
       <PageShell
         title="Schedule"
-        eyebrow={`USAU · Club · ${division}`}
-        controls={<UsauDivisionSelect />}
+        eyebrow={eyebrow}
+        controls={<UsauScheduleControls />}
       >
-        <UsauSchedule division={division} />
+        <UsauSchedule competitionLevel={level} division={division} />
       </PageShell>
     );
   }

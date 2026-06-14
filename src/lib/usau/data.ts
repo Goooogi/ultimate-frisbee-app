@@ -44,7 +44,7 @@ export interface UsauEventCard {
   teamCount: number;
 }
 
-type CompetitionLevel =
+export type CompetitionLevel =
   | 'CLUB'
   | 'COLLEGE_D1'
   | 'COLLEGE_D3'
