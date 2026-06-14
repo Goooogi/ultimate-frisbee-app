@@ -69,6 +69,7 @@ export function SearchBar() {
 
   function navigate(r: SearchResult) {
     if (r.kind === 'team') router.push(`/usau/teams/${r.id}`);
+    else if (r.kind === 'tournament') router.push(`/usau/events/${r.id}`);
     else router.push(`/players/${r.id}`);
     setQuery('');
     setOpen(false);
@@ -106,6 +107,7 @@ export function SearchBar() {
 
   const teamResults = results.filter((r) => r.kind === 'team');
   const playerResults = results.filter((r) => r.kind === 'player');
+  const tournamentResults = results.filter((r) => r.kind === 'tournament');
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -130,7 +132,7 @@ export function SearchBar() {
           ref={inputRef}
           type="text"
           role="combobox"
-          aria-label="Search players and teams"
+          aria-label="Search players, teams, and tournaments"
           aria-autocomplete="list"
           aria-expanded={showDropdown}
           aria-controls="search-bar-listbox"
@@ -145,7 +147,7 @@ export function SearchBar() {
           onFocus={() => {
             if (query.trim().length >= 2) setOpen(true);
           }}
-          placeholder="Search players, teams…"
+          placeholder="Search players, teams, tournaments…"
           autoComplete="off"
           spellCheck={false}
           className={[
@@ -229,6 +231,23 @@ export function SearchBar() {
                   })}
                 </ResultGroup>
               )}
+              {tournamentResults.length > 0 && (
+                <ResultGroup label="Tournaments">
+                  {tournamentResults.map((r) => {
+                    const i = results.indexOf(r);
+                    return (
+                      <ResultRow
+                        key={r.id}
+                        id={`search-bar-option-${i}`}
+                        result={r}
+                        active={i === highlight}
+                        onMouseEnter={() => setHighlight(i)}
+                        onClick={() => navigate(r)}
+                      />
+                    );
+                  })}
+                </ResultGroup>
+              )}
             </>
           )}
         </div>
@@ -282,7 +301,7 @@ function ResultRow({
         active ? 'bg-surface' : 'hover:bg-surface',
       ].join(' ')}
     >
-      {/* Mark: colored badge */}
+      {/* Mark: colored badge per kind */}
       <span
         aria-hidden="true"
         className={[
@@ -290,10 +309,16 @@ function ResultRow({
           'text-[9px] font-bold tracking-[0.04em] flex-shrink-0',
           result.kind === 'team'
             ? 'bg-ink text-bg'
-            : 'bg-accent text-accent-ink',
+            : result.kind === 'tournament'
+              ? 'bg-surface border border-border text-muted'
+              : 'bg-accent text-accent-ink',
         ].join(' ')}
       >
-        {result.kind === 'team' ? 'TM' : result.name.slice(0, 2).toUpperCase()}
+        {result.kind === 'team'
+          ? 'TM'
+          : result.kind === 'tournament'
+            ? <CalendarGlyph />
+            : result.name.slice(0, 2).toUpperCase()}
       </span>
       <span className="flex-1 min-w-0">
         <span className="block text-[13px] font-semibold text-ink font-tight leading-tight truncate">
@@ -318,6 +343,15 @@ function ClearGlyph() {
         strokeWidth="1.5"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function CalendarGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="1.5" y="2.5" width="11" height="10" rx="1.5" />
+      <path d="M1.5 5.5h11M4.5 1.5v2M9.5 1.5v2" />
     </svg>
   );
 }

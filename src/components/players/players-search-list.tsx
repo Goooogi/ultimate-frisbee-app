@@ -197,12 +197,15 @@ function UfaList({
   const champSet = new Set(championTeamIds.map((id) => id.toLowerCase()));
   const thBase =
     'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted border-b border-border whitespace-nowrap text-right';
+  // Cap the Player column so one long name can't balloon it to 2/3 of the row.
+  // The name itself scrolls horizontally inside this fixed box (see the <td>).
+  const playerColCls = 'w-[150px] min-w-[150px] max-w-[150px] sm:w-[200px] sm:min-w-[200px] sm:max-w-[200px]';
   return (
     <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-      <table className="w-full min-w-[860px] border-collapse">
+      <table className="w-full min-w-[860px] border-collapse table-fixed">
         <thead>
           <tr>
-            <th className={`${thBase} text-left`} scope="col">Player</th>
+            <th className={`${thBase} text-left ${playerColCls}`} scope="col">Player</th>
             <th className={thBase} scope="col" title="Games Played">GP</th>
             <th className={thBase} scope="col" title="Goals">G</th>
             <th className={thBase} scope="col" title="Assists">A</th>
@@ -228,16 +231,24 @@ function UfaList({
             const isChamp = teamAbbr ? champSet.has(teamAbbr.toLowerCase()) : false;
             return (
               <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left">
+                <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left ${playerColCls}`}>
                   <Link
                     href={`/players/${p.playerID}`}
-                    className="inline-flex items-center gap-2 hover:opacity-80 transition-opacity no-underline"
+                    className="flex items-center gap-2 hover:opacity-80 transition-opacity no-underline"
                   >
-                    <span className="tabular text-[10px] font-bold text-faint font-tight w-5 text-right">
+                    <span className="tabular text-[10px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
                       {i + 1}
                     </span>
-                    {team && <TeamLogo team={team} size={22} />}
-                    <span className="font-medium font-tight text-ink">{p.name}</span>
+                    {team && (
+                      <span className="flex-shrink-0 inline-flex">
+                        <TeamLogo team={team} size={22} />
+                      </span>
+                    )}
+                    {/* Name scrolls horizontally within the fixed Player column
+                        so a long name never widens the column. */}
+                    <span className="font-medium font-tight text-ink whitespace-nowrap overflow-x-auto no-scrollbar min-w-0">
+                      {p.name}
+                    </span>
                     {isChamp && <TrophyChip title="Reigning UFA Champion" />}
                   </Link>
                 </td>

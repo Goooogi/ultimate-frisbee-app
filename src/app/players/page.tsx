@@ -147,21 +147,21 @@ export default async function PlayersPage({ searchParams }: Props) {
           </div>
         ) : (
           <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-            <table className="w-full min-w-[700px] border-collapse">
+            <table className="w-full min-w-[700px] border-collapse table-fixed">
               <thead>
                 <tr>
                   {[
-                    { label: '#',       title: 'Rank',                     left: true  },
-                    { label: 'Player',  title: 'Player name',              left: true  },
-                    { label: 'Team',    title: 'Team',                     left: true  },
-                    { label: 'G',       title: 'Goals',                    left: false },
-                    { label: 'A',       title: 'Assists',                  left: false },
-                    { label: 'Blk',     title: 'Blocks',                   left: false },
-                    { label: 'TO',      title: 'Turnovers',                left: false },
-                    { label: 'Touch',   title: 'Touches',                  left: false },
-                    { label: 'O-Pts',   title: 'Offensive Points Played',  left: false },
-                    { label: 'D-Pts',   title: 'Defensive Points Played',  left: false },
-                    { label: '+/−',     title: 'Plus / Minus',             left: false },
+                    { label: '#',       title: 'Rank',                     left: true,  w: 'w-10' },
+                    { label: 'Player',  title: 'Player name',              left: true,  w: 'w-[140px] sm:w-[180px]' },
+                    { label: 'Team',    title: 'Team',                     left: true,  w: 'w-[120px]' },
+                    { label: 'G',       title: 'Goals',                    left: false, w: '' },
+                    { label: 'A',       title: 'Assists',                  left: false, w: '' },
+                    { label: 'Blk',     title: 'Blocks',                   left: false, w: '' },
+                    { label: 'TO',      title: 'Turnovers',                left: false, w: '' },
+                    { label: 'Touch',   title: 'Touches',                  left: false, w: '' },
+                    { label: 'O-Pts',   title: 'Offensive Points Played',  left: false, w: '' },
+                    { label: 'D-Pts',   title: 'Defensive Points Played',  left: false, w: '' },
+                    { label: '+/−',     title: 'Plus / Minus',             left: false, w: '' },
                   ].map((h) => (
                     <th
                       key={h.label}
@@ -171,6 +171,7 @@ export default async function PlayersPage({ searchParams }: Props) {
                         'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
                         'border-b border-border whitespace-nowrap',
                         h.left ? 'text-left' : 'text-right',
+                        h.w,
                       ].join(' ')}
                     >
                       {h.label}
@@ -186,22 +187,22 @@ export default async function PlayersPage({ searchParams }: Props) {
                       <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight w-10">
                         {i + 1}
                       </td>
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left">
+                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left w-[140px] sm:w-[180px]">
                         <Link
                           href={`/players/${player.id}`}
-                          className="font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                          className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"
                         >
                           {player.playerName}
                         </Link>
                       </td>
-                      <td className="px-3 py-2.5 border-b border-hairline text-left">
+                      <td className="px-3 py-2.5 border-b border-hairline text-left w-[120px]">
                         {team ? (
                           <Link
                             href={`/pul/teams/${team.id}`}
-                            className="inline-flex items-center gap-2 no-underline text-[12px] font-medium font-tight text-muted hover:text-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                            className="flex items-center gap-2 no-underline text-[12px] font-medium font-tight text-muted hover:text-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
                           >
-                            <PulTeamLogo team={team} size={22} />
-                            <span className="truncate max-w-[120px]">{team.mascot}</span>
+                            <span className="flex-shrink-0 inline-flex"><PulTeamLogo team={team} size={22} /></span>
+                            <span className="truncate">{team.mascot}</span>
                           </Link>
                         ) : (
                           <span className="text-[12px] text-faint font-tight">—</span>

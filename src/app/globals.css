@@ -19,6 +19,7 @@
   --live: 225 29 72;          /* #E11D48 */
   --accent: 255 61 0;         /* #FF3D00 — coral */
   --accent-ink: 255 255 255;
+  --notify: 225 29 72;        /* #E11D48 — notification red (same in both themes) */
 }
 
 :root[data-theme='broadcast'] {
@@ -37,6 +38,7 @@
   --live: 217 255 58;         /* #D9FF3A — volt (broadcast uses accent for live too) */
   --accent: 217 255 58;       /* #D9FF3A — volt */
   --accent-ink: 10 10 9;
+  --notify: 244 63 94;        /* #F43F5E — notification red, kept red on dark for legibility */
 }
 
 html, body {
@@ -46,6 +48,17 @@ html, body {
   -moz-osx-font-smoothing: grayscale;
   width: 100%;
   max-width: 100%;
+}
+
+/* Hide the scrollbar on an overflow-scroll element while keeping it scrollable.
+   Used for the player-name cell, which scrolls horizontally inside its fixed
+   column for the rare very-long name. */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 /* Horizontal-overflow guard — prevents a too-wide child from creating a

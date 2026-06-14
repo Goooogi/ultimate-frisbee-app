@@ -15,6 +15,7 @@ const config: Config = {
         border: 'rgb(var(--border) / <alpha-value>)',
         hairline: 'rgb(var(--hairline) / <alpha-value>)',
         live: 'rgb(var(--live) / <alpha-value>)',
+        notify: 'rgb(var(--notify) / <alpha-value>)',
         accent: 'rgb(var(--accent) / <alpha-value>)',
         'accent-ink': 'rgb(var(--accent-ink) / <alpha-value>)',
       },

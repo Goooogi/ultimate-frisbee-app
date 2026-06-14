@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from './auth-modal';
 import { useTheme } from '@/lib/use-theme';
+import { usePendingContentCount } from '@/lib/player-content/use-pending-count';
 import type { Theme } from '@/lib/theme';
 
 interface AccountChipProps {
@@ -36,6 +37,8 @@ export function AccountChip({
 }: AccountChipProps) {
   const { user, loading, signOut } = useAuth();
   const [theme, setTheme] = useTheme();
+  // Admin-only: number of submissions awaiting review. Drives the red dot.
+  const pendingReviewCount = usePendingContentCount(user?.isAdmin ?? false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -142,7 +145,11 @@ export function AccountChip({
     <div ref={wrapRef} className={`relative inline-flex ${className}`}>
       <button
         type="button"
-        aria-label={`Account — ${user.name}`}
+        aria-label={
+          pendingReviewCount > 0
+            ? `Account — ${user.name} (${pendingReviewCount} submission${pendingReviewCount === 1 ? '' : 's'} awaiting review)`
+            : `Account — ${user.name}`
+        }
         aria-haspopup="menu"
         aria-expanded={menuOpen}
         title={user.name}
@@ -155,6 +162,16 @@ export function AccountChip({
       >
         {user.initials}
       </button>
+
+      {/* Red notification dot — admins only, when content is awaiting review.
+          Positioned over the avatar's top-right; ring matches the page bg so it
+          reads as a separate pip. aria-hidden: the count is in the button label. */}
+      {pendingReviewCount > 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute top-0 right-0 w-2.5 h-2.5 rounded-full bg-notify ring-2 ring-bg pointer-events-none"
+        />
+      )}
 
       {menuOpen && (
         <div
@@ -176,12 +193,20 @@ export function AccountChip({
               role="menuitem"
               onClick={() => setMenuOpen(false)}
               className={[
-                'block w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+                'flex items-center justify-between gap-2 w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
                 'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
                 'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink',
               ].join(' ')}
             >
-              Admin
+              <span>Admin</span>
+              {pendingReviewCount > 0 && (
+                <span
+                  className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-notify text-white text-[10px] font-bold tabular tracking-normal"
+                  aria-label={`${pendingReviewCount} awaiting review`}
+                >
+                  {pendingReviewCount > 99 ? '99+' : pendingReviewCount}
+                </span>
+              )}
             </Link>
           )}
 

@@ -697,10 +697,12 @@ export async function listUsauPlayers(opts?: {
 // ─── Search ────────────────────────────────────────────────────────────
 
 export interface SearchResult {
-  kind: 'team' | 'player';
+  kind: 'team' | 'player' | 'tournament';
+  /** team/player → UUID; tournament → usau_slug (the /usau/events/[slug] route). */
   id: string;
   name: string;
-  /** Secondary line — team name for a player, state/level for a team. */
+  /** Secondary line — team name for a player, state/level for a team,
+   *  season + dates for a tournament. */
   hint: string | null;
 }
 
@@ -723,6 +725,26 @@ export interface SearchResult {
  * Uses Postgres ILIKE — fine at our current scale (220 teams, 5k
  * players). Swap in a tsvector + GIN index when we grow past ~50k rows.
  */
+/** Compact date range for search hints, e.g. "Jun 13–14" or "Jun 28".
+ *  Input is ISO yyyy-mm-dd (date-only); parse as UTC to avoid tz drift. */
+function formatEventDateRange(start: string | null, end: string | null): string | null {
+  if (!start) return null;
+  const fmt = (iso: string) =>
+    new Date(iso + 'T00:00:00Z').toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    });
+  const s = fmt(start);
+  if (!end || end === start) return s;
+  // Same month → "Jun 13–14"; else full "Jun 28 – Jul 1".
+  const sameMonth = start.slice(0, 7) === end.slice(0, 7);
+  const e = sameMonth
+    ? new Date(end + 'T00:00:00Z').toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' })
+    : fmt(end);
+  return `${s}–${e}`;
+}
+
 export async function search(query: string, limit = 8): Promise<SearchResult[]> {
   const q = query.trim();
   if (q.length < 2) return [];
@@ -733,7 +755,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
   // distinct teams in the dropdown.
   const overshoot = limit * 3;
   const db = await supabase();
-  const [teamRes, playerRes] = await Promise.all([
+  const [teamRes, playerRes, eventRes] = await Promise.all([
     db
       .from('usau_teams')
       .select('id, name, state, competition_level')
@@ -743,6 +765,13 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       .from('usau_players')
       .select('id, display_name, usau_rosters(usau_teams(name))')
       .ilike('display_name', pattern)
+      .limit(overshoot),
+    db
+      .from('usau_events')
+      .select('usau_slug, name, season, start_date, end_date')
+      .ilike('name', pattern)
+      // Newest first so the current season's tournaments surface above old ones.
+      .order('start_date', { ascending: false, nullsFirst: false })
       .limit(overshoot),
   ]);
 
@@ -775,7 +804,27 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
     });
   }
 
-  const results: SearchResult[] = [...teamMap.values(), ...playerMap.values()];
+  // ── Tournaments: keyed by usau_slug (unique per event). Hint = season +
+  //    date range; the route uses the slug, not a UUID. ──────────────────────
+  const tournamentMap = new Map<string, SearchResult>();
+  for (const e of eventRes.data ?? []) {
+    const ev = e as { usau_slug: string; name: string; season: number; start_date: string | null; end_date: string | null };
+    if (tournamentMap.has(ev.usau_slug)) continue;
+    const dates = formatEventDateRange(ev.start_date, ev.end_date);
+    const hintParts = [String(ev.season), dates].filter(Boolean) as string[];
+    tournamentMap.set(ev.usau_slug, {
+      kind: 'tournament',
+      id: ev.usau_slug,
+      name: ev.name,
+      hint: hintParts.join(' · ') || null,
+    });
+  }
+
+  const results: SearchResult[] = [
+    ...teamMap.values(),
+    ...playerMap.values(),
+    ...tournamentMap.values(),
+  ];
 
   // Prefix matches first, then alphabetical.
   const lower = q.toLowerCase();

@@ -82,6 +82,7 @@ export function SearchModal({ open, onClose }: Props) {
   function goTo(r: SearchResult) {
     onClose();
     if (r.kind === 'team') router.push(`/usau/teams/${r.id}`);
+    else if (r.kind === 'tournament') router.push(`/usau/events/${r.id}`);
     else router.push(`/players/${r.id}`);
   }
 
@@ -104,6 +105,7 @@ export function SearchModal({ open, onClose }: Props) {
 
   const teamResults = results.filter((r) => r.kind === 'team');
   const playerResults = results.filter((r) => r.kind === 'player');
+  const tournamentResults = results.filter((r) => r.kind === 'tournament');
 
   // Portal to <body> so the overlay escapes the app rail's stacking context
   // (the rail is sticky + backdrop-blur, which traps any z-index set on a
@@ -201,6 +203,21 @@ export function SearchModal({ open, onClose }: Props) {
                   })}
                 </Group>
               )}
+              {tournamentResults.length > 0 && (
+                <Group label="Tournaments">
+                  {tournamentResults.map((r) => {
+                    const i = results.indexOf(r);
+                    return (
+                      <ResultRow
+                        key={r.id}
+                        result={r}
+                        active={i === highlight}
+                        onClick={() => goTo(r)}
+                      />
+                    );
+                  })}
+                </Group>
+              )}
             </>
           )}
         </div>
@@ -246,10 +263,14 @@ function ResultRow({
         aria-hidden="true"
         className={[
           'inline-flex items-center justify-center w-7 h-7 rounded-md text-[9px] font-bold tracking-[0.04em] flex-shrink-0',
-          result.kind === 'team' ? 'bg-ink text-bg' : 'bg-accent text-accent-ink',
+          result.kind === 'team'
+            ? 'bg-ink text-bg'
+            : result.kind === 'tournament'
+              ? 'bg-surface border border-border text-muted'
+              : 'bg-accent text-accent-ink',
         ].join(' ')}
       >
-        {result.kind === 'team' ? 'TM' : 'PL'}
+        {result.kind === 'team' ? 'TM' : result.kind === 'tournament' ? 'TY' : 'PL'}
       </span>
       <span className="flex-1 min-w-0">
         <span className="block text-[14px] font-semibold text-ink font-tight leading-tight truncate">
