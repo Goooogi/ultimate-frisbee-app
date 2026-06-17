@@ -14,6 +14,7 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { listEvents, listSeasons, type UsauEventCard, type CompetitionLevel } from '@/lib/usau/data';
+import { FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import type { UsauDivision } from '@/lib/league';
 
 interface Props {
@@ -24,9 +25,11 @@ interface Props {
    *  schedule shows the full calendar for that level, not just events that
    *  happen to have teams scraped. */
   competitionLevel?: CompetitionLevel;
+  /** Optional curated Triple Crown Tour flight filter (Club only). */
+  flight?: Flight;
 }
 
-export function UsauSchedule({ division, competitionLevel }: Props = {}) {
+export function UsauSchedule({ division, competitionLevel, flight }: Props = {}) {
   const [seasons, setSeasons] = useState<number[]>([]);
   const [season, setSeason] = useState<number | null>(null);
   const [events, setEvents] = useState<UsauEventCard[]>([]);
@@ -58,7 +61,7 @@ export function UsauSchedule({ division, competitionLevel }: Props = {}) {
     // scraped yet. genderDivision is optional: when undefined, every event at
     // the level shows; when set, it narrows to events with scraped teams in
     // that division (the only ones we can attribute a gender to).
-    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel })
+    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel, flight })
       .then((e) => !cancelled && setEvents(e))
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
@@ -67,7 +70,7 @@ export function UsauSchedule({ division, competitionLevel }: Props = {}) {
     return () => {
       cancelled = true;
     };
-  }, [season, division, competitionLevel]);
+  }, [season, division, competitionLevel, flight]);
 
   const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
 
@@ -221,8 +224,10 @@ function EventCard({ event }: { event: UsauEventCard }) {
     new Date(event.endDate + 'T00:00:00').getTime() < Date.now();
   const level = prettyLevel(event.competitionLevel);
 
+  // The card itself navigates to our event detail. The "USAU" pill is a
+  // separate external link, so it sits OUTSIDE the Next <Link> (no nested <a>).
   return (
-    <li>
+    <li className="relative">
       <Link
         href={`/usau/events/${event.slug}`}
         className={[
@@ -230,9 +235,16 @@ function EventCard({ event }: { event: UsauEventCard }) {
           past ? 'opacity-75' : '',
         ].join(' ')}
       >
-        <div className="flex items-baseline justify-between gap-3 mb-2">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
-            {level}
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+              {level}
+            </span>
+            {event.flight && (
+              <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
+                {FLIGHT_LABELS[event.flight]}
+              </span>
+            )}
           </span>
           {event.teamCount > 0 && (
             <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
@@ -240,15 +252,31 @@ function EventCard({ event }: { event: UsauEventCard }) {
             </span>
           )}
         </div>
-        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2">
+        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 pr-14">
           {event.name}
         </div>
-        <div className="flex items-center gap-3 text-[11px] font-medium text-muted font-tight">
+        <div className="flex items-center gap-3 text-[11px] font-medium text-muted font-tight pr-14">
           {dateRange && <span className="tabular">{dateRange}</span>}
           {dateRange && location && <span className="text-faint">·</span>}
           {location && <span className="truncate">{location}</span>}
         </div>
       </Link>
+      {event.url && (
+        <a
+          href={event.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label={`View ${event.name} on USA Ultimate`}
+          className="absolute bottom-3 right-3 inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-2.5 py-1 border border-border hover:border-ink bg-surface"
+        >
+          USAU
+          <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M3 1.5h5.5V7" />
+            <path d="M8.5 1.5L3.5 6.5" />
+            <path d="M7 8.5H1.5V3" />
+          </svg>
+        </a>
+      )}
     </li>
   );
 }

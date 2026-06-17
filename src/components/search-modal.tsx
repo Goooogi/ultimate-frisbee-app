@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { type SearchResult } from '@/lib/usau/data';
+import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 
 interface Props {
@@ -282,6 +283,11 @@ function ResultRow({
           </span>
         )}
       </span>
+      {result.flight && (
+        <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
+          {FLIGHT_LABELS[result.flight]}
+        </span>
+      )}
     </button>
   );
 }

@@ -13,6 +13,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { flightForName, type Flight } from '@/lib/usau/flights';
 
 type DB = SupabaseClient<Database>;
 
@@ -42,6 +43,10 @@ export interface UsauEventCard {
   competitionLevel: string;
   /** Number of teams that participated, used as a "size" hint. */
   teamCount: number;
+  /** Canonical USAU event page URL (e.g. play.usaultimate.org/events/{slug}). */
+  url: string | null;
+  /** Curated Triple Crown Tour flight, or null if unclassified. See flights.ts. */
+  flight: Flight | null;
 }
 
 export type CompetitionLevel =
@@ -65,12 +70,15 @@ export async function listEvents(opts?: {
    *  the division lives on the participating teams. We treat an event
    *  as "in the X division" if any of its teams.gender_division = X. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
+  /** Filter to events curated into this Triple Crown Tour flight (see flights.ts).
+   *  Flight is a hand-maintained code map, not a USAU-published tournament field. */
+  flight?: Flight;
   limit?: number;
 }): Promise<UsauEventCard[]> {
   const db = await supabase();
   let q = db
     .from('usau_events')
-    .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level')
+    .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level, url')
     .order('start_date', { ascending: false, nullsFirst: false })
     .order('name', { ascending: true });
   if (opts?.season != null) q = q.eq('season', opts.season);
@@ -104,9 +112,12 @@ export async function listEvents(opts?: {
   }
 
   const filtered = (events ?? []).filter((e) => {
-    if (!opts?.genderDivision) return true;
-    const set = divisionsByEvent.get(e.id);
-    return set ? set.has(opts.genderDivision) : false;
+    if (opts?.genderDivision) {
+      const set = divisionsByEvent.get(e.id);
+      if (!(set && set.has(opts.genderDivision))) return false;
+    }
+    if (opts?.flight && flightForName(e.name) !== opts.flight) return false;
+    return true;
   });
 
   return filtered.map((e) => ({
@@ -120,6 +131,8 @@ export async function listEvents(opts?: {
     state: e.state,
     competitionLevel: e.competition_level,
     teamCount: countByEvent.get(e.id) ?? 0,
+    url: e.url ?? null,
+    flight: flightForName(e.name),
   }));
 }
 
@@ -704,6 +717,8 @@ export interface SearchResult {
   /** Secondary line — team name for a player, state/level for a team,
    *  season + dates for a tournament. */
   hint: string | null;
+  /** For tournaments only: curated Triple Crown Tour flight (or null). */
+  flight?: Flight | null;
 }
 
 /**
@@ -817,6 +832,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       id: ev.usau_slug,
       name: ev.name,
       hint: hintParts.join(' · ') || null,
+      flight: flightForName(ev.name),
     });
   }
 
@@ -1245,6 +1261,10 @@ export interface UsauEventSummary {
   city: string | null;
   state: string | null;
   competitionLevel: string;
+  /** Canonical USAU event page URL, for the "View on USAU" link. */
+  url: string | null;
+  /** Curated Triple Crown Tour flight (derived from the name), or null. */
+  flight: Flight | null;
   teams: Array<{
     teamId: string;
     teamName: string;
@@ -1277,7 +1297,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const db = await supabase();
   const { data: event, error } = await db
     .from('usau_events')
-    .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level')
+    .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level, url')
     .eq('usau_slug', slug)
     .maybeSingle();
   if (error) throw error;
@@ -1344,6 +1364,8 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
     city: event.city,
     state: event.state,
     competitionLevel: event.competition_level,
+    url: event.url ?? null,
+    flight: flightForName(event.name),
     teams,
     games,
   };

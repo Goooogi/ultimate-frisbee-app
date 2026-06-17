@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { type SearchResult } from '@/lib/usau/data';
+import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 import { SearchGlyph } from '@/components/search-modal';
 
@@ -119,8 +120,8 @@ export function SearchBar() {
           'transition-colors duration-150',
           'focus-within:ring-2 focus-within:ring-accent focus-within:border-accent',
           showDropdown ? 'border-accent' : 'border-border',
-          // Fixed width: snug enough at 1024px, generous at xl.
-          'w-[200px] xl:w-[240px]',
+          // Fixed width: roomier so longer tournament names fit; wider at xl.
+          'w-[280px] xl:w-[340px]',
         ].join(' ')}
       >
         {/* Magnifier icon */}
@@ -183,7 +184,7 @@ export function SearchBar() {
           aria-label="Search results"
           className={[
             'absolute left-0 top-full mt-2 z-[70]',
-            'w-full min-w-[320px]',
+            'w-full min-w-[360px]',
             'bg-bg border border-border rounded-md shadow-lg overflow-hidden',
           ].join(' ')}
         >
@@ -330,6 +331,11 @@ function ResultRow({
           </span>
         )}
       </span>
+      {result.flight && (
+        <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
+          {FLIGHT_LABELS[result.flight]}
+        </span>
+      )}
     </button>
   );
 }

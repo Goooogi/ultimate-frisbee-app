@@ -13,6 +13,7 @@ import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { getEvent, type UsauEventSummary } from '@/lib/usau/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
+import { FLIGHT_LABELS } from '@/lib/usau/flights';
 
 export const revalidate = 60;
 
@@ -31,7 +32,11 @@ export default async function UsauEventPage({ params }: Props) {
   if (!event) notFound();
 
   const subtitle = formatSubtitle(event);
-  const eyebrowParts = [event.competitionLevel, event.season]
+  const eyebrowParts = [
+    event.competitionLevel,
+    event.season,
+    event.flight ? FLIGHT_LABELS[event.flight] : null,
+  ]
     .filter(Boolean)
     .join(' · ');
 
@@ -40,6 +45,7 @@ export default async function UsauEventPage({ params }: Props) {
       title={event.name}
       eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}
       subtitle={subtitle ?? undefined}
+      controls={event.url ? <UsauLink url={event.url} name={event.name} /> : undefined}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'The Games', href: '/scores?league=usau' },
@@ -48,6 +54,26 @@ export default async function UsauEventPage({ params }: Props) {
     >
       <UsauEventDetail event={event} />
     </PageShell>
+  );
+}
+
+/** External link back to the canonical USAU event page. */
+function UsauLink({ url, name }: { url: string; name: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`View ${name} on USA Ultimate`}
+      className="inline-flex items-center gap-1.5 px-3 py-[6px] rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-surface border border-border text-ink hover:border-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
+    >
+      View on USAU
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 1.5h5.5V7" />
+        <path d="M8.5 1.5L3.5 6.5" />
+        <path d="M7 8.5H1.5V3" />
+      </svg>
+    </a>
   );
 }
 

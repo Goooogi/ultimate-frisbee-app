@@ -12,6 +12,8 @@ import { useCallback } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PillSelect } from '@/components/pill-select';
 import { UsauLevelSelect } from './usau-level-select';
+import { FLIGHTS, FLIGHT_LABELS, parseFlightParam, type Flight } from '@/lib/usau/flights';
+import type { CompetitionLevel } from '@/lib/usau/data';
 
 type DivChoice = 'all' | 'Men' | 'Women' | 'Mixed';
 
@@ -22,38 +24,57 @@ const DIV_OPTIONS: { value: DivChoice; label: string }[] = [
   { value: 'Mixed', label: 'Mixed' },
 ];
 
+type FlightChoice = 'all' | Flight;
+
+const FLIGHT_OPTIONS: { value: FlightChoice; label: string }[] = [
+  { value: 'all', label: 'All flights' },
+  ...FLIGHTS.map((f) => ({ value: f, label: FLIGHT_LABELS[f] })),
+];
+
 function parseDivChoice(raw: string | null): DivChoice {
   if (!raw) return 'all';
   const norm = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
   return norm === 'Men' || norm === 'Women' || norm === 'Mixed' ? norm : 'all';
 }
 
-export function UsauScheduleControls() {
+export function UsauScheduleControls({ level }: { level?: CompetitionLevel } = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const current = parseDivChoice(searchParams.get('div'));
+  const currentDiv = parseDivChoice(searchParams.get('div'));
+  const currentFlight: FlightChoice = parseFlightParam(searchParams.get('flight')) ?? 'all';
 
-  const onChange = useCallback(
-    (next: DivChoice) => {
+  const setParam = useCallback(
+    (key: string, value: string | null) => {
       const params = new URLSearchParams(searchParams.toString());
-      if (next === 'all') params.delete('div');
-      else params.set('div', next.toLowerCase());
+      if (value === null) params.delete(key);
+      else params.set(key, value);
       const qs = params.toString();
       router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
     },
     [router, pathname, searchParams],
   );
 
+  // Flight is a Triple Crown Tour (Club) concept — only offer it for Club.
+  const showFlight = level === 'CLUB';
+
   return (
     <div className="flex items-center gap-2 flex-wrap">
       <UsauLevelSelect />
       <PillSelect
-        value={current}
-        onChange={onChange}
+        value={currentDiv}
+        onChange={(next) => setParam('div', next === 'all' ? null : next.toLowerCase())}
         ariaLabel="Select division"
         options={DIV_OPTIONS}
       />
+      {showFlight && (
+        <PillSelect
+          value={currentFlight}
+          onChange={(next) => setParam('flight', next === 'all' ? null : next)}
+          ariaLabel="Select flight"
+          options={FLIGHT_OPTIONS}
+        />
+      )}
     </div>
   );
 }

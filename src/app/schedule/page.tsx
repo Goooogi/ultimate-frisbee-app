@@ -14,6 +14,7 @@ import { YearSelector } from '@/components/year-selector';
 import { parseDivisionParam, parseLeagueParam, parseLevelParam, levelLabel } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
 import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
+import { parseFlightParam, FLIGHT_LABELS } from '@/lib/usau/flights';
 import { PulSchedule } from '@/components/pul/pul-schedule';
 import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
 
@@ -24,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; season?: string; league?: string; div?: string; level?: string };
+  searchParams: { year?: string; season?: string; league?: string; div?: string; level?: string; flight?: string };
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
@@ -47,14 +48,22 @@ export default async function SchedulePage({ searchParams }: Props) {
     // Division is OPTIONAL on the schedule: absent ?div ⇒ show all divisions
     // (and events without scraped teams). Only narrow when a div is present.
     const division = searchParams.div ? parseDivisionParam(searchParams.div) : undefined;
-    const eyebrow = `USAU · ${levelLabel(level)}${division ? ` · ${division}` : ''}`;
+    // Flight is OPTIONAL too: absent ?flight ⇒ all flights. Only Club events
+    // carry flight classifications, so the flight control shows only for Club.
+    const flight = parseFlightParam(searchParams.flight) ?? undefined;
+    const eyebrow = [
+      'USAU',
+      levelLabel(level),
+      division,
+      flight ? FLIGHT_LABELS[flight] : null,
+    ].filter(Boolean).join(' · ');
     return (
       <PageShell
         title="Schedule"
         eyebrow={eyebrow}
-        controls={<UsauScheduleControls />}
+        controls={<UsauScheduleControls level={level} />}
       >
-        <UsauSchedule competitionLevel={level} division={division} />
+        <UsauSchedule competitionLevel={level} division={division} flight={flight} />
       </PageShell>
     );
   }
