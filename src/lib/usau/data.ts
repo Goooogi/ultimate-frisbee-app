@@ -139,11 +139,22 @@ export async function listEvents(opts?: {
 /**
  * Returns the most relevant tournament for "The Games" view.
  *
- * Tiered preference:
- *   1. A LIVE event (started, not yet ended) — Club or College, whatever's
- *      happening right now. This is the one that should headline.
- *   2. The soonest-upcoming event with games already scraped.
- *   3. The most-recently-completed event with games.
+ * Ultimate runs on a weekly tournament cadence — events play Fri–Sun, then the
+ * week is dead until the next weekend. So the headline follows the weekend, not
+ * the literal "is anything live this second" question:
+ *
+ *   • Sun / Mon / Tue  → show LAST weekend's tournament (the just-finished one).
+ *     Fans are still digesting results; the next event hasn't earned the spot.
+ *   • Wed / Thu / Fri / Sat → show the UPCOMING weekend's tournament (preview).
+ *     By Wednesday attention has shifted to who's playing this weekend.
+ *
+ * The cutover is Wednesday 00:00 in the server's local time.
+ *
+ * Within whichever side we pick, ties (multiple events the same weekend) break
+ * by FLIGHT_RANK — the marquee flight (Pro Elite Challenge) headlines over a
+ * co-scheduled local tournament. If the preferred side has no event, we fall
+ * back to the other side, then to the most-recent event that actually has games
+ * so the page is never empty.
  *
  * We consider any tournament-grade level (Club, College D-I/D-III,
  * Masters, Grand Masters) — these are the ones with real bracket data.
@@ -151,9 +162,9 @@ export async function listEvents(opts?: {
  * over a major club event.
  *
  * Returns the slug only; callers fetch the full event via getEvent().
- * The second return value is true when the chosen event has NO games
- * ingested yet — UI can render a "happening now, brackets pending"
- * fallback.
+ * `hasGames` is false when the chosen event has NO games ingested yet — UI
+ * can render a "happening soon, brackets pending" fallback. (Note: the final
+ * fallback only ever returns events that DO have games.)
  */
 const FLAGSHIP_LEVELS: CompetitionLevel[] = [
   'CLUB',
@@ -186,16 +197,23 @@ export async function getCurrentEvent(opts?: {
   genderDivision?: 'Men' | 'Women' | 'Mixed';
 }): Promise<{ slug: string; hasGames: boolean } | null> {
   const db = await supabase();
-  const today = new Date().toISOString().slice(0, 10);
-  const sixMonthsBack = new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 10);
-  const sixMonthsForward = new Date(Date.now() + 180 * 86400_000).toISOString().slice(0, 10);
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  // The weekend rule only looks one weekend back or forward, so a tight window
+  // is all we need — and it keeps the per-event count + division queries below
+  // well clear of PostgREST's 1000-row response cap (a ±180d window spans 450+
+  // events / 1300+ games, which silently truncates and drops events to "0
+  // games"). The DB-wide fallback at the end of this function still covers any
+  // gap when nothing falls inside the window.
+  const windowBack = new Date(now.getTime() - 45 * 86400_000).toISOString().slice(0, 10);
+  const windowForward = new Date(now.getTime() + 45 * 86400_000).toISOString().slice(0, 10);
 
   const { data: windowEvents } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date, competition_level')
     .in('competition_level', FLAGSHIP_LEVELS)
-    .gte('start_date', sixMonthsBack)
-    .lte('start_date', sixMonthsForward)
+    .gte('start_date', windowBack)
+    .lte('start_date', windowForward)
     .order('start_date', { ascending: true });
 
   type EventRow = {
@@ -212,71 +230,96 @@ export async function getCurrentEvent(opts?: {
   const counts = new Map<string, number>();
   const divisionsByEvent = new Map<string, Set<string>>();
   if (events.length > 0) {
-    // Games count (for "has games" + ranking).
-    const { data: gameCounts } = await db
-      .from('usau_games')
-      .select('event_id')
-      .in('event_id', events.map((e) => e.id));
-    for (const g of gameCounts ?? []) {
-      counts.set(g.event_id, (counts.get(g.event_id) ?? 0) + 1);
+    const eventIds = events.map((e) => e.id);
+
+    // Games count (for "has games" + ranking). PostgREST caps a single response
+    // at 1000 rows, so we page through with .range() until a short page tells us
+    // we're done — otherwise a busy window silently undercounts and events get
+    // mis-flagged as having no games.
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_games')
+        .select('event_id, id')
+        .in('event_id', eventIds)
+        .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
+        .range(from, from + PAGE - 1);
+      const rows = page ?? [];
+      for (const g of rows) {
+        counts.set(g.event_id, (counts.get(g.event_id) ?? 0) + 1);
+      }
+      if (rows.length < PAGE) break;
     }
-    // Participating divisions, for the optional filter.
+
+    // Participating divisions, for the optional filter. Team rows are far fewer
+    // than games, but page defensively for the same cap reason.
     if (opts?.genderDivision) {
-      const { data: parts } = await db
-        .from('usau_event_teams')
-        .select('event_id, usau_teams(gender_division)')
-        .in('event_id', events.map((e) => e.id));
-      for (const r of (parts ?? []) as Array<{
-        event_id: string;
-        usau_teams: { gender_division: string | null } | null;
-      }>) {
-        const div = r.usau_teams?.gender_division;
-        if (div) {
-          if (!divisionsByEvent.has(r.event_id)) divisionsByEvent.set(r.event_id, new Set());
-          divisionsByEvent.get(r.event_id)!.add(div);
+      for (let from = 0; ; from += PAGE) {
+        const { data: page } = await db
+          .from('usau_event_teams')
+          .select('event_id, team_id, usau_teams(gender_division)')
+          .in('event_id', eventIds)
+          // Composite key (event_id, team_id) → order by both for a total order
+          // so paged ranges don't skip/overlap.
+          .order('event_id', { ascending: true })
+          .order('team_id', { ascending: true })
+          .range(from, from + PAGE - 1);
+        const rows = (page ?? []) as Array<{
+          event_id: string;
+          team_id: string;
+          usau_teams: { gender_division: string | null } | null;
+        }>;
+        for (const r of rows) {
+          const div = r.usau_teams?.gender_division;
+          if (div) {
+            if (!divisionsByEvent.has(r.event_id)) divisionsByEvent.set(r.event_id, new Set());
+            divisionsByEvent.get(r.event_id)!.add(div);
+          }
         }
+        if (rows.length < PAGE) break;
       }
       events = events.filter((e) => divisionsByEvent.get(e.id)?.has(opts.genderDivision!) ?? false);
     }
   }
 
-  // Tier 1: live tournament (has started, hasn't ended). Prefer the highest
-  // flight (so Pro Elite Challenge headlines over a co-scheduled local event),
-  // then the soonest-ending one so we focus on what's about to wrap up.
-  const live = events
-    .filter((e) => (e.start_date ?? '') <= today && (e.end_date ?? e.start_date ?? '') >= today)
-    .sort(
-      (a, b) =>
-        flightRankForName(b.name) - flightRankForName(a.name) ||
-        (a.end_date ?? '').localeCompare(b.end_date ?? ''),
-    );
-  if (live.length > 0) {
-    const e = live[0];
-    return { slug: e.usau_slug, hasGames: (counts.get(e.id) ?? 0) > 0 };
-  }
+  // Weekend cadence: before Wednesday we look back at last weekend; from
+  // Wednesday on we look forward to the next weekend. We use getUTCDay() so the
+  // cutover and the past/upcoming date split below share one clock — `today`
+  // and event start/end dates are all compared as UTC calendar dates.
+  const lookForward = now.getUTCDay() >= 3; // Wed(3) → Sat(6)
 
-  // Tier 2: upcoming with games — highest flight first, then soonest start.
-  const upcoming = events
-    .filter((e) => (e.start_date ?? '') > today && (counts.get(e.id) ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        flightRankForName(b.name) - flightRankForName(a.name) ||
-        (a.start_date ?? '').localeCompare(b.start_date ?? ''),
-    );
-  if (upcoming.length > 0) {
-    return { slug: upcoming[0].usau_slug, hasGames: true };
-  }
+  // An event is "upcoming" if it hasn't ended yet (today on or before end_date),
+  // "past" otherwise. Using end_date keeps a Fri–Sun event in the "this
+  // weekend" bucket through Sunday rather than flipping to past mid-tournament.
+  const endOf = (e: EventRow) => e.end_date ?? e.start_date ?? '';
+  const isPast = (e: EventRow) => endOf(e) < today;
+  const isUpcomingOrNow = (e: EventRow) => endOf(e) >= today;
 
-  // Tier 3: completed with games — highest flight first, then most-recent.
-  const completed = events
-    .filter((e) => (counts.get(e.id) ?? 0) > 0)
-    .sort(
-      (a, b) =>
-        flightRankForName(b.name) - flightRankForName(a.name) ||
-        (b.start_date ?? '').localeCompare(a.start_date ?? ''),
-    );
-  if (completed.length > 0) {
-    return { slug: completed[0].usau_slug, hasGames: true };
+  // Highest flight wins; tie-break toward the weekend nearest "now" — soonest
+  // start for upcoming, most-recent start for past.
+  const byFlightThen = (recentFirst: boolean) => (a: EventRow, b: EventRow) =>
+    flightRankForName(b.name) - flightRankForName(a.name) ||
+    (recentFirst
+      ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
+      : (a.start_date ?? '').localeCompare(b.start_date ?? ''));
+
+  const upcoming = events.filter(isUpcomingOrNow).sort(byFlightThen(false));
+  const past = events.filter(isPast).sort(byFlightThen(true));
+
+  // Preferred side first, then the other side as a graceful fallback (e.g. early
+  // in a season there is no "last weekend"; at season's end no "next weekend").
+  const ordered = lookForward ? [...upcoming, ...past] : [...past, ...upcoming];
+
+  // Prefer an in-window event that actually has games. Only if NONE do (e.g. the
+  // upcoming weekend's brackets aren't scraped yet) fall through to the best
+  // gameless pick so the preview still shows "brackets pending"; the DB-wide
+  // fallback below then guarantees the page is never truly empty.
+  const withGames = ordered.find((e) => (counts.get(e.id) ?? 0) > 0);
+  if (withGames) {
+    return { slug: withGames.usau_slug, hasGames: true };
+  }
+  if (ordered.length > 0) {
+    return { slug: ordered[0].usau_slug, hasGames: false };
   }
 
   // Final fallback: most-recent flagship event with games anywhere in DB.

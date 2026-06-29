@@ -233,7 +233,7 @@ function UfaList({
               <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
                 <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left ${playerColCls}`}>
                   <Link
-                    href={`/players/${p.playerID}`}
+                    href={`/players/${p.playerID}?from=ufa`}
                     className="flex items-center gap-2 hover:opacity-80 transition-opacity no-underline"
                   >
                     <span className="tabular text-[10px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
@@ -297,7 +297,7 @@ function UsauList({ players }: { players: UsauPlayerListRow[] }) {
       {players.map((p, i) => (
         <li key={p.id} className="bg-surface">
           <Link
-            href={`/players/${p.id}`}
+            href={`/players/${p.id}?from=usau`}
             className="flex items-center gap-3 px-4 py-3 hover:bg-surface-hi transition-colors no-underline"
           >
             <span className="tabular text-[11px] font-bold text-faint font-tight w-6 text-right">

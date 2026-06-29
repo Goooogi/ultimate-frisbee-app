@@ -9,10 +9,11 @@
 //   2. The shorter name's other tokens (first + middles) must ALL appear
 //      somewhere in the longer name's other tokens.
 //
-// This is conservative on purpose. It does NOT handle nicknames
-// (Bob ↔ Robert), initials matched to full names (J. ↔ John), or
-// transliterated/diacritic variants beyond NFD-stripping. Those need
-// a real identity layer.
+// It handles a curated set of common nicknames (Bob ↔ Robert, Abby ↔
+// Abigail) via the NICKNAME_GROUPS table below, plus prefix abbreviations
+// (Ben ⊂ Benjamin). It does NOT handle initials matched to full names
+// (J. ↔ John) or transliterated variants beyond NFD-stripping. Anything
+// outside the curated table needs a real identity layer.
 
 /**
  * Normalize a name for matching: NFD-strip diacritics, lowercase, drop
@@ -84,19 +85,78 @@ export function namesMatch(a: string, b: string): boolean {
   return true;
 }
 
+// Curated nickname groups — each row is a set of given names that refer to the
+// same person. Membership is symmetric and transitive within a row: any token
+// in a group matches any other token in that group. All entries must be
+// normalized (lowercase, no punctuation) to match normalizeName's output.
+//
+// Conservative by design: only known pairs match, and the caller still requires
+// the surname to be equal, so a false merge needs both a nickname collision AND
+// a shared surname. Add new rows as real edge cases surface — do NOT add stems
+// so generic they'd merge distinct people (e.g. don't group "al" with both
+// "albert" and "alexander").
+const NICKNAME_GROUPS: readonly (readonly string[])[] = [
+  ['abby', 'abigail'],
+  ['bob', 'bobby', 'rob', 'robert'],
+  ['mike', 'michael'],
+  ['jim', 'jimmy', 'james'],
+  ['bill', 'billy', 'will', 'william'],
+  ['dick', 'rick', 'ricky', 'richard'],
+  ['tom', 'tommy', 'thomas'],
+  ['dave', 'david'],
+  ['joe', 'joey', 'joseph'],
+  ['chris', 'christopher'],
+  ['nick', 'nicholas'],
+  ['tony', 'anthony'],
+  ['kate', 'katie', 'katherine', 'kathryn', 'catherine'],
+  ['liz', 'beth', 'elizabeth'],
+  ['meg', 'maggie', 'margaret'],
+  ['becky', 'rebecca'],
+  ['jen', 'jenny', 'jennifer'],
+  ['sam', 'samantha', 'samuel'],
+  ['alex', 'alexander', 'alexandra'],
+  ['gabe', 'gabriel'],
+  ['nate', 'nathan', 'nathaniel'],
+  ['andy', 'drew', 'andrew'],
+];
+
+// Flattened symmetric index: given name → its group id. Two names are nickname-
+// equivalent iff they resolve to the same group id.
+const NICKNAME_GROUP_BY_NAME: Map<string, number> = (() => {
+  const m = new Map<string, number>();
+  NICKNAME_GROUPS.forEach((group, i) => {
+    for (const name of group) {
+      // A name in two rows would silently lose transitivity (the later row
+      // overwrites the earlier), so reject overlap at module load — merge the
+      // overlapping rows into one instead.
+      if (m.has(name)) {
+        throw new Error(`name-match: nickname "${name}" appears in multiple groups; merge them`);
+      }
+      m.set(name, i);
+    }
+  });
+  return m;
+})();
+
 /**
- * True if given-name `a` matches `b` as the same first/middle name, allowing
- * abbreviation by PREFIX. The shorter token must be a prefix of the longer and
- * be ≥3 chars, so we don't over-match short stems ("jo" → Joseph/John/Joshua).
- * Surname equality is already required by the caller, keeping this conservative.
+ * True if given-name `a` matches `b` as the same first/middle name. Three ways
+ * to match: exact equality, a curated nickname pairing (Abby ↔ Abigail), or
+ * abbreviation by PREFIX. For the prefix case the shorter token must be a prefix
+ * of the longer and be ≥3 chars, so we don't over-match short stems ("jo" →
+ * Joseph/John/Joshua). Surname equality is already required by the caller,
+ * keeping this conservative.
  *
  *   "ben"  ↔ "benjamin"  → true     "matt" ↔ "matthew" → true
  *   "dan"  ↔ "daniel"    → true     "ben"  ↔ "ben"     → true (exact)
- *   "jo"   ↔ "joseph"    → false (prefix < 3)
- *   "bob"  ↔ "robert"    → false (non-prefix nickname, out of scope)
+ *   "abby" ↔ "abigail"   → true     "bob"  ↔ "robert"  → true (nickname table)
+ *   "jo"   ↔ "joseph"    → false (prefix < 3, not a listed nickname)
  */
 function givenMatches(a: string, b: string): boolean {
   if (a === b) return true;
+  // Curated nickname equivalence (symmetric via shared group id).
+  const ga = NICKNAME_GROUP_BY_NAME.get(a);
+  if (ga !== undefined && ga === NICKNAME_GROUP_BY_NAME.get(b)) return true;
+  // Prefix abbreviation.
   const [shortG, longG] = a.length <= b.length ? [a, b] : [b, a];
   if (shortG.length < 3) return false;
   return longG.startsWith(shortG);

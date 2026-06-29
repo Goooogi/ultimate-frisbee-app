@@ -635,7 +635,7 @@ function BoxscoreRow({ row }: { row: PulBoxscoreRow }) {
         </td>
         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px]">
           <Link
-            href={`/players/${row.profileId}`}
+            href={`/players/${row.profileId}?from=pul`}
             className="text-ink group-hover:text-accent transition-colors duration-100 focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
           >
             {row.playerName}

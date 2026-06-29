@@ -17,6 +17,8 @@ import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { listPulTeams, type PulTeam } from '@/lib/pul/data';
+import { WulTeamLogo } from '@/components/wul-team-logo';
+import { listWulTeams, type WulTeam } from '@/lib/wul/data';
 import {
   parseDivisionParam,
   parseLeagueParam,
@@ -54,6 +56,27 @@ export default async function TeamsPage({ searchParams }: Props) {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {teams.map((team) => (
               <PulTeamCard key={team.id} team={team} />
+            ))}
+          </div>
+        )}
+      </PageShell>
+    );
+  }
+
+  // WUL branch: team card grid (mirrors PUL). Cards link to /wul/teams/[id].
+  if (league === 'wul') {
+    const teams = await listWulTeams().catch((): WulTeam[] => []);
+    return (
+      <PageShell
+        title="Teams"
+        eyebrow="WUL · Western Ultimate League"
+      >
+        {teams.length === 0 ? (
+          <EmptyState message="Could not load WUL teams. Try refreshing the page." />
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {teams.map((team) => (
+              <WulTeamCard key={team.id} team={team} />
             ))}
           </div>
         )}
@@ -298,6 +321,30 @@ function PulTeamCard({ team }: { team: PulTeam }) {
       ].join(' ')}
     >
       <PulTeamLogo team={team} size={56} />
+      <div className="text-center min-w-0 w-full">
+        <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight truncate">
+          {team.city}
+        </p>
+        <p className="text-[15px] font-bold font-tight text-ink leading-tight truncate mt-0.5">
+          {team.mascot}
+        </p>
+      </div>
+    </Link>
+  );
+}
+
+function WulTeamCard({ team }: { team: WulTeam }) {
+  return (
+    <Link
+      href={`/wul/teams/${team.id}`}
+      className={[
+        'flex flex-col items-center gap-3 bg-surface border border-border p-4 rounded-md',
+        'text-ink no-underline',
+        'hover:border-[rgb(var(--ink)/0.3)] hover:bg-surface-hi transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+      ].join(' ')}
+    >
+      <WulTeamLogo team={team} size={56} />
       <div className="text-center min-w-0 w-full">
         <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight truncate">
           {team.city}

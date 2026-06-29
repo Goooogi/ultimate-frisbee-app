@@ -1,28 +1,17 @@
-// /wul/scores — WUL completed games, grouped by week (most recent first).
-// Mirrors src/app/pul's scores branch (the PUL branch of /scores/page.tsx).
-// Server component; season is fixed to WUL_CURRENT_SEASON (no switcher needed
-// until WUL carries multiple archived seasons).
+// /wul/scores → redirect to the canonical shared route /scores?league=wul.
+//
+// WUL standardized on the shared ?league=wul routes (same pattern as PUL) so
+// Scores works identically across leagues. Kept as a redirect so old links /
+// bookmarks still work. Any season query is preserved.
 
-import type { Metadata } from 'next';
-import { PageShell } from '@/components/page-shell';
-import { WulScores } from '@/components/wul/wul-scores';
-import { WUL_CURRENT_SEASON } from '@/lib/wul/data';
+import { redirect } from 'next/navigation';
 
-export const revalidate = 300; // 5 min — scores update during season
+interface Props {
+  searchParams: { season?: string };
+}
 
-export const metadata: Metadata = {
-  title: `WUL Scores · ${WUL_CURRENT_SEASON} · The Layout`,
-  description: `${WUL_CURRENT_SEASON} Western Ultimate League scores and results.`,
-};
-
-export default function WulScoresPage() {
-  return (
-    <PageShell
-      title="Scores"
-      eyebrow={`WUL · Western Ultimate League · ${WUL_CURRENT_SEASON}`}
-      topNavSlot={<span />}
-    >
-      <WulScores season={WUL_CURRENT_SEASON} />
-    </PageShell>
-  );
+export default function WulScoresRedirect({ searchParams }: Props) {
+  const params = new URLSearchParams({ league: 'wul' });
+  if (searchParams.season) params.set('season', searchParams.season);
+  redirect(`/scores?${params.toString()}`);
 }

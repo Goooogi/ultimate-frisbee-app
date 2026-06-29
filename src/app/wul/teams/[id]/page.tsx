@@ -51,7 +51,7 @@ export default async function WulTeamPage({ params }: Props) {
       topNavSlot={<span />}
       breadcrumbs={[
         { label: 'Home', href: '/' },
-        { label: 'WUL Teams', href: '/wul/teams' },
+        { label: 'WUL Teams', href: '/teams?league=wul' },
         { label: `${team.city} ${team.mascot}` },
       ]}
     >
@@ -90,7 +90,7 @@ export default async function WulTeamPage({ params }: Props) {
               No players have been rostered for {team.city} {team.mascot} yet this season.
             </p>
             <Link
-              href="/wul/teams"
+              href="/teams?league=wul"
               className="mt-5 text-[12px] font-bold tracking-[0.12em] uppercase text-ink underline underline-offset-2 hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
             >
               View all WUL teams
@@ -150,7 +150,7 @@ function RosterRow({ player }: { player: WulPlayer }) {
       </td>
       <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight">
         <Link
-          href={`/players/${player.id}`}
+          href={`/players/${player.id}?from=wul`}
           className="text-ink group-hover:text-accent transition-colors duration-100 focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
         >
           {player.playerName}

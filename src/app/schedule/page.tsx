@@ -17,6 +17,7 @@ import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
 import { parseFlightParam, FLIGHT_LABELS } from '@/lib/usau/flights';
 import { PulSchedule } from '@/components/pul/pul-schedule';
 import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
+import { WulSchedule } from '@/components/wul/wul-schedule';
 
 export const revalidate = 300;
 
@@ -39,6 +40,19 @@ export default async function SchedulePage({ searchParams }: Props) {
         eyebrow={`PUL · ${season} Season`}
       >
         <PulSchedule season={season} />
+      </PageShell>
+    );
+  }
+
+  // WUL has no future fixtures — its "schedule" is the full multi-season game
+  // history (grouped by season). Distinct from /scores (current season only).
+  if (league === 'wul') {
+    return (
+      <PageShell
+        title="Schedule"
+        eyebrow="WUL · Western Ultimate League · All seasons"
+      >
+        <WulSchedule />
       </PageShell>
     );
   }

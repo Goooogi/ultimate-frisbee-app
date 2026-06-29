@@ -74,7 +74,7 @@ export function UsauTeamHistory({ seasons }: Props) {
               {active.roster.map((p) => (
                 <li key={p.playerId} className="bg-surface">
                   <Link
-                    href={`/players/${p.playerId}`}
+                    href={`/players/${p.playerId}?from=usau`}
                     className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-hi transition-colors no-underline"
                   >
                     <span

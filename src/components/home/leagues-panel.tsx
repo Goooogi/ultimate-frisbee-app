@@ -40,7 +40,7 @@ const LEAGUE_ROWS: LeagueRow[] = [
     label: 'WUL',
     abbr: 'WUL',
     subtitle: 'Western Ultimate League',
-    href: '/wul/teams',
+    href: '/scores?league=wul',
     img: '/WUL-logo.jpeg',
   },
   {

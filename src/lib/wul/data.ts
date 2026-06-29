@@ -401,6 +401,62 @@ export async function listWulGames(opts: {
   return games;
 }
 
+// ─── Postseason round derivation ───────────────────────────────────────────────
+// The source only tags playoff games as week_label='post' (no semi/final
+// distinction). But WUL's championship-weekend format is consistent across every
+// season (2022–2026, verified): Day 1 = the two semifinals; Day 2 = the final
+// (both teams won their Day-1 game) plus an optional 3rd-place game (both teams
+// lost Day 1). So we can derive the round purely from date + who advanced — no
+// DB change or re-scrape needed.
+
+export type WulPostseasonRound = 'final' | 'semifinal' | 'third_place';
+
+/** Classify a season's postseason games into final / semifinal / 3rd-place.
+ *  Input may be a full game list or just the post games; non-post games are
+ *  ignored. Returns a Map from game id → round. Games that don't fit the
+ *  two-day format (e.g. a partial/in-progress bracket) are left unclassified
+ *  and simply won't appear in the map. */
+export function deriveWulPostseasonRounds(games: WulGame[]): Map<string, WulPostseasonRound> {
+  const out = new Map<string, WulPostseasonRound>();
+  const post = games.filter((g) => g.weekLabel === 'post' && g.status === 'final' && g.gameDate);
+  if (post.length === 0) return out;
+
+  // Bucket by date; earliest day(s) are semis, the last day is championship.
+  const byDate = new Map<string, WulGame[]>();
+  for (const g of post) {
+    const d = g.gameDate as string;
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d)!.push(g);
+  }
+  const dates = [...byDate.keys()].sort();
+  if (dates.length < 2) {
+    // Only one day of data so far (e.g. semis played, final not yet) — treat
+    // every game as a semifinal until the championship day exists.
+    for (const g of post) out.set(g.id, 'semifinal');
+    return out;
+  }
+
+  const finalDay = dates[dates.length - 1];
+  const semiGames = dates.slice(0, -1).flatMap((d) => byDate.get(d)!);
+  const winners = new Set<string>();
+  for (const g of semiGames) {
+    out.set(g.id, 'semifinal');
+    const w =
+      g.home.score !== null && g.away.score !== null && g.home.score > g.away.score
+        ? g.home.teamId
+        : g.away.teamId;
+    winners.add(w);
+  }
+
+  // On the final day: the game between the two semifinal winners is the final;
+  // any other game (both teams were semifinal losers) is the 3rd-place game.
+  for (const g of byDate.get(finalDay)!) {
+    const bothWon = winners.has(g.home.teamId) && winners.has(g.away.teamId);
+    out.set(g.id, bothWon ? 'final' : 'third_place');
+  }
+  return out;
+}
+
 /** One game by id. Returns null if not found. Powers /wul/g/[...id]. */
 export async function getWulGame(id: string): Promise<WulGame | null> {
   const db = supabase();

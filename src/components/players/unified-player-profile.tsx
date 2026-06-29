@@ -29,9 +29,22 @@ import type { PlayerContentItem } from '@/lib/player-content/types';
 interface Props {
   profile: UnifiedPlayerProfile;
   content: PlayerContentItem[];
+  // Which league the user navigated from (via ?from=), so "< Players" returns
+  // them there. Undefined → root /players (UFA). See PLAYERS_LIST_HREF.
+  fromLeague?: string;
 }
 
-export function UnifiedProfile({ profile, content }: Props) {
+// Map an originating-league code to its players-list URL. UFA is the root app,
+// so it (and any unknown value) falls back to /players. All non-UFA leagues use
+// the shared /players page with a ?league= filter.
+const PLAYERS_LIST_HREF: Record<string, string> = {
+  ufa: '/players',
+  usau: '/players?league=usau',
+  pul: '/players?league=pul',
+  wul: '/players?league=wul',
+};
+
+export function UnifiedProfile({ profile, content, fromLeague }: Props) {
   const { career, years } = profile;
   const latestYear = years[0];
   const latestUfa = latestYear?.stints.find(isUfa) ?? null;
@@ -43,9 +56,11 @@ export function UnifiedProfile({ profile, content }: Props) {
   // wins.)
   const topNavSlot = <span aria-hidden="true" />;
 
+  const playersHref =
+    (fromLeague && PLAYERS_LIST_HREF[fromLeague]) || '/players';
   const crumbs = [
     { label: 'Home', href: '/' },
-    { label: 'Players', href: '/players' },
+    { label: 'Players', href: playersHref },
     { label: profile.displayName },
   ];
 

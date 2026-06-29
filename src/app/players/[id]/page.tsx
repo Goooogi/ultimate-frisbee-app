@@ -22,6 +22,10 @@ export const dynamic = 'force-dynamic';
 
 interface Props {
   params: { id: string };
+  // `from` records which league's list/feed the user arrived from, so the
+  // "< Players" breadcrumb returns them to that league rather than always
+  // defaulting to the UFA (root) players list. Absent → root /players.
+  searchParams: { from?: string };
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -30,11 +34,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `${profile.displayName} · The Layout` };
 }
 
-export default async function PlayerProfilePage({ params }: Props) {
+export default async function PlayerProfilePage({ params, searchParams }: Props) {
   const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
   if (!profile) notFound();
 
   const content = await getApprovedContentForPlayer(profile.anchorLeague, profile.anchorId);
 
-  return <UnifiedProfile profile={profile} content={content} />;
+  return <UnifiedProfile profile={profile} content={content} fromLeague={searchParams.from} />;
 }

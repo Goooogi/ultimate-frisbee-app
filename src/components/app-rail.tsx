@@ -110,12 +110,15 @@ const GAMES_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Players',  href: '/players',  match: '/players' },
 ];
 
-// WUL has its own /wul/* routes (not the shared ?league= pages), so it needs
-// its own nav items. No Schedule — the CSV source is completed-games only.
+// WUL nav — all four pages route through the shared ?league=wul routes (same
+// pattern as PUL). Schedule shows WUL's multi-season history (no future fixtures
+// in the source, so it's an archive, not upcoming games). match is the bare
+// pathname (query-agnostic); legacy /wul/* paths are kept as aliases + redirect.
 const WUL_NAV_ITEMS: GamesNavItem[] = [
-  { label: 'Scores',  href: '/wul/scores',  match: '/wul/scores',  aliases: ['/wul/g'] },
-  { label: 'Teams',   href: '/wul/teams',   match: '/wul/teams' },
-  { label: 'Players', href: '/wul/players', match: '/wul/players' },
+  { label: 'Scores',   href: '/scores?league=wul',   match: '/scores',   aliases: ['/wul/scores', '/wul/g'] },
+  { label: 'Schedule', href: '/schedule?league=wul', match: '/schedule' },
+  { label: 'Teams',    href: '/teams?league=wul',    match: '/teams',    aliases: ['/wul/teams'] },
+  { label: 'Players',  href: '/players?league=wul',  match: '/players',  aliases: ['/wul/players'] },
 ];
 
 function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {
@@ -142,17 +145,17 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'ufa',  label: 'UFA',  real: true  },
   { id: 'usau', label: 'USAU', real: true  },
   { id: 'pul',  label: 'PUL',  real: true  }, // real=true: two-pane preview with sub-page links + team grid
-  { id: 'wul',  label: 'WUL',  real: true  }, // real=true: preview pane with team grid (teams-only — no scores/schedule/players yet)
+  { id: 'wul',  label: 'WUL',  real: true  }, // real=true: two-pane preview with sub-page links (Scores/Teams/Players) + team grid
 ];
 
 // Direct-link leagues navigate on click instead of showing a preview pane.
 // (None currently — WUL was promoted to a full preview league.)
 const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
 
-// Pick which league the dropdown previews when it opens. WUL/PUL have their own
-// /wul,/pul routes (not a ?league= param), so detect them by path first.
+// Pick which league the dropdown previews when it opens. Detect by ?league=
+// param first; legacy /wul,/pul prefixed paths (now redirects) still resolve.
 function initialPreviewLeague(pathname: string, urlLeague: string): MegaLeagueId {
-  if (pathname.startsWith('/wul')) return 'wul';
+  if (pathname.startsWith('/wul') || urlLeague === 'wul') return 'wul';
   if (pathname.startsWith('/pul') || urlLeague === 'pul') return 'pul';
   if (urlLeague === 'usau') return 'usau';
   return 'ufa';
@@ -526,7 +529,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                 </div>
               )}
 
-              {/* WUL sub-page row — Scores / Teams / Players, on /wul/* routes. */}
+              {/* WUL sub-page row — Scores / Teams / Players, on shared ?league=wul routes. */}
               {previewLeague === 'wul' && (
                 <div className="flex items-center gap-1 mb-4 pb-3 border-b border-hairline">
                   {WUL_NAV_ITEMS.map((item) => {

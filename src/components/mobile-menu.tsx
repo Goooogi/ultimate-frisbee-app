@@ -61,13 +61,15 @@ const GAMES_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Players',  href: '/players',  match: '/players' },
 ];
 
-// WUL has its own /wul/* section: Scores, Teams, Players. No Schedule — the
-// CSV source is completed-games only. Game detail lives at /wul/g/* (aliased
+// WUL section — all four pages route through the shared ?league=wul routes (same
+// pattern as PUL). Schedule shows WUL's multi-season history (the source has no
+// future fixtures, so it's an archive). Game detail lives at /wul/g/* (aliased
 // under Scores so it stays highlighted on a matchup page).
 const WUL_NAV_ITEMS: GamesNavItem[] = [
-  { label: 'Scores',  href: '/wul/scores',  match: '/wul/scores',  aliases: ['/wul/g'] },
-  { label: 'Teams',   href: '/wul/teams',   match: '/wul/teams' },
-  { label: 'Players', href: '/wul/players', match: '/wul/players' },
+  { label: 'Scores',   href: '/scores?league=wul',   match: '/scores',   aliases: ['/wul/scores', '/wul/g'] },
+  { label: 'Schedule', href: '/schedule?league=wul', match: '/schedule' },
+  { label: 'Teams',    href: '/teams?league=wul',    match: '/teams',    aliases: ['/wul/teams'] },
+  { label: 'Players',  href: '/players?league=wul',  match: '/players',  aliases: ['/wul/players'] },
 ];
 
 function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {
@@ -168,10 +170,10 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
 
   const initialGamesOpen = activeApp === 'games';
   // Only open the league accordion if we're already in a real games page.
-  // WUL/PUL have their own /wul,/pul routes (not a ?league= param), so detect
-  // them by path before falling back to the qs-driven league.
+  // Detect by ?league= param; legacy /wul,/pul prefixed paths (now redirects)
+  // still resolve via the path check.
   const initialLeagueOpen: MegaLeagueId | null = initialGamesOpen
-    ? (pathname.startsWith('/wul')
+    ? (urlLeague === 'wul' || pathname.startsWith('/wul')
         ? 'wul'
         : urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' || pathname.startsWith('/pul') ? 'pul' : 'ufa')
     : null;
@@ -192,7 +194,12 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         const league = searchParams.get('league')
           ? parseLeagueParam(searchParams.get('league'))
           : (inferLeagueFromPath(pathname) ?? 'ufa');
-        setOpenLeague(league === 'usau' ? 'usau' : league === 'pul' ? 'pul' : 'ufa');
+        setOpenLeague(
+          league === 'usau' ? 'usau'
+            : league === 'pul' ? 'pul'
+            : league === 'wul' ? 'wul'
+            : 'ufa',
+        );
       }
     } else {
       setOpenLeague(null);

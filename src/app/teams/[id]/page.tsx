@@ -267,7 +267,7 @@ export default async function TeamPage({ params }: Props) {
                       <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
                         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">{jersey ?? i + 1}</td>
                         <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
-                          <Link href={`/players/${p.playerID}`} className="hover:text-accent transition-colors duration-150">
+                          <Link href={`/players/${p.playerID}?from=ufa`} className="hover:text-accent transition-colors duration-150">
                             {p.name}
                           </Link>
                         </td>

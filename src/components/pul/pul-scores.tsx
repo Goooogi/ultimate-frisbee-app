@@ -102,7 +102,8 @@ function WeekSection({
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 md:gap-3">
         {games.map((game) => (
-          <ScoreCard key={game.id} game={game} />
+          // The finals game is the championship — mark it like WUL's derived final.
+          <ScoreCard key={game.id} game={game} champion={weekLabel === 'finals'} />
         ))}
       </div>
     </section>
@@ -111,21 +112,31 @@ function WeekSection({
 
 // ── Score card ────────────────────────────────────────────────────────────────
 
-function ScoreCard({ game }: { game: PulGame }) {
+function ScoreCard({ game, champion = false }: { game: PulGame; champion?: boolean }) {
   const { away, home } = game;
   const awayWin =
     away.score !== null && home.score !== null && away.score > home.score;
   const homeWin =
     away.score !== null && home.score !== null && home.score > away.score;
 
+  // Championship game gets a subtle accent ring to stand out from the rest.
   const cardClass = [
-    'block bg-surface border border-border rounded-md',
+    'block bg-surface border rounded-md',
     'px-4 py-3.5 md:px-5 md:py-4',
     'transition-colors duration-150',
+    champion ? 'border-accent ring-1 ring-accent/40' : 'border-border',
   ].join(' ');
 
   const inner = (
     <>
+      {/* Championship marker — only on the finals game. */}
+      {champion && (
+        <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
+          <TrophyIcon />
+          <span>Championship</span>
+        </div>
+      )}
+
       {/* Date + location sub-line */}
       {(game.gameDate || game.location) && (
         <div className="flex items-center gap-2 mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
@@ -157,13 +168,27 @@ function ScoreCard({ game }: { game: PulGame }) {
     return (
       <Link
         href={`/pul/g/${pulGameHref(game.id)}`}
-        className={`${cardClass} hover:border-ink cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+        className={`${cardClass} ${champion ? 'hover:border-accent' : 'hover:border-ink'} cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
       >
         {inner}
       </Link>
     );
   }
   return <div className={cardClass}>{inner}</div>;
+}
+
+function TrophyIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M6 4h12v3a6 6 0 0 1-12 0V4Z M6 5H3v2a3 3 0 0 0 3 3 M18 5h3v2a3 3 0 0 1-3 3 M9 14.5h6 M10 18h4 M9 18h6v2H9z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 // ── Score row ─────────────────────────────────────────────────────────────────
