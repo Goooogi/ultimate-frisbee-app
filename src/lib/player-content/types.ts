@@ -9,7 +9,7 @@
 // player_kind is a plain text column (no DB CHECK), so adding a value here
 // needs no migration.
 
-export type PlayerKind = 'ufa' | 'usau' | 'pul';
+export type PlayerKind = 'ufa' | 'usau' | 'pul' | 'wul';
 export type PlayerContentKind = 'image' | 'video' | 'video_link' | 'link';
 export type PlayerContentStatus = 'pending' | 'approved' | 'rejected';
 

@@ -1,0 +1,16 @@
+.env
+.env.local
+.env.*.local
+.DS_Store
+node_modules/
+.supabase/
+supabase/.temp/
+*.log
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+
+# Generated/dropped data — the scraper regenerates these; keep the README.
+data/wul/*.csv
+!data/wul/README.md

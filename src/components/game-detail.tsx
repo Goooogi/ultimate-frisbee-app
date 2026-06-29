@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
-import { gameUiState, formatStartCompact } from '@/lib/ufa/format';
+import { gameUiState, formatStartCompact, livePhaseLabel } from '@/lib/ufa/format';
 import type {
   UfaGame,
   UfaGameStatCategory,
@@ -77,31 +77,35 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
         </span>
       </div>
 
-      {/* status strip */}
-      <div className="px-6 pt-[18px] pb-6 md:px-14 md:pt-7 md:pb-9 border-b border-hairline flex-shrink-0">
-        <div className="inline-flex items-center gap-2 mb-3">
-          {state.isLive && <LiveDotAccent size={7} />}
-          <span
-            className={`text-[11px] font-bold tracking-[0.18em] uppercase ${
-              state.isLive ? 'text-accent' : 'text-muted'
-            }`}
-          >
-            {state.isLive ? 'Live now' : state.isFinal ? 'Final' : 'Upcoming'}
-          </span>
-        </div>
-        <div className="flex items-baseline gap-4 flex-wrap">
-          {state.isUpcoming ? (
-            <span className="text-[28px] md:text-[44px] font-bold tracking-[-0.04em] text-ink tabular leading-none">
-              {start}
+      {/* status strip — one tight row. For Final/Live the score block below is
+          the headline, so we keep just a compact status pill (no redundant
+          giant "FINAL"/"LIVE"). Upcoming has no score, so the start time IS the
+          headline and stays prominent. */}
+      <div className="px-6 py-4 md:px-14 md:py-5 border-b border-hairline flex-shrink-0">
+        <div className="flex items-baseline justify-between gap-4 flex-wrap">
+          <div className="inline-flex items-center gap-2">
+            {state.isLive && <LiveDotAccent size={7} />}
+            <span
+              className={`text-[13px] font-bold tracking-[0.18em] uppercase ${
+                state.isLive ? 'text-accent' : state.isFinal ? 'text-ink' : 'text-muted'
+              }`}
+            >
+              {state.isLive ? 'Live' : state.isFinal ? 'Final' : 'Upcoming'}
             </span>
-          ) : (
-            <span className="text-[44px] md:text-[64px] font-bold tracking-[-0.05em] text-ink tabular leading-none">
-              {state.isFinal ? 'FINAL' : 'LIVE'}
+            {state.isLive && (
+              <span className="text-[13px] font-bold tracking-[0.12em] uppercase text-muted">
+                {livePhaseLabel(game.status)}
+              </span>
+            )}
+          </div>
+          {state.isUpcoming && (
+            <span className="text-[20px] md:text-[28px] font-bold tracking-[-0.03em] text-ink tabular leading-none">
+              {start}
             </span>
           )}
         </div>
         {(game.locationName || game.streamingURL || game.ticketURL) && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-4 text-[11px] font-semibold tracking-[0.06em] text-muted">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 text-[11px] font-semibold tracking-[0.06em] text-muted">
             {game.locationName && (
               <span className="inline-flex items-center gap-1.5">
                 <span aria-hidden="true">@</span>
@@ -588,7 +592,9 @@ interface GameLeadersProps {
 }
 
 function FieldGameLeaders({ away, home, awayName, homeName, categories }: GameLeadersProps) {
-  const rendered = categories.filter((c) => leaderArr(c.home).length > 0 || leaderArr(c.away).length > 0);
+  // Keep a category if EITHER side has something to show — named leaders, a
+  // tie-count, or a real stat count (so a tied-leaders bucket isn't dropped).
+  const rendered = categories.filter((c) => leaderHasData(c.home) || leaderHasData(c.away));
   if (rendered.length === 0) return null;
 
   return (
@@ -613,6 +619,8 @@ function FieldGameLeaders({ away, home, awayName, homeName, categories }: GameLe
             homeTeam={home}
             awayLeaders={leaderArr(c.away)}
             homeLeaders={leaderArr(c.home)}
+            awayTied={tiedCount(c.away)}
+            homeTied={tiedCount(c.home)}
             awayCount={c.away.count}
             homeCount={c.home.count}
           />
@@ -628,6 +636,8 @@ function FieldLeaderCard({
   homeTeam,
   awayLeaders,
   homeLeaders,
+  awayTied,
+  homeTied,
   awayCount,
   homeCount,
 }: {
@@ -636,20 +646,28 @@ function FieldLeaderCard({
   homeTeam: TeamMeta;
   awayLeaders: UfaGameStatLeader[];
   homeLeaders: UfaGameStatLeader[];
+  awayTied: number;
+  homeTied: number;
   awayCount: number;
   homeCount: number;
 }) {
-  const awayWins = awayLeaders.length > 0 && awayCount > homeCount;
-  const homeWins = homeLeaders.length > 0 && homeCount > awayCount;
+  // A side "leads" the category if it has a real count higher than the other.
+  // Gate on count (not on having named leaders) so a malformed-but-counted
+  // bucket — UFA sometimes sends { leaders: <number>, count: <real> } — is
+  // still eligible to be highlighted as the leader.
+  const awayHas = awayCount > 0;
+  const homeHas = homeCount > 0;
+  const awayWins = awayHas && awayCount > homeCount;
+  const homeWins = homeHas && homeCount > awayCount;
   return (
     <div className="bg-surface border border-border px-3 py-3.5 md:px-4 md:py-4 flex flex-col gap-3">
       <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight text-center">
         {title}
       </div>
       <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-3">
-        <FieldLeaderHalf team={awayTeam} side="Away" leaders={awayLeaders} count={awayCount} winning={awayWins} align="left" />
+        <FieldLeaderHalf team={awayTeam} side="Away" leaders={awayLeaders} tied={awayTied} count={awayCount} winning={awayWins} align="left" />
         <div className="w-px bg-hairline" aria-hidden="true" />
-        <FieldLeaderHalf team={homeTeam} side="Home" leaders={homeLeaders} count={homeCount} winning={homeWins} align="right" />
+        <FieldLeaderHalf team={homeTeam} side="Home" leaders={homeLeaders} tied={homeTied} count={homeCount} winning={homeWins} align="right" />
       </div>
     </div>
   );
@@ -659,6 +677,7 @@ function FieldLeaderHalf({
   team,
   side,
   leaders,
+  tied,
   count,
   winning,
   align,
@@ -666,11 +685,24 @@ function FieldLeaderHalf({
   team: TeamMeta;
   side: 'Away' | 'Home';
   leaders: UfaGameStatLeader[];
+  tied: number;
   count: number;
   winning: boolean;
   align: 'left' | 'right';
 }) {
   const isLeft = align === 'left';
+  // When UFA sends `leaders` as a bare number it means that many players are
+  // TIED at this stat value (it omits the names) — e.g. Points Played
+  // { leaders: 4, count: 21 } = 4 players tied at 21. We show "N players tied"
+  // with the real count, instead of a single name. `count` is still the value.
+  const hasNames = leaders.length > 0;
+  const hasTie = !hasNames && tied > 0;
+  const hasCount = typeof count === 'number' && count > 0;
+  const nameLine = hasNames
+    ? leaders.map((l) => `${l.firstName} ${l.lastName}`).join(', ')
+    : hasTie
+      ? `${tied} players tied`
+      : null;
   return (
     <div className={`flex flex-col gap-1.5 min-w-0 ${isLeft ? 'items-start text-left' : 'items-end text-right'}`}>
       <div className={`flex items-center gap-2 min-w-0 ${isLeft ? '' : 'flex-row-reverse'}`}>
@@ -680,16 +712,18 @@ function FieldLeaderHalf({
         </span>
       </div>
       <span className="text-[12px] font-semibold text-ink font-tight leading-tight w-full break-words">
-        {leaders.length > 0
-          ? leaders.map((l) => `${l.firstName} ${l.lastName}`).join(', ')
-          : <span className="text-faint italic">No data</span>}
+        {nameLine !== null ? (
+          hasTie ? <span className="text-muted">{nameLine}</span> : nameLine
+        ) : (
+          <span className="text-faint italic">No data</span>
+        )}
       </span>
       <span
         className={`tabular text-[26px] md:text-[28px] font-bold leading-none tracking-[-0.02em] font-tight mt-auto ${
           winning ? 'text-ink' : 'text-muted'
         }`}
       >
-        {leaders.length > 0 ? count : '—'}
+        {hasNames || hasTie || hasCount ? count : '—'}
       </span>
     </div>
   );
@@ -697,6 +731,20 @@ function FieldLeaderHalf({
 
 function leaderArr(b: UfaGameStatCategory['away']): UfaGameStatLeader[] {
   return Array.isArray(b.leaders) ? b.leaders : [];
+}
+
+/** When `leaders` is a bare number, UFA is telling us how many players are TIED
+ *  at this stat value (it omits the names rather than listing all of them) —
+ *  e.g. Points Played { leaders: 4, count: 21 } = 4 players tied at 21. Returns
+ *  that tie count, or 0 when leaders is a normal player array. */
+function tiedCount(b: UfaGameStatCategory['away']): number {
+  return typeof b.leaders === 'number' ? b.leaders : 0;
+}
+
+/** A side has something to show if it has named leaders, OR a tie-count, OR a
+ *  real stat count — used to decide card visibility and value rendering. */
+function leaderHasData(b: UfaGameStatCategory['away']): boolean {
+  return leaderArr(b).length > 0 || tiedCount(b) > 0 || (typeof b.count === 'number' && b.count > 0);
 }
 
 // ── Per-game team totals ─────────────────────────────────────────────────────
@@ -785,39 +833,106 @@ function FieldGameTeamStats(p: GameTeamStatsProps) {
       aria-labelledby="game-team-stats-heading"
       className="px-6 py-6 md:px-14 md:py-8 border-t border-hairline"
     >
+      {/* Heading row with inline team-color legend */}
       <h2
         id="game-team-stats-heading"
-        className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-4 pb-2 border-b border-hairline"
+        className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-5 pb-2 border-b border-hairline"
       >
         <span>Team totals · this game</span>
-        <span className="text-faint">{p.away.abbr} vs {p.home.abbr}</span>
+        {/* legend: colored dot + abbr for each side */}
+        <span className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+              style={{ background: p.away.primary }}
+              aria-hidden="true"
+            />
+            <span className="text-faint">{p.away.abbr}</span>
+          </span>
+          <span className="text-faint opacity-40">/</span>
+          <span className="flex items-center gap-1.5">
+            <span
+              className="inline-block w-2 h-2 rounded-full flex-shrink-0"
+              style={{ background: p.home.primary }}
+              aria-hidden="true"
+            />
+            <span className="text-faint">{p.home.abbr}</span>
+          </span>
+        </span>
       </h2>
 
-      <ul className="flex flex-col">
+      <ul className="flex flex-col gap-0">
         {rows.map((r) => {
           const win = rowWinner(r);
+          const total = r.awayRaw + r.homeRaw;
+          // Each side fills its share of exactly half the track width.
+          // awayFill = % of left half; homeFill = % of right half.
+          const awayShare = total > 0 ? r.awayRaw / total : 0.5;
+          const homeShare = total > 0 ? r.homeRaw / total : 0.5;
+          // Convert to % of the full track width (each side owns 50% max)
+          const awayPct = Math.round(awayShare * 50);
+          const homePct = Math.round(homeShare * 50);
+
+          const awayNumClass = win === 'away'
+            ? 'text-ink font-bold'
+            : win === 'home'
+            ? 'text-faint font-semibold'
+            : 'text-muted font-semibold';
+          const homeNumClass = win === 'home'
+            ? 'text-ink font-bold'
+            : win === 'away'
+            ? 'text-faint font-semibold'
+            : 'text-muted font-semibold';
+
+          const ariaLabel = `${r.label}: ${p.away.abbr} ${r.away}, ${p.home.abbr} ${r.home}`;
+
           return (
             <li
               key={r.label}
-              className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 py-2 border-b border-hairline last:border-b-0"
+              className="py-3.5 border-b border-hairline last:border-b-0"
             >
-              <span
-                className={`text-left tabular text-[16px] md:text-[20px] font-bold font-tight tracking-[-0.02em] ${
-                  win === 'away' ? 'text-ink' : win === 'home' ? 'text-faint' : 'text-muted'
-                }`}
+              {/* Numbers row */}
+              <div className="grid grid-cols-[1fr_auto_1fr] items-baseline gap-3 mb-2">
+                <span
+                  className={`text-left tabular text-[17px] md:text-[21px] italic tracking-[-0.02em] font-tight ${awayNumClass}`}
+                >
+                  {r.away}
+                </span>
+                <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight whitespace-nowrap">
+                  {r.label}
+                </span>
+                <span
+                  className={`text-right tabular text-[17px] md:text-[21px] italic tracking-[-0.02em] font-tight ${homeNumClass}`}
+                >
+                  {r.home}
+                </span>
+              </div>
+
+              {/* Comparison bar — dual-fill anchored at center */}
+              <div
+                role="img"
+                aria-label={ariaLabel}
+                className="relative h-[4px] rounded-full overflow-hidden bg-hairline"
               >
-                {r.away}
-              </span>
-              <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight whitespace-nowrap">
-                {r.label}
-              </span>
-              <span
-                className={`text-right tabular text-[16px] md:text-[20px] font-bold font-tight tracking-[-0.02em] ${
-                  win === 'home' ? 'text-ink' : win === 'away' ? 'text-faint' : 'text-muted'
-                }`}
-              >
-                {r.home}
-              </span>
+                {/* Away fill: grows from center leftward */}
+                <span
+                  className="absolute top-0 right-1/2 h-full rounded-l-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
+                  style={{
+                    width: `${awayPct}%`,
+                    background: p.away.primary,
+                  }}
+                  aria-hidden="true"
+                />
+                {/* Home fill: grows from center rightward */}
+                <span
+                  className="absolute top-0 left-1/2 h-full rounded-r-full transition-[width] duration-500 ease-out motion-reduce:transition-none"
+                  style={{
+                    width: `${homePct}%`,
+                    background: p.home.primary,
+                  }}
+                  aria-hidden="true"
+                />
+              </div>
             </li>
           );
         })}

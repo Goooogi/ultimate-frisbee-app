@@ -1,0 +1,110 @@
+name: WUL ingest
+
+# Automated WUL (Western Ultimate League) data refresh.
+#
+# WHY this is a GitHub Action and not a Supabase Edge Function:
+# WUL data lives only in an R Shiny dashboard that renders its tables over a
+# SockJS websocket — a plain HTTP fetch returns an empty ~4KB shell. Extracting
+# it requires a real chromium browser (Playwright). Supabase Edge Functions
+# (Deno Deploy) can't run chromium, so the browser half runs here on a hosted
+# runner; the ingest half reuses the existing Python script unchanged.
+#
+# Flow: checkout -> chromium -> scrape current season -> idempotent upsert to DB.
+# The scrape + ingest scripts are the exact same ones an operator runs locally.
+
+on:
+  # Manual "Run workflow" button — preserves the operator-run option and lets
+  # you pass a specific year or "all" for a full re-baseline.
+  workflow_dispatch:
+    inputs:
+      year:
+        description: 'Season to scrape: blank = current season, a year (e.g. 2026), or "all" to re-baseline every season'
+        required: false
+        default: ''
+  # Scheduled in-season refresh. 06:17 UTC daily (off-peak; odd minute to avoid
+  # the top-of-hour cron stampede). WUL plays ~weekly Mar–Aug, so a daily run
+  # picks up new games within 24h. OFF-SEASON: comment out the `schedule:` block
+  # below (or narrow the months) — see the month guard in the scrape step.
+  schedule:
+    - cron: '17 6 * * *'
+
+# Never run two ingests at once (they'd race on the same rows). Let the in-flight
+# one finish rather than cancelling it mid-DB-write.
+concurrency:
+  group: wul-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Season gate: on the SCHEDULED run, skip outside the WUL season window
+      # (Mar–Aug). Manual dispatch always proceeds. Avoids pointless daily
+      # scrapes (and source hits) in the off-season without editing the cron.
+      - name: Season gate (scheduled runs only)
+        id: gate
+        run: |
+          month=$(date -u +%-m)
+          if [ "${{ github.event_name }}" = "schedule" ] && { [ "$month" -lt 3 ] || [ "$month" -gt 8 ]; }; then
+            echo "Off-season (month=$month); skipping scheduled WUL ingest."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        if: steps.gate.outputs.run == 'true'
+        run: npm ci
+
+      - name: Install Playwright chromium
+        if: steps.gate.outputs.run == 'true'
+        run: npx playwright install --with-deps chromium
+
+      # Scrape: no outdir arg -> writes to usau-scraper/data/wul (the dir the
+      # ingest reads). Year from the manual input, else current season (default).
+      # Exits non-zero if the requested season yields no usable data — that
+      # fails the whole run (and emails on failure), which is what we want.
+      - name: Scrape WUL dashboard
+        if: steps.gate.outputs.run == 'true'
+        env:
+          WUL_YEAR: ${{ github.event.inputs.year }}
+        run: node usau-scraper/scripts/scrape-wul.mjs "" "$WUL_YEAR"
+
+      - name: Setup Python
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ingest deps
+        if: steps.gate.outputs.run == 'true'
+        run: pip install "psycopg[binary]"
+
+      # Ingest: idempotent upserts to Postgres via the session pooler. The
+      # script builds the pooler URL from SUPABASE_DB_PASSWORD itself. Pass the
+      # same year selection so we only re-ingest what we scraped.
+      #   blank WUL_YEAR -> ingest all CSVs present (just the current season,
+      #   since that's all the scraper wrote); "all" -> every CSV present;
+      #   a year -> just that year.
+      - name: Ingest to Postgres
+        if: steps.gate.outputs.run == 'true'
+        env:
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: |
+          YEAR='${{ github.event.inputs.year }}'
+          if [ "$YEAR" = "all" ] || [ -z "$YEAR" ]; then
+            python3 usau-scraper/scripts/ingest-wul.py
+          else
+            python3 usau-scraper/scripts/ingest-wul.py "$YEAR"
+          fi

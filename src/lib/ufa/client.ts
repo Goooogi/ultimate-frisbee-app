@@ -29,6 +29,7 @@ import type {
   UfaTeamStatsResponse,
 } from './types';
 import { teamInternalID } from './teams';
+import { isFinalStatus } from './format';
 
 export const UFA_BASE = 'https://www.backend.ufastats.com/web-v1';
 const UA = 'Mozilla/5.0 (the-layout)';
@@ -463,11 +464,12 @@ export async function getUfaChampionsByYear(years: number[]): Promise<Map<number
         const games = await getAllGamesByYears([year]);
         if (games.length === 0) return;
 
-        // Gate: season must be over. If any game is still Upcoming or Live,
-        // the championship hasn't been played — no champion yet.
-        const seasonComplete = !games.some(
-          (g) => g.status === 'Upcoming' || g.status === 'Live',
-        );
+        // Gate: season must be over. If ANY game isn't Final yet (Upcoming or
+        // an in-play phase like "Fourth Quarter"), the championship hasn't been
+        // played — no champion yet. Must classify by isFinalStatus, not by
+        // matching a literal "Live" the feed never sends (that bug would let a
+        // title-weekend in-progress game slip through and crown a bogus champ).
+        const seasonComplete = games.every((g) => isFinalStatus(g.status));
         if (!seasonComplete) return;
 
         const finalGame = findChampionshipGame(games);

@@ -39,6 +39,14 @@ import {
   type PulTeam,
   type PulPlayerCareer,
 } from '@/lib/pul/data';
+import {
+  getWulPlayer,
+  getWulPlayerCareerByName,
+  findWulPlayerNameByName,
+  listWulTeams,
+  type WulTeam,
+  type WulPlayerCareer,
+} from '@/lib/wul/data';
 import { namesMatch } from '@/lib/name-match';
 
 // ── Output shape ─────────────────────────────────────────────────────────
@@ -108,7 +116,37 @@ export interface PulSeasonStint {
   };
 }
 
-export type SeasonStint = UfaSeasonStint | UsauSeasonStint | PulSeasonStint;
+/**
+ * WUL (Western Ultimate League) stint — one season with one team. Like PUL,
+ * WUL is a women's semi-pro league overlapping USAU Club; it's kept in its own
+ * sub-block (see UnifiedPlayerProfile.wul) and NOT added to the shared career
+ * totals, to avoid double-counting overlapping competitive periods. WUL data is
+ * per-game and richer than PUL, but the stint exposes the same season-totals
+ * shape for a consistent UI.
+ */
+export interface WulSeasonStint {
+  league: 'wul';
+  season: number;
+  teamId: string;
+  teamName: string;
+  teamCity: string;
+  teamLogoUrl: string | null;
+  teamAccentColor: string | null;
+  jerseyNumber: string;
+  stats: {
+    gamesPlayed: number;
+    goals: number;
+    assists: number;
+    blocks: number;
+    turnovers: number;
+    touches: number;
+    oPoints: number;
+    dPoints: number;
+    plusMinus: number;
+  };
+}
+
+export type SeasonStint = UfaSeasonStint | UsauSeasonStint | PulSeasonStint | WulSeasonStint;
 
 export interface UnifiedYear {
   year: number;
@@ -119,7 +157,7 @@ export interface UnifiedPlayerProfile {
   /** The anchor id the URL used. UFA slug, USAU UUID, or PUL UUID. */
   anchorId: string;
   /** Which side the URL anchored on. */
-  anchorLeague: 'ufa' | 'usau' | 'pul';
+  anchorLeague: 'ufa' | 'usau' | 'pul' | 'wul';
   displayName: string;
   /** Pronouns resolved from PUL data when available; null otherwise. */
   pronouns: string | null;
@@ -163,6 +201,20 @@ export interface UnifiedPlayerProfile {
     touches: number;
     plusMinus: number;
   } | null;
+  /**
+   * WUL career sub-totals. Null when the player has no WUL history. Reported
+   * separately from `career` for the same reason as PUL — overlapping seasons.
+   */
+  wul: {
+    seasonsPlayed: number;
+    gamesPlayed: number;
+    goals: number;
+    assists: number;
+    blocks: number;
+    turnovers: number;
+    touches: number;
+    plusMinus: number;
+  } | null;
   championYearsUfa: number[];
   championYearsUsau: number[];
 }
@@ -193,10 +245,11 @@ export async function getUnifiedPlayerProfile(
   // After this block we have: anchorLeague, anchorName, and the anchor-side
   // data object (sideUsau or sidePulCareer) already fetched.
 
-  let anchorLeague: 'ufa' | 'usau' | 'pul';
+  let anchorLeague: 'ufa' | 'usau' | 'pul' | 'wul';
   let anchorName: string | null = null;
   let anchorUsau: UsauPlayerSummary | null = null;
   let anchorPulCareer: PulPlayerCareer | null = null;
+  let anchorWulCareer: WulPlayerCareer | null = null;
 
   if (!looksLikeUsauUuid(anchorId)) {
     // ── UFA slug anchor ────────────────────────────────────────────────
@@ -223,8 +276,16 @@ export async function getUnifiedPlayerProfile(
         anchorPulCareer = await getPulPlayerCareerByName(pulPlayer.playerName).catch(() => null);
         anchorName = anchorPulCareer?.playerName ?? pulPlayer.playerName;
       } else {
-        // UUID matches neither USAU nor PUL — unresolvable.
-        return null;
+        // PUL miss — try WUL (also v4 UUIDs).
+        const wulPlayer = await getWulPlayer(anchorId).catch(() => null);
+        if (wulPlayer) {
+          anchorLeague = 'wul';
+          anchorWulCareer = await getWulPlayerCareerByName(wulPlayer.playerName).catch(() => null);
+          anchorName = anchorWulCareer?.playerName ?? wulPlayer.playerName;
+        } else {
+          // UUID matches none of USAU/PUL/WUL — unresolvable.
+          return null;
+        }
       }
     }
   }
@@ -234,7 +295,7 @@ export async function getUnifiedPlayerProfile(
   // ── Fetch all three sides in parallel ──────────────────────────────────
   // Each lookup is independent once we have a display name. Failures are
   // caught per-league so one bad network call doesn't kill the whole profile.
-  const [sideUfa, sideUsau, sidePulCareer, teamMap] = await Promise.all([
+  const [sideUfa, sideUsau, sidePulCareer, teamMap, sideWulCareer, wulTeamMap] = await Promise.all([
     // UFA side
     (anchorLeague === 'ufa'
       ? buildUfaSide(anchorId)
@@ -264,6 +325,19 @@ export async function getUnifiedPlayerProfile(
     listPulTeams()
       .then((teams) => new Map<string, PulTeam>(teams.map((t) => [t.id, t])))
       .catch(() => new Map<string, PulTeam>()),
+
+    // WUL side — same pattern as PUL.
+    (anchorLeague === 'wul'
+      ? Promise.resolve(anchorWulCareer)
+      : findWulPlayerNameByName(anchorName).then((name) =>
+          name ? getWulPlayerCareerByName(name) : null,
+        )
+    ).catch(() => null),
+
+    // WUL team metadata — fetched once, used for all WUL stints.
+    listWulTeams()
+      .then((teams) => new Map<string, WulTeam>(teams.map((t) => [t.id, t])))
+      .catch(() => new Map<string, WulTeam>()),
   ] as const);
 
   // ── Merge into a Map<year, stints[]> ───────────────────────────────────
@@ -324,6 +398,35 @@ export async function getUnifiedPlayerProfile(
     }
   }
 
+  if (sideWulCareer) {
+    for (const wulStint of sideWulCareer.stints) {
+      const list = yearMap.get(wulStint.season) ?? [];
+      const team = wulTeamMap.get(wulStint.player.teamId);
+      list.push({
+        league: 'wul',
+        season: wulStint.season,
+        teamId: wulStint.player.teamId,
+        teamName: team?.name ?? wulStint.player.teamId,
+        teamCity: team?.city ?? '',
+        teamLogoUrl: team?.logoUrl ?? null,
+        teamAccentColor: team?.accentColor ?? null,
+        jerseyNumber: wulStint.player.jerseyNumber,
+        stats: {
+          gamesPlayed: wulStint.player.gamesPlayed,
+          goals: wulStint.player.goals,
+          assists: wulStint.player.assists,
+          blocks: wulStint.player.blocks,
+          turnovers: wulStint.player.turnovers,
+          touches: wulStint.player.touches,
+          oPoints: wulStint.player.oPoints,
+          dPoints: wulStint.player.dPoints,
+          plusMinus: wulStint.player.plusMinus,
+        },
+      });
+      yearMap.set(wulStint.season, list);
+    }
+  }
+
   const years: UnifiedYear[] = Array.from(yearMap.entries())
     .sort((a, b) => b[0] - a[0])
     .map(([year, stints]) => ({ year, stints: sortStintsForYear(stints) }));
@@ -361,7 +464,8 @@ export async function getUnifiedPlayerProfile(
           career.assists += ev.assists ?? 0;
         }
       }
-      // PUL stints intentionally not added to `career` — see `pul` block.
+      // PUL and WUL stints intentionally not added to `career` — see their
+      // separate `pul` / `wul` sub-blocks (overlapping-season double-count).
     }
   }
 
@@ -380,6 +484,20 @@ export async function getUnifiedPlayerProfile(
       }
     : null;
 
+  // WUL career sub-block — same treatment as PUL.
+  const wulCareerBlock = sideWulCareer
+    ? {
+        seasonsPlayed: sideWulCareer.career.seasonsPlayed,
+        gamesPlayed: sideWulCareer.career.gamesPlayed,
+        goals: sideWulCareer.career.goals,
+        assists: sideWulCareer.career.assists,
+        blocks: sideWulCareer.career.blocks,
+        turnovers: sideWulCareer.career.turnovers,
+        touches: sideWulCareer.career.touches,
+        plusMinus: sideWulCareer.career.plusMinus,
+      }
+    : null;
+
   // Pronouns: PUL data is the only league that tracks them. Surface when found.
   const pronouns =
     sidePulCareer?.pronouns ??
@@ -393,6 +511,7 @@ export async function getUnifiedPlayerProfile(
     years,
     career,
     pul: pulCareerBlock,
+    wul: wulCareerBlock,
     championYearsUfa: sideUfa?.championYears ?? [],
     championYearsUsau: sideUsau?.championYears ?? [],
   };
@@ -554,7 +673,8 @@ function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
   const leagueOrder: Record<SeasonStint['league'], number> = {
     ufa: 0,
     pul: 1,
-    usau: 2,
+    wul: 2,
+    usau: 3,
   };
   return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }

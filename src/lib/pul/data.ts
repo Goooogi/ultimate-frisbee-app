@@ -382,6 +382,7 @@ export interface PulGameTeamSide {
   city: string | null;
   mascot: string | null;
   logoUrl: string | null;
+  accentColor: string | null; // team brand color, for score block + bars
   score: number | null; // null until the game is final
 }
 
@@ -466,6 +467,7 @@ export async function listPulGames(opts: {
       city: t?.city ?? null,
       mascot: t?.mascot ?? null,
       logoUrl: t?.logoUrl ?? null,
+      accentColor: t?.accentColor ?? null,
       score,
     };
   };
@@ -498,4 +500,153 @@ export async function listPulGames(opts: {
   });
 
   return games;
+}
+
+/**
+ * One game by its id ('{season}/{week}/{AWAY}-vs-{HOME}'), with both sides'
+ * team identity resolved. Returns null if not found. Powers /pul/g/[id].
+ */
+export async function getPulGame(id: string): Promise<PulGame | null> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('pul_games')
+    .select(
+      'id, season, week_label, week_num, away_team_id, home_team_id, away_abbrev, home_abbrev, game_date, game_time, location, away_score, home_score, status',
+    )
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null;
+
+  const r = data as unknown as DbGameRow;
+  const teams = await listPulTeams();
+  const byId = new Map(teams.map((t) => [t.id, t]));
+  const side = (teamId: string, abbrev: string, score: number | null): PulGameTeamSide => {
+    const t = byId.get(teamId);
+    return {
+      teamId,
+      abbrev,
+      city: t?.city ?? null,
+      mascot: t?.mascot ?? null,
+      logoUrl: t?.logoUrl ?? null,
+      accentColor: t?.accentColor ?? null,
+      score,
+    };
+  };
+
+  return {
+    id: r.id,
+    season: r.season,
+    weekLabel: r.week_label,
+    weekNum: r.week_num,
+    status: r.status === 'final' ? 'final' : 'scheduled',
+    gameDate: r.game_date,
+    gameTime: r.game_time,
+    location: r.location,
+    away: side(r.away_team_id, r.away_abbrev, r.away_score),
+    home: side(r.home_team_id, r.home_abbrev, r.home_score),
+  };
+}
+
+// ─── Per-game box score ──────────────────────────────────────────────────────
+
+/** One player's stat line in a single game (from pul_game_player_stats). */
+export interface PulBoxscoreRow {
+  playerName: string;
+  jerseyNumber: string | null;
+  goals: number;
+  assists: number;
+  blocks: number;
+  turnovers: number;
+  touches: number;
+  oPoints: number;
+  dPoints: number;
+  plusMinus: number;
+  /** pul_players.id for the SAME season — the link target for /players/[id].
+   *  null when the box-score name has no matching season profile row. */
+  profileId: string | null;
+}
+
+/** Both teams' box scores for one game, split by team_id. */
+export interface PulGameBoxscore {
+  away: PulBoxscoreRow[];
+  home: PulBoxscoreRow[];
+}
+
+interface DbGameStatRow {
+  team_id: string;
+  player_name: string;
+  jersey_number: string | null;
+  goals: number;
+  assists: number;
+  blocks: number;
+  turnovers: number;
+  touches: number;
+  o_points: number;
+  d_points: number;
+  plus_minus: number;
+}
+
+/**
+ * Full per-player box score for one game, split into away/home by team_id,
+ * with each row carrying the profileId (same-season pul_players.id) so the UI
+ * can link a stat line straight to /players/[id]. Rows are sorted by
+ * goals+assists desc, then name. Empty arrays when a game has no player stats
+ * (e.g. 2022 — see project memory; only 2023+ carry box scores).
+ */
+export async function getPulGameBoxscore(
+  game: Pick<PulGame, 'id' | 'season' | 'away' | 'home'>,
+): Promise<PulGameBoxscore> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('pul_game_player_stats')
+    .select(
+      'team_id, player_name, jersey_number, goals, assists, blocks, turnovers, touches, o_points, d_points, plus_minus',
+    )
+    .eq('game_id', game.id);
+  if (error) throw error;
+
+  const statRows = (data ?? []) as unknown as DbGameStatRow[];
+  if (statRows.length === 0) return { away: [], home: [] };
+
+  // Resolve player_name → same-season profile id in ONE query (not per row).
+  const names = [...new Set(statRows.map((r) => r.player_name))];
+  const { data: profileRows } = await db
+    .from('pul_players')
+    .select('id, player_name')
+    .eq('season', game.season)
+    .in('player_name', names);
+  const idByName = new Map(
+    ((profileRows ?? []) as unknown as { id: string; player_name: string }[]).map((p) => [
+      p.player_name.toLowerCase(),
+      p.id,
+    ]),
+  );
+
+  const map = (r: DbGameStatRow): PulBoxscoreRow => ({
+    playerName: r.player_name,
+    jerseyNumber: r.jersey_number ?? null,
+    goals: r.goals,
+    assists: r.assists,
+    blocks: r.blocks,
+    turnovers: r.turnovers,
+    touches: r.touches,
+    oPoints: r.o_points,
+    dPoints: r.d_points,
+    plusMinus: r.plus_minus,
+    profileId: idByName.get(r.player_name.toLowerCase()) ?? null,
+  });
+
+  const sortRows = (rows: PulBoxscoreRow[]) =>
+    rows.sort((a, b) => {
+      const sa = a.goals + a.assists;
+      const sb = b.goals + b.assists;
+      if (sb !== sa) return sb - sa;
+      return a.playerName.localeCompare(b.playerName);
+    });
+
+  return {
+    away: sortRows(statRows.filter((r) => r.team_id === game.away.teamId).map(map)),
+    home: sortRows(statRows.filter((r) => r.team_id === game.home.teamId).map(map)),
+  };
 }

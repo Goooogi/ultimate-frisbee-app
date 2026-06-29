@@ -1,0 +1,46 @@
+# Supabase project config.
+# Linked to The Layout project (Hunter org).
+
+project_id = "efjipdmylkqwmupvoxab"
+
+[functions.diagnose-reachability]
+verify_jwt = false  # diagnostic, no auth needed
+
+[functions.sync-events]
+# This function is server-to-server: invoked by pg_cron internally and (during
+# dev) by curl with the service_role key. It doesn't need a user JWT — flip
+# verify_jwt off so the function checks the caller's authority via the
+# service-role key alone.
+verify_jwt = false
+
+[functions.sync-event-details]
+# Same rationale as sync-events.
+verify_jwt = false
+
+[functions.sync-event-rosters]
+# Same rationale as sync-events.
+verify_jwt = false
+
+[functions.discover-events]
+# Same rationale as sync-events.
+verify_jwt = false
+
+[functions.ingest-from-ultirzr]
+# Same rationale as sync-events.
+verify_jwt = false
+
+[functions.resolve-event-team-urls]
+# Same rationale as sync-events.
+verify_jwt = false
+
+[functions.sync-event-everything]
+# Same rationale as sync-events.
+verify_jwt = false
+
+[functions.sync-live-events]
+# Same rationale as sync-events — invoked by pg_cron with the service role key.
+verify_jwt = false
+
+[functions.sync-resolver-batch]
+# Invoked by pg_cron overnight to drain the resolver backlog in small chunks.
+verify_jwt = false

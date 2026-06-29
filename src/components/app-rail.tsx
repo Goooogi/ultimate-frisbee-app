@@ -110,6 +110,14 @@ const GAMES_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Players',  href: '/players',  match: '/players' },
 ];
 
+// WUL has its own /wul/* routes (not the shared ?league= pages), so it needs
+// its own nav items. No Schedule — the CSV source is completed-games only.
+const WUL_NAV_ITEMS: GamesNavItem[] = [
+  { label: 'Scores',  href: '/wul/scores',  match: '/wul/scores',  aliases: ['/wul/g'] },
+  { label: 'Teams',   href: '/wul/teams',   match: '/wul/teams' },
+  { label: 'Players', href: '/wul/players', match: '/wul/players' },
+];
+
 function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {
   if (item.match === '/') return pathname === '/';
   const matches = (prefix: string) =>
@@ -518,27 +526,30 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                 </div>
               )}
 
-              {/* WUL sub-page row — only Teams exists today (no scores/
-                  schedule/players until the league's API is available). */}
+              {/* WUL sub-page row — Scores / Teams / Players, on /wul/* routes. */}
               {previewLeague === 'wul' && (
                 <div className="flex items-center gap-1 mb-4 pb-3 border-b border-hairline">
-                  <Link
-                    href="/wul/teams"
-                    role="menuitem"
-                    aria-current={pathname.startsWith('/wul/teams') ? 'page' : undefined}
-                    onClick={() => setOpen(false)}
-                    className={[
-                      'px-3 py-1.5 rounded',
-                      'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
-                      'transition-colors duration-150 no-underline',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                      pathname.startsWith('/wul/teams')
-                        ? 'text-ink bg-surface'
-                        : 'text-ink hover:bg-surface',
-                    ].join(' ')}
-                  >
-                    Teams
-                  </Link>
+                  {WUL_NAV_ITEMS.map((item) => {
+                    const active = isGamesNavActive(pathname, item);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        role="menuitem"
+                        aria-current={active ? 'page' : undefined}
+                        onClick={() => setOpen(false)}
+                        className={[
+                          'px-3 py-1.5 rounded',
+                          'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
+                          'transition-colors duration-150 no-underline',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                          active ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
+                        ].join(' ')}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
                 </div>
               )}
 
@@ -693,7 +704,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                     {WUL_TEAMS_LIST.map((team) => (
                       <Link
                         key={team.id}
-                        href="/wul/teams"
+                        href={`/wul/teams/${team.id}`}
                         role="menuitem"
                         onClick={() => setOpen(false)}
                         className={[

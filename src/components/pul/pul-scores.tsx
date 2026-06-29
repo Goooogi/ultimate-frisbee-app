@@ -1,6 +1,7 @@
 // PUL Scores — server component. Shows completed games grouped by week,
 // most-recent week first (reverse chronological for a scores view).
 
+import Link from 'next/link';
 import { listPulGames, type PulGame, type PulGameTeamSide } from '@/lib/pul/data';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 
@@ -117,14 +118,14 @@ function ScoreCard({ game }: { game: PulGame }) {
   const homeWin =
     away.score !== null && home.score !== null && home.score > away.score;
 
-  return (
-    <div
-      className={[
-        'bg-surface border border-border rounded-md',
-        'px-4 py-3.5 md:px-5 md:py-4',
-        'transition-colors duration-150',
-      ].join(' ')}
-    >
+  const cardClass = [
+    'block bg-surface border border-border rounded-md',
+    'px-4 py-3.5 md:px-5 md:py-4',
+    'transition-colors duration-150',
+  ].join(' ');
+
+  const inner = (
+    <>
       {/* Date + location sub-line */}
       {(game.gameDate || game.location) && (
         <div className="flex items-center gap-2 mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
@@ -147,8 +148,22 @@ function ScoreCard({ game }: { game: PulGame }) {
 
       {/* Home row */}
       <ScoreRow side={home} win={homeWin} lose={awayWin} />
-    </div>
+    </>
   );
+
+  // Final games are clickable into the matchup detail page. Scheduled games
+  // have no box score yet, so they render as a static card.
+  if (game.status === 'final') {
+    return (
+      <Link
+        href={`/pul/g/${pulGameHref(game.id)}`}
+        className={`${cardClass} hover:border-ink cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={cardClass}>{inner}</div>;
 }
 
 // ── Score row ─────────────────────────────────────────────────────────────────
@@ -237,4 +252,14 @@ function formatDate(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number);
   const d = new Date(year, month - 1, day);
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** Build the href path for a PUL game id like "2026/finals/PHL-vs-DC".
+ *  The /pul/g/[...id] route is a catch-all, so we keep the slashes as REAL
+ *  path separators (encoding each segment individually) rather than
+ *  %2F-encoding the whole id into one segment — %2F in a single segment is
+ *  brittle across Next/Vercel normalization. The catch-all then receives the
+ *  segments array and rejoins it. */
+function pulGameHref(id: string): string {
+  return id.split('/').map(encodeURIComponent).join('/');
 }

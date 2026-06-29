@@ -11,6 +11,7 @@
 import Link from 'next/link';
 import type {
   PulSeasonStint,
+  WulSeasonStint,
   SeasonStint,
   UfaSeasonStint,
   UnifiedPlayerProfile,
@@ -135,8 +136,33 @@ export function UnifiedProfile({ profile, content }: Props) {
         </section>
       )}
 
-      {/* Fallback: show PUL-only career block if player has no UFA/USAU data */}
-      {!profile.pul && career.ufaGamesPlayed === 0 && career.usauEventsPlayed === 0 && (
+      {/* WUL career sub-block — same separation rationale as PUL */}
+      {profile.wul && (
+        <section className="mb-10" aria-labelledby="wul-career-heading">
+          <h2
+            id="wul-career-heading"
+            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+          >
+            WUL career
+          </h2>
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+            <CareerStat label="Seasons" value={profile.wul.seasonsPlayed} />
+            <CareerStat label="GP" value={profile.wul.gamesPlayed} />
+            <CareerStat label="Goals" value={profile.wul.goals} />
+            <CareerStat label="Assists" value={profile.wul.assists} />
+            <CareerStat label="Scores" value={profile.wul.goals + profile.wul.assists} />
+            <CareerStat label="Blocks" value={profile.wul.blocks} />
+            <CareerStat label="+/−" value={signed(profile.wul.plusMinus)} />
+          </div>
+        </section>
+      )}
+
+      {/* Fallback: show a basic career block if player has no UFA/USAU data AND
+          neither PUL nor WUL have their own blocks (which would already show above).
+          A WUL-only or PUL-only player gets their league-specific block above, so
+          this fallback only fires for the rare case with only UFA/USAU stints that
+          didn't produce career totals (edge case), or a truly data-empty profile. */}
+      {!profile.pul && !profile.wul && career.ufaGamesPlayed === 0 && career.usauEventsPlayed === 0 && (
         <section className="mb-10" aria-labelledby="career-heading">
           <h2
             id="career-heading"
@@ -173,12 +199,15 @@ export function UnifiedProfile({ profile, content }: Props) {
       )}
 
       {/* PlayerContentGallery only supports 'ufa' | 'usau' refs today.
-          PUL players anchored by a PUL uuid have no content rows yet —
-          pass 'usau' as the kind so the gallery renders (empty) without
-          a type error. The UI agent should extend PlayerKind to include
-          'pul' and add content support when the PUL content feature ships. */}
+          PUL and WUL players anchored by a UUID have no content rows yet —
+          map both to 'usau' so the gallery renders (empty) without a type
+          error. Extend PlayerKind to 'pul'/'wul' when content support ships. */}
       <PlayerContentGallery
-        playerKind={profile.anchorLeague === 'pul' ? 'usau' : profile.anchorLeague}
+        playerKind={
+          profile.anchorLeague === 'pul' || profile.anchorLeague === 'wul'
+            ? 'usau'
+            : profile.anchorLeague
+        }
         playerRef={profile.anchorId}
         playerDisplayName={profile.displayName}
         items={content}
@@ -193,10 +222,12 @@ function buildEyebrow(profile: UnifiedPlayerProfile): string {
   const hasUfa = profile.years.some((y) => y.stints.some(isUfa));
   const hasUsau = profile.years.some((y) => y.stints.some(isUsau));
   const hasPul = profile.pul !== null;
+  const hasWul = profile.wul !== null;
   const parts: string[] = [];
   if (hasUfa) parts.push('UFA');
   if (hasUsau) parts.push('USAU');
   if (hasPul) parts.push('PUL');
+  if (hasWul) parts.push('WUL');
   if (parts.length === 0) return 'Career';
   return `${parts.join(' + ')} · Career`;
 }
@@ -213,6 +244,8 @@ function buildLatestYearLine(year: UnifiedYear): string {
         parts.push(`${s.events.length} ${s.events.length === 1 ? 'event' : 'events'}`);
     } else if (s.league === 'pul') {
       parts.push(`${s.stats.gamesPlayed} GP · ${s.stats.goals}G · ${s.stats.assists}A (PUL)`);
+    } else if (s.league === 'wul') {
+      parts.push(`${s.stats.gamesPlayed} GP · ${s.stats.goals}G · ${s.stats.assists}A (WUL)`);
     }
   }
   return parts.join(' · ');
@@ -244,6 +277,7 @@ function StintRow({ stint }: { stint: SeasonStint }) {
   if (stint.league === 'ufa') return <UfaStintRow stint={stint} />;
   if (stint.league === 'usau') return <UsauStintRow stint={stint} />;
   if (stint.league === 'pul') return <PulStintRow stint={stint} />;
+  if (stint.league === 'wul') return <WulStintRow stint={stint} />;
   // Exhaustive guard — new league union members should add a branch above.
   return null;
 }
@@ -503,7 +537,141 @@ function PulSeasonTotalsTable({ stats }: { stats: PulSeasonStint['stats'] }) {
   );
 }
 
-// Inline logo renderer for the profile — avoids importing PulTeamLogo server
+// ── WUL stint ───────────────────────────────────────────────────────────────
+// Expandable accordion row. Summary: team logo + name + key stats.
+// Expanded panel: full season-totals table (WUL data is aggregated to season
+// totals for this view, matching the PUL treatment).
+
+function WulStintRow({ stint }: { stint: WulSeasonStint }) {
+  // Dynamic accent color — same inline-style pattern as PulStintRow.
+  const accentStyle: React.CSSProperties = stint.teamAccentColor
+    ? { borderLeft: `3px solid ${stint.teamAccentColor}` }
+    : {};
+
+  return (
+    <details className="group [&[open]>summary]:bg-surface-hi">
+      <summary
+        className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        style={accentStyle}
+      >
+        <Caret />
+        <Link
+          href={`/wul/teams/${stint.teamId}`}
+          className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+        >
+          <WulTeamLogoInline
+            logoUrl={stint.teamLogoUrl}
+            teamId={stint.teamId}
+            accentColor={stint.teamAccentColor}
+            mascot={stint.teamName.split(' ').slice(1).join(' ') || stint.teamName}
+          />
+          <span className="flex flex-col min-w-0">
+            <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
+              {stint.teamCity} {stint.teamName}
+            </span>
+            <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+              WUL
+              {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
+            </span>
+          </span>
+        </Link>
+        <YearSummaryCells
+          cells={[
+            { label: 'GP',  value: stint.stats.gamesPlayed },
+            { label: 'G',   value: stint.stats.goals },
+            { label: 'A',   value: stint.stats.assists },
+            { label: '+/−', value: signed(stint.stats.plusMinus) },
+            { label: 'BLK', value: stint.stats.blocks },
+          ]}
+        />
+      </summary>
+      <div className="px-4 pt-2 pb-4 border-t border-hairline overflow-x-auto">
+        <WulSeasonTotalsTable stats={stint.stats} />
+      </div>
+    </details>
+  );
+}
+
+function WulSeasonTotalsTable({ stats }: { stats: WulSeasonStint['stats'] }) {
+  const thBase = 'px-3 py-2 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-muted whitespace-nowrap text-right';
+  const tdBase = 'px-3 py-2 text-[12px] font-tight text-right tabular';
+  return (
+    <table className="w-full max-w-[520px] border-collapse">
+      <thead>
+        <tr>
+          <th scope="col" className={`${thBase} text-right`}>GP</th>
+          <th scope="col" className={thBase}>G</th>
+          <th scope="col" className={thBase}>A</th>
+          <th scope="col" className={thBase}>Blk</th>
+          <th scope="col" className={thBase}>TO</th>
+          <th scope="col" className={thBase}>Touch</th>
+          <th scope="col" className={thBase}>O-Pts</th>
+          <th scope="col" className={thBase}>D-Pts</th>
+          <th scope="col" className={thBase}>+/−</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td className={`${tdBase} text-ink`}>{stats.gamesPlayed}</td>
+          <td className={`${tdBase} text-ink`}>{stats.goals}</td>
+          <td className={`${tdBase} text-ink`}>{stats.assists}</td>
+          <td className={`${tdBase} text-muted`}>{stats.blocks}</td>
+          <td className={`${tdBase} text-muted`}>{stats.turnovers}</td>
+          <td className={`${tdBase} text-muted`}>{stats.touches}</td>
+          <td className={`${tdBase} text-muted`}>{stats.oPoints}</td>
+          <td className={`${tdBase} text-muted`}>{stats.dPoints}</td>
+          <td className={`${tdBase} ${stats.plusMinus > 0 ? 'text-ink font-semibold' : stats.plusMinus < 0 ? 'text-faint' : 'text-muted'}`}>
+            {signed(stats.plusMinus)}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+// Inline logo renderer for WUL — logoUrl comes from wul_teams.logo_url (same-origin path).
+// Uses the team's accentColor for the monogram background when no logo is available.
+function WulTeamLogoInline({
+  logoUrl,
+  teamId,
+  accentColor,
+  mascot,
+}: {
+  logoUrl: string | null;
+  teamId: string;
+  accentColor: string | null;
+  mascot: string;
+}) {
+  const size = 26;
+  if (logoUrl) {
+    return (
+      <span
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-md bg-white border border-[rgb(var(--ink)/0.08)]"
+        style={{ width: size, height: size }}
+        aria-hidden="true"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.84, height: size * 0.84 }} />
+      </span>
+    );
+  }
+  const initials = mascot.split(/\s+/).map((w) => w[0] ?? '').join('').slice(0, 3).toUpperCase();
+  // Use the team's own accent color when available, fall back to a neutral dark.
+  const bg = accentColor ?? '#1d2535';
+  return (
+    <span
+      className="inline-flex items-center justify-center flex-shrink-0 rounded-md"
+      style={{ width: size, height: size, background: bg }}
+      aria-hidden="true"
+    >
+      <span className="font-display font-bold text-white" style={{ fontSize: Math.max(8, size * 0.3), letterSpacing: '0.04em' }}>
+        {initials}
+      </span>
+    </span>
+  );
+}
+
+// ── Inline logo renderer for the profile — avoids importing PulTeamLogo server
 // component in a 'use client'-adjacent file while keeping the same visual.
 function PulTeamLogoInline({
   logoUrl,
@@ -730,6 +898,11 @@ function isUfa(s: SeasonStint): s is UfaSeasonStint {
 }
 function isUsau(s: SeasonStint): s is UsauSeasonStint {
   return s.league === 'usau';
+}
+// isWul is available for future use (e.g. WUL-only fallback guards).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function isWul(s: SeasonStint): s is WulSeasonStint {
+  return s.league === 'wul';
 }
 
 function signed(n: number): string {

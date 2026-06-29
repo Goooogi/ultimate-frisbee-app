@@ -61,10 +61,13 @@ const GAMES_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Players',  href: '/players',  match: '/players' },
 ];
 
-// WUL only has a Teams page today, so its expand shows just this one link
-// rather than the full Scores/Schedule/Teams/Players set.
+// WUL has its own /wul/* section: Scores, Teams, Players. No Schedule — the
+// CSV source is completed-games only. Game detail lives at /wul/g/* (aliased
+// under Scores so it stays highlighted on a matchup page).
 const WUL_NAV_ITEMS: GamesNavItem[] = [
-  { label: 'Teams', href: '/wul/teams', match: '/wul/teams' },
+  { label: 'Scores',  href: '/wul/scores',  match: '/wul/scores',  aliases: ['/wul/g'] },
+  { label: 'Teams',   href: '/wul/teams',   match: '/wul/teams' },
+  { label: 'Players', href: '/wul/players', match: '/wul/players' },
 ];
 
 function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {

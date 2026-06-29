@@ -13,11 +13,31 @@ export interface GameUiState {
   startDate: Date | null;
 }
 
+/** True when the game hasn't started. UFA sends "Upcoming" (also tolerate
+ *  "scheduled"/"pre game" defensively). */
+export function isUpcomingStatus(status: string | null | undefined): boolean {
+  const s = (status ?? '').toLowerCase().trim();
+  return s === '' || s === 'upcoming' || s === 'scheduled' || s === 'pre game' || s === 'pregame';
+}
+
+/** True when the game is over. */
+export function isFinalStatus(status: string | null | undefined): boolean {
+  const s = (status ?? '').toLowerCase().trim();
+  return s === 'final' || s === 'completed' || s === 'forfeit';
+}
+
+/** True when the game is in play. UFA has NO literal "Live" status — it sends
+ *  the current phase ("First Quarter", "Halftime", "Fourth Quarter",
+ *  "Overtime", …). So live = anything that is neither upcoming nor final.
+ *  Defined by exclusion so new/unseen phase strings still read as live. */
+export function isLiveStatus(status: string | null | undefined): boolean {
+  return !isUpcomingStatus(status) && !isFinalStatus(status);
+}
+
 export function gameUiState(game: UfaGame): GameUiState {
-  const status = (game.status ?? '').toLowerCase();
-  const isLive = status === 'live' || status === 'in progress' || status === 'inprogress';
-  const isFinal = status === 'final' || status === 'completed';
-  const isUpcoming = !isLive && !isFinal;
+  const isLive = isLiveStatus(game.status);
+  const isFinal = isFinalStatus(game.status);
+  const isUpcoming = isUpcomingStatus(game.status);
   const hasScore = game.awayScore > 0 || game.homeScore > 0;
   const awayWin = hasScore && game.awayScore > game.homeScore;
   const homeWin = hasScore && game.homeScore > game.awayScore;
@@ -92,9 +112,29 @@ export function statusLabel(state: GameUiState): string {
   return 'Upcoming';
 }
 
-/** Right-side meta string for a card: clock-ish on live, time-of-day on upcoming, date on final. */
+/** Compact live-phase label from UFA's status string. UFA's granularity is the
+ *  quarter (there is no game clock / time-remaining in the feed), so we surface
+ *  the phase: "1st Quarter" → "Q1", "Halftime" → "HALF", "Overtime" → "OT".
+ *  Unknown live phases fall back to the raw status, then "LIVE". */
+export function livePhaseLabel(status: string | null | undefined): string {
+  const s = (status ?? '').toLowerCase().trim();
+  const q = s.match(/(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter/);
+  if (q) {
+    const map: Record<string, string> = {
+      first: 'Q1', '1st': 'Q1', second: 'Q2', '2nd': 'Q2',
+      third: 'Q3', '3rd': 'Q3', fourth: 'Q4', '4th': 'Q4',
+    };
+    return map[q[1]] ?? 'LIVE';
+  }
+  if (s.includes('halftime') || s === 'half') return 'HALF';
+  if (s.includes('overtime') || s === 'ot') return 'OT';
+  return status ? status.toUpperCase() : 'LIVE';
+}
+
+/** Right-side meta string for a card: live phase (e.g. "Q4") on live,
+ *  time-of-day on upcoming, date on final. */
 export function metaRight(game: UfaGame, state: GameUiState): string {
-  if (state.isLive) return 'In progress';
+  if (state.isLive) return livePhaseLabel(game.status);
   if (state.isFinal) return formatStartDateShort(game);
   return formatStartCompact(game);
 }

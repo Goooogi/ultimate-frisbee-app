@@ -1,7 +1,12 @@
 // Wire types for the UFA backend at backend.ufastats.com/web-v1/*.
 // These match the actual response shapes — verified by hitting each endpoint.
 
-export type GameStatus = 'Upcoming' | 'Live' | 'Final' | (string & {});
+// UFA's `status` is a human-readable phase string, NOT a fixed enum. Observed
+// values: "Upcoming", "Final", and live phases like "First Quarter",
+// "Second Quarter", "Halftime", "Third Quarter", "Fourth Quarter", "Overtime".
+// There is NO literal "Live" — anything that isn't Upcoming/Final is in-play.
+// Classify via isLiveStatus()/isFinalStatus() in ./format, never by `=== 'Live'`.
+export type GameStatus = 'Upcoming' | 'Final' | (string & {});
 
 export interface UfaGame {
   gameID: string;              // "2026-05-16-COL-NY"

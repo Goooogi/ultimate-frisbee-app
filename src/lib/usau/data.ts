@@ -163,6 +163,24 @@ const FLAGSHIP_LEVELS: CompetitionLevel[] = [
   'GRAND_MASTERS',
 ];
 
+// Flight importance for headline selection — higher wins. When several events
+// share a weekend (e.g. six club tournaments all on Jun 27–28), the marquee
+// flight (Pro Elite Challenge) should headline over an unranked local
+// tournament (Antlerlock). Unclassified events rank lowest.
+const FLIGHT_RANK: Record<Flight, number> = {
+  'triple-crown': 5,
+  pro: 4,
+  elite: 3,
+  select: 2,
+  classic: 1,
+};
+
+/** Higher = more prestigious. Unclassified (null) → 0, so it loses every tie. */
+function flightRankForName(name: string | null | undefined): number {
+  const f = flightForName(name);
+  return f ? FLIGHT_RANK[f] : 0;
+}
+
 export async function getCurrentEvent(opts?: {
   /** Filter to events whose participating teams include this division. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
@@ -174,7 +192,7 @@ export async function getCurrentEvent(opts?: {
 
   const { data: windowEvents } = await db
     .from('usau_events')
-    .select('id, usau_slug, start_date, end_date, competition_level')
+    .select('id, usau_slug, name, start_date, end_date, competition_level')
     .in('competition_level', FLAGSHIP_LEVELS)
     .gte('start_date', sixMonthsBack)
     .lte('start_date', sixMonthsForward)
@@ -183,6 +201,7 @@ export async function getCurrentEvent(opts?: {
   type EventRow = {
     id: string;
     usau_slug: string;
+    name: string | null;
     start_date: string | null;
     end_date: string | null;
     competition_level: string | null;
@@ -221,28 +240,41 @@ export async function getCurrentEvent(opts?: {
     }
   }
 
-  // Tier 1: live tournament (has started, hasn't ended). Take the soonest-
-  // ending one so we focus on what's about to wrap up.
+  // Tier 1: live tournament (has started, hasn't ended). Prefer the highest
+  // flight (so Pro Elite Challenge headlines over a co-scheduled local event),
+  // then the soonest-ending one so we focus on what's about to wrap up.
   const live = events
     .filter((e) => (e.start_date ?? '') <= today && (e.end_date ?? e.start_date ?? '') >= today)
-    .sort((a, b) => (a.end_date ?? '').localeCompare(b.end_date ?? ''));
+    .sort(
+      (a, b) =>
+        flightRankForName(b.name) - flightRankForName(a.name) ||
+        (a.end_date ?? '').localeCompare(b.end_date ?? ''),
+    );
   if (live.length > 0) {
     const e = live[0];
     return { slug: e.usau_slug, hasGames: (counts.get(e.id) ?? 0) > 0 };
   }
 
-  // Tier 2: soonest upcoming with games.
+  // Tier 2: upcoming with games — highest flight first, then soonest start.
   const upcoming = events
     .filter((e) => (e.start_date ?? '') > today && (counts.get(e.id) ?? 0) > 0)
-    .sort((a, b) => (a.start_date ?? '').localeCompare(b.start_date ?? ''));
+    .sort(
+      (a, b) =>
+        flightRankForName(b.name) - flightRankForName(a.name) ||
+        (a.start_date ?? '').localeCompare(b.start_date ?? ''),
+    );
   if (upcoming.length > 0) {
     return { slug: upcoming[0].usau_slug, hasGames: true };
   }
 
-  // Tier 3: most-recent completed with games (search wider if window is empty).
+  // Tier 3: completed with games — highest flight first, then most-recent.
   const completed = events
     .filter((e) => (counts.get(e.id) ?? 0) > 0)
-    .sort((a, b) => (b.start_date ?? '').localeCompare(a.start_date ?? ''));
+    .sort(
+      (a, b) =>
+        flightRankForName(b.name) - flightRankForName(a.name) ||
+        (b.start_date ?? '').localeCompare(a.start_date ?? ''),
+    );
   if (completed.length > 0) {
     return { slug: completed[0].usau_slug, hasGames: true };
   }

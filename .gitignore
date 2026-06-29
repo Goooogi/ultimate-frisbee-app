@@ -6,7 +6,8 @@
 .pnp.js
 
 /.claude
-/usau-scraper
+# usau-scraper IS tracked — its own usau-scraper/.gitignore handles secrets
+# (.env*, supabase/.temp/), logs, node_modules, and generated CSVs.
 
 /design-reference
 # testing
