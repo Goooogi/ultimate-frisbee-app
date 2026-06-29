@@ -116,6 +116,16 @@ function DetailBody({ game, boxscore }: WulGameDetailProps) {
         />
       )}
 
+      {/* ── Per-player stat leaders (only when box score data is present) ── */}
+      {hasBoxscore && (
+        <GameStatLeaders
+          away={away}
+          home={home}
+          awayRows={boxscore.away}
+          homeRows={boxscore.home}
+        />
+      )}
+
       {/* ── Player box scores ─────────────────────────────────────────────── */}
       {hasBoxscore && (
         <BoxscoreSection
@@ -488,6 +498,173 @@ function TeamTotalsComparison({ away, home, awayTotals, homeTotals }: TeamTotals
         })}
       </ul>
     </section>
+  );
+}
+
+// ── Per-game stat leaders ─────────────────────────────────────────────────────
+// Computed entirely from the existing boxscore rows — no additional fetching.
+// WUL adds Points Played on top of PUL's 5 categories.
+
+interface WulLeaderResult {
+  name: string | null;   // null → no rows / max is 0
+  value: number;         // the max value (0 when no data)
+  tied: boolean;         // true when multiple players share the max
+  tieCount: number;      // how many players are tied (0 when not tied)
+}
+
+interface WulLeaderCategory {
+  title: string;
+  away: WulLeaderResult;
+  home: WulLeaderResult;
+}
+
+/** Extract the leader for a single stat field from a set of rows. */
+function wulLeader(rows: WulBoxscoreRow[], field: keyof Pick<WulBoxscoreRow, 'goals' | 'assists' | 'blocks' | 'turnovers' | 'touches' | 'pointsPlayed'>): WulLeaderResult {
+  if (rows.length === 0) return { name: null, value: 0, tied: false, tieCount: 0 };
+  const max = Math.max(...rows.map((r) => r[field]));
+  if (max === 0) return { name: null, value: 0, tied: false, tieCount: 0 };
+  const leaders = rows.filter((r) => r[field] === max);
+  if (leaders.length > 1) return { name: null, value: max, tied: true, tieCount: leaders.length };
+  return { name: leaders[0].playerName, value: max, tied: false, tieCount: 0 };
+}
+
+function computeWulLeaders(awayRows: WulBoxscoreRow[], homeRows: WulBoxscoreRow[]): WulLeaderCategory[] {
+  const cats: Array<{ title: string; field: keyof Pick<WulBoxscoreRow, 'goals' | 'assists' | 'blocks' | 'turnovers' | 'touches' | 'pointsPlayed'> }> = [
+    { title: 'Goals',         field: 'goals'        },
+    { title: 'Assists',       field: 'assists'      },
+    { title: 'Blocks',        field: 'blocks'       },
+    { title: 'Turnovers',     field: 'turnovers'    },
+    { title: 'Touches',       field: 'touches'      },
+    { title: 'Points Played', field: 'pointsPlayed' },
+  ];
+  return cats.map(({ title, field }) => ({
+    title,
+    away: wulLeader(awayRows, field),
+    home: wulLeader(homeRows, field),
+  }));
+}
+
+interface GameStatLeadersProps {
+  away: WulGameTeamSide;
+  home: WulGameTeamSide;
+  awayRows: WulBoxscoreRow[];
+  homeRows: WulBoxscoreRow[];
+}
+
+function GameStatLeaders({ away, home, awayRows, homeRows }: GameStatLeadersProps) {
+  const categories = computeWulLeaders(awayRows, homeRows);
+  // Keep a category if either side has something to show.
+  const rendered = categories.filter((c) => c.away.value > 0 || c.home.value > 0);
+  if (rendered.length === 0) return null;
+
+  return (
+    <section
+      aria-labelledby="wul-game-leaders-heading"
+      className="px-6 py-6 md:px-14 md:py-8 border-t border-hairline"
+    >
+      <h2
+        id="wul-game-leaders-heading"
+        className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-5 pb-2 border-b border-hairline"
+      >
+        <span>Stat leaders · this game</span>
+        <span className="text-faint">Top performers</span>
+      </h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+        {rendered.map((c) => (
+          <LeaderCard
+            key={c.title}
+            title={c.title}
+            awaySide={away}
+            homeSide={home}
+            awayResult={c.away}
+            homeResult={c.home}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function LeaderCard({
+  title,
+  awaySide,
+  homeSide,
+  awayResult,
+  homeResult,
+}: {
+  title: string;
+  awaySide: WulGameTeamSide;
+  homeSide: WulGameTeamSide;
+  awayResult: WulLeaderResult;
+  homeResult: WulLeaderResult;
+}) {
+  // Higher raw count wins; ties stay neutral.
+  const awayWins = awayResult.value > 0 && awayResult.value > homeResult.value;
+  const homeWins = homeResult.value > 0 && homeResult.value > awayResult.value;
+  return (
+    <div className="bg-surface border border-border px-3 py-3.5 md:px-4 md:py-4 flex flex-col gap-3">
+      <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight text-center">
+        {title}
+      </div>
+      <div className="grid grid-cols-[1fr_auto_1fr] items-stretch gap-3">
+        <LeaderHalf side={awaySide} label="Away" result={awayResult} winning={awayWins} align="left" />
+        <div className="w-px bg-hairline" aria-hidden="true" />
+        <LeaderHalf side={homeSide} label="Home" result={homeResult} winning={homeWins} align="right" />
+      </div>
+    </div>
+  );
+}
+
+function LeaderHalf({
+  side,
+  label,
+  result,
+  winning,
+  align,
+}: {
+  side: WulGameTeamSide;
+  label: 'Away' | 'Home';
+  result: WulLeaderResult;
+  winning: boolean;
+  align: 'left' | 'right';
+}) {
+  const isLeft = align === 'left';
+
+  const nameLine = result.name !== null
+    ? result.name
+    : result.tied
+      ? `${result.tieCount} players tied`
+      : null;
+
+  return (
+    <div className={`flex flex-col gap-1.5 min-w-0 ${isLeft ? 'items-start text-left' : 'items-end text-right'}`}>
+      <div className={`flex items-center gap-2 min-w-0 ${isLeft ? '' : 'flex-row-reverse'}`}>
+        <WulTeamLogoBlock
+          logoUrl={side.logoUrl}
+          accentColor={side.accentColor}
+          abbrev={side.abbrev}
+          size={22}
+        />
+        <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+          {label} · {side.abbrev}
+        </span>
+      </div>
+      <span className="text-[12px] font-semibold text-ink font-tight leading-tight w-full break-words">
+        {nameLine !== null ? (
+          result.tied ? <span className="text-muted">{nameLine}</span> : nameLine
+        ) : (
+          <span className="text-faint italic">No data</span>
+        )}
+      </span>
+      <span
+        className={`tabular text-[26px] md:text-[28px] font-bold leading-none tracking-[-0.02em] font-tight mt-auto ${
+          winning ? 'text-ink' : 'text-muted'
+        }`}
+      >
+        {result.value > 0 || result.tied ? result.value : '—'}
+      </span>
+    </div>
   );
 }
 
