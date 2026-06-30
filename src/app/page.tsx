@@ -1,7 +1,10 @@
 // The Layout — editorial-bento home page.
 // Server component: fetches today's slate + current standings + team-stats in
 // parallel and hands shaped data to the home components.
+// Hero slot is now a cross-league carousel: UFA → USAU → PUL → WUL.
+// Any league with no current content is simply omitted (null → no slide).
 
+import React from 'react';
 import type { Metadata } from 'next';
 import {
   getAllGamesByYears,
@@ -13,8 +16,15 @@ import {
 import { gameUiState } from '@/lib/ufa/format';
 import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
+import { getCurrentEvent, getEvent } from '@/lib/usau/data';
+import { listPulGames, PUL_CURRENT_SEASON } from '@/lib/pul/data';
+import { listWulGames, WUL_CURRENT_SEASON } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
+import { HeroCarousel } from '@/components/home/hero-carousel';
+import { HeroUsauSlide } from '@/components/home/hero-usau-slide';
+import { HeroPulSlide } from '@/components/home/hero-pul-slide';
+import { HeroWulSlide } from '@/components/home/hero-wul-slide';
 import { LeaguesPanel } from '@/components/home/leagues-panel';
 import { GameGridSection } from '@/components/home/game-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
@@ -31,15 +41,27 @@ export const metadata: Metadata = {
 export default async function HomePage() {
   const year = currentSeasonYear();
 
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes] = await Promise.allSettled([
-    getCurrentGames(),
-    // Season-wide fetch so "Up next" stays populated between weekends, when
-    // the current-week feed flips to all-finals and would otherwise be empty.
-    // Cached 5min by the underlying call.
-    getAllGamesByYears([year]),
-    getStandings(),
-    getTeamStats({ year }),
-  ]);
+  // Fetch all data sources in parallel. Cross-league fetches are gated with
+  // try/catch via Promise.allSettled so a failure in one league never breaks
+  // the page — the slide is simply omitted.
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, pulRes, wulRes] =
+    await Promise.allSettled([
+      getCurrentGames(),
+      // Season-wide fetch so "Up next" stays populated between weekends.
+      getAllGamesByYears([year]),
+      getStandings(),
+      getTeamStats({ year }),
+      // USAU: current tournament (any gender) — mirrors scores/page.tsx pattern.
+      (async () => {
+        const pick = await getCurrentEvent();
+        if (!pick) return null;
+        return await getEvent(pick.slug);
+      })(),
+      // PUL: upcoming-this-week else most-recent final.
+      listPulGames({ season: PUL_CURRENT_SEASON }),
+      // WUL: same rule.
+      listWulGames({ season: WUL_CURRENT_SEASON }),
+    ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
   const seasonGames: UfaGame[] = seasonRes.status === 'fulfilled' ? seasonRes.value : [];
@@ -53,6 +75,18 @@ export default async function HomePage() {
     standingsRes.status === 'fulfilled' ? standingsRes.value : [];
   const teamStats: UfaTeamStat[] =
     teamStatsRes.status === 'fulfilled' ? teamStatsRes.value.stats ?? [] : [];
+
+  // ── Cross-league slide data ──────────────────────────────────────────────
+  const usauEvent = usauRes.status === 'fulfilled' ? usauRes.value : null;
+
+  // PUL: prefer upcoming game this week; fall back to most-recent final.
+  // "This week" = gameDate within 7 days of today (server time).
+  const pulGames = pulRes.status === 'fulfilled' ? pulRes.value : [];
+  const pulFeatured = pickLeagueGame(pulGames);
+
+  // WUL: same rule.
+  const wulGames = wulRes.status === 'fulfilled' ? wulRes.value : [];
+  const wulFeatured = pickLeagueGame(wulGames);
 
   // Pick "Game of the Week" — most evenly-matched current-week game between
   // two good teams. See pickGameOfTheWeek() for the heuristic; the UFA API
@@ -95,14 +129,29 @@ export default async function HomePage() {
   const countLabel = (n: number, noun: string) =>
     `${n} ${n === 1 ? noun : `${noun}s`}`;
 
+  // ── Build carousel slides (order: UFA → USAU → PUL → WUL) ──────────────
+  // Each builder returns null when the league has no current content; null
+  // entries are filtered out so offseason leagues simply don't appear.
+  const slides = [
+    // UFA slide — always show the existing HeroGameCard (may render EmptyHero
+    // in offseason, which is an intentional UFA-only empty state — keep it).
+    <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
+    // USAU — tournament card, null when no current event.
+    usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
+    // PUL — game card, null when no current/recent game.
+    pulFeatured ? <HeroPulSlide key="pul" game={pulFeatured} /> : null,
+    // WUL — game card, null when no current/recent game.
+    wulFeatured ? <HeroWulSlide key="wul" game={wulFeatured} /> : null,
+  ].filter((s): s is React.ReactElement => s !== null);
+
   return (
     <div className="min-h-screen bg-bg text-ink pb-20 lg:pb-0">
       {/* Global top rail — app switching + logo + account */}
       <AppRail />
 
-      {/* HERO BENTO — primary game on the left, sub-app tiles stacked right */}
+      {/* HERO BENTO — carousel on the left, league panel stacked right */}
       <div className="px-5 lg:px-12 pt-6 lg:pt-9 pb-5 lg:pb-6 grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-5">
-        <HeroGameCard game={featured} awayRecord={awayRec} homeRecord={homeRec} />
+        <HeroCarousel slides={slides} />
         <LeaguesPanel />
       </div>
 
@@ -127,4 +176,61 @@ export default async function HomePage() {
       <SiteFooter />
     </div>
   );
+}
+
+// ─── Cross-league game picker ────────────────────────────────────────────────
+// For PUL and WUL: prefer an upcoming game within the next 7 days; if none,
+// fall back to the most recent final. Returns null when the season has no
+// games in either window (e.g. offseason — that's the correct "no slide" case).
+//
+// Works with both PulGame and WulGame since both have the same shape:
+//   { status: 'scheduled'|'final', gameDate: string|null }
+
+import type { PulGame } from '@/lib/pul/data';
+import type { WulGame } from '@/lib/wul/data';
+
+/** Shared minimal shape for both PulGame and WulGame. */
+type LeagueGame = { status: 'scheduled' | 'final'; gameDate: string | null };
+
+function pickLeagueGameGeneric<T extends LeagueGame>(games: T[]): T | null {
+  if (games.length === 0) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const sevenDaysLater = new Date(today.getTime() + 7 * 86400_000);
+
+  // Upcoming within next 7 days (soonest first)
+  const upcoming = games
+    .filter((g) => {
+      if (g.status !== 'scheduled' || !g.gameDate) return false;
+      const [y, m, d] = g.gameDate.split('-').map(Number);
+      const gd = new Date(y, m - 1, d);
+      return gd >= today && gd <= sevenDaysLater;
+    })
+    .sort((a, b) => (a.gameDate ?? '').localeCompare(b.gameDate ?? ''));
+
+  if (upcoming.length > 0) return upcoming[0];
+
+  // Most recent final within the last 7 days. A 7-day window lets a league
+  // keep showing its just-played game for a week, then drops off — so once a
+  // season ends, the slide disappears rather than lingering on stale results
+  // (PUL/WUL ended ~1–2wk ago and should NOT show until next season's data).
+  const sevenDaysAgo = new Date(today.getTime() - 7 * 86400_000);
+  const recent = games
+    .filter((g) => {
+      if (g.status !== 'final' || !g.gameDate) return false;
+      const [y, m, d] = g.gameDate.split('-').map(Number);
+      const gd = new Date(y, m - 1, d);
+      return gd >= sevenDaysAgo && gd <= today;
+    })
+    .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''));
+
+  return recent.length > 0 ? recent[0] : null;
+}
+
+// Typed wrappers — preserve the concrete return type so JSX props satisfy.
+function pickLeagueGame(games: PulGame[]): PulGame | null;
+function pickLeagueGame(games: WulGame[]): WulGame | null;
+function pickLeagueGame(games: PulGame[] | WulGame[]): PulGame | WulGame | null {
+  return pickLeagueGameGeneric(games as PulGame[]);
 }

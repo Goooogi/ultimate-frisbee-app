@@ -8,6 +8,7 @@
 import Link from 'next/link';
 import { listRankedTeams } from '@/lib/usau/data';
 import type { UsauLevel } from '@/lib/league';
+import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
 export async function UsauTeamsRanked({
   genderDivision,
@@ -74,6 +75,7 @@ export async function UsauTeamsRanked({
                 key={t.id}
                 rank={t.nationalsPlacement ?? idx + 1}
                 name={t.name}
+                genderDivision={t.genderDivision}
                 state={t.state}
                 competitionLevel={t.competitionLevel}
                 href={`/usau/teams/${t.id}`}
@@ -101,6 +103,7 @@ export async function UsauTeamsRanked({
                 key={t.id}
                 rank={t.bestRegionalsPlacement ?? idx + 1}
                 name={t.name}
+                genderDivision={t.genderDivision}
                 state={t.state}
                 competitionLevel={t.competitionLevel}
                 href={`/usau/teams/${t.id}`}
@@ -117,6 +120,7 @@ export async function UsauTeamsRanked({
 function RankedRow({
   rank,
   name,
+  genderDivision,
   state,
   competitionLevel,
   href,
@@ -124,6 +128,7 @@ function RankedRow({
 }: {
   rank: number | null;
   name: string;
+  genderDivision: string | null;
   state: string | null;
   competitionLevel: string | null;
   href: string;
@@ -155,6 +160,7 @@ function RankedRow({
         >
           {rank ?? '—'}
         </span>
+        <UsauTeamLogo name={name} genderDivision={genderDivision} size={28} />
         <span className="flex-1 min-w-0">
           <span className="block text-[14px] font-bold text-ink font-tight truncate">
             {name}
