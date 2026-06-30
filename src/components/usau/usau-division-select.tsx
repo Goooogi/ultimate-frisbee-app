@@ -14,14 +14,24 @@ const OPTIONS: { value: UsauDivision; label: string }[] = [
   { value: 'Mixed', label: 'Mixed' },
 ];
 
-export function UsauDivisionSelect() {
+/**
+ * `restrictTo` — when provided, the dropdown only offers these divisions (kept
+ * in the canonical Men/Women/Mixed order). Used on the event page so a
+ * tournament only lists divisions it actually fielded (Pro Elite has all 3; a
+ * Women's-only sectional shows just Women). Omitted → all 3 offered.
+ */
+export function UsauDivisionSelect({ restrictTo }: { restrictTo?: UsauDivision[] } = {}) {
   const [division, setDivision] = useDivision();
+  const options =
+    restrictTo && restrictTo.length > 0
+      ? OPTIONS.filter((o) => restrictTo.includes(o.value))
+      : OPTIONS;
   return (
     <PillSelect
       value={division}
       onChange={setDivision}
       ariaLabel="Select division"
-      options={OPTIONS}
+      options={options}
     />
   );
 }

@@ -88,6 +88,16 @@ export default async function HomePage() {
   // ── Cross-league slide data ──────────────────────────────────────────────
   const usauEvent = usauRes.status === 'fulfilled' ? usauRes.value : null;
 
+  // USAU belongs in "Up next" ONLY when its event is upcoming or in progress
+  // (not yet ended). getCurrentEvent()'s weekend cadence can return LAST
+  // weekend's already-completed event on a weekday — that's a Recent result,
+  // not an "up next", and its scored pool games are finished, not upcoming.
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const usauUpcomingEvent =
+    usauEvent && (usauEvent.endDate ?? usauEvent.startDate ?? '') >= todayIso
+      ? usauEvent
+      : null;
+
   // PUL: prefer upcoming game this week; fall back to most-recent final.
   // "This week" = gameDate within 7 days of today (server time).
   const pulGames = pulRes.status === 'fulfilled' ? pulRes.value : [];
@@ -193,9 +203,10 @@ export default async function HomePage() {
           ...(upNext.length > 0
             ? [{ leagueKey: 'UFA', content: <UfaTileGrid games={upNext} /> }]
             : []),
-          // USAU — current event card (with pool game mini-cards when scored).
-          ...(usauEvent
-            ? [{ leagueKey: 'USAU', content: <UsauUpNextCard event={usauEvent} /> }]
+          // USAU — only when the event is upcoming/in-progress (a completed
+          // event is a Recent result, not an "up next").
+          ...(usauUpcomingEvent
+            ? [{ leagueKey: 'USAU', content: <UsauUpNextCard event={usauUpcomingEvent} /> }]
             : []),
         ]}
       />

@@ -18,9 +18,10 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
-import { useDivision } from '@/lib/use-division';
+import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { UsauBracketTree, isChampionshipBracket } from './usau-bracket-tree';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -138,8 +139,27 @@ export function UsauEventDetail({ event }: Props) {
     poolGames.get(g.bracketName)!.push(g);
   }
 
+  // Divisions this event actually fielded, in canonical order — drives the
+  // scoped division switcher below (only shown when there's more than one).
+  const eventDivisions = (['Men', 'Women', 'Mixed'] as const).filter((d) =>
+    availableGenders.includes(d),
+  ) as UsauDivision[];
+
   return (
     <>
+      {/* Division switcher — only when the event fielded 2+ divisions (most
+          TCT/Nationals events do; single-division sectionals don't need it).
+          Scoped to the divisions this event actually has. Writes ?div=, which
+          the filter above reads via useDivision(). */}
+      {eventDivisions.length > 1 && (
+        <div className="mb-6 flex items-center gap-3">
+          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+            Division
+          </span>
+          <UsauDivisionSelect restrictTo={eventDivisions} />
+        </div>
+      )}
+
       {/* Championship bracket tree — visual left→right flow. Renders only
           when there are 1st-place bracket games to show. Receives the
           already-filtered games (filtered by the global ?div URL param). */}

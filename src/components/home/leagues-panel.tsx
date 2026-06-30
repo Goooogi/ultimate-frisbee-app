@@ -72,7 +72,7 @@ export function LeaguesPanel() {
         </span>
       </div>
 
-      {/* League rows */}
+      {/* League rows — flex-1 per li so the 4 rows fill the panel height evenly */}
       <ul className="flex flex-col flex-1" role="list">
         {LEAGUE_ROWS.map((row, index) => {
           const isLast = index === LEAGUE_ROWS.length - 1;
@@ -84,15 +84,15 @@ export function LeaguesPanel() {
                 key={row.id}
                 aria-label={`${row.label} — coming soon`}
                 className={[
-                  'flex items-center gap-3.5 px-5',
-                  'min-h-[44px] py-2',
+                  'flex flex-1 items-center gap-4 px-5',
+                  'min-h-[56px] lg:min-h-[0px] max-h-[96px] py-3',
                   'cursor-not-allowed select-none',
                   !isLast ? 'border-b border-hairline' : '',
                 ].join(' ')}
               >
                 <LeagueMark abbr={row.abbr} img={row.img} disabled />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[13px] font-semibold text-faint font-tight leading-tight truncate">
+                  <span className="block text-[15px] font-semibold text-faint font-tight leading-tight truncate">
                     {row.label}
                   </span>
                   {row.subtitle && (
@@ -108,12 +108,15 @@ export function LeaguesPanel() {
 
           // Real / navigable
           return (
-            <li key={row.id} className={!isLast ? 'border-b border-hairline' : ''}>
+            <li
+              key={row.id}
+              className={['flex flex-1', !isLast ? 'border-b border-hairline' : ''].join(' ')}
+            >
               <Link
                 href={row.href}
                 className={[
-                  'flex items-center gap-3.5 px-5',
-                  'min-h-[44px] py-2 w-full',
+                  'flex flex-1 items-center gap-4 px-5',
+                  'min-h-[56px] lg:min-h-[0px] max-h-[96px] py-3 w-full',
                   'text-ink hover:bg-surface-hi',
                   'transition-colors duration-150 no-underline',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
@@ -122,11 +125,11 @@ export function LeaguesPanel() {
               >
                 <LeagueMark abbr={row.abbr} img={row.img} />
                 <span className="flex-1 min-w-0">
-                  <span className="block text-[13px] font-semibold text-ink font-tight leading-tight truncate">
+                  <span className="block text-[15px] font-semibold text-ink font-tight leading-tight truncate">
                     {row.label}
                   </span>
                   {row.subtitle && (
-                    <span className="block text-[11px] text-muted font-tight truncate mt-0.5">
+                    <span className="block text-[12px] text-muted font-tight truncate mt-0.5">
                       {row.subtitle}
                     </span>
                   )}
@@ -160,10 +163,10 @@ function LeagueMark({
     return (
       <span
         aria-hidden="true"
-        className="inline-flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 overflow-hidden bg-white border border-[rgb(var(--ink)/0.12)]"
+        className="inline-flex items-center justify-center w-11 h-11 lg:w-12 lg:h-12 rounded-lg flex-shrink-0 overflow-hidden bg-white border border-[rgb(var(--ink)/0.10)] shadow-sm"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={img} alt="" className="w-full h-full object-contain p-0.5" />
+        <img src={img} alt="" className="w-full h-full object-contain p-1" />
       </span>
     );
   }
@@ -173,11 +176,11 @@ function LeagueMark({
       aria-hidden="true"
       className={[
         'inline-flex items-center justify-center',
-        'w-8 h-8 rounded-md flex-shrink-0',
-        'text-[9px] font-bold tracking-[0.08em] font-tight',
+        'w-11 h-11 lg:w-12 lg:h-12 rounded-lg flex-shrink-0',
+        'text-[10px] font-bold tracking-[0.08em] font-tight',
         disabled
           ? 'bg-[rgb(var(--ink)/0.04)] border border-[rgb(var(--ink)/0.08)] text-faint'
-          : 'bg-[rgb(var(--ink)/0.08)] border border-[rgb(var(--ink)/0.12)] text-ink',
+          : 'bg-[rgb(var(--ink)/0.08)] border border-[rgb(var(--ink)/0.12)] text-ink shadow-sm',
       ].join(' ')}
     >
       {abbr}
@@ -196,12 +199,12 @@ function SoonBadge() {
 function ChevronRight() {
   return (
     <svg
-      width="12"
-      height="12"
+      width="14"
+      height="14"
       viewBox="0 0 10 10"
       fill="none"
       aria-hidden="true"
-      className="text-faint flex-shrink-0 group-hover:text-muted transition-colors duration-150"
+      className="text-faint flex-shrink-0 group-hover:text-[rgb(var(--accent))] transition-colors duration-150"
     >
       <path
         d="M3.5 2L6.5 5L3.5 8"

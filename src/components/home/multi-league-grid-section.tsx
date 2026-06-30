@@ -83,11 +83,20 @@ export function MultiLeagueGridSection({
 
 export function UfaTileGrid({ games }: { games: UfaGame[] }) {
   if (games.length === 0) return null;
+  // Horizontal scroll carousel — a weekend has more than 4 games, so a fixed
+  // 4-col grid clipped the rest. Each tile is a fixed-width snap target; the
+  // row scrolls (swipe on touch, scrollbar on desktop). Negative margins +
+  // padding let the row bleed to the section edge so the last card isn't
+  // visually cut at the container boundary.
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-      {games.map((g) => (
-        <GameTile key={g.gameID} game={g} />
-      ))}
+    <div className="-mx-5 lg:-mx-12 overflow-x-auto overscroll-x-contain scroll-smooth snap-x snap-mandatory">
+      <div className="flex gap-3 px-5 lg:px-12 w-max">
+        {games.map((g) => (
+          <div key={g.gameID} className="snap-start shrink-0 w-[280px] sm:w-[320px]">
+            <GameTile game={g} />
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -113,6 +122,12 @@ function formatDateRange(start: string | null, end: string | null): string {
 
 export function UsauUpNextCard({ event }: { event: UsauEventSummary }) {
   const dateRange = formatDateRange(event.startDate, event.endDate);
+
+  // teamId → gender division, from the event's own teams. Used to resolve the
+  // correct logo per team (a "Pool A" bracket name carries no gender, so we
+  // must look the team up rather than guess the division from the bracket).
+  const divByTeamId = new Map<string, string | null>();
+  for (const t of event.teams) divByTeamId.set(t.teamId, t.genderDivision);
 
   // Show up to 4 pool games (round='pool', scored).
   const poolGames = event.games
@@ -146,7 +161,13 @@ export function UsauUpNextCard({ event }: { event: UsauEventSummary }) {
       {poolGames.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {poolGames.map((g) => (
-            <UsauPoolGameMini key={g.id} game={g} eventSlug={event.slug} />
+            <UsauPoolGameMini
+              key={g.id}
+              game={g}
+              eventSlug={event.slug}
+              divA={g.teamAId ? divByTeamId.get(g.teamAId) ?? null : null}
+              divB={g.teamBId ? divByTeamId.get(g.teamBId) ?? null : null}
+            />
           ))}
         </div>
       )}
@@ -157,9 +178,15 @@ export function UsauUpNextCard({ event }: { event: UsauEventSummary }) {
 function UsauPoolGameMini({
   game,
   eventSlug,
+  divA,
+  divB,
 }: {
   game: UsauEventSummary['games'][number];
   eventSlug: string;
+  /** Real gender division per team (from event.teams) — drives logo lookup.
+   *  Bracket/pool names carry no gender, so we must pass the team's own. */
+  divA: string | null;
+  divB: string | null;
 }) {
   const aName = game.teamAName ?? '?';
   const bName = game.teamBName ?? '?';
@@ -168,10 +195,6 @@ function UsauPoolGameMini({
   const hasScore = aScore !== null && bScore !== null;
   const aWin = hasScore && aScore! > bScore!;
   const bWin = hasScore && bScore! > aScore!;
-
-  // Derive division from bracket name for the logo
-  const bracket = (game.bracketName ?? '').toLowerCase();
-  const divA = bracket.includes('women') ? 'Women' : bracket.includes('mixed') ? 'Mixed' : 'Men';
 
   return (
     <Link
@@ -191,7 +214,7 @@ function UsauPoolGameMini({
       {/* Team B */}
       <div className={['flex items-center justify-between', aWin ? 'opacity-55' : ''].join(' ')}>
         <div className="flex items-center gap-1.5 min-w-0">
-          <UsauTeamLogo name={bName} genderDivision={divA} size={16} />
+          <UsauTeamLogo name={bName} genderDivision={divB} size={16} />
           <span className="font-tight text-[13px] text-ink truncate">{bName}</span>
         </div>
         <span className="font-mono font-bold text-[13px] text-ink tabular ml-2 flex-shrink-0">
@@ -291,22 +314,26 @@ export function PulRecentCard({ game }: { game: PulGame }) {
   ].join(' ');
 
   return (
-    <Link href={`/pul/g/${pulGameHref(game.id)}`} className={cardClass}>
-      {isChampion && (
-        <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
-          <TrophyIcon />
-          <span>Championship</span>
-        </div>
-      )}
-      {game.gameDate && (
-        <div className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight tabular">
-          {formatCardDate(game.gameDate)}
-        </div>
-      )}
-      <PulScoreRow side={away} win={awayWin} lose={homeWin} />
-      <div className="h-px bg-hairline my-1" />
-      <PulScoreRow side={home} win={homeWin} lose={awayWin} />
-    </Link>
+    // Constrain to a single grid-column width so this lone card doesn't span
+    // the full section like the multi-card UFA/USAU rows. Full width on mobile.
+    <div className="w-full sm:max-w-[360px]">
+      <Link href={`/pul/g/${pulGameHref(game.id)}`} className={cardClass}>
+        {isChampion && (
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
+            <TrophyIcon />
+            <span>Championship</span>
+          </div>
+        )}
+        {game.gameDate && (
+          <div className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight tabular">
+            {formatCardDate(game.gameDate)}
+          </div>
+        )}
+        <PulScoreRow side={away} win={awayWin} lose={homeWin} />
+        <div className="h-px bg-hairline my-1" />
+        <PulScoreRow side={home} win={homeWin} lose={awayWin} />
+      </Link>
+    </div>
   );
 }
 
@@ -360,22 +387,24 @@ export function WulRecentCard({ game, champion = false }: { game: WulGame; champ
   ].join(' ');
 
   return (
-    <Link href={`/wul/g/${wulGameHref(game.id)}`} className={cardClass}>
-      {champion && (
-        <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
-          <TrophyIcon />
-          <span>Championship</span>
-        </div>
-      )}
-      {game.gameDate && (
-        <div className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight tabular">
-          {formatCardDate(game.gameDate)}
-        </div>
-      )}
-      <WulScoreRow side={away} win={awayWin} lose={homeWin} />
-      <div className="h-px bg-hairline my-1" />
-      <WulScoreRow side={home} win={homeWin} lose={awayWin} />
-    </Link>
+    <div className="w-full sm:max-w-[360px]">
+      <Link href={`/wul/g/${wulGameHref(game.id)}`} className={cardClass}>
+        {champion && (
+          <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
+            <TrophyIcon />
+            <span>Championship</span>
+          </div>
+        )}
+        {game.gameDate && (
+          <div className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight tabular">
+            {formatCardDate(game.gameDate)}
+          </div>
+        )}
+        <WulScoreRow side={away} win={awayWin} lose={homeWin} />
+        <div className="h-px bg-hairline my-1" />
+        <WulScoreRow side={home} win={homeWin} lose={awayWin} />
+      </Link>
+    </div>
   );
 }
 
