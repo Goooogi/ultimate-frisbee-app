@@ -204,7 +204,7 @@ function ChevronRight() {
       viewBox="0 0 10 10"
       fill="none"
       aria-hidden="true"
-      className="text-faint flex-shrink-0 group-hover:text-[rgb(var(--accent))] transition-colors duration-150"
+      className="text-faint flex-shrink-0 group-hover:text-accent transition-colors duration-150"
     >
       <path
         d="M3.5 2L6.5 5L3.5 8"
