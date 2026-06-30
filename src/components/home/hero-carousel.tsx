@@ -87,8 +87,11 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
         ))}
       </div>
 
-      {/* Carousel chrome — sits above the slide stack */}
-      <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-3 px-4 pointer-events-none z-10">
+      {/* Carousel chrome. On mobile it sits BELOW the slide in normal flow so
+          it never overlaps the slide's own footer CTAs (the bug on short
+          mobile slides). On lg+ the slide is tall (480px) so we overlay it at
+          the bottom as a floating control. */}
+      <div className="flex items-center justify-center gap-3 px-4 py-3 bg-[#0F1B2E] lg:bg-transparent lg:py-0 lg:px-4 lg:absolute lg:bottom-4 lg:left-0 lg:right-0 lg:pointer-events-none z-10">
         {/* Prev */}
         <button
           aria-label="Previous slide"
