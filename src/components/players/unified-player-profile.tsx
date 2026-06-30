@@ -47,8 +47,6 @@ const PLAYERS_LIST_HREF: Record<string, string> = {
 
 export function UnifiedProfile({ profile, content, fromLeague }: Props) {
   const { career, years } = profile;
-  const latestYear = years[0];
-  const latestUfa = latestYear?.stints.find(isUfa) ?? null;
   const eyebrow = buildEyebrow(profile);
 
   // Hide the league switcher entirely on player profiles — we pass an
@@ -74,33 +72,6 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
       {profile.championYearsUfa.length > 0 && (
         <ChampionBanner years={profile.championYearsUfa} label="UFA Champion" />
       )}
-
-      {/* Hero */}
-      <div className="flex flex-wrap items-center gap-4 mb-8 pb-6 border-b border-hairline">
-        {latestUfa && (
-          <Link
-            href={`/teams/${latestUfa.teamMeta.id}`}
-            className="hover:opacity-80 transition-opacity duration-150"
-          >
-            <TeamLogo team={latestUfa.teamMeta} size={56} />
-          </Link>
-        )}
-        <div className="flex flex-col gap-0.5">
-          {latestUfa && (
-            <Link
-              href={`/teams/${latestUfa.teamMeta.id}`}
-              className="text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors duration-150"
-            >
-              {latestUfa.teamMeta.city} {latestUfa.teamMeta.name}
-            </Link>
-          )}
-          {latestYear && (
-            <div className="text-[13px] text-muted font-tight">
-              {buildLatestYearLine(latestYear)}
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Career totals — UFA + USAU combined */}
       {(career.ufaGamesPlayed > 0 || career.usauEventsPlayed > 0) && (
@@ -246,25 +217,6 @@ function buildEyebrow(profile: UnifiedPlayerProfile): string {
   if (hasWul) parts.push('WUL');
   if (parts.length === 0) return 'Career';
   return `${parts.join(' + ')} · Career`;
-}
-
-function buildLatestYearLine(year: UnifiedYear): string {
-  const parts: string[] = [String(year.year)];
-  for (const s of year.stints) {
-    if (s.league === 'ufa') {
-      parts.push(
-        `${s.totals.gamesPlayed} GP · ${s.totals.goals}G · ${s.totals.assists}A · ${signed(s.totals.plusMinus)} +/−`,
-      );
-    } else if (s.league === 'usau') {
-      if (s.events.length > 0)
-        parts.push(`${s.events.length} ${s.events.length === 1 ? 'event' : 'events'}`);
-    } else if (s.league === 'pul') {
-      parts.push(`${s.stats.gamesPlayed} GP · ${s.stats.goals}G · ${s.stats.assists}A (PUL)`);
-    } else if (s.league === 'wul') {
-      parts.push(`${s.stats.gamesPlayed} GP · ${s.stats.goals}G · ${s.stats.assists}A (WUL)`);
-    }
-  }
-  return parts.join(' · ');
 }
 
 // ── Year accordion ──────────────────────────────────────────────────────

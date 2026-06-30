@@ -32,6 +32,7 @@ import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { AccountChip } from '@/components/auth/account-chip';
 import { SearchBar } from '@/components/search-bar';
+import { SearchModal, SearchGlyph } from '@/components/search-modal';
 import { MobileMenu } from '@/components/mobile-menu';
 import {
   DEFAULT_LEAGUE,
@@ -942,6 +943,7 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
   const activeApp = detectSubApp(pathname);
   const [theme] = useTheme();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
 
   // gamesSlotMobile is no longer rendered in the mobile rail — league
@@ -1049,6 +1051,21 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
           <ThemeToggle />
         </div>
 
+        {/* Search — mobile only (<lg). Opens the full-screen SearchModal,
+            reusing the same searchAll() logic as the desktop SearchBar. */}
+        <button
+          type="button"
+          aria-label="Open search"
+          onClick={() => setMobileSearchOpen(true)}
+          className={[
+            'flex lg:hidden items-center justify-center w-11 h-11 rounded-full flex-shrink-0',
+            'text-ink hover:bg-surface transition-colors duration-150 cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
+        >
+          <SearchGlyph size={17} />
+        </button>
+
         {/* Hamburger — mobile only (<lg). Opens the MobileMenu overlay. */}
         <button
           ref={hamburgerRef}
@@ -1082,6 +1099,10 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
 
         <AccountChip size={30} />
       </div>
+
+      {/* Mobile full-screen search overlay — same SearchModal the desktop
+          topbar uses; portalled to document.body. */}
+      <SearchModal open={mobileSearchOpen} onClose={() => setMobileSearchOpen(false)} />
 
       {/* Mobile full-screen overlay menu — portalled to document.body */}
       <MobileMenu
