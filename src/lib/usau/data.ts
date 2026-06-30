@@ -797,6 +797,34 @@ export interface SearchResult {
   /** Which league this result belongs to — drives routing (resultHref).
    *  Tournaments are USAU-only. Defaults to 'usau' for legacy USAU rows. */
   league?: 'usau' | 'ufa' | 'pul' | 'wul';
+  /** Relevance/prominence score for ranking (higher = more prominent). Adult
+   *  club + pro-league teams outrank college, which outranks youth/HS/MS — so
+   *  a query like "Colorado" floats real clubs above U-20/Academy noise. The
+   *  search comparator sorts by match-quality first, then this. */
+  prominence?: number;
+}
+
+/** Prominence weight for a USAU team (higher = more prominent), from its
+ *  competition level AND name. Adult club > college > youth. Many youth teams
+ *  are mis-tagged as competition_level='CLUB' in the source data (e.g.
+ *  "Colorado Cutthroat U-20 Boys", "... Academy", "Youth Club"), so we also
+ *  detect youth markers in the NAME and demote them — otherwise a query like
+ *  "Colorado" buries real clubs under U-17/U-20/Academy noise. We demote (not
+ *  drop) youth so they still appear, just below senior teams. */
+const YOUTH_NAME_RE = /\b(u-?\d{2}|under[- ]?\d{2}|youth|academy|middle school|high school|boys|girls|hs|ms)\b/i;
+export function usauTeamProminence(name: string, level: string | null | undefined): number {
+  if (YOUTH_NAME_RE.test(name)) return 0; // youth-by-name — lowest, below everything
+  switch (level) {
+    case 'CLUB':
+    case 'MASTERS':
+    case 'GRAND_MASTERS':
+      return 3; // adult club — most prominent
+    case 'COLLEGE_D1':
+    case 'COLLEGE_D3':
+      return 2; // college
+    default:
+      return 1; // HS / MS / beach / other
+  }
 }
 
 /**
@@ -906,6 +934,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       name: t.name,
       hint: hintParts.join(' · ') || null,
       league: 'usau',
+      prominence: usauTeamProminence(t.name, t.competition_level),
     });
   }
 
@@ -971,6 +1000,10 @@ export interface UsauPlayerSummary {
   teamHistory: Array<{
     teamId: string;
     teamName: string;
+    /** "Men" | "Women" | "Mixed" — passed through from usau_teams.gender_division.
+     *  Required by UsauTeamLogo for accurate logo resolution (Men's vs Women's
+     *  teams can share the same slug, e.g. "phoenix"). Null when unknown. */
+    genderDivision: string | null;
     season: number;
     jerseyNumber: string | null;
     /** True if this team won the Club Nationals championship that season. */
@@ -1120,14 +1153,16 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
   // same (team, season) human. Collapse into one stint each.
   const stintMap = new Map<string, UsauPlayerSummary['teamHistory'][number]>();
   for (const r of rosterRes.data ?? []) {
-    const teamRel = (r as { usau_teams: { name: string } | null }).usau_teams;
+    const teamRel = (r as { usau_teams: { name: string; gender_division: string | null } | null }).usau_teams;
     const teamName = teamRel?.name ?? 'Unknown team';
+    const genderDivision = teamRel?.gender_division ?? null;
     const key = r.team_id + '|' + r.season;
     const existing = stintMap.get(key);
     if (!existing) {
       stintMap.set(key, {
         teamId: r.team_id,
         teamName,
+        genderDivision,
         season: r.season,
         jerseyNumber: r.jersey_number,
         isChampion: false,

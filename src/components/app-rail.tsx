@@ -48,6 +48,9 @@ import { TeamLogo } from '@/components/team-logo';
 const WUL_TEAMS_LIST: WulTeamMeta[] = allWulTeams();
 // Shape returned by listTopUsauTeams (lightweight mega-menu preview).
 type TopUsauTeam = { id: string; name: string; nationalsPlacement: number | null };
+// Top teams grouped by gender division for the USAU mega-menu (top 8 each).
+type UsauDivision = 'Men' | 'Women' | 'Mixed';
+type UsauTeamsByDivision = Record<UsauDivision, TopUsauTeam[]>;
 // Shape returned by listTopPulTeams.
 type TopPulTeam = { id: string; name: string; city: string; logoUrl: string | null };
 
@@ -217,11 +220,11 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
     initialPreviewLeague(pathname, urlLeague),
   );
 
-  // USAU top-16 teams — fetched lazily once when the dropdown first opens (or
-  // first time USAU is hovered). Cached in state for the session lifetime of
-  // this component instance (the rail is mounted once at the top of every page
-  // so this is effectively app-session caching).
-  const [usauTeams, setUsauTeams] = useState<TopUsauTeam[] | null>(null);
+  // USAU top-8 teams PER DIVISION (Men/Women/Mixed) — fetched lazily once when
+  // the dropdown first opens (or first time USAU is hovered). Cached in state
+  // for the session lifetime of this component instance (the rail is mounted
+  // once at the top of every page so this is effectively app-session caching).
+  const [usauTeams, setUsauTeams] = useState<UsauTeamsByDivision | null>(null);
   const [usauLoading, setUsauLoading] = useState(false);
   const [usauError, setUsauError] = useState(false);
   const usauFetchedRef = useRef(false); // guard against double-fetch
@@ -245,11 +248,15 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
     usauFetchedRef.current = true;
     setUsauLoading(true);
     try {
-      // Lightweight preview query (one round trip) — NOT the full ranking
-      // engine. Just the top-16 names + placement for the dropdown.
+      // Lightweight preview query — NOT the full ranking engine. Top 8 per
+      // division (Men/Women/Mixed) for the dropdown, fetched in parallel.
       const { listTopUsauTeams } = await import('@/lib/usau/data');
-      const teams = await listTopUsauTeams({ genderDivision: 'Men', limit: 16 });
-      if (usauMountedRef.current) setUsauTeams(teams);
+      const [men, women, mixed] = await Promise.all([
+        listTopUsauTeams({ genderDivision: 'Men', limit: 8 }),
+        listTopUsauTeams({ genderDivision: 'Women', limit: 8 }),
+        listTopUsauTeams({ genderDivision: 'Mixed', limit: 8 }),
+      ]);
+      if (usauMountedRef.current) setUsauTeams({ Men: men, Women: women, Mixed: mixed });
     } catch {
       if (usauMountedRef.current) setUsauError(true);
     } finally {
@@ -590,7 +597,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                 </div>
               )}
 
-              {/* ── USAU: top-16 teams (lazy fetch) ──────────────────── */}
+              {/* ── USAU: top 8 teams per division (lazy fetch) ──────── */}
               {previewLeague === 'usau' && (
                 <div>
                   <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">
@@ -619,27 +626,40 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                     </div>
                   )}
                   {!usauLoading && !usauError && usauTeams && (
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                      {usauTeams.map((team) => (
-                        <Link
-                          key={team.id}
-                          href={`/usau/teams/${team.id}`}
-                          role="menuitem"
-                          onClick={() => setOpen(false)}
-                          className={[
-                            'flex items-center gap-2 px-1 py-1 rounded',
-                            'text-[12px] font-medium font-tight text-ink',
-                            'transition-colors duration-150 no-underline',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                            'hover:bg-surface',
-                          ].join(' ')}
-                        >
-                          <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
-                            {team.nationalsPlacement ?? ''}
-                          </span>
-                          <span className="truncate">{team.name}</span>
-                        </Link>
-                      ))}
+                    <div className="flex flex-col gap-2.5">
+                      {(['Men', 'Women', 'Mixed'] as const).map((div) => {
+                        const teams = usauTeams[div];
+                        if (!teams || teams.length === 0) return null;
+                        return (
+                          <div key={div}>
+                            <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">
+                              {div}
+                            </p>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                              {teams.map((team) => (
+                                <Link
+                                  key={team.id}
+                                  href={`/usau/teams/${team.id}`}
+                                  role="menuitem"
+                                  onClick={() => setOpen(false)}
+                                  className={[
+                                    'flex items-center gap-2 px-1 py-1 rounded',
+                                    'text-[12px] font-medium font-tight text-ink',
+                                    'transition-colors duration-150 no-underline',
+                                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                                    'hover:bg-surface',
+                                  ].join(' ')}
+                                >
+                                  <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
+                                    {team.nationalsPlacement ?? ''}
+                                  </span>
+                                  <span className="truncate">{team.name}</span>
+                                </Link>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

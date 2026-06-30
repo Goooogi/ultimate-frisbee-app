@@ -20,6 +20,7 @@ import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision } from '@/lib/use-division';
 import { UsauBracketTree, isChampionshipBracket } from './usau-bracket-tree';
+import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -242,9 +243,10 @@ function PoolCard({ pool }: { pool: { name: string; teams: Team[] } }) {
               href={`/usau/teams/${t.teamId}`}
               className="flex items-center gap-3 px-3 py-2 hover:bg-surface-hi transition-colors no-underline"
             >
-              <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right">
+              <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
                 {t.seed ?? '—'}
               </span>
+              <UsauTeamLogo name={t.teamName} genderDivision={t.genderDivision} size={20} />
               <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink font-tight truncate">
                 {t.teamName}
               </span>

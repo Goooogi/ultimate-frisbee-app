@@ -100,6 +100,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
         name: t._name,
         hint: ['UFA', t.city].filter(Boolean).join(' · '),
         league: 'ufa' as const,
+        prominence: 3, // pro league — top-tier
       }));
   } catch {
     ufaTeamResults = [];
@@ -123,6 +124,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       name: t.name,
       hint: ['PUL', t.city].filter(Boolean).join(' · '),
       league: 'pul',
+      prominence: 3, // pro league — top-tier
     }));
 
   // PUL players — dedupe same humans against USAU rows, then cap.
@@ -157,6 +159,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       name: t.name,
       hint: ['WUL', t.city].filter(Boolean).join(' · '),
       league: 'wul',
+      prominence: 3, // pro league — top-tier
     }));
 
   // WUL players
@@ -191,18 +194,25 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ...wulPlayerResults,
   ];
 
-  // Rank by match quality only: exact (0) > starts-with (1) > contains (2),
-  // then alphabetical within tier.
+  // Rank by: (1) match quality — exact (0) > starts-with (1) > contains (2);
+  // then (2) prominence DESC — adult club + pro-league teams above college,
+  // above youth/HS, so "Colorado" floats real clubs over U-20/Academy noise;
+  // then (3) alphabetical. Missing prominence defaults to 2 (neutral — between
+  // youth=1 and prominent=3), which is where bare players/tournaments land.
   const tier = (name: string): number => {
     const n = name.toLowerCase();
     if (n === needle) return 0;
     if (n.startsWith(needle)) return 1;
     return 2;
   };
+  const prom = (r: SearchResult): number => r.prominence ?? 2;
   merged.sort((a, b) => {
     const ta = tier(a.name);
     const tb = tier(b.name);
     if (ta !== tb) return ta - tb;
+    const pa = prom(a);
+    const pb = prom(b);
+    if (pa !== pb) return pb - pa; // higher prominence first
     return a.name.localeCompare(b.name);
   });
 

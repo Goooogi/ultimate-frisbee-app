@@ -81,6 +81,10 @@ export interface UsauSeasonStint {
   /** "Men" | "Women" | "Mixed" | "Club" | "College" — used for the chip
    *  next to the team name. We pass through whatever the team row had. */
   division: string | null;
+  /** Raw gender division ("Men"|"Women"|"Mixed") from the team row — used to
+   *  resolve the team logo (UsauTeamLogo keys on it). Distinct from `division`,
+   *  which is a cosmetic chip label (currently a null placeholder). */
+  genderDivision: string | null;
   jerseyNumber: string | null;
   isChampion: boolean;
   events: UsauPlayerSummary['teamHistory'][number]['events'];
@@ -360,6 +364,7 @@ export async function getUnifiedPlayerProfile(
         teamId: stint.teamId,
         teamName: stint.teamName,
         division: deriveUsauChip(stint),
+        genderDivision: stint.genderDivision,
         jerseyNumber: stint.jerseyNumber,
         isChampion: stint.isChampion,
         events: stint.events,

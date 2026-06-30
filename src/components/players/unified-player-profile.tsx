@@ -25,6 +25,7 @@ import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import { PlayerContentGallery } from '@/components/players/player-content-gallery';
 import type { PlayerContentItem } from '@/lib/player-content/types';
+import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
 interface Props {
   profile: UnifiedPlayerProfile;
@@ -372,7 +373,7 @@ function UsauStintRow({ stint }: { stint: UsauSeasonStint }) {
           href={`/usau/teams/${stint.teamId}`}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
-          <UsauLogoMark name={stint.teamName} />
+          <UsauTeamLogo name={stint.teamName} genderDivision={stint.genderDivision} size={24} />
           <span className="flex flex-col min-w-0">
             <span className="font-display italic font-bold text-[16px] leading-tight tracking-[-0.02em] text-ink truncate pr-1">
               {stint.teamName}
@@ -846,24 +847,6 @@ function CareerStat({ label, value }: { label: string; value: string | number })
         {label}
       </div>
     </div>
-  );
-}
-
-function UsauLogoMark({ name }: { name: string }) {
-  const initials = name
-    .split(/\s+/)
-    .map((w) => w[0])
-    .filter(Boolean)
-    .slice(0, 2)
-    .join('')
-    .toUpperCase();
-  return (
-    <span
-      aria-hidden="true"
-      className="inline-flex items-center justify-center w-[26px] h-[26px] flex-shrink-0 bg-surface border border-border text-[9px] font-bold text-muted font-tight tracking-tight rounded-sm"
-    >
-      {initials || '?'}
-    </span>
   );
 }
 
