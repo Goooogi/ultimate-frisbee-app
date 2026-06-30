@@ -58,7 +58,7 @@ export function GameGridSection({
   );
 }
 
-function GameTile({ game }: { game: UfaGame }) {
+export function GameTile({ game }: { game: UfaGame }) {
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const state = gameUiState(game);

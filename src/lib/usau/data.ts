@@ -525,6 +525,119 @@ export function championFor(
   return champions.get(season)?.get(division) ?? null;
 }
 
+// ─── Recent USAU Majors with Champions ─────────────────────────────────────
+
+export interface UsauMajorWithChampions {
+  slug: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  flight: Flight | null;
+  champions: Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>;
+}
+
+/**
+ * Returns up to `limit` recently-completed USAU TCT/major events (those where
+ * `flightForName(name) !== null`), newest first, each enriched with the
+ * champion(s) derived from round='final' games.
+ *
+ * Events with no scraped finals are omitted (we can't show a champion for them).
+ */
+export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajorWithChampions[]> {
+  const db = await supabase();
+  const today = new Date().toISOString().slice(0, 10);
+
+  // 1. Pull the most-recent ~20 completed CLUB events.
+  const { data: events } = await db
+    .from('usau_events')
+    .select('id, usau_slug, name, start_date, end_date')
+    .eq('competition_level', 'CLUB')
+    .lt('end_date', today)
+    .order('end_date', { ascending: false, nullsFirst: false })
+    .limit(20);
+
+  // 2. Filter to named flights (TCT majors only).
+  const majorEvents = ((events ?? []) as Array<{
+    id: string;
+    usau_slug: string;
+    name: string;
+    start_date: string | null;
+    end_date: string | null;
+  }>).filter((e) => flightForName(e.name) !== null);
+
+  if (majorEvents.length === 0) return [];
+
+  const eventIds = majorEvents.map((e) => e.id);
+
+  // 3. Fetch all round='final' games for these events.
+  const { data: finals } = await db
+    .from('usau_games')
+    .select(
+      'event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+        'team_a:usau_teams!team_a_id(name, gender_division), ' +
+        'team_b:usau_teams!team_b_id(name, gender_division)',
+    )
+    .in('event_id', eventIds)
+    .eq('round', 'final');
+
+  type TeamRef = { name: string; gender_division: string | null } | null;
+  type Row = {
+    event_id: string;
+    team_a_id: string | null;
+    team_b_id: string | null;
+    score_a: number | null;
+    score_b: number | null;
+    scheduled_at: string | null;
+    bracket_name: string | null;
+    team_a: TeamRef;
+    team_b: TeamRef;
+  };
+
+  // 4. Group champions by event_id.
+  const championsByEvent = new Map<string, Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>>();
+  for (const g of (finals ?? []) as unknown as Row[]) {
+    if (g.score_a == null || g.score_b == null) continue;
+    if (g.team_a_id == null || g.team_b_id == null) continue;
+
+    const aWon = g.score_a > g.score_b;
+    const winnerId = aWon ? g.team_a_id : g.team_b_id;
+    const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
+
+    let division = (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
+    if (!division) {
+      const b = (g.bracket_name ?? '').toLowerCase();
+      if (b.includes('mixed')) division = 'Mixed';
+      else if (b.includes('women')) division = 'Women';
+      else if (b.includes('men')) division = 'Men';
+    }
+    if (!division) continue;
+
+    if (!championsByEvent.has(g.event_id)) championsByEvent.set(g.event_id, []);
+    // Avoid duplicate divisions.
+    const existing = championsByEvent.get(g.event_id)!;
+    if (existing.some((c) => c.division === division)) continue;
+    existing.push({ division: division as 'Men' | 'Women' | 'Mixed', teamName: winnerName, teamId: winnerId });
+  }
+
+  // 5. Build results — only events with at least one champion.
+  const results: UsauMajorWithChampions[] = [];
+  for (const e of majorEvents) {
+    const champions = championsByEvent.get(e.id);
+    if (!champions || champions.length === 0) continue;
+    results.push({
+      slug: e.usau_slug,
+      name: e.name,
+      startDate: e.start_date,
+      endDate: e.end_date,
+      flight: flightForName(e.name),
+      champions,
+    });
+    if (results.length >= limit) break;
+  }
+
+  return results;
+}
+
 /** Distinct seasons we have any event for, newest first. */
 /** Lightweight top-N USAU club teams for the nav mega-menu PREVIEW (id + name
  *  + Nationals placement only), via the top_usau_club_teams RPC — ONE round

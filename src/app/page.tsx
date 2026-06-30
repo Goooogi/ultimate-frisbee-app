@@ -16,7 +16,7 @@ import {
 import { gameUiState } from '@/lib/ufa/format';
 import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
-import { getCurrentEvent, getEvent } from '@/lib/usau/data';
+import { getCurrentEvent, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
 import { listPulGames, PUL_CURRENT_SEASON } from '@/lib/pul/data';
 import { listWulGames, WUL_CURRENT_SEASON } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
@@ -26,7 +26,14 @@ import { HeroUsauSlide } from '@/components/home/hero-usau-slide';
 import { HeroPulSlide } from '@/components/home/hero-pul-slide';
 import { HeroWulSlide } from '@/components/home/hero-wul-slide';
 import { LeaguesPanel } from '@/components/home/leagues-panel';
-import { GameGridSection } from '@/components/home/game-grid-section';
+import {
+  MultiLeagueGridSection,
+  UfaTileGrid,
+  UsauUpNextCard,
+  UsauMajorGrid,
+  PulRecentCard,
+  WulRecentCard,
+} from '@/components/home/multi-league-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
 import { SiteFooter } from '@/components/site-footer';
 
@@ -44,7 +51,7 @@ export default async function HomePage() {
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, pulRes, wulRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, pulRes, wulRes, usauMajorsRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
@@ -61,6 +68,8 @@ export default async function HomePage() {
       listPulGames({ season: PUL_CURRENT_SEASON }),
       // WUL: same rule.
       listWulGames({ season: WUL_CURRENT_SEASON }),
+      // USAU: recent completed majors (TCT events) with champions, for "Recent results".
+      recentUsauMajorsWithChampions(3),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -126,8 +135,23 @@ export default async function HomePage() {
     .sort((a, b) => tsOf(b) - tsOf(a))
     .slice(0, 4);
 
-  const countLabel = (n: number, noun: string) =>
-    `${n} ${n === 1 ? noun : `${noun}s`}`;
+  // Recent USAU majors (TCT events with champions) — for "Recent results".
+  const usauMajors = usauMajorsRes.status === 'fulfilled' ? usauMajorsRes.value : [];
+
+  // For "Recent results": most-recent final game regardless of age (the
+  // pickLeagueGame 7-day window is for the hero carousel only — for the
+  // results grid we want to show the championship game even if the season
+  // ended weeks ago).
+  const pulChampGame =
+    pulGames
+      .filter((g) => g.status === 'final')
+      .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))
+      [0] ?? null;
+  const wulChampGame =
+    wulGames
+      .filter((g) => g.status === 'final')
+      .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))
+      [0] ?? null;
 
   // ── Build carousel slides (order: UFA → USAU → PUL → WUL) ──────────────
   // Each builder returns null when the league has no current content; null
@@ -161,16 +185,43 @@ export default async function HomePage() {
         seasonLabel={`UFA · ${year}`}
       />
 
-      <GameGridSection
+      <MultiLeagueGridSection
         title="Up next"
-        subtitle={upNext.length > 0 ? countLabel(upNext.length, 'game') : undefined}
-        games={upNext}
+        rightLink={{ label: 'Full schedule', href: '/schedule' }}
+        rows={[
+          // UFA — upcoming / live games.
+          ...(upNext.length > 0
+            ? [{ leagueKey: 'UFA', content: <UfaTileGrid games={upNext} /> }]
+            : []),
+          // USAU — current event card (with pool game mini-cards when scored).
+          ...(usauEvent
+            ? [{ leagueKey: 'USAU', content: <UsauUpNextCard event={usauEvent} /> }]
+            : []),
+        ]}
       />
 
-      <GameGridSection
+      <MultiLeagueGridSection
         title="Recent results"
-        subtitle={recent.length > 0 ? countLabel(recent.length, 'final') : undefined}
-        games={recent}
+        rows={[
+          // UFA — most-recent finals.
+          ...(recent.length > 0
+            ? [{ leagueKey: 'UFA', content: <UfaTileGrid games={recent} /> }]
+            : []),
+          // USAU — completed TCT majors with champions.
+          ...(usauMajors.length > 0
+            ? [{ leagueKey: 'USAU', content: <UsauMajorGrid majors={usauMajors} /> }]
+            : []),
+          // PUL — most-recent final game (championship emphasis when weekLabel='finals').
+          ...(pulChampGame
+            ? [{ leagueKey: 'PUL', content: <PulRecentCard game={pulChampGame} /> }]
+            : []),
+          // WUL — most-recent final game (champion flag when weekLabel='post' and it's
+          // the final — we pass champion=true for any 'post' game since deriving the
+          // exact postseason round here would require re-running deriveWulPostseasonRounds).
+          ...(wulChampGame
+            ? [{ leagueKey: 'WUL', content: <WulRecentCard game={wulChampGame} champion={wulChampGame.weekLabel === 'post'} /> }]
+            : []),
+        ]}
       />
 
       <SiteFooter />

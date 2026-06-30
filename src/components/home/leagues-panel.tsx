@@ -1,6 +1,7 @@
 // Leagues panel — replaces the Playbook + Fantasy tile stack on the home bento.
-// Shows a vertical list of leagues: UFA + USAU are real links; WUL, PUL,
-// International, and Worlds are "coming soon" placeholders.
+// Shows a vertical list of the four active leagues (UFA, USAU, WUL, PUL), all
+// real links. (The row model still supports href:null "coming soon" rows for
+// future leagues, but none are listed today.)
 // Server component — no interactivity needed.
 
 import Link from 'next/link';
@@ -50,20 +51,6 @@ const LEAGUE_ROWS: LeagueRow[] = [
     subtitle: 'Premier Ultimate League',
     href: '/scores?league=pul',
     img: '/PUL.webp',
-  },
-  {
-    id: 'intl',
-    label: 'International',
-    abbr: 'INTL',
-    subtitle: 'WFDF events',
-    href: null,
-  },
-  {
-    id: 'worlds',
-    label: 'Worlds',
-    abbr: 'WRLD',
-    subtitle: 'WFDF World Championships',
-    href: null,
   },
 ];
 
