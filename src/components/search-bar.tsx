@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { type SearchResult } from '@/lib/usau/data';
+import { type SearchResult, resultHref } from '@/lib/usau/data';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 import { SearchGlyph } from '@/components/search-modal';
@@ -69,9 +69,7 @@ export function SearchBar() {
   }, [open, handleClickOutside]);
 
   function navigate(r: SearchResult) {
-    if (r.kind === 'team') router.push(`/usau/teams/${r.id}`);
-    else if (r.kind === 'tournament') router.push(`/usau/events/${r.id}`);
-    else router.push(`/players/${r.id}`);
+    router.push(resultHref(r));
     setQuery('');
     setOpen(false);
     setResults([]);
@@ -185,7 +183,10 @@ export function SearchBar() {
           className={[
             'absolute left-0 top-full mt-2 z-[70]',
             'w-full min-w-[360px]',
-            'bg-bg border border-border rounded-md shadow-lg overflow-hidden',
+            // Cap height so a long result set scrolls instead of running off the
+            // bottom of the viewport (matches search-modal / sidebar-search).
+            'max-h-[min(60vh,520px)] overflow-y-auto overscroll-contain',
+            'bg-bg border border-border rounded-md shadow-lg',
           ].join(' ')}
         >
           {loading && results.length === 0 ? (

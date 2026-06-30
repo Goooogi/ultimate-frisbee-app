@@ -8,7 +8,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
-import { type SearchResult } from '@/lib/usau/data';
+import { type SearchResult, resultHref } from '@/lib/usau/data';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 
@@ -82,9 +82,7 @@ export function SearchModal({ open, onClose }: Props) {
 
   function goTo(r: SearchResult) {
     onClose();
-    if (r.kind === 'team') router.push(`/usau/teams/${r.id}`);
-    else if (r.kind === 'tournament') router.push(`/usau/events/${r.id}`);
-    else router.push(`/players/${r.id}`);
+    router.push(resultHref(r));
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {

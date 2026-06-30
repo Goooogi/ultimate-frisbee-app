@@ -794,6 +794,35 @@ export interface SearchResult {
   hint: string | null;
   /** For tournaments only: curated Triple Crown Tour flight (or null). */
   flight?: Flight | null;
+  /** Which league this result belongs to — drives routing (resultHref).
+   *  Tournaments are USAU-only. Defaults to 'usau' for legacy USAU rows. */
+  league?: 'usau' | 'ufa' | 'pul' | 'wul';
+}
+
+/**
+ * Build the destination href for a search result. League-aware so a single
+ * helper can be shared by every search component (search-bar, search-modal,
+ * sidebar-search) instead of duplicating the routing switch.
+ *
+ *   - tournament → /usau/events/{slug}  (tournaments are USAU-only)
+ *   - player     → /players/{id}        (all leagues use the unified profile)
+ *   - team       → by league: usau→/usau/teams, ufa→/teams, pul→/pul/teams, wul→/wul/teams
+ */
+export function resultHref(r: SearchResult): string {
+  if (r.kind === 'tournament') return `/usau/events/${r.id}`;
+  if (r.kind === 'player') return `/players/${r.id}`;
+  // team
+  switch (r.league) {
+    case 'ufa':
+      return `/teams/${r.id}`;
+    case 'pul':
+      return `/pul/teams/${r.id}`;
+    case 'wul':
+      return `/wul/teams/${r.id}`;
+    case 'usau':
+    default:
+      return `/usau/teams/${r.id}`;
+  }
 }
 
 /**
@@ -876,6 +905,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       id: t.id,
       name: t.name,
       hint: hintParts.join(' · ') || null,
+      league: 'usau',
     });
   }
 
@@ -891,6 +921,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       id: p.id,
       name: p.display_name,
       hint: team,
+      league: 'usau',
     });
   }
 
@@ -908,6 +939,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       name: ev.name,
       hint: hintParts.join(' · ') || null,
       flight: flightForName(ev.name),
+      league: 'usau',
     });
   }
 

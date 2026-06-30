@@ -15,6 +15,9 @@ import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { search as searchUsau, type SearchResult } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
+import { activeTeams } from '@/lib/ufa/teams';
+import { listPulTeams, listPulPlayers } from '@/lib/pul/data';
+import { listWulTeams, listWulPlayers } from '@/lib/wul/data';
 
 /**
  * Search the year's full UFA leaderboard for players whose name includes
@@ -56,13 +59,21 @@ export async function searchUfaPlayers(
 export async function searchAll(query: string, limit = 8): Promise<SearchResult[]> {
   const q = query.trim();
   if (q.length < 2) return [];
+  const needle = q.toLowerCase();
+  // Per-league contribution cap so a big roster table can't flood / slow the
+  // dropdown. We over-fetch a little, then the final sort + slice trims.
+  const cap = limit * 2;
 
   const usau = await searchUsau(q, limit);
+
+  // Names already covered by a USAU player row — used to dedupe same-human
+  // matches from the other leagues' player lists (the unified /players/[id]
+  // profile merges every league, so one row is enough).
+  const usauPlayerNames = usau.filter((r) => r.kind === 'player').map((r) => r.name);
 
   let ufaResults: SearchResult[] = [];
   try {
     const ufa = await searchUfaPlayers(q, currentSeasonYear(), limit * 3);
-    const usauPlayerNames = usau.filter((r) => r.kind === 'player').map((r) => r.name);
     const seen = new Set<string>();
     for (const p of ufa) {
       const key = p.name.toLowerCase();
@@ -70,19 +81,130 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       seen.add(key);
       // Same human as a USAU result already shown? Skip (profile merges them).
       if (usauPlayerNames.some((n) => namesMatch(n, p.name))) continue;
-      ufaResults.push({ kind: 'player', id: p.playerID, name: p.name, hint: 'UFA' });
+      ufaResults.push({ kind: 'player', id: p.playerID, name: p.name, hint: 'UFA', league: 'ufa' });
     }
   } catch {
     ufaResults = [];
   }
 
-  const merged = [...usau, ...ufaResults];
-  const lower = q.toLowerCase();
+  // ── UFA teams (synchronous, in-memory) ────────────────────────────────
+  let ufaTeamResults: SearchResult[] = [];
+  try {
+    ufaTeamResults = activeTeams()
+      .map((t) => ({ ...t, _name: t.name ?? t.abbr }))
+      .filter((t) => t._name.toLowerCase().includes(needle))
+      .slice(0, cap)
+      .map((t) => ({
+        kind: 'team' as const,
+        id: t.id,
+        name: t._name,
+        hint: ['UFA', t.city].filter(Boolean).join(' · '),
+        league: 'ufa' as const,
+      }));
+  } catch {
+    ufaTeamResults = [];
+  }
+
+  // ── PUL + WUL (async — fan out in parallel) ───────────────────────────
+  const [pulTeams, pulPlayers, wulTeams, wulPlayers] = await Promise.all([
+    listPulTeams().catch(() => []),
+    listPulPlayers().catch(() => []),
+    listWulTeams().catch(() => []),
+    listWulPlayers().catch(() => []),
+  ]);
+
+  // PUL teams
+  const pulTeamResults: SearchResult[] = pulTeams
+    .filter((t) => t.name.toLowerCase().includes(needle))
+    .slice(0, cap)
+    .map((t) => ({
+      kind: 'team',
+      id: t.id,
+      name: t.name,
+      hint: ['PUL', t.city].filter(Boolean).join(' · '),
+      league: 'pul',
+    }));
+
+  // PUL players — dedupe same humans against USAU rows, then cap.
+  const pulTeamName = new Map(pulTeams.map((t) => [t.id, t.name]));
+  const pulPlayerResults: SearchResult[] = [];
+  {
+    const seen = new Set<string>();
+    for (const p of pulPlayers) {
+      if (pulPlayerResults.length >= cap) break;
+      if (!p.playerName.toLowerCase().includes(needle)) continue;
+      const key = p.playerName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+      pulPlayerResults.push({
+        kind: 'player',
+        id: p.id,
+        name: p.playerName,
+        hint: ['PUL', pulTeamName.get(p.teamId)].filter(Boolean).join(' · '),
+        league: 'pul',
+      });
+    }
+  }
+
+  // WUL teams
+  const wulTeamResults: SearchResult[] = wulTeams
+    .filter((t) => t.name.toLowerCase().includes(needle))
+    .slice(0, cap)
+    .map((t) => ({
+      kind: 'team',
+      id: t.id,
+      name: t.name,
+      hint: ['WUL', t.city].filter(Boolean).join(' · '),
+      league: 'wul',
+    }));
+
+  // WUL players
+  const wulTeamName = new Map(wulTeams.map((t) => [t.id, t.name]));
+  const wulPlayerResults: SearchResult[] = [];
+  {
+    const seen = new Set<string>();
+    for (const p of wulPlayers) {
+      if (wulPlayerResults.length >= cap) break;
+      if (!p.playerName.toLowerCase().includes(needle)) continue;
+      const key = p.playerName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+      wulPlayerResults.push({
+        kind: 'player',
+        id: p.id,
+        name: p.playerName,
+        hint: ['WUL', wulTeamName.get(p.teamId)].filter(Boolean).join(' · '),
+        league: 'wul',
+      });
+    }
+  }
+
+  const merged = [
+    ...usau,
+    ...ufaResults,
+    ...ufaTeamResults,
+    ...pulTeamResults,
+    ...pulPlayerResults,
+    ...wulTeamResults,
+    ...wulPlayerResults,
+  ];
+
+  // Rank by match quality only: exact (0) > starts-with (1) > contains (2),
+  // then alphabetical within tier.
+  const tier = (name: string): number => {
+    const n = name.toLowerCase();
+    if (n === needle) return 0;
+    if (n.startsWith(needle)) return 1;
+    return 2;
+  };
   merged.sort((a, b) => {
-    const ap = a.name.toLowerCase().startsWith(lower) ? 0 : 1;
-    const bp = b.name.toLowerCase().startsWith(lower) ? 0 : 1;
-    if (ap !== bp) return ap - bp;
+    const ta = tier(a.name);
+    const tb = tier(b.name);
+    if (ta !== tb) return ta - tb;
     return a.name.localeCompare(b.name);
   });
+
   return merged.slice(0, limit * 2);
 }

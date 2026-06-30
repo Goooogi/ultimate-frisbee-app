@@ -12,7 +12,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { search, type SearchResult } from '@/lib/usau/data';
+import { type SearchResult, resultHref } from '@/lib/usau/data';
+import { searchAll } from '@/lib/ufa/search-actions';
 
 export function SidebarSearch() {
   const router = useRouter();
@@ -36,7 +37,7 @@ export function SidebarSearch() {
     let cancelled = false;
     const t = setTimeout(async () => {
       try {
-        const r = await search(q, 6);
+        const r = await searchAll(q, 6);
         if (!cancelled) {
           setResults(r);
           setHighlight(0);
@@ -75,11 +76,7 @@ export function SidebarSearch() {
     setOpen(false);
     setQuery('');
     setResults([]);
-    // Teams from the search are USAU teams (we don't index UFA teams yet)
-    // — send them to the dedicated USAU team page. Players go to the
-    // unified profile route which branches on the id shape.
-    if (r.kind === 'team') router.push(`/usau/teams/${r.id}`);
-    else router.push(`/players/${r.id}`);
+    router.push(resultHref(r));
   }
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
