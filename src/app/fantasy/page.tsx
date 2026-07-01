@@ -28,9 +28,6 @@ export default async function FantasyLandingPage() {
               <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold tracking-[0.14em] uppercase bg-accent text-[rgb(var(--accent-ink))]">
                 Beta
               </span>
-              <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                Soccer-Style Free-for-All
-              </span>
             </div>
             <h2
               id="fantasy-rules-heading"

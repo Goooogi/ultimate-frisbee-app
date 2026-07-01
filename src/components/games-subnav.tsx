@@ -27,6 +27,8 @@ interface NavItem {
   href: string;
   match: string;
   aliases?: string[];
+  /** Rendered greyed-out, non-navigable — a "coming soon" placeholder tab. */
+  soon?: boolean;
 }
 
 // "Scores" replaces "The Games" for the horizontal tab treatment — shorter fits
@@ -37,6 +39,28 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Teams',    href: '/teams',    match: '/teams',    aliases: ['/usau/teams'] },
   { label: 'Players',  href: '/players',  match: '/players' },
 ];
+
+// Fantasy is its own sub-app: it gets a Fantasy-specific secondary nav instead
+// of the league (Scores/Schedule/Teams/Players) tabs, and no league switcher.
+const FANTASY_NAV_ITEMS: NavItem[] = [
+  { label: 'Leaderboard', href: '/fantasy',      match: '/fantasy' },
+  { label: 'My Team',     href: '/fantasy/team', match: '/fantasy/team' },
+  { label: 'My League',   href: '#',             match: '__none__', soon: true },
+];
+
+// The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under
+// it — so plain prefix matching would light up BOTH tabs on /fantasy/team.
+// Use exact/segment-aware matching for the fantasy tabs.
+function isFantasyActive(pathname: string, item: NavItem): boolean {
+  if (item.match === '/fantasy') {
+    // Leaderboard active only on the exact landing, not the nested team pages.
+    return pathname === '/fantasy';
+  }
+  if (item.match === '/fantasy/team') {
+    return pathname === '/fantasy/team' || pathname.startsWith('/fantasy/team/');
+  }
+  return false;
+}
 
 function isActive(pathname: string, item: NavItem): boolean {
   if (item.match === '/') return pathname === '/';
@@ -56,13 +80,18 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
 
+  // Fantasy sub-app: its own secondary nav, no league switcher.
+  const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+
   // Preserve active league + division across sub-page navigations — same
-  // logic as SidebarNav.
+  // logic as SidebarNav. (Not used on Fantasy pages.)
   const activeLeague = searchParams.get('league')
     ? parseLeagueParam(searchParams.get('league'))
     : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
   const activeDivision = parseDivisionParam(searchParams.get('div'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision);
+
+  const items = isFantasy ? FANTASY_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <div
@@ -72,16 +101,38 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
         // flex-shrink-0 keeps the bar from being squeezed by the main scroll column
         'flex-shrink-0',
       ].join(' ')}
-      aria-label="Games section navigation"
+      aria-label={isFantasy ? 'Fantasy section navigation' : 'Games section navigation'}
     >
       {/* Left: sub-page tabs */}
-      <nav className="flex items-center gap-1" aria-label="Games pages">
-        {NAV_ITEMS.map((item) => {
-          const active = isActive(pathname, item);
+      <nav className="flex items-center gap-1" aria-label={isFantasy ? 'Fantasy pages' : 'Games pages'}>
+        {items.map((item) => {
+          // "Coming soon" placeholder — greyed out, non-navigable.
+          if (item.soon) {
+            return (
+              <span
+                key={item.label}
+                aria-disabled="true"
+                className={[
+                  'relative inline-flex items-center gap-1.5 h-[44px] px-3',
+                  'text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+                  'text-faint border-b-2 border-transparent cursor-not-allowed select-none',
+                ].join(' ')}
+              >
+                {item.label}
+                <span className="text-[8px] tracking-[0.12em] text-faint/80 normal-case font-bold">
+                  Soon
+                </span>
+              </span>
+            );
+          }
+
+          const active = isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item);
+          // Fantasy links carry no league query string.
+          const href = isFantasy ? item.href : `${item.href}${leagueQs}`;
           return (
             <Link
               key={item.href}
-              href={`${item.href}${leagueQs}`}
+              href={href}
               aria-current={active ? 'page' : undefined}
               className={[
                 'relative inline-flex items-center h-[44px] px-3',
@@ -102,8 +153,8 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
         })}
       </nav>
 
-      {/* Right: league switcher slot (LeagueTabs, topNavSlot override, or empty) */}
-      {leagueSlot && (
+      {/* Right: league switcher slot — hidden on Fantasy (not league-scoped). */}
+      {!isFantasy && leagueSlot && (
         <div className="flex items-center">
           {leagueSlot}
         </div>

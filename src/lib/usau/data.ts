@@ -14,6 +14,7 @@ import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { flightForName, type Flight } from '@/lib/usau/flights';
+import { statesForEventName } from '@/lib/usau/regions';
 
 type DB = SupabaseClient<Database>;
 
@@ -223,10 +224,20 @@ const FLAGSHIP_LEVELS: CompetitionLevel[] = [
   'GRAND_MASTERS',
 ];
 
-// Flight importance for headline selection — higher wins. When several events
-// share a weekend (e.g. six club tournaments all on Jun 27–28), the marquee
-// flight (Pro Elite Challenge) should headline over an unranked local
-// tournament (Antlerlock). Unclassified events rank lowest.
+// Headline importance — higher wins when several events share a weekend. This
+// is a SUPERSET of the TCT flight tiers, because the true pinnacle events
+// (Nationals, World Championships) sit ABOVE the regular-season flights but
+// aren't "flights" in USAU's TCT taxonomy at all. Ordering (high → low):
+//
+//   PINNACLE (rank 10) — season/world championships, the top of the sport:
+//     • Club Nationals / Club Championships
+//     • World Club Championships (WUCC) and World Masters Club Champs (WMUCC)
+//     • College Nationals (D-I/D-III Championships)
+//   These outrank a same-weekend Pro Elite Challenge (Hunter: WMUCC is above
+//   everything but Club Nationals / Club Worlds).
+//
+//   Then the TCT flights: triple-crown 5 > pro 4 > elite 3 > select 2 > classic 1.
+//   Unclassified local tournaments → 0 (lose every tie).
 const FLIGHT_RANK: Record<Flight, number> = {
   'triple-crown': 5,
   pro: 4,
@@ -235,8 +246,39 @@ const FLIGHT_RANK: Record<Flight, number> = {
   classic: 1,
 };
 
-/** Higher = more prestigious. Unclassified (null) → 0, so it loses every tie. */
+const PINNACLE_RANK = 10;
+
+/** True for the sport's pinnacle championships — season Nationals + Worlds.
+ *  Name-based (like flightForName) so it survives year-to-year slug drift.
+ *  WMUCC/WUCC are World events USAU lists but does not classify as a flight. */
+function isPinnacleEventName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const n = name
+    .toLowerCase()
+    .replace(/[.,()\-/&]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // World championships (club, masters, junior) — WUCC / WMUCC / WJUC and the
+  // spelled-out "world ... club championship" forms.
+  if (/\bw[mj]?ucc\b/.test(n)) return true;
+  if (n.includes('world') && n.includes('club') && n.includes('championship')) return true;
+  if (n.includes('world masters') || n.includes('world ultimate club')) return true;
+  // USA Ultimate season Nationals — Club + College. Guard out warmups/HS/state.
+  const isNationals =
+    n.includes('club nationals') ||
+    n.includes('college championship') ||
+    (n.includes('club championship') && !n.includes('open')) ||
+    (n.includes('usa ultimate') && n.includes('nationals'));
+  const disqualified =
+    n.includes('at nationals') || n.includes('tune up') ||
+    n.includes('high school') || n.includes('state championship');
+  return isNationals && !disqualified;
+}
+
+/** Headline priority — higher = more prominent. Pinnacle events top the scale,
+ *  then TCT flights, then unclassified (0). */
 function flightRankForName(name: string | null | undefined): number {
+  if (isPinnacleEventName(name)) return PINNACLE_RANK;
   const f = flightForName(name);
   return f ? FLIGHT_RANK[f] : 0;
 }
@@ -1186,6 +1228,11 @@ export interface UsauPlayerSummary {
   }>;
   /** Years this player won the USAU Club National Championship. */
   championYears: number[];
+  /** US state postal codes this cluster's SERIES play maps to, derived from the
+   *  section/region words in its Sectional/Regional event names (e.g. "Rocky
+   *  Mountain" → CO). Used for cross-league pro-career attribution when a name
+   *  splits into multiple people. Empty when no series region is recognized. */
+  homeStates: string[];
 }
 
 /**
@@ -1222,7 +1269,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     .map((p) => p.id);
 
   if (candidateIds.length === 0) {
-    return { id: anchor.id, displayName: anchor.display_name, teamHistory: [], championYears: [] };
+    return { id: anchor.id, displayName: anchor.display_name, teamHistory: [], championYears: [], homeStates: [] };
   }
 
   // Pull rosters for ALL candidates so we can compute the cluster.
@@ -1497,11 +1544,21 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     return stint;
   });
 
+  // Home states: union of the state-sets implied by this cluster's SERIES
+  // event names (Sectionals/Regionals). Drives cross-league pro attribution.
+  const homeStatesSet = new Set<string>();
+  for (const stint of teamHistory) {
+    for (const ev of stint.events) {
+      for (const st of statesForEventName(ev.name)) homeStatesSet.add(st);
+    }
+  }
+
   return {
     id: anchor.id,
     displayName: anchor.display_name,
     teamHistory,
     championYears,
+    homeStates: [...homeStatesSet],
   };
 }
 

@@ -24,6 +24,7 @@ import {
   getUfaChampionsByYear,
 } from '@/lib/ufa/client';
 import { teamMetaByAbbr, type TeamMeta } from '@/lib/ufa/teams';
+import { ufaTeamState } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow, UfaPlayerSeasonRow } from '@/lib/ufa/types';
 import {
   findUsauPlayerByName,
@@ -346,11 +347,38 @@ export async function getUnifiedPlayerProfile(
       .catch(() => new Map<string, WulTeam>()),
   ] as const);
 
+  // ── Location-based UFA attribution ──────────────────────────────────────
+  // When a name splits into multiple USAU people (e.g. two "Thomas Brewster"s
+  // distinguished by playing different teams' series), the name-matched UFA
+  // career must attach to the RIGHT person — the one whose USAU SERIES play is
+  // in the same geography as the UFA team (e.g. UFA Colorado Apex → the
+  // Brewster who played club "Johnny Bravo" in the Rocky Mountain section, not
+  // the one on Mixed "Thunderpants" in East Plains).
+  //
+  // Signal: sideUsau.homeStates (states from the cluster's series event names)
+  // vs the UFA team's state (ufaTeamState). Attach only when they intersect.
+  // Conservative fallback per Hunter: if the USAU cluster has NO usable
+  // home-state signal, don't suppress — keep the UFA career (default to same
+  // person). We only DROP the UFA career when the cluster HAS location data and
+  // it contradicts the UFA team's state.
+  let attachUfa = true;
+  if (sideUfa && sideUsau && (sideUsau.homeStates?.length ?? 0) > 0) {
+    const usauStates = new Set(sideUsau.homeStates);
+    const ufaStates = sideUfa.stints
+      .map(({ stint }) => ufaTeamState(stint.teamId))
+      .filter((s): s is string => s != null);
+    // Non-US UFA teams (e.g. Montreal/Toronto) have no US state → can't
+    // contradict; keep them attached rather than drop on a null.
+    if (ufaStates.length > 0) {
+      attachUfa = ufaStates.some((s) => usauStates.has(s));
+    }
+  }
+
   // ── Merge into a Map<year, stints[]> ───────────────────────────────────
 
   const yearMap = new Map<number, SeasonStint[]>();
 
-  if (sideUfa) {
+  if (sideUfa && attachUfa) {
     for (const { year, stint } of sideUfa.stints) {
       const list = yearMap.get(year) ?? [];
       list.push(stint);

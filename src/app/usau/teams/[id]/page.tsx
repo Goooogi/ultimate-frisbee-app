@@ -11,6 +11,14 @@ import { PageShell } from '@/components/page-shell';
 import { getTeam } from '@/lib/usau/data';
 import { UsauTeamHistory } from '@/components/usau/usau-team-history';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import {
+  levelToParam,
+  DEFAULT_DIVISION,
+  DEFAULT_LEVEL,
+  type UsauDivision,
+  type UsauLevel,
+  USAU_LEVELS,
+} from '@/lib/league';
 
 export const revalidate = 60;
 
@@ -35,13 +43,18 @@ export default async function UsauTeamPage({ params }: Props) {
   const totalEvents = team.seasons.reduce((s, y) => s + y.events.length, 0);
   const yearsCount = team.seasons.length;
 
+  // Back link → the Teams list filtered to THIS team's division + level, so
+  // "‹ Teams" returns you to (e.g.) College D-I · Men rather than the default
+  // Club · Men. Params match the teams page: ?league=usau&div=…&level=….
+  const teamsBackHref = buildTeamsBackHref(team.genderDivision, team.competitionLevel);
+
   return (
     <PageShell
       title={team.name}
       eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}
       breadcrumbs={[
         { label: 'Home', href: '/' },
-        { label: 'Teams', href: '/teams?league=usau' },
+        { label: 'Teams', href: teamsBackHref },
         { label: team.name },
       ]}
     >
@@ -59,6 +72,33 @@ export default async function UsauTeamPage({ params }: Props) {
       <UsauTeamHistory seasons={team.seasons} />
     </PageShell>
   );
+}
+
+/**
+ * Build the "‹ Teams" href pointing back to the USAU teams list filtered to a
+ * team's own division + competition level. Params mirror the teams page
+ * (?league=usau&div=men&level=college-d1). Defaults (Men / Club) are omitted so
+ * the URL stays clean, matching buildLeagueQs's convention.
+ */
+function buildTeamsBackHref(
+  genderDivision: string | null,
+  competitionLevel: string | null,
+): string {
+  const params = new URLSearchParams({ league: 'usau' });
+
+  // Division: only add when it's a valid non-default value.
+  const div = (genderDivision ?? '') as UsauDivision;
+  if ((['Men', 'Women', 'Mixed'] as string[]).includes(div) && div !== DEFAULT_DIVISION) {
+    params.set('div', div.toLowerCase());
+  }
+
+  // Level: only add when it's a recognized non-default level.
+  const level = (competitionLevel ?? '') as UsauLevel;
+  if (USAU_LEVELS.includes(level) && level !== DEFAULT_LEVEL) {
+    params.set('level', levelToParam(level));
+  }
+
+  return `/teams?${params.toString()}`;
 }
 
 function SummaryChip({ label, value }: { label: string; value: string | number }) {
