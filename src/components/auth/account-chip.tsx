@@ -210,6 +210,20 @@ export function AccountChip({
             </Link>
           )}
 
+          {/* Settings link */}
+          <Link
+            href="/settings"
+            role="menuitem"
+            onClick={() => setMenuOpen(false)}
+            className={[
+              'flex items-center gap-2 w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+              'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
+              'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink no-underline',
+            ].join(' ')}
+          >
+            Settings
+          </Link>
+
           {/* Appearance / theme toggle row */}
           <div className="px-3 py-2.5 flex items-center justify-between border-b border-hairline">
             <span className="text-[11px] font-bold tracking-[0.16em] uppercase font-tight text-muted">

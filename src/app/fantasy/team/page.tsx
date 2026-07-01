@@ -6,6 +6,7 @@
 import { PageShell } from '@/components/page-shell';
 import { currentFantasyWeek, getMyTeam } from '@/lib/fantasy/data';
 import { RosterBuilder } from '@/components/fantasy/roster-builder';
+import { FantasyRules } from '@/components/fantasy/fantasy-rules';
 import type { Crumb } from '@/components/breadcrumbs';
 
 export const revalidate = 0; // builder needs fresh week/team state
@@ -34,6 +35,7 @@ export default async function FantasyTeamPage() {
       }
       breadcrumbs={BREADCRUMBS}
     >
+      <FantasyRules />
       <RosterBuilder weekInfo={weekInfo} existingTeam={myTeam} />
     </PageShell>
   );

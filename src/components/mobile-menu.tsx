@@ -525,6 +525,19 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             </span>
           </Link>
 
+          {/* ── Settings row — direct link ───────────────────────────── */}
+          <Link
+            href="/settings"
+            onClick={onClose}
+            className={[
+              rowBase,
+              'text-muted hover:bg-surface hover:text-ink',
+              'border-b border-hairline no-underline',
+            ].join(' ')}
+          >
+            <span>Settings</span>
+          </Link>
+
         </nav>
       </div>
     </div>

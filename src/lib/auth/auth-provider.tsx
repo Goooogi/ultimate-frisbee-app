@@ -22,7 +22,7 @@ interface AuthState {
   signUp: (
     email: string,
     password: string,
-    options?: { displayName?: string; phone?: string },
+    options?: { displayName?: string; phone?: string; username?: string },
   ) => Promise<{ error?: string; needsConfirmation?: boolean }>;
   signOut: () => Promise<void>;
   /**
@@ -117,6 +117,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const meta: Record<string, string> = {};
     if (opts?.displayName) meta.display_name = opts.displayName;
     if (opts?.phone) meta.phone = opts.phone;
+    if (opts?.username) meta.username = opts.username.toLowerCase();
 
     const { data, error } = await supabase.auth.signUp({
       email,

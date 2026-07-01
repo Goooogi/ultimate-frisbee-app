@@ -70,6 +70,24 @@ function isActive(pathname: string, item: NavItem): boolean {
   return item.aliases?.some(matches) ?? false;
 }
 
+// Route prefixes that ARE league pages — the only ones that get the
+// Scores/Schedule/Teams/Players secondary nav. Everything else (admin,
+// settings, playbook, 12-0, home, reset-password, etc.) gets NO subnav.
+const LEAGUE_PREFIXES = [
+  '/scores',
+  '/schedule',
+  '/teams',
+  '/players',
+  '/g', // UFA game detail
+  '/usau', // usau events/teams
+  '/wul',
+  '/pul',
+];
+
+function isLeaguePage(pathname: string): boolean {
+  return LEAGUE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
+
 // ─── Inner (needs hooks — wrapped in Suspense by parent) ──────────────────────
 
 interface GamesSubnavInnerProps {
@@ -82,6 +100,11 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
 
   // Fantasy sub-app: its own secondary nav, no league switcher.
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+
+  // The secondary nav belongs ONLY to league pages and the fantasy sub-app.
+  // On everything else (admin, settings, playbook, 12-0, home, …) render
+  // nothing — no stray league tabs where they don't apply.
+  if (!isFantasy && !isLeaguePage(pathname)) return null;
 
   // Preserve active league + division across sub-page navigations — same
   // logic as SidebarNav. (Not used on Fantasy pages.)

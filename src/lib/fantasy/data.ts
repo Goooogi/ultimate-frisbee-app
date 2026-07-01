@@ -15,6 +15,7 @@ import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { scoreStatLine, roundPoints, type FantasyRole } from './scoring';
 import { ufaRowToStatLine, type UfaStatRow } from './ufa-adapter';
 import { buildWeeks, activeWeek, type WeekGame } from './weeks';
+import { moderateName } from '@/lib/moderation';
 
 // fantasy_*/ufa_* tables aren't in database.types.ts (same as wul_*/pul_*), so
 // we use untyped clients and cast rows via the local interfaces below.
@@ -62,6 +63,9 @@ export interface RosterSlot {
 export interface FantasyTeamView {
   id: string;
   teamName: string;
+  /** Owner's display name — the primary public label. */
+  ownerDisplayName: string | null;
+  /** Owner's unique @handle — shown as a secondary disambiguator / fallback. */
   ownerUsername: string | null;
   seasonYear: number;
   totalPoints: number;
@@ -71,6 +75,7 @@ export interface FantasyTeamView {
 export interface LeaderboardRow {
   teamId: string;
   teamName: string;
+  ownerDisplayName: string | null;
   ownerUsername: string | null;
   totalPoints: number;
 }
@@ -146,7 +151,7 @@ export async function currentFantasyWeek(
 export async function getFantasyTeam(teamId: string): Promise<FantasyTeamView | null> {
   const { data: team, error } = await anon()
     .from('fantasy_teams')
-    .select('id, team_name, owner_username, season_year')
+    .select('id, team_name, owner_display_name, owner_username, season_year')
     .eq('id', teamId)
     .maybeSingle();
   if (error) throw error;
@@ -164,6 +169,7 @@ export async function getFantasyTeam(teamId: string): Promise<FantasyTeamView | 
   return {
     id: team.id,
     teamName: team.team_name,
+    ownerDisplayName: team.owner_display_name ?? null,
     ownerUsername: team.owner_username ?? null,
     seasonYear: team.season_year,
     totalPoints: roundPoints(weekly.reduce((acc, w) => acc + w.points, 0)),
@@ -201,7 +207,7 @@ export async function getLeaderboard(
 ): Promise<LeaderboardRow[]> {
   const { data: teams, error } = await anon()
     .from('fantasy_teams')
-    .select('id, team_name, owner_username')
+    .select('id, team_name, owner_display_name, owner_username')
     .is('league_id', null)
     .eq('season_year', year)
     .limit(limit);
@@ -225,6 +231,7 @@ export async function getLeaderboard(
     .map((t: Record<string, unknown>) => ({
       teamId: t.id as string,
       teamName: t.team_name as string,
+      ownerDisplayName: (t.owner_display_name as string) ?? null,
       ownerUsername: (t.owner_username as string) ?? null,
       totalPoints: roundPoints(totals.get(t.id as string) ?? 0),
     }))
@@ -253,32 +260,57 @@ export async function getMyTeam(year = fantasySeasonYear()): Promise<FantasyTeam
   return getFantasyTeam(data.id as string);
 }
 
-/** The signed-in user's current public handle (profiles.username), or null. */
-export async function getMyUsername(): Promise<string | null> {
+export interface MyProfile {
+  displayName: string | null;
+  username: string | null;
+}
+
+/** The signed-in user's editable public identity (display name + handle). */
+export async function getMyProfile(): Promise<MyProfile | null> {
   const supabase = sessionClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return null;
-  const { data } = await supabase.from('profiles').select('username').eq('id', user.id).maybeSingle();
-  return (data?.username as string) ?? null;
+  const { data } = await supabase
+    .from('profiles')
+    .select('display_name, username')
+    .eq('id', user.id)
+    .maybeSingle();
+  if (!data) return null;
+  return {
+    displayName: (data.display_name as string) ?? null,
+    username: (data.username as string) ?? null,
+  };
+}
+
+/** The signed-in user's current public handle (profiles.username), or null. */
+export async function getMyUsername(): Promise<string | null> {
+  return (await getMyProfile())?.username ?? null;
 }
 
 /** profiles.username constraint: lowercase, 3–30 chars, alnum + underscore. */
 export const USERNAME_RE = /^[a-z0-9_]{3,30}$/;
 
-/** Is a handle free? Case-insensitive check against the unique username column. */
+/**
+ * Is a handle free? Uses the fantasy_handle_available RPC (SECURITY DEFINER,
+ * boolean-only). This is required, NOT a nicety: profiles SELECT is
+ * authenticated-only, so a direct anon `.eq('username',…)` query reads empty
+ * and would always report "available" (broken at signup, before a session).
+ * The RPC sees the row and returns only a boolean — no row-data disclosure.
+ */
 export async function isUsernameAvailable(username: string): Promise<boolean> {
   const u = username.trim().toLowerCase();
   if (!USERNAME_RE.test(u)) return false;
-  const { data } = await anon().from('profiles').select('id').eq('username', u).maybeSingle();
-  return !data;
+  const { data, error } = await anon().rpc('fantasy_handle_available', { p_handle: u });
+  if (error) return false; // fail closed — treat as unavailable on error
+  return data === true;
 }
 
 /**
  * Set the signed-in user's public handle. RLS lets a user update only their own
- * profile row (profiles_update_own). Throws on format/taken. This is the user's
- * leaderboard identity — owner_username on teams is synced from it by trigger.
+ * profile row (profiles_update_own). Throws on format/profanity/taken. This is
+ * the user's unique leaderboard identifier — synced onto their teams by trigger.
  */
 export async function setMyUsername(username: string): Promise<void> {
   const supabase = sessionClient();
@@ -290,12 +322,33 @@ export async function setMyUsername(username: string): Promise<void> {
   if (!USERNAME_RE.test(u)) {
     throw new Error('Handle must be 3–30 characters: lowercase letters, numbers, underscores.');
   }
+  const bad = moderateName(u, 'Handle');
+  if (bad) throw new Error(bad);
   const { error } = await supabase.from('profiles').update({ username: u }).eq('id', user.id);
   if (error) {
     // 23505 = unique_violation (handle taken)
     if ((error as { code?: string }).code === '23505') throw new Error('That handle is taken.');
     throw error;
   }
+}
+
+/**
+ * Set the signed-in user's display name — the primary public label on the
+ * leaderboard. Not unique. Runs the profanity filter. 1–60 chars. The
+ * fantasy_resync trigger updates any of the user's teams' denormalized copy.
+ */
+export async function setDisplayName(name: string): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  const n = name.trim();
+  if (n.length < 1 || n.length > 60) throw new Error('Display name must be 1–60 characters.');
+  const bad = moderateName(n, 'Display name');
+  if (bad) throw new Error(bad);
+  const { error } = await supabase.from('profiles').update({ display_name: n }).eq('id', user.id);
+  if (error) throw error;
 }
 
 /**

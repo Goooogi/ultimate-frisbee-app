@@ -16,6 +16,7 @@ import {
   setMyUsername,
   getMyUsername,
   getMyTeam,
+  getMyProfile,
   isUsernameAvailable,
   USERNAME_RE,
   fantasySeasonYear,
@@ -353,17 +354,28 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
   // Form state
   const [teamName, setTeamName] = useState(existingTeam?.teamName ?? '');
   const [handle, setHandle] = useState('');
+  // Whether the user already has a handle set in their profile (post-registration users will).
+  const [hasExistingHandle, setHasExistingHandle] = useState(false);
   const [slots, setSlots] = useState<SlotState[]>(initialSlots);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedTeamId, setSavedTeamId] = useState<string | null>(null);
 
-  // Load existing username once user is known.
+  // Load profile once user is known: prefill team name from display name (if no existing team),
+  // and load their existing handle (hide the handle field if already set).
   useEffect(() => {
     if (!user) return;
-    getMyUsername().then((u) => {
-      if (u) setHandle(u);
+    getMyProfile().then((profile) => {
+      if (profile?.username) {
+        setHandle(profile.username);
+        setHasExistingHandle(true);
+      }
+      // Only prefill team name when no team exists yet
+      if (!existingTeam && !savedTeamId && profile?.displayName) {
+        setTeamName((prev) => prev || profile.displayName!);
+      }
     }).catch(() => null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   // Load existing roster if we already have a team (for the current week).
@@ -512,7 +524,8 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
     </div>
   );
 
-  const needsHandle = user && !existingTeam && !savedTeamId;
+  // Handle is only required in the legacy path (user registered before handle was mandatory).
+  const needsHandle = user && !existingTeam && !savedTeamId && !hasExistingHandle;
   const needsTeamName = user && !existingTeam && !savedTeamId;
   const handleOk =
     !needsHandle ||
@@ -558,7 +571,7 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
               Your Identity
             </div>
             <div className="space-y-4">
-              {/* Team name */}
+              {/* Team name — pre-filled from display name; user can change it freely */}
               <div>
                 <label
                   htmlFor="team-name"
@@ -585,64 +598,67 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
                 </p>
               </div>
 
-              {/* Handle */}
-              <div>
-                <label
-                  htmlFor="handle"
-                  className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
-                >
-                  Leaderboard Handle
-                </label>
-                <div className="relative flex items-center">
-                  <span className="absolute left-3 font-tight text-[14px] text-faint pointer-events-none">
-                    @
-                  </span>
-                  <input
-                    id="handle"
-                    type="text"
-                    value={handle}
-                    onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-                    maxLength={30}
-                    placeholder="your_handle"
-                    autoComplete="username"
-                    className={[
-                      'w-full pl-7 pr-4 py-2.5 rounded-md border bg-bg',
-                      'font-tight text-[14px] text-ink placeholder:text-faint',
-                      'focus:outline-none focus:ring-2 focus:border-transparent',
-                      'min-h-[44px]',
-                      handleStatus === 'available'
-                        ? 'border-green-500 focus:ring-green-500'
-                        : handleStatus === 'taken' || handleStatus === 'invalid'
-                        ? 'border-[rgb(var(--live))] focus:ring-[rgb(var(--live))]'
-                        : 'border-border focus:ring-accent',
-                    ].join(' ')}
-                  />
-                  {handleStatus === 'checking' && (
-                    <div
-                      className="absolute right-3 w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin"
-                      aria-hidden="true"
+              {/* Handle — only shown to legacy users who don't have one yet.
+                  New users set their handle at registration; it flows in via getMyProfile(). */}
+              {!hasExistingHandle && (
+                <div>
+                  <label
+                    htmlFor="handle"
+                    className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
+                  >
+                    Leaderboard Handle
+                  </label>
+                  <div className="relative flex items-center">
+                    <span className="absolute left-3 font-tight text-[14px] text-faint pointer-events-none">
+                      @
+                    </span>
+                    <input
+                      id="handle"
+                      type="text"
+                      value={handle}
+                      onChange={(e) => setHandle(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                      maxLength={30}
+                      placeholder="your_handle"
+                      autoComplete="username"
+                      className={[
+                        'w-full pl-7 pr-4 py-2.5 rounded-md border bg-bg',
+                        'font-tight text-[14px] text-ink placeholder:text-faint',
+                        'focus:outline-none focus:ring-2 focus:border-transparent',
+                        'min-h-[44px]',
+                        handleStatus === 'available'
+                          ? 'border-green-500 focus:ring-green-500'
+                          : handleStatus === 'taken' || handleStatus === 'invalid'
+                          ? 'border-[rgb(var(--live))] focus:ring-[rgb(var(--live))]'
+                          : 'border-border focus:ring-accent',
+                      ].join(' ')}
                     />
-                  )}
+                    {handleStatus === 'checking' && (
+                      <div
+                        className="absolute right-3 w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+                  <div className="mt-1 font-tight text-[11px]">
+                    {handleStatus === 'available' && (
+                      <span className="text-green-600">Handle is available</span>
+                    )}
+                    {handleStatus === 'taken' && (
+                      <span className="text-[rgb(var(--live))]">Handle is already taken</span>
+                    )}
+                    {handleStatus === 'invalid' && (
+                      <span className="text-[rgb(var(--live))]">
+                        3–30 chars, lowercase letters/numbers/underscores only
+                      </span>
+                    )}
+                    {(handleStatus === 'idle' || handleStatus === 'checking') && (
+                      <span className="text-faint">
+                        Your unique @identity on the leaderboard.
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-1 font-tight text-[11px]">
-                  {handleStatus === 'available' && (
-                    <span className="text-green-600">Handle is available</span>
-                  )}
-                  {handleStatus === 'taken' && (
-                    <span className="text-[rgb(var(--live))]">Handle is already taken</span>
-                  )}
-                  {handleStatus === 'invalid' && (
-                    <span className="text-[rgb(var(--live))]">
-                      3–30 chars, lowercase letters/numbers/underscores only
-                    </span>
-                  )}
-                  {(handleStatus === 'idle' || handleStatus === 'checking') && (
-                    <span className="text-faint">
-                      This is your public leaderboard name (@handle). Lowercase letters, numbers, underscores.
-                    </span>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           </div>
         )}

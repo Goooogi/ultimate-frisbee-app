@@ -13,9 +13,11 @@
 // before sending to Supabase, so the DB constraint never sees a malformed
 // value coming from the UI.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { isUsernameAvailable, USERNAME_RE } from '@/lib/fantasy/data';
+import { moderateName } from '@/lib/moderation';
 
 type Mode = 'signin' | 'signup' | 'reset';
 
@@ -52,6 +54,9 @@ export function AuthModal({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [phone, setPhone] = useState('');
+  const [handle, setHandle] = useState('');
+  const [handleStatus, setHandleStatus] = useState<'idle' | 'checking' | 'ok' | 'taken' | 'format' | 'profanity'>('idle');
+  const handleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +75,8 @@ export function AuthModal({
     setConfirmPassword('');
     setDisplayName('');
     setPhone('');
+    setHandle('');
+    setHandleStatus('idle');
     setShowPassword(false);
     setError(null);
     setInfo(null);
@@ -92,6 +99,25 @@ export function AuthModal({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, dismissible, onDismiss]);
+
+  // Live-validate the handle: format → profanity → availability (debounced 400ms).
+  const validateHandle = useCallback((raw: string) => {
+    const u = raw.trim().toLowerCase();
+    if (!u) { setHandleStatus('idle'); return; }
+    if (!USERNAME_RE.test(u)) { setHandleStatus('format'); return; }
+    const profanityError = moderateName(u, 'Handle');
+    if (profanityError) { setHandleStatus('profanity'); return; }
+    setHandleStatus('checking');
+    if (handleDebounceRef.current) clearTimeout(handleDebounceRef.current);
+    handleDebounceRef.current = setTimeout(async () => {
+      try {
+        const avail = await isUsernameAvailable(u);
+        setHandleStatus(avail ? 'ok' : 'taken');
+      } catch {
+        setHandleStatus('idle');
+      }
+    }, 400);
+  }, []);
 
   if (!open || !mounted) return null;
 
@@ -141,6 +167,27 @@ export function AuthModal({
         return;
       }
 
+      // Handle is required on signup.
+      const trimmedHandle = handle.trim().toLowerCase();
+      if (!trimmedHandle) {
+        setError('A handle is required. Choose your unique @identity.');
+        return;
+      }
+      if (!USERNAME_RE.test(trimmedHandle)) {
+        setError('Handle must be 3–30 characters: lowercase letters, numbers, underscores.');
+        return;
+      }
+      if (handleStatus !== 'ok') {
+        setError(
+          handleStatus === 'taken'
+            ? 'That handle is already taken. Please choose another.'
+            : handleStatus === 'profanity'
+            ? 'Handle contains language that isn\'t allowed.'
+            : 'Please wait for handle availability to finish checking.',
+        );
+        return;
+      }
+
       // Phone is optional. When provided, normalize to E.164 (+15551234567)
       // before hitting Supabase so the DB CHECK constraint never sees a
       // formatted string like "(555) 123-4567".
@@ -159,6 +206,7 @@ export function AuthModal({
       const result = await signUp(trimmedEmail, password, {
         displayName: displayName.trim() || undefined,
         phone: normalizedPhone,
+        username: handle.trim().toLowerCase(),
       });
       setSubmitting(false);
       if (result.error) {
@@ -314,6 +362,83 @@ export function AuthModal({
                 </Field>
               )}
 
+              {/* ── Handle (signup only) ─────────────────────────────────── */}
+              {isSignup && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="flex flex-col gap-1.5">
+                    <span className="flex items-baseline justify-between gap-2">
+                      <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+                        Handle
+                      </span>
+                      <span className="text-[9px] font-medium text-faint font-tight normal-case tracking-normal">
+                        required · your unique @identity
+                      </span>
+                    </span>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3 font-tight text-[14px] text-faint pointer-events-none select-none">
+                        @
+                      </span>
+                      <input
+                        type="text"
+                        value={handle}
+                        onChange={(e) => {
+                          const cleaned = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '');
+                          setHandle(cleaned);
+                          validateHandle(cleaned);
+                        }}
+                        placeholder="your_handle"
+                        autoComplete="username"
+                        spellCheck={false}
+                        maxLength={30}
+                        className={[
+                          'w-full bg-surface pl-7 pr-10 py-2.5 text-[14px] font-semibold text-ink font-tight rounded',
+                          'focus-visible:outline-none transition-colors',
+                          handleStatus === 'ok'
+                            ? 'border border-[#22c55e] focus-visible:border-[#22c55e]'
+                            : handleStatus === 'taken' || handleStatus === 'format' || handleStatus === 'profanity'
+                            ? 'border border-[rgb(var(--live))] focus-visible:border-[rgb(var(--live))]'
+                            : 'border border-border focus-visible:border-ink',
+                        ].join(' ')}
+                      />
+                      {/* Status indicator — right side of input */}
+                      <span className="absolute right-3 flex items-center" aria-hidden="true">
+                        {handleStatus === 'checking' && (
+                          <span className="w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin block" />
+                        )}
+                        {handleStatus === 'ok' && (
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M2.5 7l3.5 3.5 5.5-6" stroke="#22c55e" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        )}
+                        {(handleStatus === 'taken' || handleStatus === 'format' || handleStatus === 'profanity') && (
+                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                            <path d="M3 3l8 8M11 3l-8 8" stroke="rgb(var(--live))" strokeWidth="1.8" strokeLinecap="round" />
+                          </svg>
+                        )}
+                      </span>
+                    </div>
+                  </label>
+                  {/* Inline feedback line */}
+                  <span className="text-[11px] font-tight leading-snug">
+                    {handleStatus === 'ok' && (
+                      <span className="text-[#22c55e]">@{handle} is available</span>
+                    )}
+                    {handleStatus === 'taken' && (
+                      <span className="text-[rgb(var(--live))]">That handle is already taken</span>
+                    )}
+                    {handleStatus === 'format' && (
+                      <span className="text-[rgb(var(--live))]">3–30 chars · lowercase letters, numbers, underscores only</span>
+                    )}
+                    {handleStatus === 'profanity' && (
+                      <span className="text-[rgb(var(--live))]">Handle contains language that isn&apos;t allowed</span>
+                    )}
+                    {(handleStatus === 'idle' || handleStatus === 'checking') && (
+                      <span className="text-faint">Shown on the leaderboard as @handle</span>
+                    )}
+                  </span>
+                </div>
+              )}
+
               {/* ── Password (signin + signup, not reset) ───────────────── */}
               {!isReset && (
                 <div className="flex flex-col gap-1">
@@ -391,7 +516,7 @@ export function AuthModal({
           <div className="px-6 pb-6 flex flex-col gap-3">
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || (isSignup && handleStatus !== 'idle' && handleStatus !== 'ok' && handleStatus !== 'checking')}
               className={[
                 'inline-flex items-center justify-center gap-2 w-full py-3 rounded-md cursor-pointer',
                 'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',

@@ -53,8 +53,10 @@ export default async function FantasyTeamPage({ params }: Props) {
       title={team.teamName}
       eyebrow="Fantasy · Beta"
       subtitle={
-        team.ownerUsername
-          ? `@${team.ownerUsername} · ${team.seasonYear} Season`
+        team.ownerDisplayName || team.ownerUsername
+          ? `${team.ownerDisplayName ?? `@${team.ownerUsername}`}${
+              team.ownerDisplayName && team.ownerUsername ? ` · @${team.ownerUsername}` : ''
+            } · ${team.seasonYear} Season`
           : `${team.seasonYear} Season`
       }
       breadcrumbs={BREADCRUMBS}
