@@ -124,7 +124,12 @@ function TeamStintCard({ stint }: { stint: UsauPlayerSummary['teamHistory'][numb
               container width. pr-1.5 reserves space for the italic
               glyph's right-edge slant so "Bravo" doesn't appear clipped. */}
           <span className="flex items-center gap-2 min-w-0">
-            <UsauTeamLogo name={stint.teamName} genderDivision={stint.genderDivision} size={24} />
+            <UsauTeamLogo
+              name={stint.teamName}
+              genderDivision={stint.genderDivision}
+              competitionLevel={stint.competitionLevel}
+              size={24}
+            />
             <Link
               href={`/usau/teams/${stint.teamId}`}
               className="flex-1 min-w-0 block font-display italic font-bold text-[18px] leading-tight tracking-[-0.02em] text-ink truncate pr-1.5 hover:text-accent transition-colors"

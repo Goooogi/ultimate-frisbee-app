@@ -85,6 +85,8 @@ export interface UsauSeasonStint {
    *  resolve the team logo (UsauTeamLogo keys on it). Distinct from `division`,
    *  which is a cosmetic chip label (currently a null placeholder). */
   genderDivision: string | null;
+  /** usau_teams.competition_level — lets UsauTeamLogo resolve college crests. */
+  competitionLevel: string | null;
   jerseyNumber: string | null;
   isChampion: boolean;
   events: UsauPlayerSummary['teamHistory'][number]['events'];
@@ -365,6 +367,7 @@ export async function getUnifiedPlayerProfile(
         teamName: stint.teamName,
         division: deriveUsauChip(stint),
         genderDivision: stint.genderDivision,
+        competitionLevel: stint.competitionLevel,
         jerseyNumber: stint.jerseyNumber,
         isChampion: stint.isChampion,
         events: stint.events,

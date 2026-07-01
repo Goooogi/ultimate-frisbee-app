@@ -69,7 +69,7 @@ interface AppLink {
 const APP_LINKS: AppLink[] = [
   { id: 'games',     label: 'GAMES',    href: '/scores' },
   { id: 'playbook',  label: 'PLAYBOOK', href: '/playbook' },
-  { id: 'fantasy',   label: 'FANTASY',  href: '/fantasy',  tag: 'soon' },
+  { id: 'fantasy',   label: 'FANTASY',  href: '/fantasy',  tag: 'beta' },
   { id: 'twelve-oh', label: '12-0',     href: '/12-0' },
 ];
 
@@ -866,10 +866,14 @@ function MobileSubAppDropdown({ activeApp }: MobileSubAppDropdownProps) {
         ].join(' ')}
       >
         {activeLink ? activeLink.label : 'Menu'}
-        {/* Active badge (soon on the trigger itself; beta tag no longer used) */}
         {activeLink?.tag === 'soon' && (
           <sup className="text-[7px] font-bold tracking-[0.14em] text-faint ml-0.5 align-super leading-none">
             SOON
+          </sup>
+        )}
+        {activeLink?.tag === 'beta' && (
+          <sup className="text-[7px] font-bold tracking-[0.14em] text-accent ml-0.5 align-super leading-none">
+            BETA
           </sup>
         )}
         {/* Chevron */}
@@ -894,6 +898,7 @@ function MobileSubAppDropdown({ activeApp }: MobileSubAppDropdownProps) {
       <div className="absolute left-0 top-full mt-1 z-[60] min-w-[140px] border border-border bg-bg rounded-md p-1.5 shadow-lg">
         {menuLinks.map((link) => {
           const isSoon = link.tag === 'soon';
+          const isBeta = link.tag === 'beta';
 
           if (isSoon) {
             return (
@@ -928,6 +933,11 @@ function MobileSubAppDropdown({ activeApp }: MobileSubAppDropdownProps) {
               ].join(' ')}
             >
               {link.label}
+              {isBeta && (
+                <sup className="text-[7px] font-bold tracking-[0.14em] text-accent ml-0.5 align-super leading-none">
+                  BETA
+                </sup>
+              )}
             </Link>
           );
         })}
@@ -1030,21 +1040,25 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
           12-0
         </Link>
 
-        {/* FANTASY — desktop only, non-navigable (coming soon) */}
-        <span
-          aria-disabled="true"
-          title="Coming soon"
+        {/* FANTASY — desktop only, now navigable (beta) */}
+        <Link
+          href="/fantasy"
+          aria-current={activeApp === 'fantasy' ? 'page' : undefined}
           className={[
             'hidden lg:inline-flex items-center px-3 py-1 rounded',
             'text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
-            'text-faint cursor-not-allowed select-none',
+            'transition-colors duration-150 no-underline',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            activeApp === 'fantasy'
+              ? 'text-ink border-b-2 border-accent pb-[2px]'
+              : 'text-ink border-b-2 border-transparent pb-[2px]',
           ].join(' ')}
         >
           FANTASY
-          <sup className="text-[7px] font-bold tracking-[0.14em] text-faint ml-1 align-super leading-none">
-            SOON
+          <sup className="text-[7px] font-bold tracking-[0.14em] text-accent ml-1 align-super leading-none">
+            BETA
           </sup>
-        </span>
+        </Link>
 
         {/* ThemeToggle — desktop only. Mobile theme lives in AccountChip. */}
         <div className="hidden lg:flex">

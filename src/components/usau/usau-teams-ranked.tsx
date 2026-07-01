@@ -160,7 +160,12 @@ function RankedRow({
         >
           {rank ?? '—'}
         </span>
-        <UsauTeamLogo name={name} genderDivision={genderDivision} size={28} />
+        <UsauTeamLogo
+          name={name}
+          genderDivision={genderDivision}
+          competitionLevel={competitionLevel}
+          size={28}
+        />
         <span className="flex-1 min-w-0">
           <span className="block text-[14px] font-bold text-ink font-tight truncate">
             {name}

@@ -12,6 +12,8 @@ const MONOGRAM_BG = '#1d2535';
 interface UsauTeamLogoProps {
   name: string;
   genderDivision: string | null;
+  /** USAU competition_level; when college, resolves against the College/ logo namespace. */
+  competitionLevel?: string | null;
   size?: number;
 }
 
@@ -21,8 +23,8 @@ interface UsauTeamLogoProps {
  * - If no logo: dark square with team name initials (up to 2 words).
  * Always aria-hidden — the visible team name is the accessible label.
  */
-export function UsauTeamLogo({ name, genderDivision, size = 40 }: UsauTeamLogoProps) {
-  const logoPath = usauTeamLogo(name, genderDivision);
+export function UsauTeamLogo({ name, genderDivision, competitionLevel, size = 40 }: UsauTeamLogoProps) {
+  const logoPath = usauTeamLogo(name, genderDivision, competitionLevel);
 
   if (logoPath) {
     return (

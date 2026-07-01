@@ -325,7 +325,12 @@ function UsauStintRow({ stint }: { stint: UsauSeasonStint }) {
           href={`/usau/teams/${stint.teamId}`}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
-          <UsauTeamLogo name={stint.teamName} genderDivision={stint.genderDivision} size={24} />
+          <UsauTeamLogo
+            name={stint.teamName}
+            genderDivision={stint.genderDivision}
+            competitionLevel={stint.competitionLevel}
+            size={24}
+          />
           <span className="flex flex-col min-w-0">
             <span className="font-display italic font-bold text-[16px] leading-tight tracking-[-0.02em] text-ink truncate pr-1">
               {stint.teamName}

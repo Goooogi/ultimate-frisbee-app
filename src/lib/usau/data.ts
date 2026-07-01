@@ -29,6 +29,55 @@ async function supabase(): Promise<DB> {
   return _client;
 }
 
+// ─── Qualifying-event classifier (for player-identity clustering) ────────
+//
+// A "qualifying" event is one where a team's roster reliably reflects a real
+// commitment — the official Series (Sectionals → Regionals → Nationals) plus
+// the marquee invite tournaments where no one guests (TCT Pro Championships,
+// U.S. Open). These are the events that let us conclude "two different teams,
+// same season+track ⇒ two different people." Minor/fun tournaments are excluded
+// because players guest on other teams there (not an identity signal).
+//
+// USAU exposes no structured event-type (event_type is uniformly 'other'), so
+// we classify by name. Order/guards matter: "Championship"/"Nationals" appear
+// in BOTH true Nationals ("USA Ultimate Club/College Championships") and invite
+// events ("TCT Pro Championships", "U.S. Open Club Championships"), and warmups
+// ("...at Nationals", "Nationals Tune Up") must not match.
+export function isQualifyingSeriesEvent(rawName: string | null | undefined): boolean {
+  if (!rawName) return false;
+  const n = rawName.toLowerCase();
+
+  // Warmups / non-competitive that happen to contain series words.
+  if (/(tune up|tune-up|at nationals|warm ?up)/.test(n)) return false;
+
+  // Official series stages by name.
+  if (/sectional/.test(n)) return true;
+  if (/regional/.test(n)) return true;
+  if (/super qualifier/.test(n)) return true; // Masters/Grand-Masters series
+
+  // Marquee invite tournaments where rosters are trustworthy (no guesting).
+  if (/u\.?s\.? open/.test(n)) return true;
+  if (/tct pro champ|pro championship|usau pro champ/.test(n)) return true;
+
+  // True Nationals — anchored by "USA Ultimate", the College Championships
+  // forms, or "Club Nationals". Guard against invite/HS/worlds/beach that also
+  // carry "championship"/"nationals".
+  const isNationalsName =
+    /club nationals/.test(n) ||
+    /club championship/.test(n) ||
+    /college championship/.test(n) ||
+    /usa ultimate national championship/.test(n) ||
+    (/usa ultimate/.test(n) && /nationals/.test(n));
+  const disqualified =
+    /state championship/.test(n) ||
+    /high school|\bhs\b/.test(n) ||
+    /world|\(icc\)|- icc|\(ycc\)|wucc|wmucc|wjuc/.test(n) ||
+    /beach/.test(n);
+  if (isNationalsName && !disqualified) return true;
+
+  return false;
+}
+
 // ─── Events ────────────────────────────────────────────────────────────
 
 export interface UsauEventCard {
@@ -1117,6 +1166,9 @@ export interface UsauPlayerSummary {
      *  Required by UsauTeamLogo for accurate logo resolution (Men's vs Women's
      *  teams can share the same slug, e.g. "phoenix"). Null when unknown. */
     genderDivision: string | null;
+    /** usau_teams.competition_level (e.g. "CLUB", "COLLEGE_D1"). Lets UsauTeamLogo
+     *  resolve college crests from the College/ namespace. Null when unknown. */
+    competitionLevel: string | null;
     season: number;
     jerseyNumber: string | null;
     /** True if this team won the Club Nationals championship that season. */
@@ -1178,11 +1230,53 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
   // division) champion since 3 divisions share the same Nationals event.
   const { data: candidateRosters } = await db
     .from('usau_rosters')
-    .select('player_id, team_id, season, jersey_number, usau_teams(name, gender_division)')
+    .select('player_id, team_id, season, jersey_number, usau_teams(name, gender_division, competition_level)')
     .in('player_id', candidateIds);
 
-  // Union-find: two ids are linked iff they never have (same season,
-  // different team). Anchor's connected component = this profile.
+  // For the identity conflict rule we need to know which candidate TEAMS played
+  // a QUALIFYING event (official series or a marquee tournament). Fetch the
+  // events for every candidate team_id and mark the teams that qualify.
+  const candTeamIds = Array.from(new Set((candidateRosters ?? []).map((r) => r.team_id)));
+  const qualifyingTeamIds = new Set<string>();
+  if (candTeamIds.length > 0) {
+    const { data: candEventRows } = await db
+      .from('usau_event_teams')
+      .select('team_id, usau_events(name)')
+      .in('team_id', candTeamIds);
+    for (const row of candEventRows ?? []) {
+      const ev = (row as { usau_events: { name: string } | null }).usau_events;
+      if (ev && isQualifyingSeriesEvent(ev.name)) qualifyingTeamIds.add((row as { team_id: string }).team_id);
+    }
+  }
+
+  // Union-find over same-named player rows → one connected component per human.
+  //
+  // CONFLICT rule (what BLOCKS a merge → keeps two profiles separate). Two rows
+  // conflict iff ALL of:
+  //   1. same season, AND
+  //   2. same competition TRACK (Club / College-D1 / College-D3), AND
+  //   3. different team identity, AND
+  //   4. BOTH teams played a QUALIFYING event that season (official series —
+  //      Sectionals/Regionals/Nationals — or a marquee tournament like TCT Pro
+  //      Championships / U.S. Open, where no one guests).
+  //
+  // Rationale:
+  //   • A team commits to ONE series path per season per track, so two DIFFERENT
+  //     teams both in official series (same track, same year) can't be one human
+  //     → different people. This is the reliable split signal (e.g. two "Thomas
+  //     Brewster"s: one on Thunderpants at Mixed Sectionals, one on shame. at
+  //     Mixed Regionals+Nationals, same 2024 Mixed track → split).
+  //   • Cross-track (college + club + masters same year) is NORMAL for one human
+  //     → never conflicts (e.g. Zeke Thoreson: college Colorado + club Bravo).
+  //   • Guesting at a NON-qualifying "fun" event for another team is NOT a split
+  //     signal → if either team's only appearance is a minor event, no conflict
+  //     (default to same person).
+  //
+  // Team identity is the tuple (name+gender+level), NOT the per-event team_id:
+  // the scraper writes a separate team_id per event (Regionals vs Nationals are
+  // different team_ids for the same team), so comparing raw team_id would
+  // falsely conflict a player's own Regionals + Nationals rows. usau_team_id is
+  // unpopulated, so the identity tuple is the reliable key.
   const parent = new Map<string, string>();
   candidateIds.forEach((id) => parent.set(id, id));
   const find = (x: string): string => {
@@ -1197,10 +1291,29 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     const rb = find(b);
     if (ra !== rb) parent.set(ra, rb);
   };
-  const rostersByPlayer = new Map<string, Array<{ team_id: string; season: number }>>();
+  // Competition TRACK from a team's level. College D1/D3 are distinct tracks;
+  // everything else (CLUB, plus Masters which folds into CLUB at team level) is
+  // the "club" track. Masters-vs-open within a season is not distinguishable at
+  // the team level (both CLUB) — an accepted limitation.
+  const trackOf = (level: string): string =>
+    level === 'COLLEGE_D1' || level === 'COLLEGE_D3' ? level : 'CLUB';
+  const teamMeta = (r: {
+    team_id: string;
+    usau_teams?: { name?: string | null; gender_division?: string | null; competition_level?: string | null } | null;
+  }): { track: string; identity: string; qualifying: boolean } => {
+    const t = r.usau_teams;
+    const level = t?.competition_level ?? '';
+    const identity = [(t?.name ?? '').toLowerCase(), t?.gender_division ?? '', level].join('|');
+    return { track: trackOf(level), identity, qualifying: qualifyingTeamIds.has(r.team_id) };
+  };
+  const rostersByPlayer = new Map<
+    string,
+    Array<{ season: number; track: string; identity: string; qualifying: boolean }>
+  >();
   for (const r of candidateRosters ?? []) {
     if (!rostersByPlayer.has(r.player_id)) rostersByPlayer.set(r.player_id, []);
-    rostersByPlayer.get(r.player_id)!.push({ team_id: r.team_id, season: r.season });
+    const { track, identity, qualifying } = teamMeta(r as never);
+    rostersByPlayer.get(r.player_id)!.push({ season: r.season, track, identity, qualifying });
   }
   for (let i = 0; i < candidateIds.length; i++) {
     for (let j = i + 1; j < candidateIds.length; j++) {
@@ -1209,7 +1322,13 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
       let conflict = false;
       outer: for (const sa of ra) {
         for (const sb of rb) {
-          if (sa.season === sb.season && sa.team_id !== sb.team_id) {
+          if (
+            sa.season === sb.season &&
+            sa.track === sb.track &&
+            sa.identity !== sb.identity &&
+            sa.qualifying &&
+            sb.qualifying
+          ) {
             conflict = true;
             break outer;
           }
@@ -1262,34 +1381,56 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     });
   }
 
-  // Dedupe team-seasons: scraper sometimes writes multiple rows for the
-  // same (team, season) human. Collapse into one stint each.
-  const stintMap = new Map<string, UsauPlayerSummary['teamHistory'][number]>();
+  // Dedupe team-seasons into one stint per real-world team+season.
+  //
+  // A team like "Colorado" plays several events per season (Regionals →
+  // Nationals), and the scraper writes a SEPARATE per-event usau_teams row for
+  // each participation (distinct team_id). Grouping by team_id therefore split
+  // one team-season into multiple cards. The persistent usau_team_id column is
+  // not populated yet, so we key on the stable identity tuple instead:
+  //   name + gender_division + competition_level + season
+  // This correctly (a) merges a team's Regionals + Nationals + Sectionals into
+  // one stint, while (b) keeping Men's vs Women's (gender_division) and
+  // college vs club "Colorado" (competition_level) as distinct stints.
+  //
+  // Because one stint now spans multiple per-event team_ids, we track them in
+  // a Set so the events + champion passes below can look up every participation.
+  type Stint = UsauPlayerSummary['teamHistory'][number] & { _teamIds: Set<string> };
+  const stintMap = new Map<string, Stint>();
   for (const r of rosterRes.data ?? []) {
-    const teamRel = (r as { usau_teams: { name: string; gender_division: string | null } | null }).usau_teams;
+    const teamRel = (
+      r as { usau_teams: { name: string; gender_division: string | null; competition_level: string | null } | null }
+    ).usau_teams;
     const teamName = teamRel?.name ?? 'Unknown team';
     const genderDivision = teamRel?.gender_division ?? null;
-    const key = r.team_id + '|' + r.season;
+    const level = teamRel?.competition_level ?? '';
+    const key = [teamName.toLowerCase(), genderDivision ?? '', level, r.season].join('|');
     const existing = stintMap.get(key);
     if (!existing) {
       stintMap.set(key, {
         teamId: r.team_id,
         teamName,
         genderDivision,
+        competitionLevel: level || null,
         season: r.season,
         jerseyNumber: r.jersey_number,
         isChampion: false,
         events: [],
+        _teamIds: new Set([r.team_id]),
       });
-    } else if (!existing.jerseyNumber && r.jersey_number) {
-      existing.jerseyNumber = r.jersey_number;
+    } else {
+      existing._teamIds.add(r.team_id);
+      if (!existing.jerseyNumber && r.jersey_number) existing.jerseyNumber = r.jersey_number;
     }
   }
 
   for (const stint of stintMap.values()) {
     const seenEvents = new Set<string>();
     const events: typeof stint.events = [];
-    for (const p of eventsByTeamId.get(stint.teamId) ?? []) {
+    // The stint spans every per-event team_id for this team+season, so gather
+    // participations across all of them (dedup by event_id).
+    const participations = [...stint._teamIds].flatMap((tid) => eventsByTeamId.get(tid) ?? []);
+    for (const p of participations) {
       const ev = (p as { usau_events: { usau_slug: string; name: string; season: number; start_date: string | null } | null }).usau_events;
       if (!ev || ev.season !== stint.season) continue;
       if (seenEvents.has(p.event_id)) continue;
@@ -1310,7 +1451,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     stint.events = events;
   }
 
-  const teamHistory = Array.from(stintMap.values()).sort(
+  const teamHistoryStints = Array.from(stintMap.values()).sort(
     (a, b) => b.season - a.season || a.teamName.localeCompare(b.teamName),
   );
 
@@ -1329,15 +1470,32 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     if (tr?.gender_division) divisionByTeamId.set(r.team_id, tr.gender_division);
   }
   const championYears: number[] = [];
-  for (const stint of teamHistory) {
-    const div = divisionByTeamId.get(stint.teamId);
-    const champ = div ? champions.get(stint.season)?.get(div) : null;
-    if (champ && champ.teamId === stint.teamId) {
+  for (const stint of teamHistoryStints) {
+    // The stint spans multiple per-event team_ids; it's a champion if ANY of
+    // them is the season's division winner (the title is won at Nationals,
+    // which is one of the stint's participations).
+    const ids = stint._teamIds;
+    let isChamp = false;
+    for (const tid of ids) {
+      const div = divisionByTeamId.get(tid);
+      const champ = div ? champions.get(stint.season)?.get(div) : null;
+      if (champ && champ.teamId === tid) {
+        isChamp = true;
+        break;
+      }
+    }
+    if (isChamp) {
       stint.isChampion = true;
       championYears.push(stint.season);
     }
   }
   championYears.sort((a, b) => b - a);
+
+  // Strip the internal _teamIds set from the wire shape.
+  const teamHistory = teamHistoryStints.map(({ _teamIds, ...stint }) => {
+    void _teamIds;
+    return stint;
+  });
 
   return {
     id: anchor.id,

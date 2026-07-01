@@ -484,21 +484,27 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             </span>
           </Link>
 
-          {/* ── FANTASY row — disabled ───────────────────────────────── */}
-          <div
-            aria-disabled="true"
+          {/* ── FANTASY row — direct link (beta) ────────────────────── */}
+          <Link
+            href="/fantasy"
+            onClick={onClose}
+            aria-current={activeApp === 'fantasy' ? 'page' : undefined}
             className={[
               rowBase,
-              'text-faint cursor-not-allowed select-none border-b border-hairline',
+              activeApp === 'fantasy' ? 'text-ink' : 'text-ink hover:bg-surface',
+              'border-b border-hairline no-underline',
             ].join(' ')}
           >
             <span className="flex items-center gap-2">
               FANTASY
-              <sup className="text-[8px] font-bold tracking-[0.14em] text-faint leading-none">
-                SOON
+              <sup className="text-[8px] font-bold tracking-[0.14em] text-accent leading-none">
+                BETA
               </sup>
+              {activeApp === 'fantasy' && (
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" aria-hidden="true" />
+              )}
             </span>
-          </div>
+          </Link>
 
           {/* ── 12-0 row — direct link ───────────────────────────────── */}
           <Link

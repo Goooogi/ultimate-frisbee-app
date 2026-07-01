@@ -46,7 +46,12 @@ export default async function UsauTeamPage({ params }: Props) {
       ]}
     >
       <div className="flex flex-wrap items-center gap-3 mb-8 pb-6 border-b border-hairline">
-        <UsauTeamLogo name={team.name} genderDivision={team.genderDivision} size={56} />
+        <UsauTeamLogo
+          name={team.name}
+          genderDivision={team.genderDivision}
+          competitionLevel={team.competitionLevel}
+          size={56}
+        />
         <SummaryChip label="Seasons" value={yearsCount} />
         <SummaryChip label="Events" value={totalEvents} />
       </div>
