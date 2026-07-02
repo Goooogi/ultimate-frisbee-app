@@ -12,6 +12,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getUnifiedPlayerProfile } from '@/lib/unified-player';
 import { UnifiedProfile } from '@/components/players/unified-player-profile';
+import { DivisionSync } from '@/components/players/division-sync';
 import { getApprovedContentForPlayer } from '@/lib/player-content/server';
 
 // Content rows are user-uploaded and approved on demand — they can change
@@ -40,5 +41,10 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
 
   const content = await getApprovedContentForPlayer(profile.anchorLeague, profile.anchorId);
 
-  return <UnifiedProfile profile={profile} content={content} fromLeague={searchParams.from} />;
+  return (
+    <>
+      <DivisionSync division={profile.mostRecentUsauDivision} />
+      <UnifiedProfile profile={profile} content={content} fromLeague={searchParams.from} />
+    </>
+  );
 }

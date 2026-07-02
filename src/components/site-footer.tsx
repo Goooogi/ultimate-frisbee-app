@@ -7,6 +7,8 @@
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
 
+// Used by the (currently hidden) Altius attribution below — kept for restore.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ExternalArrow() {
   return (
     <svg
@@ -53,8 +55,9 @@ export function SiteFooter() {
         </span>
       </div>
 
-      {/* RIGHT — attribution */}
-      <a
+      {/* RIGHT — attribution. Hidden for now (per Hunter); restore this block
+          to show "Developed by Altius" again in the future. */}
+      {/* <a
         href="https://altiusapps.com"
         target="_blank"
         rel="noopener noreferrer"
@@ -71,7 +74,7 @@ export function SiteFooter() {
           Altius
         </span>
         <ExternalArrow />
-      </a>
+      </a> */}
     </footer>
   );
 }

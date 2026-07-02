@@ -386,16 +386,24 @@ export async function getCurrentEvent(opts?: {
   const isPast = (e: EventRow) => endOf(e) < today;
   const isUpcomingOrNow = (e: EventRow) => endOf(e) >= today;
 
-  // Highest flight wins; tie-break toward the weekend nearest "now" — soonest
-  // start for upcoming, most-recent start for past.
-  const byFlightThen = (recentFirst: boolean) => (a: EventRow, b: EventRow) =>
-    flightRankForName(b.name) - flightRankForName(a.name) ||
-    (recentFirst
+  // "Highest-flight MOST RECENT": the nearest WEEKEND to now wins first, and
+  // flight only breaks ties AMONG same-weekend events. So last weekend's Pro
+  // Elite Challenge headlines over a 5-week-old College Championships, while a
+  // marquee event still out-headlines a co-scheduled local tournament.
+  // (Previously flight was the primary key, which wrongly surfaced an old
+  // pinnacle event over a much more recent one.) Events on the same weekend
+  // share a start_date, so start_date as the primary key groups them; flight is
+  // the secondary key within that group.
+  const byDateThenFlight = (recentFirst: boolean) => (a: EventRow, b: EventRow) => {
+    const dateCmp = recentFirst
       ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
-      : (a.start_date ?? '').localeCompare(b.start_date ?? ''));
+      : (a.start_date ?? '').localeCompare(b.start_date ?? '');
+    if (dateCmp !== 0) return dateCmp;
+    return flightRankForName(b.name) - flightRankForName(a.name);
+  };
 
-  const upcoming = events.filter(isUpcomingOrNow).sort(byFlightThen(false));
-  const past = events.filter(isPast).sort(byFlightThen(true));
+  const upcoming = events.filter(isUpcomingOrNow).sort(byDateThenFlight(false));
+  const past = events.filter(isPast).sort(byDateThenFlight(true));
 
   // Preferred side first, then the other side as a graceful fallback (e.g. early
   // in a season there is no "last weekend"; at season's end no "next weekend").
@@ -727,6 +735,148 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   }
 
   return results;
+}
+
+/**
+ * Recent USAU tournaments for the /scores?league=usau landing: the last ~14
+ * days (≈ 2 weekends) of FLAGSHIP tournaments, each enriched with per-division
+ * champions.
+ *
+ * Selection (per Hunter):
+ *   • FLAGSHIP only — ranked-flight events (Pro Elite, Elite-Select, Select
+ *     Flight, Nationals, US Open, …). We deliberately DON'T show the long tail
+ *     of local summer invites; team-count doesn't distinguish them (locals run
+ *     14-35 teams too), and they aren't results people track.
+ *   • FINISHED only — a card appears only once the tournament has ≥1 division
+ *     champion (a decided final). In-progress/unscraped events are omitted.
+ *   • Newest weekend first, then higher flight first within a weekend, capped
+ *     at `limit`.
+ *
+ * Champion detection is corrected vs. the older per-event helper: USAU
+ * sometimes labels BOTH a semifinal and the title game round='final' in the
+ * same championship bracket, so we keep the LATEST-scheduled final per
+ * (event, division) rather than whichever row we happen to see first.
+ */
+export async function recentUsauTournamentCards(
+  now: Date = new Date(),
+  limit = 8,
+): Promise<UsauMajorWithChampions[]> {
+  const db = await supabase();
+  const today = now.toISOString().slice(0, 10);
+  const windowBack = new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 10);
+
+  // Recent completed CLUB events in the last ~2 weekends.
+  const { data: events } = await db
+    .from('usau_events')
+    .select('id, usau_slug, name, start_date, end_date')
+    .eq('competition_level', 'CLUB')
+    .lt('end_date', today)
+    .gte('end_date', windowBack)
+    .order('end_date', { ascending: false, nullsFirst: false });
+
+  // FLAGSHIP only — keep just ranked-flight events.
+  const recent = ((events ?? []) as Array<{
+    id: string;
+    usau_slug: string;
+    name: string;
+    start_date: string | null;
+    end_date: string | null;
+  }>).filter((e) => flightForName(e.name) !== null);
+  if (recent.length === 0) return [];
+
+  const eventIds = recent.map((e) => e.id);
+
+  // round='final' games for all these events, with scheduling to break the
+  // semi-vs-final ambiguity, and bracket_name to drop placement brackets.
+  const { data: finals } = await db
+    .from('usau_games')
+    .select(
+      'event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+        'team_a:usau_teams!team_a_id(name, gender_division), ' +
+        'team_b:usau_teams!team_b_id(name, gender_division)',
+    )
+    .in('event_id', eventIds)
+    .eq('round', 'final');
+
+  type TeamRef = { name: string; gender_division: string | null } | null;
+  type Row = {
+    event_id: string;
+    team_a_id: string | null;
+    team_b_id: string | null;
+    score_a: number | null;
+    score_b: number | null;
+    scheduled_at: string | null;
+    bracket_name: string | null;
+    team_a: TeamRef;
+    team_b: TeamRef;
+  };
+
+  // Keep the latest-scheduled decided final per (event, division), skipping
+  // placement brackets (13th/17th place etc. also carry round='final').
+  const best = new Map<
+    string,
+    { teamName: string; teamId: string; scheduledAt: string }
+  >();
+  for (const g of (finals ?? []) as unknown as Row[]) {
+    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
+    if (g.team_a_id == null || g.team_b_id == null) continue;
+    const b = (g.bracket_name ?? '').toLowerCase();
+    if (/\b\d+(st|nd|rd|th)\b/.test(b) && !b.includes('1st')) continue; // drop 5th/13th/17th…
+    if (b.includes('consolation') || b.includes('placement')) continue;
+
+    const aWon = g.score_a > g.score_b;
+    const winnerId = aWon ? g.team_a_id : g.team_b_id;
+    const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
+    let division = (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
+    if (!division) {
+      if (b.includes('mixed')) division = 'Mixed';
+      else if (b.includes('women')) division = 'Women';
+      else if (b.includes('men')) division = 'Men';
+    }
+    if (!division) continue;
+
+    const key = `${g.event_id}|${division}`;
+    const sched = g.scheduled_at ?? '';
+    const prev = best.get(key);
+    if (!prev || sched > prev.scheduledAt) {
+      best.set(key, { teamName: winnerName, teamId: winnerId, scheduledAt: sched });
+    }
+  }
+
+  const championsByEvent = new Map<
+    string,
+    Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>
+  >();
+  for (const [key, v] of best) {
+    const [eventId, division] = key.split('|');
+    if (!championsByEvent.has(eventId)) championsByEvent.set(eventId, []);
+    championsByEvent
+      .get(eventId)!
+      .push({ division: division as 'Men' | 'Women' | 'Mixed', teamName: v.teamName, teamId: v.teamId });
+  }
+
+  const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
+  const results: UsauMajorWithChampions[] = [];
+  for (const e of recent) {
+    const champions = championsByEvent.get(e.id);
+    if (!champions || champions.length === 0) continue; // finished-only
+    results.push({
+      slug: e.usau_slug,
+      name: e.name,
+      startDate: e.start_date,
+      endDate: e.end_date,
+      flight: flightForName(e.name),
+      champions: champions.sort((a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9)),
+    });
+  }
+
+  // Newest weekend first; within a weekend the higher flight leads.
+  results.sort(
+    (a, b) =>
+      (b.endDate ?? '').localeCompare(a.endDate ?? '') ||
+      flightRankForName(b.name) - flightRankForName(a.name),
+  );
+  return results.slice(0, limit);
 }
 
 /** Distinct seasons we have any event for, newest first. */

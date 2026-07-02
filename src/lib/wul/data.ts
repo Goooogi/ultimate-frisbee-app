@@ -573,3 +573,105 @@ export async function getWulGameBoxscore(
     home: sortRows(statRows.filter((r) => r.team_id === game.home.teamId).map(map)),
   };
 }
+
+// ─── Per-player game log (for the unified profile's season dropdown) ─────────
+
+/** One WUL game from a single player's perspective: their stat line + the
+ *  matchup context (opponent, date, result). */
+export interface WulPlayerGameRow {
+  gameId: string;
+  date: string | null;
+  weekLabel: string;
+  opponentAbbrev: string | null;
+  /** 'W' | 'L' | null (null = no final score). From the player's team POV. */
+  result: 'W' | 'L' | null;
+  teamScore: number | null;
+  oppScore: number | null;
+  goals: number;
+  assists: number;
+  blocks: number;
+  turnovers: number;
+  touches: number;
+  pointsPlayed: number;
+  plusMinus: number;
+  totalYards: number;
+}
+
+/**
+ * A WUL player's game-by-game log for one season. Matches by player_name (the
+ * box-score rows store name, not a stable id). Joins wul_games for the matchup
+ * so the profile can show opponent + result per game. Sorted by date asc.
+ */
+export async function getWulPlayerGameLog(
+  playerName: string,
+  season: number,
+): Promise<WulPlayerGameRow[]> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('wul_game_player_stats')
+    .select(
+      'game_id, team_id, goals, assists, blocks, turnovers, touches, points_played, plus_minus, total_yards, ' +
+        'wul_games!inner(id, game_date, week_label, away_team_id, home_team_id, away_abbrev, home_abbrev, away_score, home_score, season)',
+    )
+    .eq('player_name', playerName)
+    .eq('wul_games.season', season);
+  if (error) throw error;
+
+  type Row = {
+    game_id: string;
+    team_id: string;
+    goals: number;
+    assists: number;
+    blocks: number;
+    turnovers: number;
+    touches: number;
+    points_played: number;
+    plus_minus: number;
+    total_yards: number;
+    wul_games: {
+      id: string;
+      game_date: string | null;
+      week_label: string;
+      away_team_id: string;
+      home_team_id: string;
+      away_abbrev: string;
+      home_abbrev: string;
+      away_score: number | null;
+      home_score: number | null;
+    } | null;
+  };
+
+  const rows = (data ?? []) as unknown as Row[];
+  const out: WulPlayerGameRow[] = [];
+  for (const r of rows) {
+    const g = r.wul_games;
+    if (!g) continue;
+    const isHome = r.team_id === g.home_team_id;
+    const teamScore = isHome ? g.home_score : g.away_score;
+    const oppScore = isHome ? g.away_score : g.home_score;
+    const opponentAbbrev = isHome ? g.away_abbrev : g.home_abbrev;
+    let result: 'W' | 'L' | null = null;
+    if (teamScore != null && oppScore != null && teamScore !== oppScore) {
+      result = teamScore > oppScore ? 'W' : 'L';
+    }
+    out.push({
+      gameId: g.id,
+      date: g.game_date,
+      weekLabel: g.week_label,
+      opponentAbbrev,
+      result,
+      teamScore,
+      oppScore,
+      goals: r.goals,
+      assists: r.assists,
+      blocks: r.blocks,
+      turnovers: r.turnovers,
+      touches: r.touches,
+      pointsPlayed: r.points_played,
+      plusMinus: Number(r.plus_minus),
+      totalYards: r.total_yards,
+    });
+  }
+  out.sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
+  return out;
+}

@@ -139,6 +139,55 @@ export function UsauEventDetail({ event }: Props) {
     poolGames.get(g.bracketName)!.push(g);
   }
 
+  // ── Pool-play records (per team, from that pool's completed games) ──────
+  // W-L within pool play, shown in the standings card next to each team.
+  // Only counts finished games with a decisive score. A team with no
+  // completed pool games gets no record (rendered as "—") rather than 0-0,
+  // so a pool that hasn't started reads as pending, not all-tied.
+  const poolRecords = new Map<string, { wins: number; losses: number }>();
+  for (const gs of poolGames.values()) {
+    for (const g of gs) {
+      if (g.status !== 'final') continue;
+      if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) continue;
+      const aWon = g.scoreA > g.scoreB;
+      const winId = aWon ? g.teamAId : g.teamBId;
+      const loseId = aWon ? g.teamBId : g.teamAId;
+      if (winId) {
+        const r = poolRecords.get(winId) ?? { wins: 0, losses: 0 };
+        r.wins += 1;
+        poolRecords.set(winId, r);
+      }
+      if (loseId) {
+        const r = poolRecords.get(loseId) ?? { wins: 0, losses: 0 };
+        r.losses += 1;
+        poolRecords.set(loseId, r);
+      }
+    }
+  }
+
+  // ── Championship final (for the top-of-page result banner) ─────────────
+  // The completed title game. We surface it ABOVE the bracket tree so a
+  // finished tournament leads with its champion — most valuable on mobile,
+  // where the horizontal bracket tree otherwise buries the final off-screen.
+  const finalGame = useMemo(() => {
+    const finals = games.filter(
+      (g) =>
+        isChampionshipBracket(g) &&
+        g.round === 'final' &&
+        g.status === 'final' &&
+        g.scoreA != null &&
+        g.scoreB != null &&
+        g.scoreA !== g.scoreB,
+    );
+    if (finals.length === 0) return null;
+    // USAU sometimes labels BOTH the semi and the title game round='final' under
+    // "1st Place". The actual title game is the LAST one played, so pick the
+    // latest scheduledAt (fall back to array order when timestamps are missing).
+    return finals.reduce((latest, g) =>
+      (g.scheduledAt ?? '') > (latest.scheduledAt ?? '') ? g : latest,
+    );
+  }, [games]);
+
   // Divisions this event actually fielded, in canonical order — drives the
   // scoped division switcher below (only shown when there's more than one).
   const eventDivisions = (['Men', 'Women', 'Mixed'] as const).filter((d) =>
@@ -147,6 +196,17 @@ export function UsauEventDetail({ event }: Props) {
 
   return (
     <>
+      {/* Champion banner — leads the page for a finished tournament so the
+          title result is the first thing seen (esp. on mobile, where the
+          bracket tree scrolls horizontally and hides the final). */}
+      {finalGame && (
+        <ChampionBanner
+          game={finalGame}
+          competitionLevel={event.competitionLevel}
+          genderDivision={gender || null}
+        />
+      )}
+
       {/* Division switcher — only when the event fielded 2+ divisions (most
           TCT/Nationals events do; single-division sectionals don't need it).
           Scoped to the divisions this event actually has. Writes ?div=, which
@@ -175,7 +235,12 @@ export function UsauEventDetail({ event }: Props) {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
             {pools.map((pool) => (
-              <PoolCard key={pool.name} pool={pool} />
+              <PoolCard
+                key={pool.name}
+                pool={pool}
+                competitionLevel={event.competitionLevel}
+                records={poolRecords}
+              />
             ))}
           </div>
           {poolGames.size > 0 ? (
@@ -248,7 +313,104 @@ function PoolGamesEmpty({ slug }: { slug: string }) {
   );
 }
 
-function PoolCard({ pool }: { pool: { name: string; teams: Team[] } }) {
+function ChampionBanner({
+  game,
+  competitionLevel,
+  genderDivision,
+}: {
+  game: Game;
+  competitionLevel: string;
+  genderDivision: string | null;
+}) {
+  const aWon = game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
+  const winnerName = aWon ? game.teamAName : game.teamBName;
+  const winnerId = aWon ? game.teamAId : game.teamBId;
+  const loserName = aWon ? game.teamBName : game.teamAName;
+  const winScore = aWon ? game.scoreA : game.scoreB;
+  const loseScore = aWon ? game.scoreB : game.scoreA;
+
+  const WinnerInner = (
+    <span className="flex items-center gap-3 min-w-0">
+      <UsauTeamLogo name={winnerName ?? ''} genderDivision={genderDivision} competitionLevel={competitionLevel} size={40} />
+      <span className="flex flex-col min-w-0">
+        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate">
+          {winnerName ?? '—'}
+        </span>
+        {loserName && (
+          <span className="text-[11px] text-muted font-tight truncate mt-1">
+            def. {loserName} · {winScore}–{loseScore}
+          </span>
+        )}
+      </span>
+    </span>
+  );
+
+  return (
+    <section
+      aria-label="Champion"
+      className="mb-6 rounded-lg border border-border bg-surface overflow-hidden"
+    >
+      {/* accent ring / trophy row */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
+        <TrophyIcon />
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+          Champion
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3 px-4 py-4">
+        {winnerId ? (
+          <Link
+            href={`/usau/teams/${winnerId}`}
+            className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
+          >
+            {WinnerInner}
+          </Link>
+        ) : (
+          <span className="min-w-0 flex-1">{WinnerInner}</span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TrophyIcon() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0">
+      <path
+        d="M4 2h8v3a4 4 0 01-8 0V2zM4 3H2v1a2 2 0 002 2M12 3h2v1a2 2 0 01-2 2M6 9.5V11m4-1.5V11M5 14h6M6.5 11h3l.5 3h-4l.5-3z"
+        stroke="rgb(var(--accent))"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PoolCard({
+  pool,
+  competitionLevel,
+  records,
+}: {
+  pool: { name: string; teams: Team[] };
+  competitionLevel: string;
+  records: Map<string, { wins: number; losses: number }>;
+}) {
+  // Rank by pool record when we have any completed games; the incoming
+  // team order is by seed, which stays as the tiebreak within equal records.
+  const anyRecords = pool.teams.some((t) => t.teamId && records.has(t.teamId));
+  const ranked = anyRecords
+    ? pool.teams
+        .slice()
+        .sort((a, b) => {
+          const ra = (a.teamId && records.get(a.teamId)) || { wins: 0, losses: 0 };
+          const rb = (b.teamId && records.get(b.teamId)) || { wins: 0, losses: 0 };
+          if (rb.wins !== ra.wins) return rb.wins - ra.wins;
+          if (ra.losses !== rb.losses) return ra.losses - rb.losses;
+          return (a.seed ?? 99) - (b.seed ?? 99);
+        })
+    : pool.teams;
+
   return (
     <div className="bg-surface border border-border rounded-md overflow-hidden">
       <div className="px-3 py-2 border-b border-hairline">
@@ -257,22 +419,33 @@ function PoolCard({ pool }: { pool: { name: string; teams: Team[] } }) {
         </span>
       </div>
       <ul>
-        {pool.teams.map((t) => (
-          <li key={t.teamId} className="border-b border-hairline last:border-b-0">
-            <Link
-              href={`/usau/teams/${t.teamId}`}
-              className="flex items-center gap-3 px-3 py-2 hover:bg-surface-hi transition-colors no-underline"
-            >
-              <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
-                {t.seed ?? '—'}
-              </span>
-              <UsauTeamLogo name={t.teamName} genderDivision={t.genderDivision} size={20} />
-              <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink font-tight truncate">
-                {t.teamName}
-              </span>
-            </Link>
-          </li>
-        ))}
+        {ranked.map((t) => {
+          const rec = t.teamId ? records.get(t.teamId) : undefined;
+          return (
+            <li key={t.teamId} className="border-b border-hairline last:border-b-0">
+              <Link
+                href={`/usau/teams/${t.teamId}`}
+                className="flex items-center gap-3 px-3 py-2 hover:bg-surface-hi transition-colors no-underline"
+              >
+                <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
+                  {t.seed ?? '—'}
+                </span>
+                <UsauTeamLogo
+                  name={t.teamName}
+                  genderDivision={t.genderDivision}
+                  competitionLevel={competitionLevel}
+                  size={20}
+                />
+                <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink font-tight truncate">
+                  {t.teamName}
+                </span>
+                <span className="tabular text-[11px] font-bold text-muted font-tight flex-shrink-0">
+                  {rec ? `${rec.wins}–${rec.losses}` : '—'}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );

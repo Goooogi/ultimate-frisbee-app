@@ -14,6 +14,7 @@
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
 import type { UsauPlayerSummary } from '@/lib/usau/data';
+import { usauEventHref } from '@/lib/usau/event-href';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
 interface Props {
@@ -158,7 +159,11 @@ function TeamStintCard({ stint }: { stint: UsauPlayerSummary['teamHistory'][numb
         ) : (
           <ul className="flex flex-col gap-1.5">
             {stint.events.map((event) => (
-              <EventRow key={`${stint.teamId}-${event.slug}`} event={event} />
+              <EventRow
+                key={`${stint.teamId}-${event.slug}`}
+                event={event}
+                genderDivision={stint.genderDivision}
+              />
             ))}
           </ul>
         )}
@@ -169,8 +174,10 @@ function TeamStintCard({ stint }: { stint: UsauPlayerSummary['teamHistory'][numb
 
 function EventRow({
   event,
+  genderDivision,
 }: {
   event: UsauPlayerSummary['teamHistory'][number]['events'][number];
+  genderDivision: string | null;
 }) {
   const date = event.startDate
     ? new Date(event.startDate + 'T00:00:00').toLocaleDateString('en-US', {
@@ -182,7 +189,7 @@ function EventRow({
   return (
     <li className="flex items-center gap-3 px-2 py-1.5 hover:bg-surface transition-colors rounded">
       <Link
-        href={`/usau/events/${event.slug}`}
+        href={usauEventHref(event.slug, genderDivision)}
         className="flex-1 min-w-0 text-[13px] text-ink font-tight hover:text-accent transition-colors truncate"
       >
         {event.name}

@@ -37,16 +37,20 @@ import {
   getPulPlayerCareerByName,
   findPulPlayerNameByName,
   listPulTeams,
+  getPulPlayerGameLog,
   type PulTeam,
   type PulPlayerCareer,
+  type PulPlayerGameRow,
 } from '@/lib/pul/data';
 import {
   getWulPlayer,
   getWulPlayerCareerByName,
   findWulPlayerNameByName,
   listWulTeams,
+  getWulPlayerGameLog,
   type WulTeam,
   type WulPlayerCareer,
+  type WulPlayerGameRow,
 } from '@/lib/wul/data';
 import { namesMatch } from '@/lib/name-match';
 
@@ -121,6 +125,8 @@ export interface PulSeasonStint {
     dPoints: number;
     plusMinus: number;
   };
+  /** Per-game log for the season. Empty when no box scores exist (e.g. 2022). */
+  games: PulPlayerGameRow[];
 }
 
 /**
@@ -151,6 +157,8 @@ export interface WulSeasonStint {
     dPoints: number;
     plusMinus: number;
   };
+  /** Per-game log for the season. */
+  games: WulPlayerGameRow[];
 }
 
 export type SeasonStint = UfaSeasonStint | UsauSeasonStint | PulSeasonStint | WulSeasonStint;
@@ -224,6 +232,11 @@ export interface UnifiedPlayerProfile {
   } | null;
   championYearsUfa: number[];
   championYearsUsau: number[];
+  /** The player's most-recent USAU gender division ('Men'|'Women'|'Mixed'), or
+   *  null if they have no USAU stints. Lets the profile sync the nav's division
+   *  so the "Teams" tab lands on the right division (e.g. a Mixed player → Mixed
+   *  club teams). Most-recent chosen because a career can span divisions. */
+  mostRecentUsauDivision: string | null;
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────
@@ -405,7 +418,16 @@ export async function getUnifiedPlayerProfile(
   }
 
   if (sidePulCareer) {
-    for (const pulStint of sidePulCareer.stints) {
+    // Fetch all PUL game logs in parallel — one per season stint.
+    const pulGameLogs = await Promise.all(
+      sidePulCareer.stints.map((pulStint) =>
+        getPulPlayerGameLog(sidePulCareer.playerName, pulStint.season).catch(
+          () => [] as PulPlayerGameRow[],
+        ),
+      ),
+    );
+    for (let i = 0; i < sidePulCareer.stints.length; i++) {
+      const pulStint = sidePulCareer.stints[i];
       const list = yearMap.get(pulStint.season) ?? [];
       const team = teamMap.get(pulStint.player.teamId);
       list.push({
@@ -429,13 +451,23 @@ export async function getUnifiedPlayerProfile(
           dPoints: pulStint.player.dPoints,
           plusMinus: pulStint.player.plusMinus,
         },
+        games: pulGameLogs[i],
       });
       yearMap.set(pulStint.season, list);
     }
   }
 
   if (sideWulCareer) {
-    for (const wulStint of sideWulCareer.stints) {
+    // Fetch all WUL game logs in parallel — one per season stint.
+    const wulGameLogs = await Promise.all(
+      sideWulCareer.stints.map((wulStint) =>
+        getWulPlayerGameLog(sideWulCareer.playerName, wulStint.season).catch(
+          () => [] as WulPlayerGameRow[],
+        ),
+      ),
+    );
+    for (let i = 0; i < sideWulCareer.stints.length; i++) {
+      const wulStint = sideWulCareer.stints[i];
       const list = yearMap.get(wulStint.season) ?? [];
       const team = wulTeamMap.get(wulStint.player.teamId);
       list.push({
@@ -458,6 +490,7 @@ export async function getUnifiedPlayerProfile(
           dPoints: wulStint.player.dPoints,
           plusMinus: wulStint.player.plusMinus,
         },
+        games: wulGameLogs[i],
       });
       yearMap.set(wulStint.season, list);
     }
@@ -466,6 +499,19 @@ export async function getUnifiedPlayerProfile(
   const years: UnifiedYear[] = Array.from(yearMap.entries())
     .sort((a, b) => b[0] - a[0])
     .map(([year, stints]) => ({ year, stints: sortStintsForYear(stints) }));
+
+  // Most-recent USAU division — years are newest-first, so the first USAU
+  // stint we encounter with a gender division is the latest. Drives the
+  // "Teams" nav tab's division on the profile.
+  let mostRecentUsauDivision: string | null = null;
+  outer: for (const y of years) {
+    for (const s of y.stints) {
+      if (s.league === 'usau' && s.genderDivision) {
+        mostRecentUsauDivision = s.genderDivision;
+        break outer;
+      }
+    }
+  }
 
   // ── Career aggregates ───────────────────────────────────────────────────
   // UFA + USAU add into the shared `career` block (same as before).
@@ -550,6 +596,7 @@ export async function getUnifiedPlayerProfile(
     wul: wulCareerBlock,
     championYearsUfa: sideUfa?.championYears ?? [],
     championYearsUsau: sideUsau?.championYears ?? [],
+    mostRecentUsauDivision,
   };
 }
 

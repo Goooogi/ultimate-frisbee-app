@@ -23,9 +23,12 @@ import { PageShell } from '@/components/page-shell';
 import { TeamLogo } from '@/components/team-logo';
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
+import type { PulPlayerGameRow } from '@/lib/pul/data';
+import type { WulPlayerGameRow } from '@/lib/wul/data';
 import { PlayerContentGallery } from '@/components/players/player-content-gallery';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { usauEventHref } from '@/lib/usau/event-href';
 
 interface Props {
   profile: UnifiedPlayerProfile;
@@ -364,7 +367,11 @@ function UsauStintRow({ stint }: { stint: UsauSeasonStint }) {
         ) : (
           <ul className="flex flex-col gap-1.5">
             {stint.events.map((event) => (
-              <UsauEventRow key={`${stint.teamId}-${event.slug}`} event={event} />
+              <UsauEventRow
+                key={`${stint.teamId}-${event.slug}`}
+                event={event}
+                genderDivision={stint.genderDivision}
+              />
             ))}
           </ul>
         )}
@@ -375,8 +382,10 @@ function UsauStintRow({ stint }: { stint: UsauSeasonStint }) {
 
 function UsauEventRow({
   event,
+  genderDivision,
 }: {
   event: UsauSeasonStint['events'][number];
+  genderDivision: string | null;
 }) {
   const date = event.startDate
     ? new Date(event.startDate + 'T00:00:00').toLocaleDateString('en-US', {
@@ -385,10 +394,13 @@ function UsauEventRow({
         year: 'numeric',
       })
     : null;
+  // Carry the stint's division so the event opens on the RIGHT bracket (a Mixed
+  // player's Nationals link should land on the Mixed bracket, not default Men).
+  const href = usauEventHref(event.slug, genderDivision);
   return (
     <li className="flex items-center gap-3 px-2 py-1.5 hover:bg-surface transition-colors rounded">
       <Link
-        href={`/usau/events/${event.slug}`}
+        href={href}
         className="flex-1 min-w-0 text-[13px] text-ink font-tight hover:text-accent transition-colors truncate"
       >
         {event.name}
@@ -421,13 +433,22 @@ function UsauEventRow({
 
 // ── PUL stint ───────────────────────────────────────────────────────────
 // Expandable accordion row. Summary: team logo + name + key stats.
-// Expanded panel: full season-totals table (PUL has no per-game log).
+// Expanded panel: per-game log when box scores are available, season-totals
+// table as fallback (e.g. 2022 PUL has no box scores).
 
 function PulStintRow({ stint }: { stint: PulSeasonStint }) {
   // Dynamic accent color — sanctioned inline style (same pattern as PulTeamLogo).
   const accentStyle: React.CSSProperties = stint.teamAccentColor
     ? { borderLeft: `3px solid ${stint.teamAccentColor}` }
     : {};
+
+  // Dedup: teamName may already include the city (e.g. "Raleigh Radiance" while
+  // teamCity is "Raleigh"). Only prepend teamCity when teamName doesn't already
+  // start with it (case-insensitive).
+  const displayTeamName =
+    stint.teamName.toLowerCase().startsWith(stint.teamCity.toLowerCase())
+      ? stint.teamName
+      : `${stint.teamCity} ${stint.teamName}`;
 
   return (
     <details className="group [&[open]>summary]:bg-surface-hi">
@@ -447,7 +468,7 @@ function PulStintRow({ stint }: { stint: PulSeasonStint }) {
           />
           <span className="flex flex-col min-w-0">
             <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
-              {stint.teamCity} {stint.teamName}
+              {displayTeamName}
             </span>
             <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
               PUL
@@ -467,7 +488,11 @@ function PulStintRow({ stint }: { stint: PulSeasonStint }) {
         />
       </summary>
       <div className="px-4 pt-2 pb-4 border-t border-hairline overflow-x-auto">
-        <PulSeasonTotalsTable stats={stint.stats} />
+        {stint.games.length > 0 ? (
+          <PulGameLogTable games={stint.games} />
+        ) : (
+          <PulSeasonTotalsTable stats={stint.stats} />
+        )}
       </div>
     </details>
   );
@@ -510,16 +535,105 @@ function PulSeasonTotalsTable({ stats }: { stats: PulSeasonStint['stats'] }) {
   );
 }
 
+function PulGameLogTable({ games }: { games: PulPlayerGameRow[] }) {
+  const thBase =
+    'px-2 py-2 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-muted whitespace-nowrap';
+  const tdBase = 'px-2 py-2 text-[12px] border-b border-hairline whitespace-nowrap font-tight';
+
+  return (
+    <table className="w-full min-w-[560px] border-collapse">
+      <thead>
+        <tr>
+          <th scope="col" className={`${thBase} text-left`}>Date</th>
+          <th scope="col" className={`${thBase} text-left`}>Opp</th>
+          <th scope="col" className={`${thBase} text-left`}>Result</th>
+          <th scope="col" className={`${thBase} text-right`}>G</th>
+          <th scope="col" className={`${thBase} text-right`}>A</th>
+          <th scope="col" className={`${thBase} text-right`}>+/−</th>
+          <th scope="col" className={`${thBase} text-right`}>BLK</th>
+          <th scope="col" className={`${thBase} text-right`}>TO</th>
+          <th scope="col" className={`${thBase} text-right`}>Tch</th>
+        </tr>
+      </thead>
+      <tbody>
+        {games.map((g) => {
+          const date = g.date
+            ? formatShortDate(g.date)
+            : g.weekLabel;
+          const win = g.result === 'W';
+          const loss = g.result === 'L';
+          const score =
+            g.teamScore != null && g.oppScore != null
+              ? `${g.teamScore}–${g.oppScore}`
+              : '';
+          return (
+            <tr key={g.gameId} className="hover:bg-surface-hi transition-colors duration-100">
+              <td className={`${tdBase} text-left text-faint tabular`}>{date}</td>
+              <td className={`${tdBase} text-left`}>
+                {g.opponentAbbrev ? (
+                  <span className="text-muted font-semibold">{g.opponentAbbrev}</span>
+                ) : (
+                  <span className="text-faint">—</span>
+                )}
+              </td>
+              <td className={`${tdBase} text-left`}>
+                <Link
+                  href={`/pul/g/${g.gameId}`}
+                  className="inline-flex items-center gap-1 text-ink hover:text-accent transition-colors cursor-pointer"
+                >
+                  <span
+                    className={`text-[10px] font-bold tracking-[0.1em] uppercase ${win ? 'text-accent' : loss ? 'text-faint' : 'text-muted'}`}
+                  >
+                    {g.result ?? '—'}
+                  </span>
+                  {score && <span className="tabular text-[12px] text-muted">{score}</span>}
+                </Link>
+              </td>
+              <td className={`${tdBase} text-right tabular text-ink`}>{g.goals}</td>
+              <td className={`${tdBase} text-right tabular text-ink`}>{g.assists}</td>
+              <td
+                className={`${tdBase} text-right tabular ${g.plusMinus > 0 ? 'text-ink font-semibold' : g.plusMinus < 0 ? 'text-faint' : 'text-muted'}`}
+              >
+                {signed(g.plusMinus)}
+              </td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.blocks}</td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.turnovers}</td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.touches}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+      <tfoot>
+        <tr className="border-t-2 border-border">
+          <td colSpan={3} className={tfootLabel}>Total · {games.length} GP</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.goals)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.assists)}</td>
+          <td className={tfootCell}>{signed(sumBy(games, (g) => g.plusMinus))}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.blocks)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.turnovers)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.touches)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
 // ── WUL stint ───────────────────────────────────────────────────────────────
 // Expandable accordion row. Summary: team logo + name + key stats.
-// Expanded panel: full season-totals table (WUL data is aggregated to season
-// totals for this view, matching the PUL treatment).
+// Expanded panel: per-game log when available, season-totals table as fallback.
 
 function WulStintRow({ stint }: { stint: WulSeasonStint }) {
   // Dynamic accent color — same inline-style pattern as PulStintRow.
   const accentStyle: React.CSSProperties = stint.teamAccentColor
     ? { borderLeft: `3px solid ${stint.teamAccentColor}` }
     : {};
+
+  // Dedup: teamName may already include the city. Only prepend teamCity when it
+  // doesn't already appear at the start of teamName (case-insensitive).
+  const displayTeamName =
+    stint.teamName.toLowerCase().startsWith(stint.teamCity.toLowerCase())
+      ? stint.teamName
+      : `${stint.teamCity} ${stint.teamName}`;
 
   return (
     <details className="group [&[open]>summary]:bg-surface-hi">
@@ -540,7 +654,7 @@ function WulStintRow({ stint }: { stint: WulSeasonStint }) {
           />
           <span className="flex flex-col min-w-0">
             <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
-              {stint.teamCity} {stint.teamName}
+              {displayTeamName}
             </span>
             <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
               WUL
@@ -559,7 +673,11 @@ function WulStintRow({ stint }: { stint: WulSeasonStint }) {
         />
       </summary>
       <div className="px-4 pt-2 pb-4 border-t border-hairline overflow-x-auto">
-        <WulSeasonTotalsTable stats={stint.stats} />
+        {stint.games.length > 0 ? (
+          <WulGameLogTable games={stint.games} />
+        ) : (
+          <WulSeasonTotalsTable stats={stint.stats} />
+        )}
       </div>
     </details>
   );
@@ -598,6 +716,96 @@ function WulSeasonTotalsTable({ stats }: { stats: WulSeasonStint['stats'] }) {
           </td>
         </tr>
       </tbody>
+    </table>
+  );
+}
+
+function WulGameLogTable({ games }: { games: WulPlayerGameRow[] }) {
+  const thBase =
+    'px-2 py-2 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-muted whitespace-nowrap';
+  const tdBase = 'px-2 py-2 text-[12px] border-b border-hairline whitespace-nowrap font-tight';
+
+  return (
+    <table className="w-full min-w-[660px] border-collapse">
+      <thead>
+        <tr>
+          <th scope="col" className={`${thBase} text-left`}>Date</th>
+          <th scope="col" className={`${thBase} text-left`}>Opp</th>
+          <th scope="col" className={`${thBase} text-left`}>Result</th>
+          <th scope="col" className={`${thBase} text-right`}>G</th>
+          <th scope="col" className={`${thBase} text-right`}>A</th>
+          <th scope="col" className={`${thBase} text-right`}>+/−</th>
+          <th scope="col" className={`${thBase} text-right`}>BLK</th>
+          <th scope="col" className={`${thBase} text-right`}>TO</th>
+          <th scope="col" className={`${thBase} text-right`}>Tch</th>
+          <th scope="col" className={`${thBase} text-right`} title="Points played">PP</th>
+          <th scope="col" className={`${thBase} text-right`} title="Total yards">Yds</th>
+        </tr>
+      </thead>
+      <tbody>
+        {games.map((g) => {
+          const date = g.date
+            ? formatShortDate(g.date)
+            : g.weekLabel;
+          const win = g.result === 'W';
+          const loss = g.result === 'L';
+          const score =
+            g.teamScore != null && g.oppScore != null
+              ? `${g.teamScore}–${g.oppScore}`
+              : '';
+          const pm = g.plusMinus;
+          return (
+            <tr key={g.gameId} className="hover:bg-surface-hi transition-colors duration-100">
+              <td className={`${tdBase} text-left text-faint tabular`}>{date}</td>
+              <td className={`${tdBase} text-left`}>
+                {g.opponentAbbrev ? (
+                  <span className="text-muted font-semibold">{g.opponentAbbrev}</span>
+                ) : (
+                  <span className="text-faint">—</span>
+                )}
+              </td>
+              <td className={`${tdBase} text-left`}>
+                <Link
+                  href={`/wul/g/${g.gameId}`}
+                  className="inline-flex items-center gap-1 text-ink hover:text-accent transition-colors cursor-pointer"
+                >
+                  <span
+                    className={`text-[10px] font-bold tracking-[0.1em] uppercase ${win ? 'text-accent' : loss ? 'text-faint' : 'text-muted'}`}
+                  >
+                    {g.result ?? '—'}
+                  </span>
+                  {score && <span className="tabular text-[12px] text-muted">{score}</span>}
+                </Link>
+              </td>
+              <td className={`${tdBase} text-right tabular text-ink`}>{g.goals}</td>
+              <td className={`${tdBase} text-right tabular text-ink`}>{g.assists}</td>
+              <td
+                className={`${tdBase} text-right tabular ${pm > 0 ? 'text-ink font-semibold' : pm < 0 ? 'text-faint' : 'text-muted'}`}
+              >
+                {signed(pm)}
+              </td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.blocks}</td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.turnovers}</td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.touches}</td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.pointsPlayed}</td>
+              <td className={`${tdBase} text-right tabular text-muted`}>{g.totalYards}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+      <tfoot>
+        <tr className="border-t-2 border-border">
+          <td colSpan={3} className={tfootLabel}>Total · {games.length} GP</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.goals)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.assists)}</td>
+          <td className={tfootCell}>{signed(sumBy(games, (g) => g.plusMinus))}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.blocks)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.turnovers)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.touches)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.pointsPlayed)}</td>
+          <td className={tfootCell}>{sumBy(games, (g) => g.totalYards)}</td>
+        </tr>
+      </tfoot>
     </table>
   );
 }
@@ -790,6 +998,38 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
           );
         })}
       </tbody>
+      <tfoot>
+        {(() => {
+          // Counting stats sum; % columns recompute from summed totals (you
+          // can't average per-game percentages). +/− is the summed plus/minus.
+          const g = sumBy(sorted, (r) => r.goals);
+          const a = sumBy(sorted, (r) => r.assists);
+          const blk = sumBy(sorted, (r) => r.blocks);
+          const cmp = sumBy(sorted, (r) => r.completions);
+          const thr = sumBy(sorted, (r) => r.throwsAttempted);
+          const hc = sumBy(sorted, (r) => r.hucksCompleted);
+          const ha = sumBy(sorted, (r) => r.hucksAttempted);
+          const pm = sumBy(
+            sorted,
+            (r) => r.goals + r.assists + r.blocks - r.throwaways - r.drops - r.stalls,
+          );
+          const cmpPct = thr ? (cmp / thr) * 100 : 0;
+          const huckPct = ha ? (hc / ha) * 100 : 0;
+          return (
+            <tr className="border-t-2 border-border">
+              <td colSpan={3} className={tfootLabel}>Total · {sorted.length} GP</td>
+              <td className={tfootCell}>{g}</td>
+              <td className={tfootCell}>{a}</td>
+              <td className={tfootCell}>{signed(pm)}</td>
+              <td className={tfootCell}>{blk}</td>
+              <td className={tfootCell}>{cmp}/{thr}</td>
+              <td className={tfootCell}>{cmpPct ? `${cmpPct.toFixed(0)}%` : '—'}</td>
+              <td className={tfootCell}>{ha ? `${hc}/${ha}` : '—'}</td>
+              <td className={tfootCell}>{huckPct ? `${huckPct.toFixed(0)}%` : '—'}</td>
+            </tr>
+          );
+        })()}
+      </tfoot>
     </table>
   );
 }
@@ -863,6 +1103,25 @@ function isWul(s: SeasonStint): s is WulSeasonStint {
 function signed(n: number): string {
   if (n === 0) return '0';
   return n > 0 ? `+${n}` : String(n);
+}
+
+/** Sum a numeric field across game-log rows. */
+function sumBy<T>(rows: T[], pick: (r: T) => number): number {
+  return rows.reduce((acc, r) => acc + pick(r), 0);
+}
+
+// Shared styling for the game-log "Total" footer row — bold ink, sits under a
+// heavier top border so it reads as a summary distinct from the per-game rows.
+const tfootLabel =
+  'px-2 py-2 text-left text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-ink whitespace-nowrap';
+const tfootCell = 'px-2 py-2 text-right text-[12px] font-tight font-bold tabular text-ink whitespace-nowrap';
+
+/** Format a YYYY-MM-DD date string as "Jun 7" for display in game log tables. */
+function formatShortDate(dateStr: string): string {
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return dateStr;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[Number(m[2]) - 1]} ${Number(m[3])}`;
 }
 
 function parseGameDate(gameID: string): string {

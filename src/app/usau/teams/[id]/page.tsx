@@ -69,7 +69,7 @@ export default async function UsauTeamPage({ params }: Props) {
         <SummaryChip label="Events" value={totalEvents} />
       </div>
 
-      <UsauTeamHistory seasons={team.seasons} />
+      <UsauTeamHistory seasons={team.seasons} genderDivision={team.genderDivision} />
     </PageShell>
   );
 }

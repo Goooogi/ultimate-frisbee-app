@@ -650,3 +650,105 @@ export async function getPulGameBoxscore(
     home: sortRows(statRows.filter((r) => r.team_id === game.home.teamId).map(map)),
   };
 }
+
+// ─── Per-player game log (for the unified profile's season dropdown) ─────────
+
+/** One PUL game from a single player's perspective: their stat line + matchup
+ *  context (opponent, date, result). PUL box scores lack yards/points-played;
+ *  o/d points are available. */
+export interface PulPlayerGameRow {
+  gameId: string;
+  date: string | null;
+  weekLabel: string;
+  opponentAbbrev: string | null;
+  result: 'W' | 'L' | null;
+  teamScore: number | null;
+  oppScore: number | null;
+  goals: number;
+  assists: number;
+  blocks: number;
+  turnovers: number;
+  touches: number;
+  oPoints: number;
+  dPoints: number;
+  plusMinus: number;
+}
+
+/**
+ * A PUL player's game-by-game log for one season. Matches by player_name; joins
+ * pul_games for the matchup (opponent + result). Sorted by date asc. Only
+ * 2023+ seasons carry box scores (2022 has none) — returns [] otherwise.
+ */
+export async function getPulPlayerGameLog(
+  playerName: string,
+  season: number,
+): Promise<PulPlayerGameRow[]> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('pul_game_player_stats')
+    .select(
+      'game_id, team_id, goals, assists, blocks, turnovers, touches, o_points, d_points, plus_minus, ' +
+        'pul_games!inner(id, game_date, week_label, away_team_id, home_team_id, away_abbrev, home_abbrev, away_score, home_score, season)',
+    )
+    .eq('player_name', playerName)
+    .eq('pul_games.season', season);
+  if (error) throw error;
+
+  type Row = {
+    game_id: string;
+    team_id: string;
+    goals: number;
+    assists: number;
+    blocks: number;
+    turnovers: number;
+    touches: number;
+    o_points: number;
+    d_points: number;
+    plus_minus: number;
+    pul_games: {
+      id: string;
+      game_date: string | null;
+      week_label: string;
+      away_team_id: string;
+      home_team_id: string;
+      away_abbrev: string;
+      home_abbrev: string;
+      away_score: number | null;
+      home_score: number | null;
+    } | null;
+  };
+
+  const rows = (data ?? []) as unknown as Row[];
+  const out: PulPlayerGameRow[] = [];
+  for (const r of rows) {
+    const g = r.pul_games;
+    if (!g) continue;
+    const isHome = r.team_id === g.home_team_id;
+    const teamScore = isHome ? g.home_score : g.away_score;
+    const oppScore = isHome ? g.away_score : g.home_score;
+    const opponentAbbrev = isHome ? g.away_abbrev : g.home_abbrev;
+    let result: 'W' | 'L' | null = null;
+    if (teamScore != null && oppScore != null && teamScore !== oppScore) {
+      result = teamScore > oppScore ? 'W' : 'L';
+    }
+    out.push({
+      gameId: g.id,
+      date: g.game_date,
+      weekLabel: g.week_label,
+      opponentAbbrev,
+      result,
+      teamScore,
+      oppScore,
+      goals: r.goals,
+      assists: r.assists,
+      blocks: r.blocks,
+      turnovers: r.turnovers,
+      touches: r.touches,
+      oPoints: r.o_points,
+      dPoints: r.d_points,
+      plusMinus: Number(r.plus_minus),
+    });
+  }
+  out.sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
+  return out;
+}

@@ -8,13 +8,17 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { UsauTeamSummary } from '@/lib/usau/data';
+import { usauEventHref } from '@/lib/usau/event-href';
 import { PillSelect } from '@/components/pill-select';
 
 interface Props {
   seasons: UsauTeamSummary['seasons'];
+  /** The team's gender division — carried onto event links so a Mixed team's
+   *  Nationals link opens the Mixed bracket, not the default Men's. */
+  genderDivision?: string | null;
 }
 
-export function UsauTeamHistory({ seasons }: Props) {
+export function UsauTeamHistory({ seasons, genderDivision = null }: Props) {
   const [selected, setSelected] = useState<number | null>(() => seasons[0]?.season ?? null);
 
   if (seasons.length === 0) {
@@ -59,7 +63,7 @@ export function UsauTeamHistory({ seasons }: Props) {
             </div>
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {active.events.map((event) => (
-                <EventCard key={event.slug} event={event} />
+                <EventCard key={event.slug} event={event} genderDivision={genderDivision} />
               ))}
             </ul>
           </div>
@@ -124,8 +128,10 @@ function YearDropdown({
 
 function EventCard({
   event,
+  genderDivision,
 }: {
   event: UsauTeamSummary['seasons'][number]['events'][number];
+  genderDivision: string | null;
 }) {
   const date = event.startDate
     ? new Date(event.startDate + 'T00:00:00').toLocaleDateString('en-US', {
@@ -137,7 +143,7 @@ function EventCard({
   return (
     <li>
       <Link
-        href={`/usau/events/${event.slug}`}
+        href={usauEventHref(event.slug, genderDivision)}
         className="block bg-surface border border-border rounded-md p-3.5 hover:border-ink transition-colors no-underline"
       >
         <div className="flex items-baseline justify-between gap-2 mb-1">

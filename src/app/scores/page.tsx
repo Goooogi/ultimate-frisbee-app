@@ -8,8 +8,8 @@ import { getCurrentGames } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
-import { getCurrentEvent, getEvent, type UsauEventSummary } from '@/lib/usau/data';
-import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
+import { recentUsauTournamentCards, type UsauMajorWithChampions } from '@/lib/usau/data';
+import { parseLeagueParam } from '@/lib/league';
 import { PageShell } from '@/components/page-shell';
 import { PulScores } from '@/components/pul/pul-scores';
 import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
@@ -23,8 +23,6 @@ interface Props {
 }
 
 export default async function HomePage({ searchParams }: Props) {
-  // USAU division filter persists across pages via ?div=. Default 'Men'.
-  const division = parseDivisionParam(searchParams.div);
   const league = parseLeagueParam(searchParams.league);
 
   // ── PUL branch ────────────────────────────────────────────────────────────
@@ -54,28 +52,20 @@ export default async function HomePage({ searchParams }: Props) {
   // showed, causing slow/stalled loads. Gate it on the active league so UFA
   // renders as fast as its own ~fast API call. (Mirrors how /schedule gates
   // its USAU fetch.) Switching to USAU re-fetches on that navigation.
-  const [games, usauEvent] = await Promise.all([
+  const [games, usauCards] = await Promise.all([
     getCurrentGames().catch((err) => {
       console.error('Failed to fetch UFA current games:', err);
       return [] as UfaGame[];
     }),
-    league === 'usau' ? loadCurrentEvent(division) : Promise.resolve<UsauEventSummary | null>(null),
+    league === 'usau'
+      ? recentUsauTournamentCards().catch((err) => {
+          console.error('Failed to load recent USAU tournaments:', err);
+          return [] as UsauMajorWithChampions[];
+        })
+      : Promise.resolve<UsauMajorWithChampions[]>([]),
   ]);
   const today = getToday();
-  return <FeedPage games={sortForFeed(games)} today={today} usauEvent={usauEvent} />;
-}
-
-async function loadCurrentEvent(
-  division: 'Men' | 'Women' | 'Mixed',
-): Promise<UsauEventSummary | null> {
-  try {
-    const pick = await getCurrentEvent({ genderDivision: division });
-    if (!pick) return null;
-    return await getEvent(pick.slug);
-  } catch (err) {
-    console.error('Failed to load USAU current event:', err);
-    return null;
-  }
+  return <FeedPage games={sortForFeed(games)} today={today} usauCards={usauCards} />;
 }
 
 /**
