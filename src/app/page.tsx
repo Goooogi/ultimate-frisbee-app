@@ -35,6 +35,11 @@ import {
   WulRecentCard,
 } from '@/components/home/multi-league-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
+import {
+  PulStandingsSection,
+  WulStandingsSection,
+  UsauRankingsSection,
+} from '@/components/home/league-standings-sections';
 import { SiteFooter } from '@/components/site-footer';
 
 export const revalidate = 60;
@@ -194,6 +199,12 @@ export default async function HomePage() {
         teamStats={teamStats}
         seasonLabel={`UFA · ${year}`}
       />
+
+      {/* PUL, WUL, and USAU standings / rankings — each section fetches its
+          own data and returns null if that league has no data (offseason-safe). */}
+      <PulStandingsSection />
+      <WulStandingsSection />
+      <UsauRankingsSection />
 
       <MultiLeagueGridSection
         title="Up next"

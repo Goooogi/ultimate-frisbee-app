@@ -457,6 +457,91 @@ export function deriveWulPostseasonRounds(games: WulGame[]): Map<string, WulPost
   return out;
 }
 
+// ─── Standings ─────────────────────────────────────────────────────────────
+
+/** A team's derived regular-season standing. WUL is a single division. */
+export interface WulStandingRow {
+  team: WulTeam;
+  wins: number;
+  losses: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDiff: number;
+  /** True if this team won the season's championship (final) game. */
+  champion: boolean;
+}
+
+/**
+ * Season standings for WUL, derived from final games (no standings table).
+ * Regular-season record only (postseason games excluded from W-L), sorted by
+ * wins → point differential. The championship winner (via
+ * deriveWulPostseasonRounds) is flagged `champion` so the UI can badge them.
+ */
+export async function getWulStandings(season: number): Promise<WulStandingRow[]> {
+  const [teams, games] = await Promise.all([
+    listWulTeams(),
+    listWulGames({ season, onlyFinal: true }),
+  ]);
+
+  // Champion = winner of the derived 'final' game.
+  const rounds = deriveWulPostseasonRounds(games);
+  let champion: string | null = null;
+  for (const g of games) {
+    if (rounds.get(g.id) !== 'final') continue;
+    if (g.home.score == null || g.away.score == null) continue;
+    champion = g.home.score > g.away.score ? g.home.teamId : g.away.teamId;
+  }
+
+  const rec = new Map<
+    string,
+    { wins: number; losses: number; pointsFor: number; pointsAgainst: number }
+  >();
+  const ensure = (id: string) => {
+    if (!rec.has(id)) rec.set(id, { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0 });
+    return rec.get(id)!;
+  };
+
+  for (const g of games) {
+    if (g.weekLabel === 'post') continue; // regular season only
+    const a = g.away.score;
+    const h = g.home.score;
+    if (a == null || h == null || a === h) continue;
+    const home = ensure(g.home.teamId);
+    const away = ensure(g.away.teamId);
+    home.pointsFor += h;
+    home.pointsAgainst += a;
+    away.pointsFor += a;
+    away.pointsAgainst += h;
+    if (h > a) {
+      home.wins += 1;
+      away.losses += 1;
+    } else {
+      away.wins += 1;
+      home.losses += 1;
+    }
+  }
+
+  return teams
+    .map((team) => {
+      const r = rec.get(team.id) ?? { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0 };
+      return {
+        team,
+        wins: r.wins,
+        losses: r.losses,
+        pointsFor: r.pointsFor,
+        pointsAgainst: r.pointsAgainst,
+        pointDiff: r.pointsFor - r.pointsAgainst,
+        champion: team.id === champion,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.wins - a.wins ||
+        b.pointDiff - a.pointDiff ||
+        a.team.name.localeCompare(b.team.name),
+    );
+}
+
 /** One game by id. Returns null if not found. Powers /wul/g/[...id]. */
 export async function getWulGame(id: string): Promise<WulGame | null> {
   const db = supabase();

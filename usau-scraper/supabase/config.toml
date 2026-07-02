@@ -44,3 +44,8 @@ verify_jwt = false
 [functions.sync-resolver-batch]
 # Invoked by pg_cron overnight to drain the resolver backlog in small chunks.
 verify_jwt = false
+
+[functions.sync-usau-rankings]
+# Invoked weekly (Sunday night) by pg_cron with the service role key to scrape
+# USAU's official published Top-20 rankings per division into usau_rankings.
+verify_jwt = false

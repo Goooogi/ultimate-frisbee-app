@@ -188,6 +188,29 @@ export function UsauEventDetail({ event }: Props) {
     );
   }, [games]);
 
+  // ── Pool leader (fallback winner when there's no bracket final) ─────────
+  // A pool-play-only division has no championship game. The de-facto winner
+  // is the team with the best pool record — but only when it's UNIQUE (a tie
+  // for first is ambiguous, so we show no banner). Skipped entirely when a
+  // bracket final exists (that's the real champion).
+  const poolLeader = useMemo(() => {
+    if (finalGame) return null;
+    const teamById = new Map(teams.map((t) => [t.teamId, t] as const));
+    const standings = Array.from(poolRecords.entries())
+      .filter(([id]) => teamById.has(id))
+      .map(([id, r]) => ({ team: teamById.get(id)!, ...r }))
+      .sort((a, b) => b.wins - a.wins || a.losses - b.losses);
+    if (standings.length === 0) return null;
+    const top = standings[0];
+    if (top.wins === 0 && top.losses === 0) return null; // no games played yet
+    const tiedForFirst = standings.filter(
+      (s) => s.wins === top.wins && s.losses === top.losses,
+    ).length;
+    if (tiedForFirst > 1) return null;
+    return top;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finalGame, teams, games]);
+
   // Divisions this event actually fielded, in canonical order — drives the
   // scoped division switcher below (only shown when there's more than one).
   const eventDivisions = (['Men', 'Women', 'Mixed'] as const).filter((d) =>
@@ -204,6 +227,17 @@ export function UsauEventDetail({ event }: Props) {
           game={finalGame}
           competitionLevel={event.competitionLevel}
           genderDivision={gender || null}
+        />
+      )}
+
+      {/* Pool leader — shown for a pool-play-only division (no bracket final).
+          The best (unique) pool record is the de-facto winner. */}
+      {!finalGame && poolLeader && (
+        <PoolLeaderBanner
+          team={poolLeader.team}
+          wins={poolLeader.wins}
+          losses={poolLeader.losses}
+          competitionLevel={event.competitionLevel}
         />
       )}
 
@@ -368,6 +402,59 @@ function ChampionBanner({
         ) : (
           <span className="min-w-0 flex-1">{WinnerInner}</span>
         )}
+      </div>
+    </section>
+  );
+}
+
+function PoolLeaderBanner({
+  team,
+  wins,
+  losses,
+  competitionLevel,
+}: {
+  team: Team;
+  wins: number;
+  losses: number;
+  competitionLevel: string;
+}) {
+  const Inner = (
+    <span className="flex items-center gap-3 min-w-0">
+      <UsauTeamLogo
+        name={team.teamName}
+        genderDivision={team.genderDivision}
+        competitionLevel={competitionLevel}
+        size={40}
+      />
+      <span className="flex flex-col min-w-0">
+        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate">
+          {team.teamName}
+        </span>
+        <span className="text-[11px] text-muted font-tight truncate mt-1">
+          Best pool record · <span className="tabular">{wins}–{losses}</span>
+        </span>
+      </span>
+    </span>
+  );
+
+  return (
+    <section
+      aria-label="Pool leader"
+      className="mb-6 rounded-lg border border-border bg-surface overflow-hidden"
+    >
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
+        <TrophyIcon />
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+          Pool leader
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3 px-4 py-4">
+        <Link
+          href={`/usau/teams/${team.teamId}`}
+          className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
+        >
+          {Inner}
+        </Link>
       </div>
     </section>
   );

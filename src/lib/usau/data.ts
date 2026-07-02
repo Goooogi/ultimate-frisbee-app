@@ -632,7 +632,15 @@ export interface UsauMajorWithChampions {
   startDate: string | null;
   endDate: string | null;
   flight: Flight | null;
-  champions: Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>;
+  champions: Array<{
+    division: 'Men' | 'Women' | 'Mixed';
+    teamName: string;
+    teamId: string;
+    /** True when the "winner" was derived from best pool-play record rather
+     *  than a bracket final (pool-play-only events with no bracket). The card
+     *  labels these "Pool leader" instead of "Champion". */
+    viaPoolRecord?: boolean;
+  }>;
 }
 
 /**
@@ -759,7 +767,7 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
  */
 export async function recentUsauTournamentCards(
   now: Date = new Date(),
-  limit = 8,
+  limit = 200,
 ): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
   const today = now.toISOString().slice(0, 10);
@@ -774,29 +782,20 @@ export async function recentUsauTournamentCards(
     .gte('end_date', windowBack)
     .order('end_date', { ascending: false, nullsFirst: false });
 
-  // FLAGSHIP only — keep just ranked-flight events.
+  // ALL club events in the window (not just ranked-flight flagships). We show
+  // every tournament from the past ~2 weekends as a full list, ordered by
+  // flight status below. Flight tags exist only on marquee events today, so
+  // most sort to the bottom (no flight) — that's expected until more get tagged.
   const recent = ((events ?? []) as Array<{
     id: string;
     usau_slug: string;
     name: string;
     start_date: string | null;
     end_date: string | null;
-  }>).filter((e) => flightForName(e.name) !== null);
+  }>);
   if (recent.length === 0) return [];
 
   const eventIds = recent.map((e) => e.id);
-
-  // round='final' games for all these events, with scheduling to break the
-  // semi-vs-final ambiguity, and bracket_name to drop placement brackets.
-  const { data: finals } = await db
-    .from('usau_games')
-    .select(
-      'event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
-        'team_a:usau_teams!team_a_id(name, gender_division), ' +
-        'team_b:usau_teams!team_b_id(name, gender_division)',
-    )
-    .in('event_id', eventIds)
-    .eq('round', 'final');
 
   type TeamRef = { name: string; gender_division: string | null } | null;
   type Row = {
@@ -811,13 +810,37 @@ export async function recentUsauTournamentCards(
     team_b: TeamRef;
   };
 
+  // round='final' games for all these events, with scheduling to break the
+  // semi-vs-final ambiguity, and bracket_name to drop placement brackets. Now
+  // that we include EVERY club event in the window (not just flagships), page
+  // through — a busy 2-weekend window can exceed PostgREST's 1000-row cap and
+  // would otherwise silently drop finals.
+  const PAGE = 1000;
+  const finals: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('usau_games')
+      .select(
+        'id, event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+          'team_a:usau_teams!team_a_id(name, gender_division), ' +
+          'team_b:usau_teams!team_b_id(name, gender_division)',
+      )
+      .in('event_id', eventIds)
+      .eq('round', 'final')
+      .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
+      .range(from, from + PAGE - 1);
+    const rows = (page ?? []) as unknown as Row[];
+    finals.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+
   // Keep the latest-scheduled decided final per (event, division), skipping
   // placement brackets (13th/17th place etc. also carry round='final').
   const best = new Map<
     string,
     { teamName: string; teamId: string; scheduledAt: string }
   >();
-  for (const g of (finals ?? []) as unknown as Row[]) {
+  for (const g of finals) {
     if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
     const b = (g.bracket_name ?? '').toLowerCase();
@@ -845,7 +868,7 @@ export async function recentUsauTournamentCards(
 
   const championsByEvent = new Map<
     string,
-    Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>
+    Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string; viaPoolRecord?: boolean }>
   >();
   for (const [key, v] of best) {
     const [eventId, division] = key.split('|');
@@ -855,11 +878,31 @@ export async function recentUsauTournamentCards(
       .push({ division: division as 'Men' | 'Women' | 'Mixed', teamName: v.teamName, teamId: v.teamId });
   }
 
+  // ── Pool-record fallback ────────────────────────────────────────────────
+  // Some events (esp. lower-flight, pool-play-only weekends) never played a
+  // bracket, so no (event, division) shows up in `best`. For those, the team
+  // with the best pool-play record is the de-facto winner. We only declare one
+  // when there's a UNIQUE best record — a tie for first in a pool-only format
+  // has no clear champion, so we skip rather than guess.
+  const decidedKeys = new Set(best.keys()); // `${eventId}|${division}` already won via bracket
+  const poolWinners = await bestPoolRecordWinners(db, eventIds, decidedKeys);
+  for (const w of poolWinners) {
+    if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
+    championsByEvent.get(w.eventId)!.push({
+      division: w.division,
+      teamName: w.teamName,
+      teamId: w.teamId,
+      viaPoolRecord: true,
+    });
+  }
+
   const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
   const results: UsauMajorWithChampions[] = [];
   for (const e of recent) {
-    const champions = championsByEvent.get(e.id);
-    if (!champions || champions.length === 0) continue; // finished-only
+    // Show every event in the window — including those with no champion yet
+    // (no bracket final and no unique pool leader). Champions may be empty; the
+    // card renders the event header with no winner row in that case.
+    const champions = championsByEvent.get(e.id) ?? [];
     results.push({
       slug: e.usau_slug,
       name: e.name,
@@ -870,13 +913,116 @@ export async function recentUsauTournamentCards(
     });
   }
 
-  // Newest weekend first; within a weekend the higher flight leads.
+  // Order by FLIGHT status first (highest flight at the top), then by recency
+  // (newest weekend first) as the tiebreak. Untagged events (no flight) fall to
+  // the bottom, most-recent-first among themselves.
   results.sort(
     (a, b) =>
-      (b.endDate ?? '').localeCompare(a.endDate ?? '') ||
-      flightRankForName(b.name) - flightRankForName(a.name),
+      flightRankForName(b.name) - flightRankForName(a.name) ||
+      (b.endDate ?? '').localeCompare(a.endDate ?? ''),
   );
   return results.slice(0, limit);
+}
+
+/**
+ * For (event, division) pairs with NO decided bracket final, derive the
+ * de-facto winner from best pool-play record. Returns one winner per pair,
+ * ONLY when the top record is unique (no tie for first) — a pool-only tie has
+ * no clear champion. `decidedKeys` holds the `${eventId}|${division}` pairs
+ * already settled by a bracket, which we skip.
+ */
+async function bestPoolRecordWinners(
+  db: Awaited<ReturnType<typeof supabase>>,
+  eventIds: string[],
+  decidedKeys: Set<string>,
+): Promise<Array<{ eventId: string; division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>> {
+  type TeamRef = { name: string; gender_division: string | null } | null;
+  type Row = {
+    event_id: string;
+    team_a_id: string | null;
+    team_b_id: string | null;
+    score_a: number | null;
+    score_b: number | null;
+    team_a: TeamRef;
+    team_b: TeamRef;
+  };
+
+  // Pull all pool-play games (round='pool') across the candidate events, with
+  // each side's team name + division for grouping and display. Page through —
+  // across every club event in a 2-weekend window, pool games easily exceed
+  // PostgREST's 1000-row cap, which would silently truncate records.
+  const PAGE = 1000;
+  const poolGames: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('usau_games')
+      .select(
+        'id, event_id, team_a_id, team_b_id, score_a, score_b, ' +
+          'team_a:usau_teams!team_a_id(name, gender_division), ' +
+          'team_b:usau_teams!team_b_id(name, gender_division)',
+      )
+      .in('event_id', eventIds)
+      .eq('round', 'pool')
+      .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
+      .range(from, from + PAGE - 1);
+    const rows = (page ?? []) as unknown as Row[];
+    poolGames.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+
+  // (eventId|division) → teamId → { wins, losses, name }
+  const records = new Map<string, Map<string, { wins: number; losses: number; name: string }>>();
+
+  const bump = (
+    groupKey: string,
+    teamId: string,
+    name: string,
+    won: boolean,
+  ) => {
+    if (!records.has(groupKey)) records.set(groupKey, new Map());
+    const g = records.get(groupKey)!;
+    const r = g.get(teamId) ?? { wins: 0, losses: 0, name };
+    if (won) r.wins += 1;
+    else r.losses += 1;
+    g.set(teamId, r);
+  };
+
+  for (const g of poolGames) {
+    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
+    if (g.team_a_id == null || g.team_b_id == null) continue;
+    // Division comes from the teams (pool games are single-division); require
+    // both sides agree, else skip.
+    const div = g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
+    if (div !== 'Men' && div !== 'Women' && div !== 'Mixed') continue;
+    const groupKey = `${g.event_id}|${div}`;
+    if (decidedKeys.has(groupKey)) continue; // bracket already settled this one
+
+    const aWon = g.score_a > g.score_b;
+    bump(groupKey, g.team_a_id, g.team_a?.name ?? 'Unknown', aWon);
+    bump(groupKey, g.team_b_id, g.team_b?.name ?? 'Unknown', !aWon);
+  }
+
+  const winners: Array<{ eventId: string; division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }> = [];
+  for (const [groupKey, teamMap] of records) {
+    const [eventId, division] = groupKey.split('|');
+    const standings = Array.from(teamMap.entries())
+      .map(([teamId, r]) => ({ teamId, ...r }))
+      .sort((a, b) => b.wins - a.wins || a.losses - b.losses);
+    if (standings.length === 0) continue;
+    const top = standings[0];
+    // Unique best record only — a tie for the top win/loss line is ambiguous.
+    const tiedForFirst = standings.filter(
+      (s) => s.wins === top.wins && s.losses === top.losses,
+    ).length;
+    if (tiedForFirst > 1) continue;
+    winners.push({
+      eventId,
+      division: division as 'Men' | 'Women' | 'Mixed',
+      teamName: top.name,
+      teamId: top.teamId,
+    });
+  }
+  return winners;
 }
 
 /** Distinct seasons we have any event for, newest first. */
@@ -1997,6 +2143,118 @@ export function looksLikeUsauUuid(id: string): boolean {
 }
 
 // ─── Ranked team lists ─────────────────────────────────────────────────
+
+// ─── Official USAU rankings (scraped weekly) ──────────────────────────────
+// USAU publishes an official weekly power-rating Top-20 per division. We
+// scrape it into usau_rankings (see sync-usau-rankings Edge Function) and read
+// the latest week here. Only these 5 RankSets are published (no D-III / Masters
+// on the rankings page), so listOfficialUsauRankings supports exactly them.
+
+export interface OfficialRankedTeam {
+  /** usau_teams.id — links to the team profile / logo. */
+  id: string;
+  name: string;
+  state: string | null;
+  region: string | null;
+  rank: number;
+  rating: number | null;
+  wins: number | null;
+  losses: number | null;
+}
+
+/** RankSet keys used by usau_rankings.division + the scraper. */
+type OfficialRankDivision =
+  | 'Club-Men'
+  | 'Club-Women'
+  | 'Club-Mixed'
+  | 'College-Men'
+  | 'College-Women';
+
+/** Map a (competitionLevel, genderDivision) to its published RankSet, or null
+ *  if USAU doesn't publish rankings for that combination (D-III, Masters, etc.). */
+export function officialRankSetFor(
+  competitionLevel: string | null | undefined,
+  genderDivision: string | null | undefined,
+): OfficialRankDivision | null {
+  const g = genderDivision;
+  if (competitionLevel === 'CLUB') {
+    if (g === 'Men') return 'Club-Men';
+    if (g === 'Women') return 'Club-Women';
+    if (g === 'Mixed') return 'Club-Mixed';
+  }
+  if (competitionLevel === 'COLLEGE_D1') {
+    if (g === 'Men') return 'College-Men';
+    if (g === 'Women') return 'College-Women';
+  }
+  return null;
+}
+
+/**
+ * The latest official USAU ranking for one division, top N (default 16),
+ * joined to usau_teams. Reads the most-recent (season, week) present in
+ * usau_rankings for that RankSet. Returns an empty array when we haven't
+ * scraped that division yet (so callers can fall back to seed-ordering).
+ */
+export async function listOfficialUsauRankings(
+  division: OfficialRankDivision,
+  limit = 16,
+): Promise<{ season: number; week: number; scrapedAt: string | null; teams: OfficialRankedTeam[] }> {
+  const db = await supabase();
+
+  // Find the latest (season, week) we have for this division.
+  const { data: latest } = await db
+    .from('usau_rankings')
+    .select('season, week')
+    .eq('division', division)
+    .order('season', { ascending: false })
+    .order('week', { ascending: false })
+    .limit(1);
+  const head = (latest ?? [])[0] as { season: number; week: number } | undefined;
+  if (!head) return { season: 0, week: 0, scrapedAt: null, teams: [] };
+
+  const { data, error } = await db
+    .from('usau_rankings')
+    .select(
+      'rank, rating, wins, losses, region, scraped_at, ' +
+        'team:usau_teams!team_id(id, name, state)',
+    )
+    .eq('division', division)
+    .eq('season', head.season)
+    .eq('week', head.week)
+    .order('rank', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+
+  type Row = {
+    rank: number;
+    rating: number | null;
+    wins: number | null;
+    losses: number | null;
+    region: string | null;
+    scraped_at: string | null;
+    team: { id: string; name: string; state: string | null } | null;
+  };
+  const rows = (data ?? []) as unknown as Row[];
+  const teams: OfficialRankedTeam[] = rows
+    .filter((r) => r.team)
+    .map((r) => ({
+      id: r.team!.id,
+      name: r.team!.name,
+      state: r.team!.state,
+      region: r.region,
+      rank: r.rank,
+      rating: r.rating,
+      wins: r.wins,
+      losses: r.losses,
+    }));
+
+  return {
+    season: head.season,
+    week: head.week,
+    scrapedAt: rows[0]?.scraped_at ?? null,
+    teams,
+  };
+}
 
 export interface RankedTeam {
   id: string;

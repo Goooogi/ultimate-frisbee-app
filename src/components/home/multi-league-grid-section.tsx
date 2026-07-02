@@ -14,6 +14,7 @@ import type { PulGame } from '@/lib/pul/data';
 import type { WulGame } from '@/lib/wul/data';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import type { UsauMajorWithChampions } from '@/lib/usau/data';
+import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { GameTile } from '@/components/home/game-grid-section';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { WulTeamLogo } from '@/components/wul-team-logo';
@@ -251,9 +252,16 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
     >
       {/* Event header */}
       <div className="flex flex-col gap-0.5">
-        <span className="font-tight font-semibold text-[13px] text-ink leading-snug line-clamp-2">
-          {major.name}
-        </span>
+        <div className="flex items-start justify-between gap-2">
+          <span className="font-tight font-semibold text-[13px] text-ink leading-snug line-clamp-2">
+            {major.name}
+          </span>
+          {major.flight && (
+            <span className="shrink-0 mt-0.5 text-[8.5px] font-bold tracking-[0.12em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
+              {FLIGHT_LABELS[major.flight]}
+            </span>
+          )}
+        </div>
         {dateRange && (
           <span className="font-mono text-[10px] text-faint tracking-[0.06em]">{dateRange}</span>
         )}
@@ -261,18 +269,27 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
 
       {/* Champions */}
       <div className="flex flex-col gap-2">
-        {major.champions.map((c) => (
-          <div key={c.division} className="flex items-center gap-2">
-            <span className="text-accent flex-shrink-0">
-              <TrophyIcon />
-            </span>
-            <UsauTeamLogo name={c.teamName} genderDivision={c.division} size={22} />
-            <div className="min-w-0 flex-1">
-              <div className="font-tight text-[13px] text-ink font-semibold truncate">{c.teamName}</div>
-              <div className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">{c.division}</div>
+        {major.champions.length === 0 ? (
+          <span className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
+            Results pending
+          </span>
+        ) : (
+          major.champions.map((c) => (
+            <div key={c.division} className="flex items-center gap-2">
+              <span className="text-accent flex-shrink-0">
+                <TrophyIcon />
+              </span>
+              <UsauTeamLogo name={c.teamName} genderDivision={c.division} size={22} />
+              <div className="min-w-0 flex-1">
+                <div className="font-tight text-[13px] text-ink font-semibold truncate">{c.teamName}</div>
+                <div className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
+                  {c.division}
+                  {c.viaPoolRecord && <span className="text-accent"> · Pool leader</span>}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </Link>
   );

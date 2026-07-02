@@ -171,48 +171,41 @@ function Section({
   defaultOpen: boolean;
   emphasized?: boolean;
 }) {
+  // Both sections are collapsible. The section header itself is the toggle, so
+  // the open state looks identical to before (header rule + card grid) — only
+  // now the header is clickable to collapse. `defaultOpen` preserves the prior
+  // defaults: Upcoming open, Prior collapsed (unless there's no Upcoming).
   return (
-    <section>
-      <div
+    <details className="group" open={defaultOpen}>
+      <summary
         className={[
+          'list-none cursor-pointer select-none',
           'flex items-baseline justify-between gap-3 mb-3 pb-2 border-b',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           emphasized ? 'border-ink' : 'border-hairline',
         ].join(' ')}
       >
-        <span
-          className={[
-            'text-[10px] font-bold tracking-[0.18em] uppercase font-tight',
-            emphasized ? 'text-ink' : 'text-muted',
-          ].join(' ')}
-        >
-          {eyebrow}
+        <span className="flex items-center gap-2">
+          <Chevron />
+          <span
+            className={[
+              'text-[10px] font-bold tracking-[0.18em] uppercase font-tight',
+              emphasized ? 'text-ink' : 'text-muted',
+            ].join(' ')}
+          >
+            {eyebrow}
+          </span>
         </span>
         <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
           {count} {count === 1 ? 'tournament' : 'tournaments'}
         </span>
-      </div>
-      {defaultOpen ? (
-        <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 lg:gap-3">
-          {events.map((e) => (
-            <EventCard key={e.id} event={e} />
-          ))}
-        </ul>
-      ) : (
-        <details className="group">
-          <summary className="list-none cursor-pointer flex items-center justify-between gap-3 py-3 px-4 border border-border bg-surface hover:border-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent">
-            <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
-              Show {count} prior {count === 1 ? 'tournament' : 'tournaments'}
-            </span>
-            <Chevron />
-          </summary>
-          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 lg:gap-3 mt-3">
-            {events.map((e) => (
-              <EventCard key={e.id} event={e} />
-            ))}
-          </ul>
-        </details>
-      )}
-    </section>
+      </summary>
+      <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 lg:gap-3">
+        {events.map((e) => (
+          <EventCard key={e.id} event={e} />
+        ))}
+      </ul>
+    </details>
   );
 }
 

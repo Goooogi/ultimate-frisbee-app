@@ -502,6 +502,91 @@ export async function listPulGames(opts: {
   return games;
 }
 
+// ─── Standings ─────────────────────────────────────────────────────────────
+
+/** A team's derived regular-season standing. PUL is a single division. */
+export interface PulStandingRow {
+  team: PulTeam;
+  wins: number;
+  losses: number;
+  /** Total points scored / allowed across counted games (for point diff). */
+  pointsFor: number;
+  pointsAgainst: number;
+  pointDiff: number;
+  /** True if this team won the season's Finals game. */
+  champion: boolean;
+}
+
+/**
+ * Season standings for PUL, derived from final games (no standings table).
+ * Regular-season record only (playoff weeks excluded from W-L so the table
+ * reads as "regular-season standings"), sorted by wins → point differential.
+ * The Finals winner is flagged `champion` so the UI can badge them.
+ */
+export async function getPulStandings(season: number): Promise<PulStandingRow[]> {
+  const [teams, games] = await Promise.all([
+    listPulTeams(),
+    listPulGames({ season, onlyFinal: true }),
+  ]);
+
+  const isPlayoff = (label: string) => label === 'semifinals' || label === 'finals';
+
+  const rec = new Map<
+    string,
+    { wins: number; losses: number; pointsFor: number; pointsAgainst: number }
+  >();
+  const ensure = (id: string) => {
+    if (!rec.has(id)) rec.set(id, { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0 });
+    return rec.get(id)!;
+  };
+
+  let champion: string | null = null;
+  for (const g of games) {
+    const a = g.away.score;
+    const h = g.home.score;
+    if (a == null || h == null || a === h) continue;
+    const homeWon = h > a;
+    if (g.weekLabel === 'finals') {
+      champion = homeWon ? g.home.teamId : g.away.teamId;
+    }
+    // Only regular-season games count toward the standings record.
+    if (isPlayoff(g.weekLabel)) continue;
+    const home = ensure(g.home.teamId);
+    const away = ensure(g.away.teamId);
+    home.pointsFor += h;
+    home.pointsAgainst += a;
+    away.pointsFor += a;
+    away.pointsAgainst += h;
+    if (homeWon) {
+      home.wins += 1;
+      away.losses += 1;
+    } else {
+      away.wins += 1;
+      home.losses += 1;
+    }
+  }
+
+  return teams
+    .map((team) => {
+      const r = rec.get(team.id) ?? { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0 };
+      return {
+        team,
+        wins: r.wins,
+        losses: r.losses,
+        pointsFor: r.pointsFor,
+        pointsAgainst: r.pointsAgainst,
+        pointDiff: r.pointsFor - r.pointsAgainst,
+        champion: team.id === champion,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.wins - a.wins ||
+        b.pointDiff - a.pointDiff ||
+        a.team.name.localeCompare(b.team.name),
+    );
+}
+
 /**
  * One game by its id ('{season}/{week}/{AWAY}-vs-{HOME}'), with both sides'
  * team identity resolved. Returns null if not found. Powers /pul/g/[id].
