@@ -18,7 +18,7 @@ import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { listPulTeams, type PulTeam } from '@/lib/pul/data';
 import { WulTeamLogo } from '@/components/wul-team-logo';
-import { listWulTeams, type WulTeam } from '@/lib/wul/data';
+import { listActiveWulTeams, type WulTeam } from '@/lib/wul/data';
 import {
   parseDivisionParam,
   parseLeagueParam,
@@ -65,7 +65,7 @@ export default async function TeamsPage({ searchParams }: Props) {
 
   // WUL branch: team card grid (mirrors PUL). Cards link to /wul/teams/[id].
   if (league === 'wul') {
-    const teams = await listWulTeams().catch((): WulTeam[] => []);
+    const teams = await listActiveWulTeams().catch((): WulTeam[] => []);
     return (
       <PageShell
         title="Teams"

@@ -142,6 +142,46 @@ export async function listWulTeams(): Promise<WulTeam[]> {
   return ((data ?? []) as unknown as DbTeamRow[]).map(mapTeam);
 }
 
+/**
+ * Team ids that played at least one game in a given season. Used to hide
+ * inactive/folded franchises (e.g. a team with 0 games this year) from
+ * season-scoped surfaces like the Teams grid and standings — while keeping the
+ * full team list (`listWulTeams`) intact for logo lookups, career resolution,
+ * and historical browsing.
+ */
+export async function listWulActiveTeamIds(season: number): Promise<Set<string>> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('wul_games')
+    .select('away_team_id, home_team_id')
+    .eq('season', season);
+  if (error) throw error;
+  const active = new Set<string>();
+  for (const r of (data ?? []) as unknown as {
+    away_team_id: string;
+    home_team_id: string;
+  }[]) {
+    active.add(r.away_team_id);
+    active.add(r.home_team_id);
+  }
+  return active;
+}
+
+/**
+ * Teams that are active in a given season (played ≥1 game). Powers the Teams
+ * page grid so folded franchises with no games this season don't appear.
+ * Defaults to the current WUL season.
+ */
+export async function listActiveWulTeams(
+  season = WUL_CURRENT_SEASON,
+): Promise<WulTeam[]> {
+  const [teams, active] = await Promise.all([
+    listWulTeams(),
+    listWulActiveTeamIds(season),
+  ]);
+  return teams.filter((t) => active.has(t.id));
+}
+
 export async function getWulTeam(teamId: string): Promise<WulTeam | null> {
   const db = supabase();
   const { data, error } = await db.from('wul_teams').select('*').eq('id', teamId).maybeSingle();
@@ -522,8 +562,11 @@ export async function getWulStandings(season: number): Promise<WulStandingRow[]>
   }
 
   return teams
+    // Drop teams with no regular-season game this season (e.g. folded
+    // franchises). A team must have actually played to appear in standings.
+    .filter((team) => rec.has(team.id))
     .map((team) => {
-      const r = rec.get(team.id) ?? { wins: 0, losses: 0, pointsFor: 0, pointsAgainst: 0 };
+      const r = rec.get(team.id)!;
       return {
         team,
         wins: r.wins,

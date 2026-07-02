@@ -86,12 +86,13 @@ export function UfaTileGrid({ games }: { games: UfaGame[] }) {
   if (games.length === 0) return null;
   // Horizontal scroll carousel — a weekend has more than 4 games, so a fixed
   // 4-col grid clipped the rest. Each tile is a fixed-width snap target; the
-  // row scrolls (swipe on touch, scrollbar on desktop). Negative margins +
-  // padding let the row bleed to the section edge so the last card isn't
-  // visually cut at the container boundary.
+  // row scrolls (swipe on touch, scrollbar on desktop). The carousel stays
+  // CONTAINED within the section's own padding (no negative-margin bleed) so
+  // the first card's left edge and the row's right edge align with the
+  // USAU/PUL/WUL cards below.
   return (
-    <div className="-mx-5 lg:-mx-12 overflow-x-auto overscroll-x-contain scroll-smooth snap-x snap-mandatory">
-      <div className="flex gap-3 px-5 lg:px-12 w-max">
+    <div className="overflow-x-auto overscroll-x-contain scroll-smooth snap-x snap-mandatory">
+      <div className="flex gap-3 w-max">
         {games.map((g) => (
           <div key={g.gameID} className="snap-start shrink-0 w-[280px] sm:w-[320px]">
             <GameTile game={g} />
@@ -297,10 +298,15 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
 
 export function UsauMajorGrid({ majors }: { majors: UsauMajorWithChampions[] }) {
   if (majors.length === 0) return null;
+  // Fixed-width cards (matching the UFA tiles and PUL/WUL recent cards) that
+  // wrap, rather than a stretch-to-fill grid — so a lone USAU card is the same
+  // size as the other leagues' cards instead of spanning the full section.
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <div className="flex flex-wrap gap-3">
       {majors.map((m) => (
-        <UsauMajorCard key={m.slug} major={m} />
+        <div key={m.slug} className="w-full sm:w-[360px]">
+          <UsauMajorCard major={m} />
+        </div>
       ))}
     </div>
   );

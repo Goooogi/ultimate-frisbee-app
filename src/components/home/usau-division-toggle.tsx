@@ -22,9 +22,11 @@ export function UsauDivisionToggle({ divisions }: UsauDivisionToggleProps) {
 
   return (
     <div className="flex flex-col">
-      {/* Tab strip */}
+      {/* Tab strip — all divisions on one line. Each tab flexes to an equal
+          share of the width so five short labels fit without wrapping; the
+          overflow-x-auto is a safety net for extreme narrow viewports. */}
       <div
-        className="flex flex-wrap gap-px border-b border-border bg-border overflow-x-auto"
+        className="flex gap-px border-b border-border bg-border overflow-x-auto"
         role="tablist"
         aria-label="USAU divisions"
       >
@@ -38,7 +40,7 @@ export function UsauDivisionToggle({ divisions }: UsauDivisionToggleProps) {
               aria-controls={`usau-panel-${div.key}`}
               onClick={() => setActiveDivKey(div.key)}
               className={[
-                'relative px-3 py-2 font-tight text-[10.5px] font-bold tracking-[0.12em] uppercase whitespace-nowrap transition-colors cursor-pointer',
+                'relative flex-1 min-w-0 px-1.5 py-2 font-tight text-[10px] font-bold tracking-[0.06em] uppercase whitespace-nowrap text-center transition-colors cursor-pointer',
                 isActive
                   ? 'bg-surface text-ink'
                   : 'bg-surface-hi text-muted hover:text-ink hover:bg-surface',

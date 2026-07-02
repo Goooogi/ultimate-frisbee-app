@@ -701,7 +701,13 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   };
 
   // 4. Group champions by event_id.
-  const championsByEvent = new Map<string, Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>>();
+  const championsByEvent = new Map<
+    string,
+    Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string; viaPoolRecord?: boolean }>
+  >();
+  // `${eventId}|${division}` pairs already settled by a bracket final — used to
+  // skip the pool-record fallback for divisions that DID play a bracket.
+  const decidedKeys = new Set<string>();
   for (const g of (finals ?? []) as unknown as Row[]) {
     if (g.score_a == null || g.score_b == null) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
@@ -724,9 +730,26 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
     const existing = championsByEvent.get(g.event_id)!;
     if (existing.some((c) => c.division === division)) continue;
     existing.push({ division: division as 'Men' | 'Women' | 'Mixed', teamName: winnerName, teamId: winnerId });
+    decidedKeys.add(`${g.event_id}|${division}`);
+  }
+
+  // 4b. Pool-record fallback — same rule as the /scores tab. Divisions that
+  // never played a bracket (pool-play-only, e.g. an event whose Women's bracket
+  // isn't scraped yet) get the unique best-pool-record team as de-facto winner,
+  // badged "Pool leader". Skips divisions already decided by a bracket final.
+  const poolWinners = await bestPoolRecordWinners(db, eventIds, decidedKeys);
+  for (const w of poolWinners) {
+    if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
+    championsByEvent.get(w.eventId)!.push({
+      division: w.division,
+      teamName: w.teamName,
+      teamId: w.teamId,
+      viaPoolRecord: true,
+    });
   }
 
   // 5. Build results — only events with at least one champion.
+  const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
   const results: UsauMajorWithChampions[] = [];
   for (const e of majorEvents) {
     const champions = championsByEvent.get(e.id);
@@ -737,7 +760,9 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
       startDate: e.start_date,
       endDate: e.end_date,
       flight: flightForName(e.name),
-      champions,
+      champions: champions.sort(
+        (a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9),
+      ),
     });
     if (results.length >= limit) break;
   }
