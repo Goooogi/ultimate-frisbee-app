@@ -647,13 +647,21 @@ function isNationalsChampionshipName(name: string): boolean {
 
 /**
  * A team's National Championship podium finishes, one per season.
- *   1st = won the Nationals final, 2nd = lost it, 3rd = lost a Nationals semi.
- * Matched by team name + gender division (usau_team_id is unpopulated, so a
- * franchise is identified by name+division+level — see the team_id memo).
+ *   1st = won the Nationals final
+ *   2nd = lost the Nationals final
+ *   3rd = WON the 3rd-place game (the game between the two teams that lost the
+ *         National Championship SEMIS). The loser of that game is 4th → no medal.
  *
- * 1st/2nd are reliable (the final is always present at a scored Nationals);
- * 3rd depends on the semifinal games having been ingested — absent semis just
- * yield no bronze rather than a wrong one. Newest season first.
+ * Bracket-aware on purpose: USAU runs many placement brackets at Nationals
+ * (Fifth Place, Pro Flight Play-In, 13th Place…) that each have their own
+ * semis/finals — a loss there is NOT a podium finish. Podium is derived ONLY
+ * from the main "Championship" bracket, so e.g. a team that lost the main
+ * quarters and then the 5th-place-bracket semi does not get bronze.
+ *
+ * Matched by team name + gender division (usau_team_id is unpopulated, so a
+ * franchise is name+division+level). Games bucketed by played-year with a
+ * name-year guard to survive corrupt legacy events. 3rd needs the 3rd-place
+ * game to be ingested; absent, no bronze rather than a wrong one.
  */
 export async function getTeamNationalsMedals(
   teamName: string,
@@ -680,26 +688,35 @@ export async function getTeamNationalsMedals(
         'name.ilike.%college championship%,' +
         'name.ilike.%masters championship%',
     );
-  const bySeason = new Map<string, number>();
+  const bySeason = new Map<string, { season: number; name: string }>();
   for (const e of (events ?? []) as Array<{ id: string; season: number; name: string }>) {
-    if (isNationalsChampionshipName(e.name)) bySeason.set(e.id, e.season);
+    if (isNationalsChampionshipName(e.name)) bySeason.set(e.id, { season: e.season, name: e.name });
   }
   if (bySeason.size === 0) return [];
 
+  // We need the National Championship bracket (final + semis) PLUS the separate
+  // 3rd-place game (a placement game between the two semi losers, labeled
+  // "Third Place" / "WUCC Qualification" / etc.). Scoping to just these keeps
+  // the result small — fetching every bracket game across ~12 Nationals events
+  // would risk the PostgREST 1000-row cap (pool play alone is ~24 games/event).
   const { data: games } = await db
     .from('usau_games')
     .select(
-      'event_id, round, score_a, score_b, ' +
+      'event_id, round, bracket_name, scheduled_at, score_a, score_b, ' +
         'team_a:usau_teams!team_a_id(name, gender_division), ' +
         'team_b:usau_teams!team_b_id(name, gender_division)',
     )
     .in('event_id', Array.from(bySeason.keys()))
-    .in('round', ['final', 'semi']);
+    .or(
+      'bracket_name.ilike.%championship%,round.eq.placement,bracket_name.ilike.%qualification%',
+    );
 
   type TeamRef = { name: string; gender_division: string | null } | null;
   type Row = {
     event_id: string;
     round: string;
+    bracket_name: string | null;
+    scheduled_at: string | null;
     score_a: number | null;
     score_b: number | null;
     team_a: TeamRef;
@@ -708,33 +725,95 @@ export async function getTeamNationalsMedals(
 
   const wantName = teamName.trim().toLowerCase();
   const wantDiv = genderDivision ?? null;
-  const isThisTeam = (t: TeamRef): boolean =>
-    !!t &&
-    t.name.trim().toLowerCase() === wantName &&
-    (wantDiv == null || t.gender_division == null || t.gender_division === wantDiv);
+  const nameOf = (t: TeamRef): string => (t ? t.name.trim().toLowerCase() : '');
+  const isThisTeam = (t: TeamRef): boolean => !!t && nameOf(t) === wantName;
+  const inDivision = (t: TeamRef): boolean =>
+    !!t && (wantDiv == null || t.gender_division == null || t.gender_division === wantDiv);
+  const decisive = (g: Row): boolean =>
+    g.score_a != null && g.score_b != null && g.score_a !== g.score_b;
+  const winnerOf = (g: Row): TeamRef => (g.score_a! > g.score_b! ? g.team_a : g.team_b);
+  const loserOf = (g: Row): TeamRef => (g.score_a! > g.score_b! ? g.team_b : g.team_a);
+  // The MAIN championship bracket. USAU names it inconsistently across years —
+  // "National Championship", "Championship Bracket", "Championship" — but always
+  // contains "championship", while the placement brackets never do ("Fifth
+  // Place", "Pro Flight Play In", "WUCC Qualification"). Guard consolation just
+  // in case.
+  const isChampBracket = (g: Row): boolean => {
+    const b = (g.bracket_name ?? '').toLowerCase();
+    return b.includes('championship') && !b.includes('consolation');
+  };
 
-  // season → best (lowest) place
+  // Bucket games by the year they were actually PLAYED (scheduled_at), not the
+  // event's season field. Some legacy events lack a year in the name and merge
+  // multiple years of Nationals under one event id (e.g. a "USA Ultimate
+  // National Championships" row with games from 2014, 2016 AND 2017) — bucketing
+  // by scheduled year splits those back into the correct seasons. Falls back to
+  // the event season when a game has no scheduled_at.
+  const yearOf = (g: Row): number | null => {
+    const ev = bySeason.get(g.event_id);
+    if (!ev) return null;
+    let y = ev.season;
+    if (g.scheduled_at) {
+      const sy = new Date(g.scheduled_at).getUTCFullYear();
+      if (Number.isFinite(sy)) y = sy;
+    }
+    // Guard against corrupt legacy events that lack a year in their name and
+    // merge multiple seasons under one id with inconsistent dates: only trust a
+    // game's year if the event name actually contains it. Well-formed Nationals
+    // events always carry the year ("2025 USA Ultimate Club Nationals"); the
+    // corrupt no-year "USA Ultimate National Championships" row is dropped.
+    return ev.name.includes(String(y)) ? y : null;
+  };
+  const byYear = new Map<number, Row[]>();
+  for (const g of (games ?? []) as unknown as Row[]) {
+    const y = yearOf(g);
+    if (y == null) continue;
+    if (!byYear.has(y)) byYear.set(y, []);
+    byYear.get(y)!.push(g);
+  }
+
   const best = new Map<number, 1 | 2 | 3>();
   const note = (season: number, place: 1 | 2 | 3) => {
     const cur = best.get(season);
     if (cur == null || place < cur) best.set(season, place);
   };
 
-  for (const g of (games ?? []) as unknown as Row[]) {
-    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
-    const season = bySeason.get(g.event_id);
-    if (season == null) continue;
+  for (const [season, evGames] of byYear) {
+    // Championship-bracket games in THIS team's division only. USAU's placement
+    // brackets (Fifth Place, Pro Flight Play-In, 13th Place…) also have their
+    // own semis/finals — a loss there is NOT a podium finish, so they're
+    // excluded by requiring bracket_name === "National Championship".
+    const champ = evGames.filter(
+      (g) => isChampBracket(g) && decisive(g) && inDivision(g.team_a) && inDivision(g.team_b),
+    );
 
-    const aWon = g.score_a > g.score_b;
-    const winner = aWon ? g.team_a : g.team_b;
-    const loser = aWon ? g.team_b : g.team_a;
+    // 1st / 2nd — the championship final.
+    const finalG = champ.find((g) => g.round === 'final');
+    if (finalG) {
+      if (isThisTeam(winnerOf(finalG))) note(season, 1);
+      else if (isThisTeam(loserOf(finalG))) note(season, 2);
+    }
 
-    if (g.round === 'final') {
-      if (isThisTeam(winner)) note(season, 1);
-      else if (isThisTeam(loser)) note(season, 2);
-    } else if (g.round === 'semi') {
-      // The two semifinal losers tie for 3rd.
-      if (isThisTeam(loser)) note(season, 3);
+    // 3rd — the winner of the game between the two championship-semi losers.
+    const semiLosers = champ.filter((g) => g.round === 'semi').map(loserOf);
+    if (semiLosers.some(isThisTeam) && semiLosers.length >= 2) {
+      const other = semiLosers.find((t) => !isThisTeam(t));
+      if (other) {
+        const otherName = nameOf(other);
+        // The 3rd-place game: the (post-semi) game whose two teams are exactly
+        // this team + the other semi loser. Found by team pairing, so the
+        // bracket label ("Third Place" / "WUCC Qualification") doesn't matter.
+        const thirdGame = evGames.find(
+          (g) =>
+            decisive(g) &&
+            !(isChampBracket(g) && g.round === 'semi') &&
+            ((nameOf(g.team_a) === wantName && nameOf(g.team_b) === otherName) ||
+              (nameOf(g.team_b) === wantName && nameOf(g.team_a) === otherName)),
+        );
+        if (thirdGame && isThisTeam(winnerOf(thirdGame))) note(season, 3);
+        // Loser of the 3rd-place game is 4th → no medal. If no 3rd-place game
+        // was found at all, we award no bronze rather than guess.
+      }
     }
   }
 

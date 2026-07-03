@@ -294,6 +294,17 @@ async function ingestEvent(
     return;
   }
 
+  // Year-aware slug. USAU reused a YEAR-LESS slug for several consecutive
+  // seasons — e.g. "usa-ultimate-national-championships" covered 2014 through
+  // 2018 — and usau_slug is UNIQUE, so without the year all those seasons
+  // collapse into a single event row (this merged 5 Nationals + 740 games into
+  // one). Appending the season when the slug doesn't already carry a 4-digit
+  // year keeps each season its own event. Modern slugs already include the year
+  // (e.g. "2025-usa-ultimate-club-nationals"), so they're untouched.
+  if (!/\b(19|20)\d{2}\b/.test(slug)) {
+    slug = `${slug}-${season}`;
+  }
+
   if (dryRun) {
     stats.events++;
     return;
