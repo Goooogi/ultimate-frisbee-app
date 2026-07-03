@@ -23,7 +23,6 @@ import { Field } from './field';
 import { StepStrip } from './step-strip';
 import { StepRail } from './step-rail';
 import { PlaybackControls } from './playback-controls';
-import { PlayList } from './play-list';
 import { SidebarPlayList } from './sidebar-play-list';
 import { CreatePlayDialog } from './create-play-dialog';
 import { DrawToolbar } from './draw-toolbar';
@@ -722,54 +721,6 @@ export function PlaybookApp() {
         />
       </div>
 
-      {/* Mobile-only: persistent play management bar above the field card.
-          On desktop (lg+) this is redundant with the sidebar PlayList, so we hide it. */}
-      <div className="lg:hidden flex items-center justify-between gap-2 px-1">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
-            {plays.length === 1 ? '1 play' : `${plays.length} plays`}
-          </span>
-          {plays.length > 1 && (
-            <span className="text-[10px] text-faint/50 font-tight">· {currentPlay.name || 'Untitled'}</span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {plays.length > 1 && (
-            <select
-              value={currentID ?? ''}
-              onChange={(e) => handleSelectPlay(e.target.value)}
-              aria-label="Switch play"
-              className={[
-                'text-[10px] font-bold tracking-[0.14em] uppercase font-tight',
-                'bg-surface border border-border rounded px-2 h-11',
-                'text-ink appearance-none pr-6 max-w-[120px] truncate',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              ].join(' ')}
-            >
-              {plays.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name || 'Untitled'}
-                </option>
-              ))}
-            </select>
-          )}
-          <button
-            type="button"
-            onClick={handleOpenCreateDialog}
-            className={[
-              'inline-flex items-center gap-1.5 px-3 h-11 rounded-md border-2 border-dashed border-border',
-              'text-muted hover:text-ink hover:border-ink transition-colors cursor-pointer',
-              'text-[10px] font-bold tracking-[0.16em] uppercase font-tight flex-shrink-0',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-            ].join(' ')}
-            aria-label="Create a new play"
-          >
-            <span className="text-[14px] leading-none font-bold" aria-hidden="true">+</span>
-            New play
-          </button>
-        </div>
-      </div>
-
       <div className="flex flex-col bg-bg border border-hairline rounded-sm overflow-hidden">
         <div className="relative bg-surface px-2 py-2 lg:py-2">
           <div className="flex justify-end pr-2 pb-1 lg:pb-1.5">
@@ -865,6 +816,13 @@ export function PlaybookApp() {
       currentTeamID={currentTeamID}
       onSwitchTeam={handleShellSwitchTeam}
       playsNavExtras={sidebarList}
+      plays={plays}
+      currentPlayID={currentID}
+      onSelectPlay={handleSelectPlay}
+      onCreatePlay={handleOpenCreateDialog}
+      onDeletePlay={handleDeletePlay}
+      copyTargets={copyTargetsForCurrentScope}
+      onCopyPlay={handleCopyPlay}
     >
       <div className="px-2 pt-2 pb-6 md:px-3 lg:px-6 lg:pt-3 lg:pb-3">
         <div className="max-w-[1200px] mx-auto">
@@ -898,28 +856,6 @@ export function PlaybookApp() {
                 onDelete={handleDeleteStep}
               />
             </aside>
-
-            <details className="lg:hidden bg-bg border border-hairline">
-              <summary className="list-none cursor-pointer flex items-center justify-between gap-3 px-4 py-3 border-b border-hairline">
-                <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
-                  My plays · {plays.length}
-                </span>
-                <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight">
-                  Show
-                </span>
-              </summary>
-              <div className="px-4 py-3">
-                <PlayList
-                  plays={plays}
-                  currentID={currentID}
-                  onSelect={handleSelectPlay}
-                  onCreate={handleOpenCreateDialog}
-                  onDelete={handleDeletePlay}
-                  copyTargets={copyTargetsForCurrentScope}
-                  onCopy={handleCopyPlay}
-                />
-              </div>
-            </details>
           </div>
         </div>
       </div>
