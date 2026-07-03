@@ -90,7 +90,7 @@ export function PlaybookShell({
                 aria-label={`Current scope: ${currentTeam?.name ?? 'Personal'}`}
                 className={[
                   'list-none cursor-pointer inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-md border border-border bg-surface',
-                  'max-w-[46vw] hover:border-ink transition-colors',
+                  'h-10 max-w-[46vw] hover:border-ink transition-colors',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 ].join(' ')}
               >
@@ -314,17 +314,17 @@ function PlaysDropdown({
       <summary
         aria-label="Switch play"
         className={[
-          'list-none cursor-pointer inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border bg-surface',
-          'max-w-[38vw] hover:border-ink transition-colors',
+          'list-none cursor-pointer inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-md border border-border bg-surface',
+          'h-10 max-w-[38vw] hover:border-ink transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >
         <span className="min-w-0 flex flex-col leading-none">
-          <span className="text-[8px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
-            {plays.length === 1 ? '1 play' : `${plays.length} plays`}
-          </span>
-          <span className="text-[11px] font-bold text-ink font-tight truncate mt-0.5">
+          <span className="text-[11px] font-bold text-ink font-tight truncate">
             {current?.name || 'Untitled'}
+          </span>
+          <span className="text-[8px] font-bold tracking-[0.16em] uppercase text-faint font-tight mt-0.5">
+            {plays.length === 1 ? '1 play' : `${plays.length} plays`}
           </span>
         </span>
         <ChevronGlyph />
