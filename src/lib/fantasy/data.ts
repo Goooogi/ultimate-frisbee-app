@@ -260,6 +260,36 @@ export async function getMyTeam(year = fantasySeasonYear()): Promise<FantasyTeam
   return getFantasyTeam(data.id as string);
 }
 
+/**
+ * The signed-in user's saved roster for a given week, so the builder can
+ * pre-fill their existing picks instead of showing empty search boxes.
+ *
+ * `week` is the week the builder edits (the current/open week). If that week
+ * has no slots yet — e.g. a new week opened and they haven't re-saved — we
+ * fall back to the most recent PRIOR week that does have a roster, so the user
+ * always sees their last-known lineup to tweak rather than a blank slate.
+ * Returns [] when the user has no team / no saved roster at all.
+ */
+export async function getMyTeamRoster(week: string): Promise<RosterSlot[]> {
+  const team = await getMyTeam();
+  if (!team) return [];
+
+  // Preferred: this exact week.
+  const current = await getTeamRoster(team.id, week);
+  if (current.length > 0) return current;
+
+  // Fallback: the latest week that has any slots for this team.
+  const { data: weeks } = await anon()
+    .from('fantasy_roster_slots')
+    .select('week')
+    .eq('team_id', team.id);
+  const latest = (weeks ?? [])
+    .map((r: Record<string, unknown>) => r.week as string)
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
+  if (!latest) return [];
+  return getTeamRoster(team.id, latest);
+}
+
 export interface MyProfile {
   displayName: string | null;
   username: string | null;

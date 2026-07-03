@@ -4,9 +4,9 @@
 // client RosterBuilder component.
 
 import { PageShell } from '@/components/page-shell';
-import { currentFantasyWeek, getMyTeam } from '@/lib/fantasy/data';
+import { currentFantasyWeek, getMyTeam, getMyTeamRoster } from '@/lib/fantasy/data';
 import { RosterBuilder } from '@/components/fantasy/roster-builder';
-import { FantasyRules } from '@/components/fantasy/fantasy-rules';
+import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
 import type { Crumb } from '@/components/breadcrumbs';
 
 export const revalidate = 0; // builder needs fresh week/team state
@@ -24,6 +24,13 @@ export default async function FantasyTeamPage() {
     getMyTeam().catch(() => null),
   ]);
 
+  // Pre-fill the builder with the user's already-saved roster so "My Team"
+  // shows their picks instead of empty search boxes. Needs a week to key on;
+  // if the schedule has no active week we skip it (builder starts empty).
+  const existingRoster = weekInfo
+    ? await getMyTeamRoster(weekInfo.week).catch(() => [])
+    : [];
+
   return (
     <PageShell
       title="My Team"
@@ -35,8 +42,10 @@ export default async function FantasyTeamPage() {
       }
       breadcrumbs={BREADCRUMBS}
     >
-      <FantasyRules />
-      <RosterBuilder weekInfo={weekInfo} existingTeam={myTeam} />
+      <div className="flex justify-end mb-6">
+        <FantasyRulesModal label="How scoring works" />
+      </div>
+      <RosterBuilder weekInfo={weekInfo} existingTeam={myTeam} existingRoster={existingRoster} />
     </PageShell>
   );
 }

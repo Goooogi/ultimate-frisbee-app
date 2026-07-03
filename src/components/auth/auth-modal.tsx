@@ -44,7 +44,7 @@ export function AuthModal({
   subhead,
   initialEmail,
 }: AuthModalProps) {
-  const { signIn, signUp, resetPassword } = useAuth();
+  const { user, signIn, signUp, resetPassword } = useAuth();
   const [mode, setMode] = useState<Mode>(initialMode);
   // Tracks whether the reset-password email was successfully sent so we can
   // show the "check your inbox" confirmation state inside the modal.
@@ -89,6 +89,17 @@ export function AuthModal({
     }, 30);
     return () => clearTimeout(t);
   }, [open, initialMode, initialEmail]);
+
+  // Self-close on successful auth. Some callers (e.g. the fantasy roster
+  // builder) keep this modal mounted after sign-in — they open it on a write
+  // attempt but have no way to know the AuthProvider listener has since set a
+  // user. Once a user exists while we're open, the modal's job is done, so we
+  // dismiss it ourselves rather than relying on the parent to notice. Callers
+  // that unmount on sign-in (AccountChip) are unaffected — they never re-render
+  // this while open. Guarded on `open` so we don't fire onDismiss spuriously.
+  useEffect(() => {
+    if (open && user) onDismiss?.();
+  }, [open, user, onDismiss]);
 
   // Esc dismisses only when allowed.
   useEffect(() => {

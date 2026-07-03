@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
+import { revalidateFantasy } from '@/app/fantasy/actions';
 import {
   searchDraftablePlayers,
   createMyTeam,
@@ -16,12 +17,14 @@ import {
   setMyUsername,
   getMyUsername,
   getMyTeam,
+  getMyTeamRoster,
   getMyProfile,
   isUsernameAvailable,
   USERNAME_RE,
   fantasySeasonYear,
   type FantasyPlayerHit,
   type FantasyTeamView,
+  type RosterSlot,
 } from '@/lib/fantasy/data';
 import { playerSeasonPreview } from '@/lib/fantasy/data';
 import { type FantasyRole, SCORING } from '@/lib/fantasy/scoring';
@@ -37,6 +40,9 @@ interface WeekInfo {
 interface RosterBuilderProps {
   weekInfo: WeekInfo | null;
   existingTeam: FantasyTeamView | null;
+  /** The user's already-saved roster, used to pre-fill the slots so returning
+   *  to "My Team" shows their picks instead of empty search boxes. */
+  existingRoster?: RosterSlot[];
 }
 
 interface SlotState {
@@ -57,6 +63,30 @@ function initialSlots(): SlotState[] {
     { role: 'defender', player: null, preview: null },
     { role: 'defender', player: null, preview: null },
   ];
+}
+
+// Build the 7 fixed slots (4 O then 3 D) pre-filled from a saved roster.
+// Slots beyond the saved count (or the wrong role) stay empty. Extra saved
+// players of a role past its capacity are ignored (shouldn't happen — the DB
+// enforces 4/3 — but we guard defensively).
+function slotsFromRoster(roster: RosterSlot[]): SlotState[] {
+  const slots = initialSlots();
+  const offenders = roster.filter((r) => r.role === 'offender');
+  const defenders = roster.filter((r) => r.role === 'defender');
+  const toHit = (r: RosterSlot): FantasyPlayerHit => ({
+    playerId: r.playerId,
+    fullName: r.fullName,
+    teamId: r.teamId,
+    teamName: r.teamName,
+  });
+  // Offender slots are indices 0–3, defender slots 4–6.
+  offenders.slice(0, 4).forEach((r, i) => {
+    slots[i] = { role: 'offender', player: toHit(r), preview: null };
+  });
+  defenders.slice(0, 3).forEach((r, i) => {
+    slots[4 + i] = { role: 'defender', player: toHit(r), preview: null };
+  });
+  return slots;
 }
 
 // ─── Player Typeahead ─────────────────────────────────────────────────────────
@@ -344,7 +374,7 @@ function useUsernameCheck(username: string): UsernameStatus {
 
 // ─── RosterBuilder (main component) ───────────────────────────────────────────
 
-export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
+export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: RosterBuilderProps) {
   const { user } = useAuth();
   const router = useRouter();
 
@@ -356,7 +386,13 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
   const [handle, setHandle] = useState('');
   // Whether the user already has a handle set in their profile (post-registration users will).
   const [hasExistingHandle, setHasExistingHandle] = useState(false);
-  const [slots, setSlots] = useState<SlotState[]>(initialSlots);
+  // Seed the slots from any already-saved roster so "My Team" shows the user's
+  // real picks on first paint, not empty search boxes.
+  const [slots, setSlots] = useState<SlotState[]>(() =>
+    existingRoster && existingRoster.length > 0
+      ? slotsFromRoster(existingRoster)
+      : initialSlots(),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedTeamId, setSavedTeamId] = useState<string | null>(null);
@@ -466,7 +502,12 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
         .map((s) => ({ playerId: s.player!.playerId, role: s.role }));
       await saveRoster(teamId, weekInfo.week, rosterSlots);
 
-      // 4. Redirect to public team view.
+      // 4. Bust the ISR cache on the leaderboard + this team's public view so
+      // the new/updated team shows immediately instead of after the 60s
+      // revalidate window. Non-fatal.
+      await revalidateFantasy(teamId).catch(() => null);
+
+      // 5. Redirect to public team view.
       router.push(`/fantasy/team/${teamId}`);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
@@ -475,7 +516,11 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
     }
   };
 
-  // After sign-in, re-load existing team.
+  // After sign-in, re-load existing team + its saved roster. This covers the
+  // case where the page was rendered logged-out (empty existingRoster) and the
+  // user signed in via the modal — without this, their picks wouldn't appear
+  // until a full reload. Only fills slots that are still empty so we never
+  // clobber picks the user has already started making this session.
   useEffect(() => {
     if (!user) return;
     getMyTeam().then((t) => {
@@ -484,7 +529,17 @@ export function RosterBuilder({ weekInfo, existingTeam }: RosterBuilderProps) {
         setSavedTeamId(t.id);
       }
     }).catch(() => null);
-  }, [user]);
+
+    if (!weekInfo) return;
+    getMyTeamRoster(weekInfo.week).then((roster) => {
+      if (roster.length === 0) return;
+      setSlots((prev) => {
+        // Don't overwrite a session where the user already picked players.
+        if (prev.some((s) => s.player !== null)) return prev;
+        return slotsFromRoster(roster);
+      });
+    }).catch(() => null);
+  }, [user, weekInfo]);
 
   // ── Section helpers ───────────────────────────────────────────────────────
 

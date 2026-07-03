@@ -6,6 +6,7 @@
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
 import { getLeaderboard } from '@/lib/fantasy/data';
+import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
 
 export const revalidate = 60;
 
@@ -32,11 +33,14 @@ export default async function FantasyLandingPage() {
               Standings
             </h2>
           </div>
-          {leaderboard.length > 0 && (
-            <span className="text-[12px] text-faint font-tight tabular flex-shrink-0">
-              {leaderboard.length} team{leaderboard.length !== 1 ? 's' : ''}
-            </span>
-          )}
+          <div className="flex items-center gap-3 flex-shrink-0">
+            {leaderboard.length > 0 && (
+              <span className="text-[12px] text-faint font-tight tabular">
+                {leaderboard.length} team{leaderboard.length !== 1 ? 's' : ''}
+              </span>
+            )}
+            <FantasyRulesModal label="Rules" />
+          </div>
         </div>
 
         {leaderboard.length === 0 ? (

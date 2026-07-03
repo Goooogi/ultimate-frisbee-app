@@ -81,21 +81,22 @@ export default async function TeamPage({ params }: Props) {
       return ta - tb;
     });
 
-  const recentFinals = allGames
+  // Every completed game this season, most recent first. (Previously capped at
+  // 6 "recent results"; the team page now shows the full season schedule.)
+  const seasonFinals = allGames
     .filter((g) => gameUiState(g).isFinal)
     .sort((a, b) => {
       const ta = a.startTimestamp ? new Date(a.startTimestamp).getTime() : 0;
       const tb = b.startTimestamp ? new Date(b.startTimestamp).getTime() : 0;
       return tb - ta; // most recent first
-    })
-    .slice(0, 6);
+    });
 
   // Jersey numbers: the player-stats endpoint has no jersey field, but each
   // game's roster-report does. Pull the most recent PLAYED game's roster and
   // map playerID → jerseyNumber. Numbers are stable within a season, so the
   // latest game is a good source. Degrades gracefully to {} on any failure.
   const jerseyByPlayer = new Map<string, string>();
-  const latestGame = recentFinals[0];
+  const latestGame = seasonFinals[0];
   if (latestGame) {
     try {
       const roster = await getGameRoster(latestGame.gameID);
@@ -317,24 +318,25 @@ export default async function TeamPage({ params }: Props) {
           </section>
         )}
 
-        {/* Recent results */}
-        {recentFinals.length > 0 && (
+        {/* Season results — every completed game this season */}
+        {seasonFinals.length > 0 && (
           <section aria-labelledby="results-heading">
             <h2
               id="results-heading"
-              className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
+              className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
             >
-              Recent Results
+              <span>Season Results · {year}</span>
+              <span className="text-faint tabular">{seasonFinals.length}</span>
             </h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 md:gap-3">
-              {recentFinals.map((g) => (
+              {seasonFinals.map((g) => (
                 <GameCard key={g.gameID} game={g} />
               ))}
             </div>
           </section>
         )}
 
-        {upcomingAndLive.length === 0 && recentFinals.length === 0 && (
+        {upcomingAndLive.length === 0 && seasonFinals.length === 0 && (
           <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
             <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
               No games found
