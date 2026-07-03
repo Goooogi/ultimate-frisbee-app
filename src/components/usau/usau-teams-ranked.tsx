@@ -28,7 +28,10 @@ export async function UsauTeamsRanked({
   // publish (D-III, Masters) or that we haven't scraped yet.
   const rankSet = officialRankSetFor(competitionLevel, genderDivision);
   if (rankSet) {
-    const official = await listOfficialUsauRankingsCached(rankSet, 25);
+    // Show the full official ranking (Club runs 200+; College ~130–195). The
+    // scraper stores every team it can match, so surface them all rather than
+    // truncating to a top-N.
+    const official = await listOfficialUsauRankingsCached(rankSet, 500);
     if (official.teams.length > 0) {
       return <OfficialRankings data={official} genderDivision={genderDivision} competitionLevel={competitionLevel} />;
     }

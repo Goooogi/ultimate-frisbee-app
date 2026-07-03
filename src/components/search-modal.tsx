@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { type SearchResult, resultHref } from '@/lib/usau/search-nav';
+import { SearchResultIcon } from '@/components/search-result-icon';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 
@@ -258,19 +259,7 @@ function ResultRow({
         active ? 'bg-surface' : 'hover:bg-surface',
       ].join(' ')}
     >
-      <span
-        aria-hidden="true"
-        className={[
-          'inline-flex items-center justify-center w-7 h-7 rounded-md text-[9px] font-bold tracking-[0.04em] flex-shrink-0',
-          result.kind === 'team'
-            ? 'bg-ink text-bg'
-            : result.kind === 'tournament'
-              ? 'bg-surface border border-border text-muted'
-              : 'bg-accent text-accent-ink',
-        ].join(' ')}
-      >
-        {result.kind === 'team' ? 'TM' : result.kind === 'tournament' ? 'TY' : 'PL'}
-      </span>
+      <SearchResultIcon result={result} />
       <span className="flex-1 min-w-0">
         <span className="block text-[14px] font-semibold text-ink font-tight leading-tight truncate">
           {result.name}

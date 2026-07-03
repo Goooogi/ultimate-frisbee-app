@@ -117,6 +117,14 @@ export function activeTeams(): TeamMeta[] {
     .sort((a, b) => `${a.city ?? ''} ${a.name ?? ''}`.localeCompare(`${b.city ?? ''} ${b.name ?? ''}`));
 }
 
+/** Every UFA team we know — active AND folded/historical — city-sorted. Used by
+ *  search so a folded franchise is still findable. */
+export function allUfaTeams(): TeamMeta[] {
+  return Object.values(TEAM_META).sort((a, b) =>
+    `${a.city ?? ''} ${a.name ?? ''}`.localeCompare(`${b.city ?? ''} ${b.name ?? ''}`),
+  );
+}
+
 /** Some gameID/abbr fields use different shorthand than the leaderboard (e.g.
  *  "ATX" for Austin where leaderboard uses "AUS", "RAL" for Raleigh→Carolina). */
 const ABBR_ALIAS: Record<string, string> = {

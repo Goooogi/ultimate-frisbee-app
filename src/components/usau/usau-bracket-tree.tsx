@@ -68,9 +68,12 @@ export function UsauBracketTree({ games }: Props) {
         Championship bracket
       </h2>
 
-      {/* Mobile: vertical stack by round */}
+      {/* Mobile: vertical stack by round, latest round FIRST (Final → SF → QF
+          → R1). On a phone the result you care about is the championship, so it
+          leads; the desktop bracket below keeps the natural left-to-right
+          feed into the final on the right. */}
       <div className="lg:hidden flex flex-col gap-5">
-        {columns.map(
+        {[...columns].reverse().map(
           (col) =>
             col.games.length > 0 && (
               <div key={col.key}>

@@ -13,9 +13,11 @@ import {
   getWulRoster,
   listWulTeams,
   getWulCurrentSeason,
+  getWulTeamPodiums,
   type WulTeam,
   type WulPlayer,
 } from '@/lib/wul/data';
+import { TeamMedals } from '@/components/team-medals';
 
 export const revalidate = 3600;
 
@@ -36,9 +38,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function WulTeamPage({ params }: Props) {
   const season = await getWulCurrentSeason();
-  const [teams, roster] = await Promise.all([
+  const [teams, roster, podiums] = await Promise.all([
     listWulTeams().catch((): WulTeam[] => []),
     getWulRoster(params.id, season).catch((): WulPlayer[] => []),
+    getWulTeamPodiums(params.id).catch(() => []),
   ]);
 
   const team = teams.find((t) => t.id === params.id);
@@ -58,7 +61,7 @@ export default async function WulTeamPage({ params }: Props) {
       ]}
     >
       {/* Team hero band */}
-      <div className="flex items-center gap-5 mb-8 pb-6 border-b border-hairline">
+      <div className="flex flex-wrap items-center gap-5 mb-8 pb-6 border-b border-hairline">
         <WulTeamLogo team={team} size={72} />
         <div>
           <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-1">
@@ -71,6 +74,11 @@ export default async function WulTeamPage({ params }: Props) {
             {season} Season
           </div>
         </div>
+        {podiums.length > 0 && (
+          <div className="w-full sm:w-auto sm:ml-auto">
+            <TeamMedals medals={podiums} />
+          </div>
+        )}
       </div>
 
       {/* Roster */}

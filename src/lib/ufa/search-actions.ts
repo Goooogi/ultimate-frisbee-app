@@ -15,7 +15,7 @@ import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { search as searchUsau, type SearchResult } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
-import { activeTeams } from '@/lib/ufa/teams';
+import { allUfaTeams } from '@/lib/ufa/teams';
 import { listPulTeams, listPulPlayers } from '@/lib/pul/data';
 import { listWulTeams, listWulPlayers } from '@/lib/wul/data';
 
@@ -88,18 +88,27 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   }
 
   // ── UFA teams (synchronous, in-memory) ────────────────────────────────
+  // ALL teams (not just currently-active) so folded/historical franchises are
+  // still findable. Match on team name OR city — "Boston" should surface
+  // "Boston Glory" — and display the full "City Name" the way UFA brands teams.
   let ufaTeamResults: SearchResult[] = [];
   try {
-    ufaTeamResults = activeTeams()
-      .map((t) => ({ ...t, _name: t.name ?? t.abbr }))
-      .filter((t) => t._name.toLowerCase().includes(needle))
+    ufaTeamResults = allUfaTeams()
+      .map((t) => ({ meta: t, mascot: t.name ?? t.abbr, city: t.city ?? '' }))
+      .filter(
+        (t) =>
+          t.mascot.toLowerCase().includes(needle) ||
+          t.city.toLowerCase().includes(needle) ||
+          `${t.city} ${t.mascot}`.toLowerCase().includes(needle),
+      )
       .slice(0, cap)
       .map((t) => ({
         kind: 'team' as const,
-        id: t.id,
-        name: t._name,
-        hint: ['UFA', t.city].filter(Boolean).join(' · '),
+        id: t.meta.id,
+        name: [t.city, t.mascot].filter(Boolean).join(' '),
+        hint: 'UFA',
         league: 'ufa' as const,
+        logoUrl: t.meta.logo ?? null,
         prominence: 3, // pro league — top-tier
       }));
   } catch {
@@ -114,9 +123,13 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     listWulPlayers().catch(() => []),
   ]);
 
-  // PUL teams
+  // PUL teams — match on name OR city (so "Philadelphia" surfaces the Surge).
   const pulTeamResults: SearchResult[] = pulTeams
-    .filter((t) => t.name.toLowerCase().includes(needle))
+    .filter(
+      (t) =>
+        t.name.toLowerCase().includes(needle) ||
+        (t.city ?? '').toLowerCase().includes(needle),
+    )
     .slice(0, cap)
     .map((t) => ({
       kind: 'team',
@@ -124,6 +137,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       name: t.name,
       hint: ['PUL', t.city].filter(Boolean).join(' · '),
       league: 'pul',
+      logoUrl: t.logoUrl ?? null,
       prominence: 3, // pro league — top-tier
     }));
 
@@ -149,9 +163,13 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     }
   }
 
-  // WUL teams
+  // WUL teams — match on name OR city.
   const wulTeamResults: SearchResult[] = wulTeams
-    .filter((t) => t.name.toLowerCase().includes(needle))
+    .filter(
+      (t) =>
+        t.name.toLowerCase().includes(needle) ||
+        (t.city ?? '').toLowerCase().includes(needle),
+    )
     .slice(0, cap)
     .map((t) => ({
       kind: 'team',
@@ -159,6 +177,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       name: t.name,
       hint: ['WUL', t.city].filter(Boolean).join(' · '),
       league: 'wul',
+      logoUrl: t.logoUrl ?? null,
       prominence: 3, // pro league — top-tier
     }));
 

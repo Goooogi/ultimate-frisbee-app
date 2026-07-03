@@ -28,8 +28,52 @@
 // Cron: intended to run weekly (Sunday night) via pg_cron → this function.
 
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
-import { fetchHtml } from '../_shared/http.ts';
+import { fetchHtml, postForm } from '../_shared/http.ts';
 import { parseHtml, rankingsUrl } from '../_shared/parse.ts';
+import { parseHiddenFields, extractViewAllPostback } from '../_shared/aspnet.ts';
+
+/**
+ * Fetch the FULL rankings table for a RankSet, not just the default first page.
+ *
+ * The page is an ASP.NET GridView that shows 20 rows per page (~200+ teams
+ * across ~12 pages) with a single "View All" postback that expands them all
+ * onto one response. We:
+ *   1. GET page 1 (confirmed reachable from the cloud IP — see WAF notes).
+ *   2. Extract the hidden form fields (__VIEWSTATE etc.) + the View All target.
+ *   3. POST "View All" back → one response with every team.
+ * Both requests go through the shared 5s-throttled client, so this is paced.
+ *
+ * If there's no View All link, or the postback fails (e.g. a WAF block on the
+ * cloud-IP POST that the GET doesn't trigger), we fall back to page 1's ~20
+ * rows and log it — a partial result beats a hard failure, and the stats make
+ * the fallback visible.
+ */
+async function fetchAllRankingsHtml(rankSet: string): Promise<string> {
+  const url = rankingsUrl(rankSet);
+  const page1 = await fetchHtml(url);
+
+  const viewAll = extractViewAllPostback(page1);
+  if (!viewAll) {
+    console.log(`[sync-usau-rankings] ${rankSet}: no "View All" link — using page 1 only`);
+    return page1;
+  }
+
+  const hidden = parseHiddenFields(page1);
+  try {
+    const full = await postForm(url, {
+      ...hidden,
+      __EVENTTARGET: viewAll.target,
+      __EVENTARGUMENT: viewAll.argument,
+    });
+    return full;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(
+      `[sync-usau-rankings] ${rankSet}: "View All" postback failed (${msg}) — falling back to page 1`,
+    );
+    return page1;
+  }
+}
 
 interface RequestBody {
   season?: number;
@@ -215,7 +259,7 @@ async function run(body: RequestBody): Promise<{
 
   for (const rankSet of sets) {
     const { gender, level } = RANK_SETS[rankSet];
-    const html = await fetchHtml(rankingsUrl(rankSet));
+    const html = await fetchAllRankingsHtml(rankSet);
     const rows = parseRankings(html);
     // Sanity guard (scraper convention): a RankSet page always has a Top-20
     // table. Zero rows means the selectors drifted or the page changed —
@@ -230,12 +274,26 @@ async function run(body: RequestBody): Promise<{
 
     const upserts: Record<string, unknown>[] = [];
     const unmatched: string[] = [];
+    // Dedupe by team_id within the division. Two distinct ranked rows can
+    // resolve to the SAME usau_teams id when their names normalize identically
+    // (the ambiguous-match fallback picks the first candidate) — common now
+    // that we ingest 200+ teams/division, not just a top-20. Rows arrive in
+    // rank order, so the FIRST time we see a team_id is its best (lowest) rank;
+    // keep that and drop later collisions. Without this the upsert throws
+    // "ON CONFLICT DO UPDATE cannot affect row a second time".
+    const seenTeamIds = new Set<string>();
+    let collisions = 0;
     for (const r of rows) {
       const teamId = matchTeam(r, idx);
       if (!teamId) {
         unmatched.push(r.teamName);
         continue;
       }
+      if (seenTeamIds.has(teamId)) {
+        collisions++;
+        continue;
+      }
+      seenTeamIds.add(teamId);
       upserts.push({
         season,
         week,
@@ -249,6 +307,11 @@ async function run(body: RequestBody): Promise<{
         conference: r.section,
         scraped_at: scrapedAt,
       });
+    }
+    if (collisions > 0) {
+      console.log(
+        `[sync-usau-rankings] ${rankSet}: dropped ${collisions} duplicate team_id row(s) (ambiguous name match)`,
+      );
     }
 
     let written = 0;

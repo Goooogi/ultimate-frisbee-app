@@ -605,6 +605,55 @@ export async function getWulStandings(season: number): Promise<WulStandingRow[]>
     );
 }
 
+export interface TeamPodium {
+  year: number;
+  place: 1 | 2 | 3;
+}
+
+/**
+ * Every podium (top-3) finish for a WUL team across all seasons.
+ *   1st = Final winner, 2nd = Final loser, 3rd = 3rd-place-game winner.
+ * (WUL plays an explicit 3rd-place game, so bronze is that winner — the loser
+ * is 4th and gets no medal.) Newest first.
+ */
+export async function getWulTeamPodiums(teamId: string): Promise<TeamPodium[]> {
+  const seasons = await listWulSeasons().catch(() => [] as number[]);
+  const out: TeamPodium[] = [];
+
+  for (const year of seasons) {
+    const games = await listWulGames({ season: year, onlyFinal: true }).catch(
+      () => [] as WulGame[],
+    );
+    const rounds = deriveWulPostseasonRounds(games);
+
+    for (const g of games) {
+      const round = rounds.get(g.id);
+      if (!round) continue;
+      const a = g.away;
+      const h = g.home;
+      if (a.score == null || h.score == null || a.score === h.score) continue;
+      const winner = a.score > h.score ? a.teamId : h.teamId;
+      const loser = a.score > h.score ? h.teamId : a.teamId;
+
+      if (round === 'final') {
+        if (winner === teamId) out.push({ year, place: 1 });
+        else if (loser === teamId) out.push({ year, place: 2 });
+      } else if (round === 'third_place') {
+        if (winner === teamId) out.push({ year, place: 3 });
+      }
+    }
+  }
+
+  const best = new Map<number, 1 | 2 | 3>();
+  for (const m of out) {
+    const cur = best.get(m.year);
+    if (cur == null || m.place < cur) best.set(m.year, m.place);
+  }
+  return [...best.entries()]
+    .map(([year, place]) => ({ year, place }))
+    .sort((x, y) => y.year - x.year);
+}
+
 /** One game by id. Returns null if not found. Powers /wul/g/[...id]. */
 export async function getWulGame(id: string): Promise<WulGame | null> {
   const db = supabase();

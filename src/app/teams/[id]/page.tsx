@@ -11,8 +11,10 @@ import {
   getCurrentGames,
   getAllPlayerStats,
   getGameRoster,
+  getUfaTeamPodiums,
   currentSeasonYear,
 } from '@/lib/ufa/client';
+import { TeamMedals } from '@/components/team-medals';
 import { teamMeta } from '@/lib/ufa/teams';
 import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame, UfaPlayerStat, UfaStanding } from '@/lib/ufa/types';
@@ -40,13 +42,14 @@ export default async function TeamPage({ params }: Props) {
   const year = currentSeasonYear();
 
   // Fire all fetches in parallel.
-  const [standingsResult, teamStatsResult, seasonGamesResult, liveGamesResult, playersResult] =
+  const [standingsResult, teamStatsResult, seasonGamesResult, liveGamesResult, playersResult, podiumsResult] =
     await Promise.allSettled([
       getStandings(),
       getTeamStats({ year }),
       getAllGamesByYears([year], { teamID: id }),
       getCurrentGames(),
       getAllPlayerStats({ year, teamID: id, sort: 'scores', dir: 'desc' }),
+      getUfaTeamPodiums(id),
     ]);
 
   const standings = standingsResult.status === 'fulfilled' ? standingsResult.value : [];
@@ -54,6 +57,7 @@ export default async function TeamPage({ params }: Props) {
   const seasonGames = seasonGamesResult.status === 'fulfilled' ? seasonGamesResult.value : [];
   const liveGames = liveGamesResult.status === 'fulfilled' ? liveGamesResult.value : [];
   const players = playersResult.status === 'fulfilled' ? playersResult.value : [];
+  const podiums = podiumsResult.status === 'fulfilled' ? podiumsResult.value : [];
 
   // Merge live games with season games — live data wins.
   const allGamesById = new Map<string, UfaGame>();
@@ -190,6 +194,13 @@ export default async function TeamPage({ params }: Props) {
           )}
         </div>
       </div>
+
+      {/* Championship medals (podium finishes) */}
+      {podiums.length > 0 && (
+        <div className="px-6 md:px-8 -mt-4 mb-6">
+          <TeamMedals medals={podiums} />
+        </div>
+      )}
 
       {/* Team stats strip */}
       {teamStatRow && (

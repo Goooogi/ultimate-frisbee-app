@@ -100,3 +100,43 @@ export function extractNextPostback(
 
   return result;
 }
+
+/**
+ * Find the "View All" postback link and return its __EVENTTARGET / __EVENTARGUMENT.
+ *
+ * USAU's paged GridViews (e.g. the team rankings page) render a single link
+ * below the grid that expands every page onto one:
+ *
+ *   <a id="CT_Main_0_lnkViewAll"
+ *      href="javascript:__doPostBack('CT_Main_0$lnkViewAll','')">View All</a>
+ *
+ * One "View All" postback returns ALL rows in a single response — far cheaper
+ * (and gentler on the WAF) than looping "Next 20 »" pages. The ctl/id prefix
+ * changes across pages/versions, so we locate the link by its id ending in
+ * "lnkViewAll" OR its visible text "View All" and pull the target out of the
+ * __doPostBack href.
+ *
+ * @returns { target, argument } if found, else null (caller falls back to page 1).
+ */
+export function extractViewAllPostback(
+  html: string,
+): { target: string; argument: string } | null {
+  const $ = load(html);
+  let result: { target: string; argument: string } | null = null;
+
+  $('a').each((_, el) => {
+    const id = $(el).attr('id') ?? '';
+    const text = $(el).text().trim();
+    const isViewAll = /lnkViewAll$/i.test(id) || /^view all$/i.test(text);
+    if (!isViewAll) return;
+
+    const href = $(el).attr('href') ?? '';
+    const m = href.match(/javascript:__doPostBack\('([^']+)'\s*,\s*'([^']*)'\)/i);
+    if (m) {
+      result = { target: m[1], argument: m[2] };
+      return false; // break cheerio .each()
+    }
+  });
+
+  return result;
+}

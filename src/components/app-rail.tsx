@@ -44,6 +44,7 @@ import {
 import { activeTeams } from '@/lib/ufa/teams';
 import { allWulTeams, type WulTeamMeta } from '@/lib/wul/teams';
 import { TeamLogo } from '@/components/team-logo';
+import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
 // WUL teams are static — build the grid list once at module load.
 const WUL_TEAMS_LIST: WulTeamMeta[] = allWulTeams();
@@ -654,6 +655,7 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                                   <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
                                     {team.nationalsPlacement ?? ''}
                                   </span>
+                                  <UsauTeamLogo name={team.name} genderDivision={div} size={20} />
                                   <span className="truncate">{team.name}</span>
                                 </Link>
                               ))}

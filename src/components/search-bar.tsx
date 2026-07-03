@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { type SearchResult, resultHref } from '@/lib/usau/search-nav';
+import { SearchResultIcon } from '@/components/search-result-icon';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 import { SearchGlyph } from '@/components/search-modal';
@@ -303,25 +304,8 @@ function ResultRow({
         active ? 'bg-surface' : 'hover:bg-surface',
       ].join(' ')}
     >
-      {/* Mark: colored badge per kind */}
-      <span
-        aria-hidden="true"
-        className={[
-          'inline-flex items-center justify-center w-7 h-7 rounded-md',
-          'text-[9px] font-bold tracking-[0.04em] flex-shrink-0',
-          result.kind === 'team'
-            ? 'bg-ink text-bg'
-            : result.kind === 'tournament'
-              ? 'bg-surface border border-border text-muted'
-              : 'bg-accent text-accent-ink',
-        ].join(' ')}
-      >
-        {result.kind === 'team'
-          ? 'TM'
-          : result.kind === 'tournament'
-            ? <CalendarGlyph />
-            : result.name.slice(0, 2).toUpperCase()}
-      </span>
+      {/* Mark: team logo (or monogram), calendar for tournaments, initials for players */}
+      <SearchResultIcon result={result} />
       <span className="flex-1 min-w-0">
         <span className="block text-[13px] font-semibold text-ink font-tight leading-tight truncate">
           {result.name}
@@ -350,15 +334,6 @@ function ClearGlyph() {
         strokeWidth="1.5"
         strokeLinecap="round"
       />
-    </svg>
-  );
-}
-
-function CalendarGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="1.5" y="2.5" width="11" height="10" rx="1.5" />
-      <path d="M1.5 5.5h11M4.5 1.5v2M9.5 1.5v2" />
     </svg>
   );
 }

@@ -8,9 +8,10 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
-import { getTeam } from '@/lib/usau/data';
+import { getTeam, getTeamNationalsMedals } from '@/lib/usau/data';
 import { UsauTeamHistory } from '@/components/usau/usau-team-history';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { TeamMedals } from '@/components/team-medals';
 import {
   levelToParam,
   DEFAULT_DIVISION,
@@ -35,6 +36,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function UsauTeamPage({ params }: Props) {
   const team = await getTeam(params.id);
   if (!team) notFound();
+
+  // National Championship medals (year + placement). Non-fatal on failure.
+  const medals = await getTeamNationalsMedals(
+    team.name,
+    team.genderDivision,
+    team.competitionLevel,
+  ).catch(() => []);
 
   const eyebrowParts = [team.competitionLevel, team.genderDivision, team.state]
     .filter(Boolean)
@@ -67,6 +75,11 @@ export default async function UsauTeamPage({ params }: Props) {
         />
         <SummaryChip label="Seasons" value={yearsCount} />
         <SummaryChip label="Events" value={totalEvents} />
+        {medals.length > 0 && (
+          <div className="w-full sm:w-auto sm:ml-auto">
+            <TeamMedals medals={medals} heading="National Championships" showPlace />
+          </div>
+        )}
       </div>
 
       <UsauTeamHistory seasons={team.seasons} genderDivision={team.genderDivision} />

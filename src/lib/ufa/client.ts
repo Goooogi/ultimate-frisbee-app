@@ -437,6 +437,49 @@ export async function getUfaChampionsByYear(years: number[]): Promise<Map<number
   return result;
 }
 
+export interface TeamPodium {
+  year: number;
+  place: 1 | 2 | 3;
+}
+
+/**
+ * A UFA team's championship-game finishes by year: 1st (won the final) or 2nd
+ * (lost it). We deliberately DO NOT report 3rd — UFA's API gives no reliable
+ * semifinal marker (2024+ playoff games are all `week-N`), so we can't identify
+ * the losing semifinalists without guessing. Gold + silver only, newest first.
+ *
+ * Scans the modern UFA window (2021→current), where `findChampionshipGame`'s
+ * label handling is validated. Only completed seasons yield a result.
+ */
+export async function getUfaTeamPodiums(teamSlug: string): Promise<TeamPodium[]> {
+  const current = currentSeasonYear();
+  const years: number[] = [];
+  for (let y = current; y >= 2021; y--) years.push(y);
+  const slug = teamSlug.toLowerCase();
+  const out: TeamPodium[] = [];
+
+  await Promise.all(
+    years.map(async (year) => {
+      try {
+        const games = await getAllGamesByYears([year]);
+        if (games.length === 0) return;
+        if (!games.every((g) => isFinalStatus(g.status))) return; // season not over
+        const finalGame = findChampionshipGame(games);
+        if (!finalGame) return;
+        const awayWon = finalGame.awayScore > finalGame.homeScore;
+        const winner = (awayWon ? finalGame.awayTeamID : finalGame.homeTeamID)?.toLowerCase();
+        const loser = (awayWon ? finalGame.homeTeamID : finalGame.awayTeamID)?.toLowerCase();
+        if (winner === slug) out.push({ year, place: 1 });
+        else if (loser === slug) out.push({ year, place: 2 });
+      } catch (err) {
+        console.error(`getUfaTeamPodiums: failed for ${year}`, err);
+      }
+    }),
+  );
+
+  return out.sort((a, b) => b.year - a.year);
+}
+
 // ── Season helpers ───────────────────────────────────────────────────────────
 
 /** Current UFA season year. Season runs ~April through August. */

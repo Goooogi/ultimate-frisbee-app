@@ -596,6 +596,54 @@ export async function getPulStandings(season: number): Promise<PulStandingRow[]>
     );
 }
 
+export interface TeamPodium {
+  year: number;
+  place: 1 | 2 | 3;
+}
+
+/**
+ * Every podium (top-3) playoff finish for a PUL team, across all seasons.
+ *   1st = Finals winner, 2nd = Finals loser, 3rd = each Semifinal loser.
+ * Used for the medals row on the team page. Newest first.
+ */
+export async function getPulTeamPodiums(teamId: string): Promise<TeamPodium[]> {
+  const seasons = await listPulSeasons().catch(() => [] as number[]);
+  const out: TeamPodium[] = [];
+
+  for (const year of seasons) {
+    const games = await listPulGames({ season: year, onlyFinal: true }).catch(
+      () => [] as PulGame[],
+    );
+
+    for (const g of games) {
+      const a = g.away;
+      const h = g.home;
+      if (a.score == null || h.score == null || a.score === h.score) continue;
+      const winner = a.score > h.score ? a.teamId : h.teamId;
+      const loser = a.score > h.score ? h.teamId : a.teamId;
+
+      if (g.weekLabel === 'finals') {
+        if (winner === teamId) out.push({ year, place: 1 });
+        else if (loser === teamId) out.push({ year, place: 2 });
+      } else if (g.weekLabel === 'semifinals') {
+        // Both semifinal losers tie for 3rd.
+        if (loser === teamId) out.push({ year, place: 3 });
+      }
+    }
+  }
+
+  // A team can't hold two places in one season; if it somehow appears twice
+  // (data quirk), keep the best. Dedupe by year keeping the lowest place.
+  const best = new Map<number, 1 | 2 | 3>();
+  for (const m of out) {
+    const cur = best.get(m.year);
+    if (cur == null || m.place < cur) best.set(m.year, m.place);
+  }
+  return [...best.entries()]
+    .map(([year, place]) => ({ year, place }))
+    .sort((x, y) => y.year - x.year);
+}
+
 /**
  * One game by its id ('{season}/{week}/{AWAY}-vs-{HOME}'), with both sides'
  * team identity resolved. Returns null if not found. Powers /pul/g/[id].

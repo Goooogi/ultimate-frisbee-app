@@ -22,6 +22,10 @@ export interface SearchResult {
   /** Which league this result belongs to — drives routing (resultHref).
    *  Tournaments are USAU-only. Defaults to 'usau' for legacy USAU rows. */
   league?: 'usau' | 'ufa' | 'pul' | 'wul';
+  /** Resolved team logo path/URL (local `/teams/...` or remote R2 URL), or null
+   *  when we have no logo — the result renderer falls back to a name monogram.
+   *  Teams only; players/tournaments leave this undefined. */
+  logoUrl?: string | null;
   /** Relevance/prominence score for ranking (higher = more prominent). Adult
    *  club + pro-league teams outrank college, which outranks youth/HS/MS — so
    *  a query like "Colorado" floats real clubs above U-20/Academy noise. The

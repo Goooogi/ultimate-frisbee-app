@@ -14,6 +14,7 @@ import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { flightForName, type Flight } from '@/lib/usau/flights';
+import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 
 type DB = SupabaseClient<Database>;
@@ -612,6 +613,134 @@ export async function getUsauClubChampionsBySeason(): Promise<
     });
   }
   return result;
+}
+
+export interface UsauNationalsMedal {
+  year: number;
+  place: 1 | 2 | 3;
+}
+
+/**
+ * True ONLY for the season's National Championships — the pinnacle Series event.
+ * Purpose-built for medal derivation because it must catch every historical
+ * naming variant ("USA Ultimate National Championships", "…Club Championships",
+ * "Club Nationals") while rejecting the many other events that also carry
+ * "Championship": Regionals/Sectionals, US Open, Pro Championships, Worlds, HS.
+ * (isPinnacleEventName misses "National Championships" — singular "national" —
+ * which cost real titles, so we don't reuse it here.)
+ */
+function isNationalsChampionshipName(name: string): boolean {
+  const n = name.toLowerCase();
+  if (/regional|sectional|conference/.test(n)) return false;
+  if (/u\.?\s?s\.?\s?open|pro[- ]?championship|pro[- ]?elite|tune ?up|warm ?up|\binvite\b/.test(n))
+    return false;
+  if (/wucc|wmucc|wjuc|worlds?\b/.test(n)) return false;
+  if (/high school|middle school|\byouth\b|state championship/.test(n)) return false;
+  return (
+    /national championship/.test(n) ||
+    /club nationals/.test(n) ||
+    /club championship/.test(n) ||
+    /college championship/.test(n) ||
+    /masters championship/.test(n)
+  );
+}
+
+/**
+ * A team's National Championship podium finishes, one per season.
+ *   1st = won the Nationals final, 2nd = lost it, 3rd = lost a Nationals semi.
+ * Matched by team name + gender division (usau_team_id is unpopulated, so a
+ * franchise is identified by name+division+level — see the team_id memo).
+ *
+ * 1st/2nd are reliable (the final is always present at a scored Nationals);
+ * 3rd depends on the semifinal games having been ingested — absent semis just
+ * yield no bronze rather than a wrong one. Newest season first.
+ */
+export async function getTeamNationalsMedals(
+  teamName: string,
+  genderDivision: string | null,
+  competitionLevel: string | null,
+): Promise<UsauNationalsMedal[]> {
+  if (!teamName || !competitionLevel) return [];
+  const db = await supabase();
+
+  // Nationals events for this competition level. The DB filter must be tight:
+  // a broad '%championship%' matches every Regional/Sectional Championship
+  // (thousands of rows) and would silently truncate at PostgREST's 1000-row
+  // cap — dropping older Nationals events (this bit us: pre-2023 titles
+  // vanished). These patterns match only Nationals-shaped names; the JS
+  // classifier below then drops the few stragglers (US Open / Pro Champs).
+  const { data: events } = await db
+    .from('usau_events')
+    .select('id, season, name')
+    .eq('competition_level', competitionLevel as CompetitionLevel)
+    .or(
+      'name.ilike.%national championship%,' +
+        'name.ilike.%club nationals%,' +
+        'name.ilike.%club championship%,' +
+        'name.ilike.%college championship%,' +
+        'name.ilike.%masters championship%',
+    );
+  const bySeason = new Map<string, number>();
+  for (const e of (events ?? []) as Array<{ id: string; season: number; name: string }>) {
+    if (isNationalsChampionshipName(e.name)) bySeason.set(e.id, e.season);
+  }
+  if (bySeason.size === 0) return [];
+
+  const { data: games } = await db
+    .from('usau_games')
+    .select(
+      'event_id, round, score_a, score_b, ' +
+        'team_a:usau_teams!team_a_id(name, gender_division), ' +
+        'team_b:usau_teams!team_b_id(name, gender_division)',
+    )
+    .in('event_id', Array.from(bySeason.keys()))
+    .in('round', ['final', 'semi']);
+
+  type TeamRef = { name: string; gender_division: string | null } | null;
+  type Row = {
+    event_id: string;
+    round: string;
+    score_a: number | null;
+    score_b: number | null;
+    team_a: TeamRef;
+    team_b: TeamRef;
+  };
+
+  const wantName = teamName.trim().toLowerCase();
+  const wantDiv = genderDivision ?? null;
+  const isThisTeam = (t: TeamRef): boolean =>
+    !!t &&
+    t.name.trim().toLowerCase() === wantName &&
+    (wantDiv == null || t.gender_division == null || t.gender_division === wantDiv);
+
+  // season → best (lowest) place
+  const best = new Map<number, 1 | 2 | 3>();
+  const note = (season: number, place: 1 | 2 | 3) => {
+    const cur = best.get(season);
+    if (cur == null || place < cur) best.set(season, place);
+  };
+
+  for (const g of (games ?? []) as unknown as Row[]) {
+    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
+    const season = bySeason.get(g.event_id);
+    if (season == null) continue;
+
+    const aWon = g.score_a > g.score_b;
+    const winner = aWon ? g.team_a : g.team_b;
+    const loser = aWon ? g.team_b : g.team_a;
+
+    if (g.round === 'final') {
+      if (isThisTeam(winner)) note(season, 1);
+      else if (isThisTeam(loser)) note(season, 2);
+    } else if (g.round === 'semi') {
+      // The two semifinal losers tie for 3rd.
+      if (isThisTeam(loser)) note(season, 3);
+    }
+  }
+
+  return [...best.entries()]
+    .map(([year, place]) => ({ year, place }))
+    .sort((a, b) => b.year - a.year);
 }
 
 // ─── Recent USAU Majors with Champions ─────────────────────────────────────
@@ -1384,7 +1513,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
   const [teamRes, playerRes, eventRes] = await Promise.all([
     db
       .from('usau_teams')
-      .select('id, name, state, competition_level')
+      .select('id, name, state, competition_level, gender_division')
       .ilike('name', pattern)
       .limit(overshoot),
     db
@@ -1413,6 +1542,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
       name: t.name,
       hint: hintParts.join(' · ') || null,
       league: 'usau',
+      logoUrl: usauTeamLogo(t.name, t.gender_division, t.competition_level),
       prominence: usauTeamProminence(t.name, t.competition_level),
     });
   }
