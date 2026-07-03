@@ -124,8 +124,30 @@ function mapPlayer(row: DbPlayerRow): PulPlayer {
 
 // ─── Season constants ──────────────────────────────────────────────────────────
 
-/** The current/latest PUL season. The scrape embeds 2023–2026. */
-export const PUL_CURRENT_SEASON = 2026;
+/**
+ * Sync fallback for the current PUL season. Calendar-derived (PUL seasons are
+ * calendar-year-aligned) so it self-advances instead of being a hardcoded
+ * literal someone has to bump each year. Prefer the async getPulCurrentSeason()
+ * where possible — it reads the newest season actually present in the data, so
+ * it never points at a season with no games yet.
+ */
+export const PUL_CURRENT_SEASON = new Date().getFullYear();
+
+/**
+ * The newest PUL season that actually has data, or the calendar year if the
+ * table is empty/unreachable. This is the source of truth for "current season"
+ * on the visible surfaces (home, standings, default views): it advances on its
+ * own the moment the scraper ingests a new season, and never selects an empty
+ * one. Cheap — reuses listPulSeasons() (small table).
+ */
+export async function getPulCurrentSeason(): Promise<number> {
+  try {
+    const seasons = await listPulSeasons();
+    return seasons[0] ?? PUL_CURRENT_SEASON;
+  } catch {
+    return PUL_CURRENT_SEASON;
+  }
+}
 
 /**
  * Distinct seasons that have player data, newest first. Drives the season
@@ -414,19 +436,6 @@ interface DbGameRow {
   away_score: number | null;
   home_score: number | null;
   status: string;
-}
-
-/** Distinct seasons that have GAME data, newest first (drives the games season switcher). */
-export async function listPulGameSeasons(): Promise<number[]> {
-  const db = supabase();
-  const { data, error } = await db
-    .from('pul_games')
-    .select('season')
-    .order('season', { ascending: false });
-  if (error) throw error;
-  const seen = new Set<number>();
-  for (const row of (data ?? []) as unknown as { season: number }[]) seen.add(row.season);
-  return [...seen].sort((a, b) => b - a);
 }
 
 /**

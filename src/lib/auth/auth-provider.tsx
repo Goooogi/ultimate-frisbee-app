@@ -10,9 +10,9 @@
 //   (avatars, name pills) get the display name + initials without each
 //   component running its own fetch.
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import type { Session } from '@supabase/supabase-js';
-import { createClient } from '@/lib/supabase/client';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { Session, SupabaseClient } from '@supabase/supabase-js';
+import type { Database } from '@/lib/supabase/database.types';
 import type { Profile, SessionUser } from './types';
 
 interface AuthState {
@@ -51,35 +51,57 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+type Client = SupabaseClient<Database>;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const supabase = useMemo(() => createClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   // Start true so the playbook can show a loading state and not flash the
   // sign-in modal before we've checked for an existing session.
   const [loading, setLoading] = useState(true);
 
+  // The Supabase browser client (supabase-js, ~245 kB) is loaded lazily via a
+  // dynamic import so it stays OUT of the root-layout bundle that every page
+  // ships. `loadClient` caches the single instance in a ref and is shared by
+  // the mount effect and every auth callback. Until it resolves, `loading`
+  // stays true — identical to the prior behavior where getSession() was still
+  // pending, so consumers see no difference.
+  const clientRef = useRef<Client | null>(null);
+  const loadClient = useCallback(async (): Promise<Client> => {
+    if (clientRef.current) return clientRef.current;
+    const { createClient } = await import('@/lib/supabase/client');
+    clientRef.current = createClient();
+    return clientRef.current;
+  }, []);
+
   // Hydrate the existing session on mount + subscribe to changes.
   useEffect(() => {
     let mounted = true;
+    let unsubscribe: (() => void) | undefined;
 
-    supabase.auth.getSession().then(({ data }) => {
+    (async () => {
+      const supabase = await loadClient();
+      if (!mounted) return;
+
+      const { data } = await supabase.auth.getSession();
       if (!mounted) return;
       setSession(data.session);
       setLoading(false);
-    });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, next) => {
-      if (!mounted) return;
-      setSession(next);
-      setLoading(false);
-    });
+      const { data: subscription } = supabase.auth.onAuthStateChange((_event, next) => {
+        if (!mounted) return;
+        setSession(next);
+        setLoading(false);
+      });
+      unsubscribe = () => subscription.subscription.unsubscribe();
+      if (!mounted) unsubscribe();
+    })();
 
     return () => {
       mounted = false;
-      subscription.subscription.unsubscribe();
+      unsubscribe?.();
     };
-  }, [supabase]);
+  }, [loadClient]);
 
   // Whenever the session user changes, fetch their profile row. We refetch
   // any time the user id flips so a fresh sign-up picks up the trigger-
@@ -91,29 +113,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     let cancelled = false;
-    supabase
-      .from('profiles')
-      .select('id, email, display_name, username, avatar_url, phone, role')
-      .eq('id', userId)
-      .maybeSingle()
-      .then(({ data }) => {
-        if (cancelled) return;
-        setProfile(data ?? null);
-      });
+    (async () => {
+      const supabase = await loadClient();
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, email, display_name, username, avatar_url, phone, role')
+        .eq('id', userId)
+        .maybeSingle();
+      if (cancelled) return;
+      setProfile(data ?? null);
+    })();
     return () => {
       cancelled = true;
     };
-  }, [session?.user.id, supabase]);
+  }, [session?.user.id, loadClient]);
 
   const signIn = useCallback<AuthState['signIn']>(async (email, password) => {
+    const supabase = await loadClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     // Normalize all sign-in failures to a single generic message so the
     // response can't be used to enumerate registered emails.
     if (error) return { error: 'Incorrect email or password.' };
     return {};
-  }, [supabase]);
+  }, [loadClient]);
 
   const signUp = useCallback<AuthState['signUp']>(async (email, password, opts) => {
+    const supabase = await loadClient();
     const meta: Record<string, string> = {};
     if (opts?.displayName) meta.display_name = opts.displayName;
     if (opts?.phone) meta.phone = opts.phone;
@@ -131,13 +156,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // When email confirmation is on, Supabase returns a user but no session.
     const needsConfirmation = !data.session && !!data.user;
     return { needsConfirmation };
-  }, [supabase]);
+  }, [loadClient]);
 
   const signOut = useCallback(async () => {
+    const supabase = await loadClient();
     await supabase.auth.signOut();
-  }, [supabase]);
+  }, [loadClient]);
 
   const resetPassword = useCallback<AuthState['resetPassword']>(async (email) => {
+    const supabase = await loadClient();
     // redirectTo must be on the Supabase dashboard Redirect-URLs allowlist.
     // Using window.location.origin (not a hardcoded value) so it works across
     // environments (prod, staging, localhost) without code changes.
@@ -167,13 +194,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // All other errors (unknown email, rate-limit hints, etc.) are silenced.
     }
     return {};
-  }, [supabase]);
+  }, [loadClient]);
 
   const updatePassword = useCallback<AuthState['updatePassword']>(async (newPassword) => {
+    const supabase = await loadClient();
     const { error } = await supabase.auth.updateUser({ password: newPassword });
     if (error) return { error: error.message };
     return {};
-  }, [supabase]);
+  }, [loadClient]);
 
   const value = useMemo<AuthState>(() => {
     const user: SessionUser | null = session?.user

@@ -8,13 +8,14 @@ import { getCurrentGames } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
-import { recentUsauTournamentCards, type UsauMajorWithChampions } from '@/lib/usau/data';
+import { type UsauMajorWithChampions } from '@/lib/usau/data';
+import { recentUsauTournamentCardsCached } from '@/lib/cached-readers';
 import { parseLeagueParam } from '@/lib/league';
 import { PageShell } from '@/components/page-shell';
 import { PulScores } from '@/components/pul/pul-scores';
-import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
+import { getPulCurrentSeason } from '@/lib/pul/data';
 import { WulScores } from '@/components/wul/wul-scores';
-import { WUL_CURRENT_SEASON } from '@/lib/wul/data';
+import { getWulCurrentSeason } from '@/lib/wul/data';
 
 export const revalidate = 30;
 
@@ -27,7 +28,8 @@ export default async function HomePage({ searchParams }: Props) {
 
   // ── PUL branch ────────────────────────────────────────────────────────────
   if (league === 'pul') {
-    const season = parseInt(searchParams.season ?? String(PUL_CURRENT_SEASON), 10) || PUL_CURRENT_SEASON;
+    const currentSeason = await getPulCurrentSeason();
+    const season = parseInt(searchParams.season ?? String(currentSeason), 10) || currentSeason;
     return (
       <PageShell title="Scores" eyebrow={`PUL · ${season} Season`}>
         <PulScores season={season} />
@@ -36,7 +38,8 @@ export default async function HomePage({ searchParams }: Props) {
   }
   // ── WUL branch ────────────────────────────────────────────────────────────
   if (league === 'wul') {
-    const season = parseInt(searchParams.season ?? String(WUL_CURRENT_SEASON), 10) || WUL_CURRENT_SEASON;
+    const currentSeason = await getWulCurrentSeason();
+    const season = parseInt(searchParams.season ?? String(currentSeason), 10) || currentSeason;
     return (
       <PageShell title="Scores" eyebrow={`WUL · Western Ultimate League · ${season}`}>
         <WulScores season={season} />
@@ -58,7 +61,7 @@ export default async function HomePage({ searchParams }: Props) {
       return [] as UfaGame[];
     }),
     league === 'usau'
-      ? recentUsauTournamentCards().catch((err) => {
+      ? recentUsauTournamentCardsCached().catch((err) => {
           console.error('Failed to load recent USAU tournaments:', err);
           return [] as UsauMajorWithChampions[];
         })

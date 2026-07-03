@@ -15,6 +15,7 @@
 // anchor-resolution block in getUnifiedPlayerProfile.
 
 import 'server-only';
+import { cache } from 'react';
 import {
   currentSeasonYear,
   getAllPlayerStats,
@@ -257,7 +258,7 @@ export interface UnifiedPlayerProfile {
  * per year) + 1 USAU profile fetch + 1 PUL career fetch + 1 PUL teams fetch.
  * Each upstream call is cached 1h–24h via the existing library defaults.
  */
-export async function getUnifiedPlayerProfile(
+async function _getUnifiedPlayerProfile(
   anchorId: string,
 ): Promise<UnifiedPlayerProfile | null> {
   // ── Anchor resolution ───────────────────────────────────────────────────
@@ -599,6 +600,14 @@ export async function getUnifiedPlayerProfile(
     mostRecentUsauDivision,
   };
 }
+
+/**
+ * Request-memoized wrapper. `/players/[id]` resolves the same profile in both
+ * `generateMetadata` and the page body; `cache()` dedupes those two calls
+ * within a single request so the expensive UFA/USAU fan-out runs once, not
+ * twice. Cross-request caching still comes from the underlying library TTLs.
+ */
+export const getUnifiedPlayerProfile = cache(_getUnifiedPlayerProfile);
 
 // ── Reverse lookup: USAU → UFA via name ────────────────────────────────
 

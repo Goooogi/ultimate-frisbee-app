@@ -8,9 +8,9 @@
 import Link from 'next/link';
 import {
   listRankedTeams,
-  listOfficialUsauRankings,
   officialRankSetFor,
 } from '@/lib/usau/data';
+import { listOfficialUsauRankingsCached } from '@/lib/cached-readers';
 import type { UsauLevel } from '@/lib/league';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
@@ -28,7 +28,7 @@ export async function UsauTeamsRanked({
   // publish (D-III, Masters) or that we haven't scraped yet.
   const rankSet = officialRankSetFor(competitionLevel, genderDivision);
   if (rankSet) {
-    const official = await listOfficialUsauRankings(rankSet, 25);
+    const official = await listOfficialUsauRankingsCached(rankSet, 25);
     if (official.teams.length > 0) {
       return <OfficialRankings data={official} genderDivision={genderDivision} competitionLevel={competitionLevel} />;
     }
@@ -139,7 +139,7 @@ function OfficialRankings({
   genderDivision,
   competitionLevel,
 }: {
-  data: Awaited<ReturnType<typeof listOfficialUsauRankings>>;
+  data: Awaited<ReturnType<typeof listOfficialUsauRankingsCached>>;
   genderDivision?: 'Men' | 'Women' | 'Mixed';
   competitionLevel?: UsauLevel;
 }) {

@@ -11,7 +11,6 @@
 //   submission shows up within ~a minute without any realtime infra.
 
 import { useEffect, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
 
 const POLL_MS = 60_000;
 
@@ -24,30 +23,45 @@ export function usePendingContentCount(isAdmin: boolean): number {
       return;
     }
 
-    const supabase = createClient();
     let cancelled = false;
+    let teardown: (() => void) | undefined;
 
-    async function refresh() {
-      const { count: c, error } = await supabase
-        .from('player_content')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'pending');
-      if (!cancelled && !error) setCount(c ?? 0);
-    }
+    // Load the Supabase browser client lazily (dynamic import) so supabase-js
+    // stays out of the global nav bundle — only the admin who mounts the
+    // account chip ever downloads it.
+    (async () => {
+      const { createClient } = await import('@/lib/supabase/client');
+      if (cancelled) return;
+      const supabase = createClient();
 
-    refresh();
-    const interval = setInterval(refresh, POLL_MS);
-    // Re-check when the admin returns to the tab (cheap, catches new submissions
-    // that arrived while they were away).
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') refresh();
-    };
-    document.addEventListener('visibilitychange', onVisible);
+      async function refresh() {
+        const { count: c, error } = await supabase
+          .from('player_content')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'pending');
+        if (!cancelled && !error) setCount(c ?? 0);
+      }
+
+      refresh();
+      const interval = setInterval(refresh, POLL_MS);
+      // Re-check when the admin returns to the tab (cheap, catches new
+      // submissions that arrived while they were away).
+      const onVisible = () => {
+        if (document.visibilityState === 'visible') refresh();
+      };
+      document.addEventListener('visibilitychange', onVisible);
+
+      teardown = () => {
+        clearInterval(interval);
+        document.removeEventListener('visibilitychange', onVisible);
+      };
+      // If the component unmounted while the import was in flight, clean up now.
+      if (cancelled) teardown();
+    })();
 
     return () => {
       cancelled = true;
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', onVisible);
+      teardown?.();
     };
   }, [isAdmin]);
 

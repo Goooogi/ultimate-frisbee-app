@@ -16,7 +16,12 @@ import {
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { YearSelector } from '@/components/year-selector';
-import { listUsauPlayers, type UsauPlayerListRow } from '@/lib/usau/data';
+import { type UsauPlayerListRow } from '@/lib/usau/data';
+import {
+  listUsauPlayersCached,
+  listPulPlayersCached,
+  listWulPlayersCached,
+} from '@/lib/cached-readers';
 import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
 import { PlayersSearchList } from '@/components/players/players-search-list';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
@@ -26,19 +31,17 @@ import { Suspense } from 'react';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { PulSeasonSelect } from '@/components/pul-season-select';
 import {
-  listPulPlayers,
   listPulTeams,
   listPulSeasons,
-  PUL_CURRENT_SEASON,
+  getPulCurrentSeason,
   type PulPlayer,
   type PulTeam,
   type PulSortField,
 } from '@/lib/pul/data';
 import { WulTeamLogo } from '@/components/wul-team-logo';
 import {
-  listWulPlayers,
   listWulTeams,
-  WUL_CURRENT_SEASON,
+  getWulCurrentSeason,
   type WulPlayer,
   type WulTeam,
   type WulSortField,
@@ -139,13 +142,14 @@ export default async function PlayersPage({ searchParams }: Props) {
     const rawDir = searchParams.dir ?? '';
     const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
 
-    const rawSeason = parseInt(searchParams.season ?? String(PUL_CURRENT_SEASON), 10);
-    const season = isNaN(rawSeason) ? PUL_CURRENT_SEASON : rawSeason;
+    const currentSeason = await getPulCurrentSeason();
+    const rawSeason = parseInt(searchParams.season ?? String(currentSeason), 10);
+    const season = isNaN(rawSeason) ? currentSeason : rawSeason;
 
     const [players, teams, seasons] = await Promise.all([
-      listPulPlayers({ season, sortBy, limit: 500 }).catch((): PulPlayer[] => []),
+      listPulPlayersCached({ season, sortBy, limit: 500 }).catch((): PulPlayer[] => []),
       listPulTeams().catch((): PulTeam[] => []),
-      listPulSeasons().catch((): number[] => [PUL_CURRENT_SEASON]),
+      listPulSeasons().catch((): number[] => [currentSeason]),
     ]);
 
     // Client-side asc re-sort (DB always returns desc).
@@ -275,11 +279,12 @@ export default async function PlayersPage({ searchParams }: Props) {
     const rawDir = searchParams.dir ?? '';
     const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
 
-    const rawSeason = parseInt(searchParams.season ?? String(WUL_CURRENT_SEASON), 10);
-    const season = isNaN(rawSeason) ? WUL_CURRENT_SEASON : rawSeason;
+    const currentSeason = await getWulCurrentSeason();
+    const rawSeason = parseInt(searchParams.season ?? String(currentSeason), 10);
+    const season = isNaN(rawSeason) ? currentSeason : rawSeason;
 
     const [players, teams] = await Promise.all([
-      listWulPlayers({ season, sortBy, limit: 500 }).catch((): WulPlayer[] => []),
+      listWulPlayersCached({ season, sortBy, limit: 500 }).catch((): WulPlayer[] => []),
       listWulTeams().catch((): WulTeam[] => []),
     ]);
 
@@ -409,7 +414,7 @@ export default async function PlayersPage({ searchParams }: Props) {
 
   if (league === 'usau') {
     const division = parseDivisionParam(searchParams.div);
-    const players = await listUsauPlayers({ limit: 200, genderDivision: division }).catch(
+    const players = await listUsauPlayersCached({ limit: 200, genderDivision: division }).catch(
       () => [] as UsauPlayerListRow[],
     );
     return (
@@ -437,7 +442,12 @@ export default async function PlayersPage({ searchParams }: Props) {
   const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
 
   const [stats, champions] = await Promise.all([
-    getAllPlayerStats({ year, per: 'total', sort, dir }).catch(() => [] as UfaPlayerStat[]),
+    // We only render the top 200; at 30 rows/page that's 7 pages. Cap maxPages
+    // so a cache miss walks 7 upstream pages instead of the default 30 (~900
+    // rows) only to discard 700 of them.
+    getAllPlayerStats({ year, per: 'total', sort, dir }, { maxPages: 7 }).catch(
+      () => [] as UfaPlayerStat[],
+    ),
     getUfaChampionsByYear([year]).catch(() => new Map<number, string>()),
   ]);
   // API returns rows already sorted; just cap at 200.

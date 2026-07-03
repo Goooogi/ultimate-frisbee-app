@@ -16,7 +16,7 @@ import { UsauSchedule } from '@/components/usau/usau-schedule';
 import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
 import { parseFlightParam, FLIGHT_LABELS } from '@/lib/usau/flights';
 import { PulSchedule } from '@/components/pul/pul-schedule';
-import { PUL_CURRENT_SEASON } from '@/lib/pul/data';
+import { getPulCurrentSeason } from '@/lib/pul/data';
 import { WulSchedule } from '@/components/wul/wul-schedule';
 
 export const revalidate = 300;
@@ -33,7 +33,8 @@ export default async function SchedulePage({ searchParams }: Props) {
   const league = parseLeagueParam(searchParams.league);
 
   if (league === 'pul') {
-    const season = parseInt(searchParams.season ?? String(PUL_CURRENT_SEASON), 10) || PUL_CURRENT_SEASON;
+    const currentSeason = await getPulCurrentSeason();
+    const season = parseInt(searchParams.season ?? String(currentSeason), 10) || currentSeason;
     return (
       <PageShell
         title="Schedule"

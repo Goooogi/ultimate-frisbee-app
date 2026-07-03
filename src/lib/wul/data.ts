@@ -130,8 +130,28 @@ function mapPlayer(row: DbPlayerRow): WulPlayer {
 const PLAYER_COLS =
   'id, player_name, jersey_number, team_id, season, games_played, goals, assists, blocks, turnovers, touches, o_points, d_points, plus_minus, callahans, hucks_completed, yards_total';
 
-/** Current/latest WUL season the data covers. CSV exports embed 2021–2026. */
-export const WUL_CURRENT_SEASON = 2026;
+/**
+ * Sync fallback for the current WUL season. Calendar-derived (WUL seasons are
+ * calendar-year-aligned) so it self-advances instead of being a hardcoded
+ * literal. Prefer the async getWulCurrentSeason() where possible — it reads the
+ * newest season actually present in the data, so it never points at an empty one.
+ */
+export const WUL_CURRENT_SEASON = new Date().getFullYear();
+
+/**
+ * The newest WUL season that actually has data, or the calendar year if the
+ * table is empty/unreachable. Source of truth for "current season" on the
+ * visible surfaces — advances on its own when new data is ingested, never
+ * selects an empty season. Reuses listWulSeasons().
+ */
+export async function getWulCurrentSeason(): Promise<number> {
+  try {
+    const seasons = await listWulSeasons();
+    return seasons[0] ?? WUL_CURRENT_SEASON;
+  } catch {
+    return WUL_CURRENT_SEASON;
+  }
+}
 
 // ─── Teams ───────────────────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { type SearchResult, resultHref } from '@/lib/usau/data';
+import { type SearchResult, resultHref } from '@/lib/usau/search-nav';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { searchAll } from '@/lib/ufa/search-actions';
 import { SearchGlyph } from '@/components/search-modal';

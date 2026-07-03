@@ -5,12 +5,16 @@
 // a 'use client' sub-component that receives already-fetched data as props.
 
 import Link from 'next/link';
-import { getPulStandings, PUL_CURRENT_SEASON } from '@/lib/pul/data';
+import { getPulCurrentSeason } from '@/lib/pul/data';
 import type { PulStandingRow } from '@/lib/pul/data';
-import { getWulStandings, WUL_CURRENT_SEASON } from '@/lib/wul/data';
+import { getWulCurrentSeason } from '@/lib/wul/data';
 import type { WulStandingRow } from '@/lib/wul/data';
-import { listOfficialUsauRankings } from '@/lib/usau/data';
 import type { OfficialRankedTeam } from '@/lib/usau/data';
+import {
+  getPulStandingsCached,
+  getWulStandingsCached,
+  listOfficialUsauRankingsCached,
+} from '@/lib/cached-readers';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { WulTeamLogo } from '@/components/wul-team-logo';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
@@ -43,8 +47,9 @@ function TrophyIcon() {
 
 export async function PulStandingsSection() {
   let rows: PulStandingRow[] = [];
+  const season = await getPulCurrentSeason();
   try {
-    rows = await getPulStandings(PUL_CURRENT_SEASON);
+    rows = await getPulStandingsCached(season);
   } catch {
     return null;
   }
@@ -71,7 +76,7 @@ export async function PulStandingsSection() {
               Complete
             </div>
             <div className="font-mono text-[11px] mt-3 text-[rgba(244,242,235,0.55)]">
-              {PUL_CURRENT_SEASON} season
+              {season} season
             </div>
           </div>
         </div>
@@ -125,8 +130,9 @@ export async function PulStandingsSection() {
 
 export async function WulStandingsSection() {
   let rows: WulStandingRow[] = [];
+  const season = await getWulCurrentSeason();
   try {
-    rows = await getWulStandings(WUL_CURRENT_SEASON);
+    rows = await getWulStandingsCached(season);
   } catch {
     return null;
   }
@@ -152,7 +158,7 @@ export async function WulStandingsSection() {
               Complete
             </div>
             <div className="font-mono text-[11px] mt-3 text-[rgba(244,242,235,0.55)]">
-              {WUL_CURRENT_SEASON} season
+              {season} season
             </div>
           </div>
         </div>
@@ -258,7 +264,7 @@ export type UsauDivisionData = {
 export async function UsauRankingsSection() {
   // Fetch all 5 divisions in parallel — a failure in any one is non-fatal.
   const results = await Promise.allSettled(
-    RANK_DIVISIONS.map((div) => listOfficialUsauRankings(div.key, 16)),
+    RANK_DIVISIONS.map((div) => listOfficialUsauRankingsCached(div.key, 16)),
   );
 
   const divisions: UsauDivisionData[] = RANK_DIVISIONS.map((div, i) => {

@@ -12,7 +12,7 @@ import { WulTeamLogo } from '@/components/wul-team-logo';
 import {
   getWulRoster,
   listWulTeams,
-  WUL_CURRENT_SEASON,
+  getWulCurrentSeason,
   type WulTeam,
   type WulPlayer,
 } from '@/lib/wul/data';
@@ -27,16 +27,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const teams = await listWulTeams().catch((): WulTeam[] => []);
   const team = teams.find((t) => t.id === params.id);
   if (!team) return { title: 'Team not found · The Layout' };
+  const season = await getWulCurrentSeason();
   return {
     title: `${team.city} ${team.mascot} · WUL · The Layout`,
-    description: `${team.city} ${team.mascot} roster and stats for the ${WUL_CURRENT_SEASON} WUL season.`,
+    description: `${team.city} ${team.mascot} roster and stats for the ${season} WUL season.`,
   };
 }
 
 export default async function WulTeamPage({ params }: Props) {
+  const season = await getWulCurrentSeason();
   const [teams, roster] = await Promise.all([
     listWulTeams().catch((): WulTeam[] => []),
-    getWulRoster(params.id, WUL_CURRENT_SEASON).catch((): WulPlayer[] => []),
+    getWulRoster(params.id, season).catch((): WulPlayer[] => []),
   ]);
 
   const team = teams.find((t) => t.id === params.id);
@@ -66,7 +68,7 @@ export default async function WulTeamPage({ params }: Props) {
             {team.mascot}
           </h2>
           <div className="text-[12px] text-muted font-tight mt-1.5">
-            {WUL_CURRENT_SEASON} Season
+            {season} Season
           </div>
         </div>
       </div>
@@ -77,7 +79,7 @@ export default async function WulTeamPage({ params }: Props) {
           id="roster-heading"
           className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
         >
-          <span>Roster · {WUL_CURRENT_SEASON}</span>
+          <span>Roster · {season}</span>
           <span className="text-faint tabular">{roster.length}</span>
         </h2>
 

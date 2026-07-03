@@ -614,16 +614,6 @@ export async function getUsauClubChampionsBySeason(): Promise<
   return result;
 }
 
-/** Convenience: just the champion for one (season, division), or null. */
-export function championFor(
-  champions: Map<number, Map<string, UsauChampion>>,
-  season: number,
-  division: 'Men' | 'Women' | 'Mixed' | null | undefined,
-): UsauChampion | null {
-  if (!division) return null;
-  return champions.get(season)?.get(division) ?? null;
-}
-
 // ─── Recent USAU Majors with Champions ─────────────────────────────────────
 
 export interface UsauMajorWithChampions {
@@ -1309,25 +1299,15 @@ export async function listUsauPlayers(opts?: {
 
 // ─── Search ────────────────────────────────────────────────────────────
 
-export interface SearchResult {
-  kind: 'team' | 'player' | 'tournament';
-  /** team/player → UUID; tournament → usau_slug (the /usau/events/[slug] route). */
-  id: string;
-  name: string;
-  /** Secondary line — team name for a player, state/level for a team,
-   *  season + dates for a tournament. */
-  hint: string | null;
-  /** For tournaments only: curated Triple Crown Tour flight (or null). */
-  flight?: Flight | null;
-  /** Which league this result belongs to — drives routing (resultHref).
-   *  Tournaments are USAU-only. Defaults to 'usau' for legacy USAU rows. */
-  league?: 'usau' | 'ufa' | 'pul' | 'wul';
-  /** Relevance/prominence score for ranking (higher = more prominent). Adult
-   *  club + pro-league teams outrank college, which outranks youth/HS/MS — so
-   *  a query like "Colorado" floats real clubs above U-20/Academy noise. The
-   *  search comparator sorts by match-quality first, then this. */
-  prominence?: number;
-}
+// SearchResult + resultHref live in ./search-nav (no supabase dependency) so
+// the global nav search components can import them without pulling this whole
+// data layer + supabase-js into the client bundle. Imported here for internal
+// use (the search() query builds SearchResult[]) and re-exported for the
+// server-side consumers that already import them from this module.
+import { resultHref } from './search-nav';
+import type { SearchResult } from './search-nav';
+export { resultHref };
+export type { SearchResult };
 
 /** Prominence weight for a USAU team (higher = more prominent), from its
  *  competition level AND name. Adult club > college > youth. Many youth teams
@@ -1349,32 +1329,6 @@ export function usauTeamProminence(name: string, level: string | null | undefine
       return 2; // college
     default:
       return 1; // HS / MS / beach / other
-  }
-}
-
-/**
- * Build the destination href for a search result. League-aware so a single
- * helper can be shared by every search component (search-bar, search-modal,
- * sidebar-search) instead of duplicating the routing switch.
- *
- *   - tournament → /usau/events/{slug}  (tournaments are USAU-only)
- *   - player     → /players/{id}        (all leagues use the unified profile)
- *   - team       → by league: usau→/usau/teams, ufa→/teams, pul→/pul/teams, wul→/wul/teams
- */
-export function resultHref(r: SearchResult): string {
-  if (r.kind === 'tournament') return `/usau/events/${r.id}`;
-  if (r.kind === 'player') return `/players/${r.id}`;
-  // team
-  switch (r.league) {
-    case 'ufa':
-      return `/teams/${r.id}`;
-    case 'pul':
-      return `/pul/teams/${r.id}`;
-    case 'wul':
-      return `/wul/teams/${r.id}`;
-    case 'usau':
-    default:
-      return `/usau/teams/${r.id}`;
   }
 }
 

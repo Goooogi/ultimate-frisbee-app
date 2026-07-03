@@ -246,15 +246,17 @@ function TrophyIcon() {
 
 function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
   const dateRange = formatDateRange(major.startDate, major.endDate);
+  // Card is a container (not a single anchor) so each division row can be its
+  // own link into that division's bracket — nested anchors are invalid HTML.
   return (
-    <Link
-      href={`/usau/events/${major.slug}`}
-      className="group bg-surface border border-border px-4 py-3.5 flex flex-col gap-2.5 hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-    >
-      {/* Event header */}
-      <div className="flex flex-col gap-0.5">
+    <div className="group h-full bg-surface border border-border px-4 py-3.5 flex flex-col gap-2.5 hover:border-ink transition-colors">
+      {/* Event header → event overview (all divisions) */}
+      <Link
+        href={`/usau/events/${major.slug}`}
+        className="flex flex-col gap-0.5 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+      >
         <div className="flex items-start justify-between gap-2">
-          <span className="font-tight font-semibold text-[13px] text-ink leading-snug line-clamp-2">
+          <span className="font-tight font-semibold text-[13px] text-ink leading-snug line-clamp-2 group-hover:text-accent transition-colors">
             {major.name}
           </span>
           {major.flight && (
@@ -266,9 +268,9 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
         {dateRange && (
           <span className="font-mono text-[10px] text-faint tracking-[0.06em]">{dateRange}</span>
         )}
-      </div>
+      </Link>
 
-      {/* Champions */}
+      {/* Champions — each row links to that division's bracket */}
       <div className="flex flex-col gap-2">
         {major.champions.length === 0 ? (
           <span className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
@@ -276,7 +278,11 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
           </span>
         ) : (
           major.champions.map((c) => (
-            <div key={c.division} className="flex items-center gap-2">
+            <Link
+              key={c.division}
+              href={`/usau/events/${major.slug}?div=${c.division.toLowerCase()}`}
+              className="flex items-center gap-2 no-underline rounded-sm -mx-1 px-1 py-0.5 hover:bg-hairline/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
               <span className="text-accent flex-shrink-0">
                 <TrophyIcon />
               </span>
@@ -288,22 +294,51 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
                   {c.viaPoolRecord && <span className="text-accent"> · Pool leader</span>}
                 </div>
               </div>
-            </div>
+            </Link>
           ))
         )}
       </div>
-    </Link>
+    </div>
   );
 }
 
-export function UsauMajorGrid({ majors }: { majors: UsauMajorWithChampions[] }) {
+export function UsauMajorGrid({
+  majors,
+  fill = false,
+}: {
+  majors: UsauMajorWithChampions[];
+  /**
+   * `fill` → full-width responsive 2-column grid with equal-height cards
+   * (the Scores feed, where the section owns the whole width). Default → fixed
+   * 360px cards that wrap, so on the home multi-league section a USAU card is
+   * the same size as the sibling PUL/WUL/UFA cards instead of spanning it.
+   */
+  fill?: boolean;
+}) {
   if (majors.length === 0) return null;
-  // Fixed-width cards (matching the UFA tiles and PUL/WUL recent cards) that
-  // wrap, rather than a stretch-to-fill grid — so a lone USAU card is the same
-  // size as the other leagues' cards instead of spanning the full section.
+  // Events with no champions yet ("Results pending") sink to the bottom so the
+  // completed tournaments lead. Array.sort is stable, so within each group the
+  // upstream date ordering (most recent first) is preserved.
+  const ordered = [...majors].sort(
+    (a, b) => Number(a.champions.length === 0) - Number(b.champions.length === 0),
+  );
+
+  if (fill) {
+    // One column on mobile, two on desktop; each card fills its column (no
+    // horizontal dead space) and stretches to the row's tallest card (h-full)
+    // so rows read as clean, matched pairs. Mirrors the UFA feed's grid.
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
+        {ordered.map((m) => (
+          <UsauMajorCard key={m.slug} major={m} />
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-wrap gap-3">
-      {majors.map((m) => (
+      {ordered.map((m) => (
         <div key={m.slug} className="w-full sm:w-[360px]">
           <UsauMajorCard major={m} />
         </div>

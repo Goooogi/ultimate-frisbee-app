@@ -16,7 +16,12 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
-import { AuthModal } from './auth-modal';
+import dynamic from 'next/dynamic';
+
+// The auth modal (and its ~44 kB obscenity profanity dataset) is only needed
+// once a signed-out visitor opens sign-in/up. Load it on demand so it stays
+// out of the global-nav bundle that ships on every page.
+const AuthModal = dynamic(() => import('./auth-modal').then((m) => m.AuthModal));
 import { useTheme } from '@/lib/use-theme';
 import { usePendingContentCount } from '@/lib/player-content/use-pending-count';
 import type { Theme } from '@/lib/theme';
@@ -130,12 +135,14 @@ export function AccountChip({
           </div>
         )}
 
-        <AuthModal
-          open={authOpen}
-          dismissible
-          initialMode={authMode}
-          onDismiss={() => setAuthOpen(false)}
-        />
+        {authOpen && (
+          <AuthModal
+            open={authOpen}
+            dismissible
+            initialMode={authMode}
+            onDismiss={() => setAuthOpen(false)}
+          />
+        )}
       </div>
     );
   }

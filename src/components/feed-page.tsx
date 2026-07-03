@@ -121,7 +121,7 @@ function UsauFeed({ cards }: { cards: UsauMajorWithChampions[] }) {
       </div>
 
       {cards.length > 0 ? (
-        <UsauMajorGrid majors={cards} />
+        <UsauMajorGrid majors={cards} fill />
       ) : (
         <div className="rounded-lg border border-border bg-surface p-10 text-center">
           <p className="text-[14px] text-muted font-tight">

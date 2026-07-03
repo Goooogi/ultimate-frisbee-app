@@ -180,57 +180,6 @@ export async function getAllPlayerStats(
   return out;
 }
 
-/**
- * Walk one year's leaderboard page-by-page until the target player is found
- * or every page is exhausted. Short-circuits on first match — top-ranked
- * players resolve in 1-2 pages instead of paging through the whole league.
- */
-async function findPlayerInYear(
-  playerID: string,
-  year: number | 'career',
-  maxPages = 25,
-): Promise<UfaPlayerStat | null> {
-  for (let page = 1; page <= maxPages; page++) {
-    const res = await getPlayerStats({ year, page, limit: MAX_LIMIT });
-    const found = res.stats?.find((r) => r.playerID === playerID);
-    if (found) return found;
-    if (!res.stats || res.stats.length < MAX_LIMIT) return null;
-    if (page * MAX_LIMIT >= res.total) return null;
-  }
-  return null;
-}
-
-/**
- * Synthesized player profile across recent seasons + career.
- * Each year's lookup runs in parallel, and within a year we stop paging as soon
- * as the player appears — so a top-25 scorer resolves in one round trip per year.
- *
- * @deprecated Prefer getPlayerSeasons() / getPlayerGameLog() — direct endpoints,
- * no leaderboard pagination needed. Kept for callers that need the leaderboard
- * row's `name` and `teams` fields.
- */
-export async function getPlayerProfile(
-  playerID: string,
-  years: number[],
-): Promise<{
-  career: UfaPlayerStat | null;
-  seasons: Array<{ year: number; row: UfaPlayerStat }>;
-} | null> {
-  const [career, ...seasonRows] = await Promise.all([
-    findPlayerInYear(playerID, 'career'),
-    ...years.map((y) => findPlayerInYear(playerID, y)),
-  ]);
-
-  const seasons = seasonRows
-    .map((row, i) => (row ? { year: years[i], row } : null))
-    .filter((s): s is { year: number; row: UfaPlayerStat } => s != null)
-    .sort((a, b) => b.year - a.year);
-
-  if (!career && seasons.length === 0) return null;
-
-  return { career, seasons };
-}
-
 // ── Player profile (direct endpoints) ────────────────────────────────────────
 // Both undocumented; sourced from watchufa.com's player-stats Svelte bundle.
 //   /web-v1/roster-stats-for-player?playerID=X

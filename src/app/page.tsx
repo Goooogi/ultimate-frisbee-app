@@ -17,8 +17,8 @@ import { gameUiState } from '@/lib/ufa/format';
 import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { getCurrentEvent, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
-import { listPulGames, PUL_CURRENT_SEASON } from '@/lib/pul/data';
-import { listWulGames, WUL_CURRENT_SEASON } from '@/lib/wul/data';
+import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
+import { listWulGames, getWulCurrentSeason } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
 import { HeroCarousel } from '@/components/home/hero-carousel';
@@ -69,10 +69,11 @@ export default async function HomePage() {
         if (!pick) return null;
         return await getEvent(pick.slug);
       })(),
-      // PUL: upcoming-this-week else most-recent final.
-      listPulGames({ season: PUL_CURRENT_SEASON }),
+      // PUL: upcoming-this-week else most-recent final. Season resolved from the
+      // data (newest present) so it self-advances and never queries an empty year.
+      (async () => listPulGames({ season: await getPulCurrentSeason() }))(),
       // WUL: same rule.
-      listWulGames({ season: WUL_CURRENT_SEASON }),
+      (async () => listWulGames({ season: await getWulCurrentSeason() }))(),
       // USAU: recent completed majors (TCT events) with champions, for "Recent results".
       recentUsauMajorsWithChampions(3),
     ]);
