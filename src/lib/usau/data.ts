@@ -708,7 +708,14 @@ export async function getTeamNationalsMedals(
     )
     .in('event_id', Array.from(bySeason.keys()))
     .or(
-      'bracket_name.ilike.%championship%,round.eq.placement,bracket_name.ilike.%qualification%',
+      // The top bracket is named inconsistently across years — "Championship",
+      // "Championship Bracket", "First/1st Place Bracket" — so fetch all of
+      // them. `round.eq.placement`/`qualification` bring in the 3rd-place game.
+      'bracket_name.ilike.%championship%,' +
+        'bracket_name.ilike.%first place%,' +
+        'bracket_name.ilike.%1st place%,' +
+        'round.eq.placement,' +
+        'bracket_name.ilike.%qualification%',
     );
 
   type TeamRef = { name: string; gender_division: string | null } | null;
@@ -733,14 +740,17 @@ export async function getTeamNationalsMedals(
     g.score_a != null && g.score_b != null && g.score_a !== g.score_b;
   const winnerOf = (g: Row): TeamRef => (g.score_a! > g.score_b! ? g.team_a : g.team_b);
   const loserOf = (g: Row): TeamRef => (g.score_a! > g.score_b! ? g.team_b : g.team_a);
-  // The MAIN championship bracket. USAU names it inconsistently across years —
-  // "National Championship", "Championship Bracket", "Championship" — but always
-  // contains "championship", while the placement brackets never do ("Fifth
-  // Place", "Pro Flight Play In", "WUCC Qualification"). Guard consolation just
-  // in case.
+  // The MAIN (gold-medal) bracket. USAU names it inconsistently across years:
+  // "Championship" / "Championship Bracket" / "Men's Division Championship"
+  // (2021+, 2016, 2024) AND "First Place Bracket" / "1st Place Bracket" (2017,
+  // 2018, 2022) — the latter has a trailing space in some rows. The lower
+  // placement brackets are always ordinal ("Fifth Place", "13th Place", "Pro
+  // Flight Play-In", "WUCC Qualification") — never "championship" or the exact
+  // top-of-bracket "first/1st place" phrase. Guard consolation just in case.
   const isChampBracket = (g: Row): boolean => {
-    const b = (g.bracket_name ?? '').toLowerCase();
-    return b.includes('championship') && !b.includes('consolation');
+    const b = (g.bracket_name ?? '').trim().toLowerCase();
+    if (b.includes('consolation')) return false;
+    return b.includes('championship') || b.includes('first place') || b.includes('1st place');
   };
 
   // Bucket games by the year they were actually PLAYED (scheduled_at), not the
@@ -778,11 +788,34 @@ export async function getTeamNationalsMedals(
     if (cur == null || place < cur) best.set(season, place);
   };
 
-  for (const [season, evGames] of byYear) {
+  for (const [season, allYearGames] of byYear) {
+    // Same-year contamination guard. Legacy slug collisions pull the mid-season
+    // U.S. Open (played Aug) into the Nationals event alongside the real
+    // Nationals bracket (played Sep–Oct) — both carry a "championship"/"first
+    // place" bracket, so naïvely we'd read TWO finals for one year (e.g. 2022
+    // Mixed: a bogus U.S. Open "AMP 14-12 NOISE" beside the true Nationals
+    // "Seattle Mixtape 14-12 NOISE"). Nationals ends the season, so the REAL
+    // title bracket is the one owning the LATEST-dated champ final. Keep only
+    // that bracket_name's games for this year+division.
+    const champAll = allYearGames.filter(
+      (g) => isChampBracket(g) && decisive(g) && inDivision(g.team_a) && inDivision(g.team_b),
+    );
+    const finals = champAll.filter((g) => g.round === 'final' && g.scheduled_at);
+    let evGames = allYearGames;
+    if (finals.length > 1) {
+      const latest = finals.reduce((a, b) =>
+        new Date(a.scheduled_at!) >= new Date(b.scheduled_at!) ? a : b,
+      );
+      const keepBracket = (latest.bracket_name ?? '').trim().toLowerCase();
+      evGames = allYearGames.filter(
+        (g) => (g.bracket_name ?? '').trim().toLowerCase() === keepBracket || !isChampBracket(g),
+      );
+    }
+
     // Championship-bracket games in THIS team's division only. USAU's placement
     // brackets (Fifth Place, Pro Flight Play-In, 13th Place…) also have their
     // own semis/finals — a loss there is NOT a podium finish, so they're
-    // excluded by requiring bracket_name === "National Championship".
+    // excluded by isChampBracket.
     const champ = evGames.filter(
       (g) => isChampBracket(g) && decisive(g) && inDivision(g.team_a) && inDivision(g.team_b),
     );
@@ -794,25 +827,48 @@ export async function getTeamNationalsMedals(
       else if (isThisTeam(loserOf(finalG))) note(season, 2);
     }
 
-    // 3rd — the winner of the game between the two championship-semi losers.
+    // 3rd — losing a Championship-bracket semifinal.
+    //
+    // When USAU stages a 3rd-place game between the two semi losers, only its
+    // WINNER is 3rd (the loser is 4th). But many Nationals (and every year with
+    // no bronze-medal game, e.g. 2023 Mixed) leave the two semi losers to TIE
+    // for 3rd — both take a bronze, matching USAU's official final standings.
     const semiLosers = champ.filter((g) => g.round === 'semi').map(loserOf);
     if (semiLosers.some(isThisTeam) && semiLosers.length >= 2) {
       const other = semiLosers.find((t) => !isThisTeam(t));
-      if (other) {
-        const otherName = nameOf(other);
-        // The 3rd-place game: the (post-semi) game whose two teams are exactly
-        // this team + the other semi loser. Found by team pairing, so the
-        // bracket label ("Third Place" / "WUCC Qualification") doesn't matter.
-        const thirdGame = evGames.find(
-          (g) =>
-            decisive(g) &&
-            !(isChampBracket(g) && g.round === 'semi') &&
-            ((nameOf(g.team_a) === wantName && nameOf(g.team_b) === otherName) ||
-              (nameOf(g.team_b) === wantName && nameOf(g.team_a) === otherName)),
+      const otherName = other ? nameOf(other) : '';
+      // The 3rd-place game: the (post-semi) BRACKET game whose two teams are
+      // exactly this team + the other semi loser. Found by team pairing, so the
+      // bracket label ("Third Place" / "WUCC Qualification") doesn't matter.
+      // Must NOT count a pool-play meeting between the same two teams as a
+      // "3rd-place game" (they often played earlier in pools, e.g. 2022 Mixed
+      // XIST bt Drag'n Thrust in Pool A) — that would wrongly deny the loser a
+      // tied-3rd bronze. Restrict to placement/qualification/champ games.
+      const isBracketGame = (g: Row): boolean => {
+        const b = (g.bracket_name ?? '').toLowerCase();
+        return (
+          g.round === 'placement' ||
+          b.includes('place') ||
+          b.includes('qualification') ||
+          isChampBracket(g)
         );
-        if (thirdGame && isThisTeam(winnerOf(thirdGame))) note(season, 3);
-        // Loser of the 3rd-place game is 4th → no medal. If no 3rd-place game
-        // was found at all, we award no bronze rather than guess.
+      };
+      const thirdGame = otherName
+        ? evGames.find(
+            (g) =>
+              decisive(g) &&
+              isBracketGame(g) &&
+              !(isChampBracket(g) && g.round === 'semi') &&
+              ((nameOf(g.team_a) === wantName && nameOf(g.team_b) === otherName) ||
+                (nameOf(g.team_b) === wantName && nameOf(g.team_a) === otherName)),
+          )
+        : undefined;
+      if (thirdGame) {
+        // A 3rd-place game was played → only its winner medals (loser is 4th).
+        if (isThisTeam(winnerOf(thirdGame))) note(season, 3);
+      } else {
+        // No 3rd-place game → the semi losers tie for 3rd; both medal.
+        note(season, 3);
       }
     }
   }
