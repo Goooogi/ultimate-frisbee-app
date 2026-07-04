@@ -20,8 +20,8 @@ export interface SearchResult {
   /** For tournaments only: curated Triple Crown Tour flight (or null). */
   flight?: Flight | null;
   /** Which league this result belongs to — drives routing (resultHref).
-   *  Tournaments are USAU-only. Defaults to 'usau' for legacy USAU rows. */
-  league?: 'usau' | 'ufa' | 'pul' | 'wul';
+   *  Tournaments are USAU or WFDF. Defaults to 'usau' for legacy USAU rows. */
+  league?: 'usau' | 'ufa' | 'pul' | 'wul' | 'wfdf';
   /** Resolved team logo path/URL (local `/teams/...` or remote R2 URL), or null
    *  when we have no logo — the result renderer falls back to a name monogram.
    *  Teams only; players/tournaments leave this undefined. */
@@ -43,7 +43,10 @@ export interface SearchResult {
  *   - team       → by league: usau→/usau/teams, ufa→/teams, pul→/pul/teams, wul→/wul/teams
  */
 export function resultHref(r: SearchResult): string {
-  if (r.kind === 'tournament') return `/usau/events/${r.id}`;
+  if (r.kind === 'tournament') {
+    // Tournaments belong to USAU or WFDF; route by league.
+    return r.league === 'wfdf' ? `/wfdf/events/${r.id}` : `/usau/events/${r.id}`;
+  }
   if (r.kind === 'player') return `/players/${r.id}`;
   // team
   switch (r.league) {
@@ -53,6 +56,8 @@ export function resultHref(r: SearchResult): string {
       return `/pul/teams/${r.id}`;
     case 'wul':
       return `/wul/teams/${r.id}`;
+    case 'wfdf':
+      return `/wfdf/teams/${r.id}`;
     case 'usau':
     default:
       return `/usau/teams/${r.id}`;

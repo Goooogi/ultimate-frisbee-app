@@ -17,11 +17,13 @@ import type {
   UnifiedPlayerProfile,
   UnifiedYear,
   UsauSeasonStint,
+  WfdfSeasonStint,
 } from '@/lib/unified-player';
 import { teamMetaByAbbr } from '@/lib/ufa/teams';
 import { PageShell } from '@/components/page-shell';
 import { TeamLogo } from '@/components/team-logo';
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
+import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PulPlayerGameRow } from '@/lib/pul/data';
 import type { WulPlayerGameRow } from '@/lib/wul/data';
@@ -249,6 +251,7 @@ function StintRow({ stint }: { stint: SeasonStint }) {
   if (stint.league === 'usau') return <UsauStintRow stint={stint} />;
   if (stint.league === 'pul') return <PulStintRow stint={stint} />;
   if (stint.league === 'wul') return <WulStintRow stint={stint} />;
+  if (stint.league === 'wfdf') return <WfdfStintRow stint={stint} />;
   // Exhaustive guard — new league union members should add a branch above.
   return null;
 }
@@ -680,6 +683,44 @@ function WulStintRow({ stint }: { stint: WulSeasonStint }) {
         )}
       </div>
     </details>
+  );
+}
+
+// ── WFDF stint ──────────────────────────────────────────────────────────
+// A single Worlds appearance — non-expandable (no game log upstream; just
+// tournament goals/assists). Links to the team's WFDF page. Champions get an
+// accent gold marker.
+function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
+  return (
+    <div className="px-4 py-3 flex items-center gap-3">
+      <Link
+        href={`/wfdf/teams/${stint.teamId}`}
+        className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+      >
+        <WfdfFlag flagFile={null} countryCode={stint.countryCode} size={20} />
+        <span className="flex flex-col min-w-0">
+          <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
+            {stint.teamName}
+            {stint.isChampion && (
+              <span className="ml-1.5 text-[9px] font-bold tracking-[0.12em] uppercase text-[#B8891E]">
+                · Champion
+              </span>
+            )}
+          </span>
+          <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+            WFDF · {stint.eventName}
+            {stint.divisionName ? ` · ${stint.divisionName}` : ''}
+            {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
+          </span>
+        </span>
+      </Link>
+      <YearSummaryCells
+        cells={[
+          { label: 'G', value: stint.stats.goals ?? '—' },
+          { label: 'A', value: stint.stats.assists ?? '—' },
+        ]}
+      />
+    </div>
   );
 }
 

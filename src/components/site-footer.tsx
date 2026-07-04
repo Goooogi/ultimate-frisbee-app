@@ -55,8 +55,13 @@ export function SiteFooter() {
         </span>
       </div>
 
-      {/* RIGHT — attribution. Hidden for now (per Hunter); restore this block
-          to show "Developed by Altius" again in the future. */}
+      {/* RIGHT — social. Instagram, deep-linking into the native app on mobile. */}
+      <div className="flex items-center gap-4 self-start lg:self-auto">
+        <InstagramLink />
+      </div>
+
+      {/* Attribution. Hidden for now (per Hunter); restore this block to show
+          "Developed by Altius" again in the future. */}
       {/* <a
         href="https://altiusapps.com"
         target="_blank"
@@ -76,5 +81,74 @@ export function SiteFooter() {
         <ExternalArrow />
       </a> */}
     </footer>
+  );
+}
+
+const IG_HANDLE = 'layout.ultimate';
+const IG_WEB = `https://www.instagram.com/${IG_HANDLE}/`;
+// The app scheme Instagram registers on iOS/Android. Opening it hands the tap
+// straight to the native app if it's installed.
+const IG_APP = `instagram://user?username=${IG_HANDLE}`;
+
+function InstagramLink() {
+  // The href stays the web URL so it always works (SSR, crawlers, no-JS, and
+  // desktop). On a touch device we intercept the tap and try the app scheme
+  // first, falling back to the web URL if the app doesn't take over quickly.
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (typeof window === 'undefined') return;
+    const isMobile = /iphone|ipad|ipod|android/i.test(navigator.userAgent);
+    if (!isMobile) return; // desktop → let the normal web link open
+
+    e.preventDefault();
+    // Try to open the native app. If it succeeds, the browser backgrounds and
+    // our fallback timer never fires; if nothing handles the scheme, we send
+    // the user to the web profile after a short beat.
+    const fallback = window.setTimeout(() => {
+      window.location.href = IG_WEB;
+    }, 700);
+    // If the app opens, the page is hidden — cancel the web fallback.
+    const onHide = () => {
+      if (document.hidden) window.clearTimeout(fallback);
+    };
+    document.addEventListener('visibilitychange', onHide, { once: true });
+    window.location.href = IG_APP;
+  };
+
+  return (
+    <a
+      href={IG_WEB}
+      onClick={handleClick}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="The Layout on Instagram (@layout.ultimate)"
+      className={[
+        'inline-flex items-center justify-center w-9 h-9 rounded-full',
+        'text-muted hover:text-ink',
+        'motion-safe:transition-colors motion-safe:duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+      ].join(' ')}
+    >
+      <InstagramGlyph />
+    </a>
+  );
+}
+
+function InstagramGlyph() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="5" />
+      <circle cx="12" cy="12" r="4" />
+      <circle cx="17.2" cy="6.8" r="1" fill="currentColor" stroke="none" />
+    </svg>
   );
 }

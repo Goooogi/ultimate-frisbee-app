@@ -53,6 +53,7 @@ import {
   type WulPlayerCareer,
   type WulPlayerGameRow,
 } from '@/lib/wul/data';
+import { getWfdfPlayerStints, type WfdfPlayerStint } from '@/lib/wfdf/data';
 import { namesMatch } from '@/lib/name-match';
 
 // ── Output shape ─────────────────────────────────────────────────────────
@@ -162,7 +163,33 @@ export interface WulSeasonStint {
   games: WulPlayerGameRow[];
 }
 
-export type SeasonStint = UfaSeasonStint | UsauSeasonStint | PulSeasonStint | WulSeasonStint;
+// WFDF "Worlds" appearance — name-matched from a per-event roster. Player-level
+// stats are just tournament goals/assists (no advanced stats upstream), and
+// there's no standalone WFDF player id, so this is a merge-in stint only (WFDF
+// never anchors a profile).
+export interface WfdfSeasonStint {
+  league: 'wfdf';
+  season: number;
+  teamId: string;
+  teamName: string;
+  countryCode: string | null;
+  divisionName: string | null;
+  eventName: string;
+  eventSlug: string;
+  jerseyNumber: string | null;
+  isChampion: boolean;
+  stats: {
+    goals: number | null;
+    assists: number | null;
+  };
+}
+
+export type SeasonStint =
+  | UfaSeasonStint
+  | UsauSeasonStint
+  | PulSeasonStint
+  | WulSeasonStint
+  | WfdfSeasonStint;
 
 export interface UnifiedYear {
   year: number;
@@ -316,7 +343,8 @@ async function _getUnifiedPlayerProfile(
   // ── Fetch all three sides in parallel ──────────────────────────────────
   // Each lookup is independent once we have a display name. Failures are
   // caught per-league so one bad network call doesn't kill the whole profile.
-  const [sideUfa, sideUsau, sidePulCareer, teamMap, sideWulCareer, wulTeamMap] = await Promise.all([
+  const [sideUfa, sideUsau, sidePulCareer, teamMap, sideWulCareer, wulTeamMap, wfdfStints] =
+    await Promise.all([
     // UFA side
     (anchorLeague === 'ufa'
       ? buildUfaSide(anchorId)
@@ -359,6 +387,10 @@ async function _getUnifiedPlayerProfile(
     listWulTeams()
       .then((teams) => new Map<string, WulTeam>(teams.map((t) => [t.id, t])))
       .catch(() => new Map<string, WulTeam>()),
+
+    // WFDF "Worlds" side — name-matched across all events/rosters (all rosters,
+    // club + national). WFDF never anchors; it's always a merge-in by name.
+    getWfdfPlayerStints(anchorName).catch(() => [] as WfdfPlayerStint[]),
   ] as const);
 
   // ── Location-based UFA attribution ──────────────────────────────────────
@@ -495,6 +527,26 @@ async function _getUnifiedPlayerProfile(
       });
       yearMap.set(wulStint.season, list);
     }
+  }
+
+  // WFDF "Worlds" stints — name-matched appearances at world championships.
+  // One stint per (event, team) the person appeared on, bucketed by event year.
+  for (const s of wfdfStints) {
+    const list = yearMap.get(s.year) ?? [];
+    list.push({
+      league: 'wfdf',
+      season: s.year,
+      teamId: s.teamId,
+      teamName: s.teamName,
+      countryCode: s.countryCode,
+      divisionName: s.divisionName,
+      eventName: s.eventName,
+      eventSlug: s.eventSlug,
+      jerseyNumber: s.jerseyNumber,
+      isChampion: s.isChampion,
+      stats: { goals: s.goals, assists: s.assists },
+    });
+    yearMap.set(s.year, list);
   }
 
   const years: UnifiedYear[] = Array.from(yearMap.entries())
@@ -767,6 +819,7 @@ function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
     pul: 1,
     wul: 2,
     usau: 3,
+    wfdf: 4,
   };
   return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }

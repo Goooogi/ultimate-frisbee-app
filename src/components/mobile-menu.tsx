@@ -28,7 +28,7 @@ import {
 
 type SubApp = 'games' | 'playbook' | 'fantasy' | 'twelve-oh';
 
-type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul';
+type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf';
 
 interface MegaLeague {
   id: MegaLeagueId;
@@ -41,11 +41,14 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'usau', label: 'USAU', real: true  },
   { id: 'pul',  label: 'PUL',  real: true  }, // real=true: expandable with 4 sub-page links
   { id: 'wul',  label: 'WUL',  real: true  }, // real=true: expandable, but Teams-only (no scores/schedule/players yet)
+  { id: 'wfdf', label: 'WFDF', real: true  }, // direct-link → event browser (event-based Worlds)
 ];
 
-// Direct-link leagues navigate on tap instead of expanding. (None currently —
-// WUL was promoted to an expandable league with a single Teams sub-link.)
-const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
+// Direct-link leagues navigate on tap instead of expanding. WFDF is
+// event-based (Worlds tournaments) so it jumps to the event browser.
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
+  wfdf: '/wfdf/events',
+};
 
 interface GamesNavItem {
   label: string;
@@ -94,6 +97,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/usau',     'games'],
   ['/pul',      'games'],
   ['/wul',      'games'],
+  ['/wfdf',     'games'],
 ];
 
 function detectSubApp(pathname: string): SubApp | null {

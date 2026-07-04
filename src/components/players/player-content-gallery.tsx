@@ -38,7 +38,19 @@ export function PlayerContentGallery({ playerKind, playerRef, playerDisplayName,
         )}
       </div>
 
-      <div className="mb-4">
+      {items.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {items.map((item) => (
+            <ContentTile key={item.id} item={item} onClick={() => setLightbox(item)} />
+          ))}
+        </div>
+      )}
+
+      {/* Uploader sits BELOW the content — the gallery leads, the "add" CTA
+          follows it. */}
+      <div className="mt-4">
         <PlayerContentUploader
           playerKind={playerKind}
           playerRef={playerRef}
@@ -51,16 +63,6 @@ export function PlayerContentGallery({ playerKind, playerRef, playerDisplayName,
           }}
         />
       </div>
-
-      {items.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-          {items.map((item) => (
-            <ContentTile key={item.id} item={item} onClick={() => setLightbox(item)} />
-          ))}
-        </div>
-      )}
 
       {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
     </section>

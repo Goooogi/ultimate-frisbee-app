@@ -1,7 +1,7 @@
 // League tab definitions — UFA active, USAU/INTL stubbed for season-window
 // gating later. Real game/team/player data comes from src/lib/ufa/*.
 
-export type LeagueId = 'ufa' | 'usau' | 'pul' | 'intl' | 'wul';
+export type LeagueId = 'ufa' | 'usau' | 'pul' | 'intl' | 'wul' | 'wfdf';
 
 export interface League {
   id: LeagueId;
@@ -16,5 +16,6 @@ export const LEAGUES: League[] = [
   { id: 'usau', short: 'USAU', long: 'USAU Club',     sub: 'Series · Regionals',    count: 0 },
   { id: 'pul',  short: 'PUL',  long: 'PUL',           sub: "Women's pro · Stats",   count: 0 },
   { id: 'wul',  short: 'WUL',  long: 'WUL',           sub: "Women's pro · West",    count: 0 },
+  { id: 'wfdf', short: 'WFDF', long: 'WFDF Worlds',   sub: 'Worlds · Club + Nations', count: 0 },
   { id: 'intl', short: 'INTL', long: 'International', sub: 'WUCC qualifiers',       count: 0 },
 ];

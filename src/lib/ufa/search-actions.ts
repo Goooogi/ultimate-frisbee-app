@@ -18,6 +18,7 @@ import { namesMatch } from '@/lib/name-match';
 import { allUfaTeams } from '@/lib/ufa/teams';
 import { listPulTeams, listPulPlayers } from '@/lib/pul/data';
 import { listWulTeams, listWulPlayers } from '@/lib/wul/data';
+import { searchWfdfTeams } from '@/lib/wfdf/data';
 
 /**
  * Search the year's full UFA leaderboard for players whose name includes
@@ -115,12 +116,14 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ufaTeamResults = [];
   }
 
-  // ── PUL + WUL (async — fan out in parallel) ───────────────────────────
-  const [pulTeams, pulPlayers, wulTeams, wulPlayers] = await Promise.all([
+  // ── PUL + WUL + WFDF (async — fan out in parallel) ────────────────────
+  const [pulTeams, pulPlayers, wulTeams, wulPlayers, wfdfTeams] = await Promise.all([
     listPulTeams().catch(() => []),
     listPulPlayers().catch(() => []),
     listWulTeams().catch(() => []),
     listWulPlayers().catch(() => []),
+    // WFDF teams are already DB-filtered by name (query pushed down).
+    searchWfdfTeams(query, cap).catch(() => []),
   ]);
 
   // PUL teams — match on name OR city (so "Philadelphia" surfaces the Surge).
@@ -203,6 +206,16 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     }
   }
 
+  // WFDF teams — DB-filtered by name already; tag with the event for context.
+  const wfdfTeamResults: SearchResult[] = wfdfTeams.map((t) => ({
+    kind: 'team',
+    id: t.id,
+    name: t.name,
+    hint: ['WFDF', t.eventName].filter(Boolean).join(' · '),
+    league: 'wfdf',
+    prominence: 2, // international event teams — neutral (not a standing club/pro team)
+  }));
+
   const merged = [
     ...usau,
     ...ufaResults,
@@ -211,6 +224,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ...pulPlayerResults,
     ...wulTeamResults,
     ...wulPlayerResults,
+    ...wfdfTeamResults,
   ];
 
   // Rank by: (1) match quality — exact (0) > starts-with (1) > contains (2);

@@ -52,6 +52,15 @@ const LEAGUE_ROWS: LeagueRow[] = [
     href: '/scores?league=pul',
     img: '/PUL.webp',
   },
+  {
+    id: 'wfdf',
+    label: 'WFDF Worlds',
+    abbr: 'WFDF',
+    subtitle: 'World Flying Disc Federation',
+    // Event-based league — lands on the Worlds event browser, not /scores.
+    href: '/wfdf/events',
+    img: '/WFDF_Logo.webp',
+  },
 ];
 
 export function LeaguesPanel() {

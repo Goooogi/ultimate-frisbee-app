@@ -89,6 +89,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/usau',     'games'],
   ['/pul',      'games'],
   ['/wul',      'games'],
+  ['/wfdf',     'games'],
 ];
 
 function detectSubApp(pathname: string): SubApp | null {
@@ -138,7 +139,7 @@ function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {
 // Defined locally — intentionally NOT added to LeagueId or LEAGUES in data.ts
 // (WUL/PUL don't belong in the league-switching system until they're built).
 
-type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul';
+type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf';
 
 interface MegaLeague {
   id: MegaLeagueId;
@@ -151,11 +152,15 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'usau', label: 'USAU', real: true  },
   { id: 'pul',  label: 'PUL',  real: true  }, // real=true: two-pane preview with sub-page links + team grid
   { id: 'wul',  label: 'WUL',  real: true  }, // real=true: two-pane preview with sub-page links (Scores/Teams/Players) + team grid
+  { id: 'wfdf', label: 'WFDF', real: true  }, // direct-link → event browser (event-based, no per-game scores feed)
 ];
 
 // Direct-link leagues navigate on click instead of showing a preview pane.
-// (None currently — WUL was promoted to a full preview league.)
-const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
+// WFDF is event-based (Worlds tournaments), so it jumps straight to the event
+// browser rather than previewing Scores/Schedule/Teams/Players sub-pages.
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
+  wfdf: '/wfdf/events',
+};
 
 // Pick which league the dropdown previews when it opens. Detect by ?league=
 // param first; legacy /wul,/pul prefixed paths (now redirects) still resolve.
