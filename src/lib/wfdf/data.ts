@@ -336,6 +336,219 @@ export async function getWfdfPlayerStints(displayName: string): Promise<WfdfPlay
   return stints.sort((a, b) => b.year - a.year);
 }
 
+// ─── League hubs (Teams / Players / Scores across all events) ─────────────────
+// WFDF is event-centric, so these hubs group by event rather than presenting a
+// single season-long feed. They power the /wfdf/teams, /wfdf/players and
+// /wfdf/scores nav pages (the event-scoped hub model).
+
+export interface WfdfTeamHubRow {
+  id: string;
+  name: string;
+  countryCode: string | null;
+  flagFile: string | null;
+  divisionName: string | null;
+  finalStanding: number | null;
+  wins: number | null;
+  losses: number | null;
+  eventSlug: string;
+  eventName: string;
+  eventYear: number;
+}
+
+export interface WfdfEventGroup {
+  eventSlug: string;
+  eventName: string;
+  eventYear: number;
+  location: string | null;
+}
+
+/** Every WFDF team, tagged with its event, newest event first. Grouped in the UI. */
+export async function listAllTeams(): Promise<WfdfTeamHubRow[]> {
+  const db = supabase();
+  const { data } = await db
+    .from('wfdf_teams')
+    .select(
+      'id, name, country_code, flag_file, final_standing, wins, losses, ' +
+        'division:division_id(name), event:event_id(slug, name, year, start_date)',
+    )
+    .order('name');
+  const rows = ((data ?? []) as Row[])
+    .map((t) => {
+      const ev = t.event as Record<string, unknown> | null;
+      const div = t.division as Record<string, unknown> | null;
+      if (!ev) return null;
+      return {
+        id: t.id as string,
+        name: t.name as string,
+        countryCode: (t.country_code as string) ?? null,
+        flagFile: (t.flag_file as string) ?? null,
+        divisionName: (div?.name as string) ?? null,
+        finalStanding: (t.final_standing as number) ?? null,
+        wins: (t.wins as number) ?? null,
+        losses: (t.losses as number) ?? null,
+        eventSlug: (ev.slug as string) ?? '',
+        eventName: (ev.name as string) ?? '',
+        eventYear: (ev.year as number) ?? 0,
+      } as WfdfTeamHubRow;
+    })
+    .filter((r): r is WfdfTeamHubRow => r !== null);
+  return rows;
+}
+
+export interface WfdfPlayerHubRow {
+  fullName: string;
+  teamId: string;
+  teamName: string;
+  countryCode: string | null;
+  eventSlug: string;
+  eventName: string;
+  eventYear: number;
+  goals: number | null;
+  assists: number | null;
+}
+
+function mapPlayerHubRow(r: Row): WfdfPlayerHubRow | null {
+  const team = r.team as Record<string, unknown> | null;
+  if (!team) return null;
+  const ev = team.event as Record<string, unknown> | null;
+  if (!ev) return null;
+  return {
+    fullName: r.full_name as string,
+    teamId: team.id as string,
+    teamName: (team.name as string) ?? '',
+    countryCode: (team.country_code as string) ?? null,
+    eventSlug: (ev.slug as string) ?? '',
+    eventName: (ev.name as string) ?? '',
+    eventYear: (ev.year as number) ?? 0,
+    goals: (r.goals as number) ?? null,
+    assists: (r.assists as number) ?? null,
+  };
+}
+
+/**
+ * Search named roster appearances by player name. Runs an indexed ilike()
+ * server-side (via the WFDF players hub server action) so we never ship the full
+ * ~21k-row corpus to the client just to filter it. Capped at 500 rows.
+ * (Team search lives on the Teams hub; this endpoint is player-name-first.)
+ */
+export async function searchRosterPlayers(query: string): Promise<WfdfPlayerHubRow[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const db = supabase();
+  const { data } = await db
+    .from('wfdf_rosters')
+    .select(
+      'full_name, goals, assists, ' +
+        'team:team_id(id, name, country_code, event:event_id(slug, name, year))',
+    )
+    .ilike('full_name', `%${q}%`)
+    .limit(500);
+  const seen = new Set<string>();
+  const rows: WfdfPlayerHubRow[] = [];
+  for (const r of (data ?? []) as Row[]) {
+    const mapped = mapPlayerHubRow(r);
+    if (!mapped) continue;
+    const key = `${mapped.teamId}|${mapped.fullName}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rows.push(mapped);
+  }
+  return rows.sort((a, b) => b.eventYear - a.eventYear || a.fullName.localeCompare(b.fullName));
+}
+
+/**
+ * Per-event roster player counts for the Players hub's pre-search browse state.
+ * One head+count query per event, filtered through an inner join on the team's
+ * event_id — no full-corpus download, no client shipping.
+ */
+export async function listEventPlayerTotals(): Promise<
+  { slug: string; name: string; year: number; playerCount: number }[]
+> {
+  const events = await listEvents();
+  if (events.length === 0) return [];
+  const db = supabase();
+  const totals = await Promise.all(
+    events.map(async (e) => {
+      // wfdf_rosters carries event_id directly, so a head+count query filtered
+      // on it is a cheap index scan with no rows sent to the app.
+      const { count } = await db
+        .from('wfdf_rosters')
+        .select('id', { count: 'exact', head: true })
+        .eq('event_id', e.id);
+      return { slug: e.slug, name: e.name, year: e.year, playerCount: count ?? 0 };
+    }),
+  );
+  return totals.sort((a, b) => b.year - a.year || a.name.localeCompare(b.name));
+}
+
+export interface WfdfScoreEventGroup {
+  eventSlug: string;
+  eventName: string;
+  eventYear: number;
+  location: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  gameCount: number;
+  completedCount: number;
+  divisions: string[];
+}
+
+/**
+ * Event-level summary for the Scores/Schedule hub: one card per event with its
+ * game counts and division list. Detailed games live on the event page.
+ */
+export async function listEventScoreSummaries(): Promise<WfdfScoreEventGroup[]> {
+  const events = await listEvents();
+  if (events.length === 0) return [];
+  const db = supabase();
+
+  // Fetch games (division + status) for all events, paging past the 1000 cap.
+  // MAX_GAME_ROWS is a hard, compile-time ceiling on the page-walk — it must
+  // stay a constant and NEVER be derived from request input (that would let a
+  // request amplify into an unbounded run of DB round-trips).
+  const MAX_GAME_ROWS = 20_000;
+  const gameRows: Row[] = [];
+  const PAGE = 1000;
+  for (let from = 0; from < MAX_GAME_ROWS; from += PAGE) {
+    const { data } = await db
+      .from('wfdf_games')
+      .select('event_id, status, division:division_id(name)')
+      .range(from, from + PAGE - 1);
+    const batch = (data ?? []) as Row[];
+    gameRows.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+
+  const byEvent = new Map<string, { total: number; completed: number; divs: Set<string> }>();
+  for (const g of gameRows) {
+    const eid = g.event_id as string;
+    let bucket = byEvent.get(eid);
+    if (!bucket) {
+      bucket = { total: 0, completed: 0, divs: new Set() };
+      byEvent.set(eid, bucket);
+    }
+    bucket.total += 1;
+    if (g.status === 'completed') bucket.completed += 1;
+    const dn = (g.division as Record<string, unknown> | null)?.name as string | undefined;
+    if (dn) bucket.divs.add(dn);
+  }
+
+  return events.map((e) => {
+    const b = byEvent.get(e.id);
+    return {
+      eventSlug: e.slug,
+      eventName: e.name,
+      eventYear: e.year,
+      location: e.location,
+      startDate: e.startDate,
+      endDate: e.endDate,
+      gameCount: b?.total ?? 0,
+      completedCount: b?.completed ?? 0,
+      divisions: b ? [...b.divs].sort() : [],
+    };
+  });
+}
+
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 export interface WfdfSearchTeam {

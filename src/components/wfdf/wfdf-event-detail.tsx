@@ -192,6 +192,11 @@ function GameRow({ game: g }: { game: Game }) {
   const done = g.status === 'completed' && g.homeScore != null && g.awayScore != null;
   const homeWon = done && (g.homeScore ?? 0) > (g.awayScore ?? 0);
   const awayWon = done && (g.awayScore ?? 0) > (g.homeScore ?? 0);
+  // WFDF records a single spirit-of-the-game score per game (in away_sotg);
+  // there is no separate home value in the source, so we show it once.
+  const sotg = g.awaySotg ?? g.homeSotg;
+  const timeLabel = formatGameTime(g.scheduledAt);
+  const hasFooter = timeLabel != null || sotg != null || (!done && g.status === 'scheduled');
   return (
     <div className="rounded-md border border-hairline bg-surface px-3 py-2.5">
       <TeamLine
@@ -211,8 +216,36 @@ function GameRow({ game: g }: { game: Game }) {
         won={awayWon}
         done={done}
       />
+      {hasFooter && (
+        <div className="flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-hairline text-[10px] font-tight text-faint">
+          <span className="truncate">
+            {timeLabel ?? (g.status === 'scheduled' ? 'Scheduled' : '')}
+          </span>
+          {sotg != null && (
+            <span className="tabular flex-shrink-0" title="Spirit of the Game">
+              SOTG {sotg}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+// Format a scheduled_at ISO timestamp as a compact "Mon 28 · 10:30" label in
+// UTC (the source times are venue-local stored as UTC). Returns null if absent.
+function formatGameTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+  const time = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  });
+  return `${day} · ${time}`;
 }
 
 function TeamLine({

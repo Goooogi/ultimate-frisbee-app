@@ -48,6 +48,7 @@ const PLAYERS_LIST_HREF: Record<string, string> = {
   usau: '/players?league=usau',
   pul: '/players?league=pul',
   wul: '/players?league=wul',
+  wfdf: '/wfdf/players',
 };
 
 export function UnifiedProfile({ profile, content, fromLeague }: Props) {

@@ -458,6 +458,23 @@ export async function ingestLegacy(
     await sleep(FETCH_DELAY_MS);
   }
 
+  // 6b. FALLBACK — playercard walk. When the per-team teamcard view is broken
+  //     (500s server-side, e.g. WMUCC-2022/WBUC-2023/…), reconstruct rosters
+  //     from the per-PLAYER cards: the alphabetical allplayers index lists every
+  //     player id, and each playercard names their team + jersey. Expensive
+  //     (~1 fetch per player) but the only way to recover those rosters.
+  //     Gated on the teamcard path having produced nothing.
+  if (!rostersReachable) {
+    rosterPlayers += await reconstructRostersFromPlayercards(
+      supabase,
+      base,
+      cfg.season,
+      eventId,
+      teamUuidByNorm,
+    );
+    if (rosterPlayers > 0) rostersReachable = true;
+  }
+
   return {
     season: cfg.season,
     event: cfg.name,
@@ -467,6 +484,106 @@ export async function ingestLegacy(
     games: gameRows.length,
     rostersReachable,
   };
+}
+
+// Walk the allplayers A–Z index → each playercard → { name, jersey, team }.
+// Groups players by team-name (matched to the teams we already stored) and
+// upserts rosters. Throttled; caps total players to avoid runaway loops.
+async function reconstructRostersFromPlayercards(
+  supabase: SupabaseClient,
+  base: string,
+  season: string,
+  eventId: string,
+  teamUuidByNorm: Map<string, string>,
+): Promise<number> {
+  const url = (qs: string) => `${base}/?${qs}&season=${encodeURIComponent(season)}`;
+
+  // 1. Collect every player id from the paginated allplayers index (list=A..Z
+  //    plus the default page). Dedup.
+  const playerIds = new Set<number>();
+  const pages = ['', ...Array.from({ length: 26 }, (_, i) => `&list=${String.fromCharCode(65 + i)}`)];
+  for (const pg of pages) {
+    const html = await fetchHtml(url(`view=allplayers${pg}`));
+    if (!html) continue;
+    for (const m of html.matchAll(/view=playercard&(?:amp;)?series=\d+&(?:amp;)?player=(\d+)/g)) {
+      playerIds.add(Number(m[1]));
+    }
+    await sleep(80);
+  }
+  if (playerIds.size === 0) return 0;
+
+  // 2. Fetch each playercard (bounded concurrency) → parse name + jersey + team.
+  //    Accumulate roster rows keyed by team uuid; assign a per-team player index.
+  //
+  // TIME BUDGET: the edge function is killed at ~55s wall-clock (status 546).
+  // Large events (PAUC-2023: 84 teams, ~3k players) can't finish the walk in
+  // one shot, so we stop fetching at a soft deadline and upsert whatever we
+  // collected. Upserts are idempotent, so a SECOND invocation resumes coverage
+  // (it re-walks, but only the still-missing teams' players change anything —
+  // and even a partial pass is better than the all-or-nothing timeout we had).
+  const perTeam = new Map<string, { fullName: string; jersey: string | null }[]>();
+  const ids = [...playerIds].slice(0, 4000); // safety cap
+  const CONC = 12;
+  const deadline = Date.now() + 40_000; // leave headroom for index scrape + upserts
+  for (let i = 0; i < ids.length; i += CONC) {
+    if (Date.now() > deadline) break; // budget exhausted → commit what we have
+    const batch = ids.slice(i, i + CONC);
+    await Promise.all(
+      batch.map(async (pid) => {
+        const html = await fetchHtml(url(`view=playercard&series=0&player=${pid}`)).catch(() => null);
+        if (!html) return;
+        const card = parsePlayercard(html);
+        if (!card) return;
+        const teamUuid = teamUuidByNorm.get(normName(card.team));
+        if (!teamUuid) return; // team not in this event (shouldn't happen)
+        const list = perTeam.get(teamUuid) ?? [];
+        list.push({ fullName: card.fullName, jersey: card.jersey });
+        perTeam.set(teamUuid, list);
+      }),
+    );
+  }
+
+  // 3. Upsert per team.
+  let total = 0;
+  for (const [teamUuid, players] of perTeam) {
+    const rows = players.map((p, idx) => ({
+      team_id: teamUuid,
+      event_id: eventId,
+      wfdf_player_id: idx + 1,
+      full_name: p.fullName,
+      first_name: p.fullName.split(' ')[0] ?? null,
+      last_name: p.fullName.split(' ').slice(1).join(' ') || null,
+      jersey_number: p.jersey,
+      goals: null,
+      assists: null,
+      callahans: null,
+      total: null,
+      games: null,
+    }));
+    const { error } = await supabase
+      .from('wfdf_rosters')
+      .upsert(rows, { onConflict: 'team_id,wfdf_player_id' });
+    if (!error) total += rows.length;
+  }
+  return total;
+}
+
+// Parse a playercard. The header renders as "#{jersey} {First Last} Nav.
+// History: …" (jersey optional), and a teamcard link names the team. The name
+// run allows accents + hyphens/apostrophes and stops at the "Nav." label.
+// Returns null if we can't read a name.
+function parsePlayercard(html: string): { fullName: string; jersey: string | null; team: string } | null {
+  const teamM = html.match(/view=teamcard[^>]*>\s*([^<]+?)\s*</);
+  if (!teamM) return null;
+  const team = decode(teamM[1]);
+  const text = stripTags(html);
+  // With jersey: "#80 Jon Aaron Nav. History:"
+  const m = text.match(/#(\d+)\s+([A-ZÀ-Þ][A-Za-zÀ-ÿ'\-. ]+?)\s+Nav\.?/);
+  if (m) return { jersey: m[1], fullName: decode(m[2]).trim(), team };
+  // No jersey: the name is the first run before "Nav.".
+  const m2 = text.match(/(?:^|\s)([A-ZÀ-Þ][A-Za-zÀ-ÿ'\-. ]+?)\s+Nav\.?/);
+  if (m2) return { jersey: null, fullName: decode(m2[1]).trim(), team };
+  return null;
 }
 
 // Minimal country-name → 3-letter code (legacy view=teams gives full names).

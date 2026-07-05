@@ -4,8 +4,17 @@
 // Identity left (logo + version), attribution right (Developed by Altius).
 // Theme-aware: logo swaps light/dark via useTheme(); tokens swap via CSS vars.
 
+import Link from 'next/link';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
+
+// Top-level destinations surfaced in the footer brand bar. Kept short and
+// scannable (per the slim brand-bar direction) — the full nav lives in the rail.
+const FOOTER_LINKS: { label: string; href: string }[] = [
+  { label: 'Scores', href: '/scores' },
+  { label: 'Playbook', href: '/playbook' },
+  { label: 'Fantasy', href: '/fantasy' },
+];
 
 // Used by the (currently hidden) Altius attribution below — kept for restore.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -34,52 +43,69 @@ export function SiteFooter() {
   const [theme] = useTheme();
 
   return (
-    <footer
-      className={[
-        'border-t border-hairline',
-        'px-5 lg:px-12',
-        'py-8 lg:py-10',
-        'flex flex-col gap-4',
-        'lg:flex-row lg:items-center lg:justify-between',
-      ].join(' ')}
-    >
-      {/* LEFT — wordmark + version */}
-      <div className="flex flex-col gap-2">
-        <LogoStrikeInline
-          accentColor="rgb(var(--accent))"
-          theme={theme === 'broadcast' ? 'dark' : 'light'}
-          size={0.85}
-        />
+    <footer className="border-t border-hairline px-5 lg:px-12 py-8 lg:py-9">
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+        {/* LEFT — wordmark + tagline */}
+        <div className="flex flex-col gap-1.5">
+          <LogoStrikeInline
+            accentColor="rgb(var(--accent))"
+            theme={theme === 'broadcast' ? 'dark' : 'light'}
+            size={0.85}
+          />
+          <span className="text-[12px] text-muted font-tight">
+            Every league, one place.
+          </span>
+        </div>
+
+        {/* RIGHT — quick links + social */}
+        <div className="flex items-center gap-5 self-start sm:self-auto">
+          <nav aria-label="Footer" className="flex items-center gap-4">
+            {FOOTER_LINKS.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                className={[
+                  'text-[12px] font-bold tracking-[0.1em] uppercase font-tight text-muted no-underline',
+                  'motion-safe:transition-colors motion-safe:duration-150 hover:text-ink',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
+                ].join(' ')}
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <span className="w-px h-4 bg-hairline" aria-hidden="true" />
+          {/* Instagram, deep-linking into the native app on mobile. */}
+          <InstagramLink />
+        </div>
+      </div>
+
+      {/* BOTTOM — copyright + version. Leaves a clean slot to restore the
+          "Developed by Altius" attribution (below) later. */}
+      <div className="mt-7 pt-5 border-t border-hairline flex items-center justify-between gap-4">
         <span className="text-[10px] font-bold tracking-[0.16em] text-faint uppercase font-tight">
-          v0.1 · 2026 season
+          © 2026 The Layout · v0.1
         </span>
-      </div>
 
-      {/* RIGHT — social. Instagram, deep-linking into the native app on mobile. */}
-      <div className="flex items-center gap-4 self-start lg:self-auto">
-        <InstagramLink />
+        {/* Attribution. Hidden for now (per Hunter); restore this block to show
+            "Developed by Altius" again in the future. */}
+        {/* <a
+          href="https://altiusapps.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={[
+            'group text-[12px] text-muted font-tight',
+            'motion-safe:transition-colors motion-safe:duration-150 hover:text-ink',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
+          ].join(' ')}
+        >
+          Developed by{' '}
+          <span className="text-ink font-bold group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150">
+            Altius
+          </span>
+          <ExternalArrow />
+        </a> */}
       </div>
-
-      {/* Attribution. Hidden for now (per Hunter); restore this block to show
-          "Developed by Altius" again in the future. */}
-      {/* <a
-        href="https://altiusapps.com"
-        target="_blank"
-        rel="noopener noreferrer"
-        className={[
-          'group text-[12px] lg:text-[13px] text-muted font-tight',
-          'motion-safe:transition-colors motion-safe:duration-150',
-          'hover:text-ink',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-          'self-start lg:self-auto',
-        ].join(' ')}
-      >
-        Developed by{' '}
-        <span className="text-ink font-bold group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150">
-          Altius
-        </span>
-        <ExternalArrow />
-      </a> */}
     </footer>
   );
 }
@@ -122,33 +148,14 @@ function InstagramLink() {
       rel="noopener noreferrer"
       aria-label="The Layout on Instagram (@layout.ultimate)"
       className={[
-        'inline-flex items-center justify-center w-9 h-9 rounded-full',
-        'text-muted hover:text-ink',
-        'motion-safe:transition-colors motion-safe:duration-150',
+        'inline-flex items-center justify-center w-11 h-11 -m-1 rounded-lg',
+        'opacity-90 hover:opacity-100',
+        'motion-safe:transition-opacity motion-safe:duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
       ].join(' ')}
     >
-      <InstagramGlyph />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/instagram.png" alt="" width={24} height={24} className="w-6 h-6" />
     </a>
-  );
-}
-
-function InstagramGlyph() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="3" width="18" height="18" rx="5" />
-      <circle cx="12" cy="12" r="4" />
-      <circle cx="17.2" cy="6.8" r="1" fill="currentColor" stroke="none" />
-    </svg>
   );
 }

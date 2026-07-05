@@ -55,6 +55,8 @@ type UsauDivision = 'Men' | 'Women' | 'Mixed';
 type UsauTeamsByDivision = Record<UsauDivision, TopUsauTeam[]>;
 // Shape returned by listTopPulTeams.
 type TopPulTeam = { id: string; name: string; city: string; logoUrl: string | null };
+// Lightweight WFDF event shape for the mega-menu preview.
+type WfdfMenuEvent = { slug: string; name: string; year: number };
 
 // ─── Sub-app definitions ──────────────────────────────────────────────────────
 
@@ -156,15 +158,22 @@ const MEGA_LEAGUES: MegaLeague[] = [
 ];
 
 // Direct-link leagues navigate on click instead of showing a preview pane.
-// WFDF is event-based (Worlds tournaments), so it jumps straight to the event
-// browser rather than previewing Scores/Schedule/Teams/Players sub-pages.
-const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
-  wfdf: '/wfdf/events',
-};
+// (None today — WFDF now previews Events/Scores/Teams/Players like the others.)
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
+
+// WFDF nav — event-scoped hub. "Events" is the browser landing; Scores/Teams/
+// Players are cross-event hubs. All live under /wfdf/* (no ?league= param).
+const WFDF_NAV_ITEMS: GamesNavItem[] = [
+  { label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events' },
+  { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
+  { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams' },
+  { label: 'Players', href: '/wfdf/players', match: '/wfdf/players' },
+];
 
 // Pick which league the dropdown previews when it opens. Detect by ?league=
 // param first; legacy /wul,/pul prefixed paths (now redirects) still resolve.
 function initialPreviewLeague(pathname: string, urlLeague: string): MegaLeagueId {
+  if (pathname.startsWith('/wfdf')) return 'wfdf';
   if (pathname.startsWith('/wul') || urlLeague === 'wul') return 'wul';
   if (pathname.startsWith('/pul') || urlLeague === 'pul') return 'pul';
   if (urlLeague === 'usau') return 'usau';
@@ -242,6 +251,12 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   const [pulError, setPulError] = useState(false);
   const pulFetchedRef = useRef(false);
 
+  // WFDF recent events — lazy-fetched for the mega-menu preview (event-scoped).
+  const [wfdfEvents, setWfdfEvents] = useState<WfdfMenuEvent[] | null>(null);
+  const [wfdfLoading, setWfdfLoading] = useState(false);
+  const [wfdfError, setWfdfError] = useState(false);
+  const wfdfFetchedRef = useRef(false);
+
   const mountedRef = useRef(true);
   useEffect(() => () => { mountedRef.current = false; }, []);
 
@@ -286,6 +301,24 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
     }
   }, []);
 
+  const fetchWfdfEvents = useCallback(async () => {
+    if (wfdfFetchedRef.current) return;
+    wfdfFetchedRef.current = true;
+    setWfdfLoading(true);
+    try {
+      const { listEvents } = await import('@/lib/wfdf/data');
+      const events = await listEvents();
+      const trimmed = events
+        .slice(0, 8)
+        .map((e) => ({ slug: e.slug, name: e.name, year: e.year }));
+      if (mountedRef.current) setWfdfEvents(trimmed);
+    } catch {
+      if (mountedRef.current) setWfdfError(true);
+    } finally {
+      if (mountedRef.current) setWfdfLoading(false);
+    }
+  }, []);
+
   const isActive = activeApp === 'games';
 
   // Reset preview league to match URL when the dropdown opens.
@@ -299,7 +332,8 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
   useEffect(() => {
     if (open && previewLeague === 'usau') fetchUsauTeams();
     if (open && previewLeague === 'pul') fetchPulTeams();
-  }, [open, previewLeague, fetchUsauTeams, fetchPulTeams]);
+    if (open && previewLeague === 'wfdf') fetchWfdfEvents();
+  }, [open, previewLeague, fetchUsauTeams, fetchPulTeams, fetchWfdfEvents]);
 
   // Close on Esc.
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -471,11 +505,13 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                       setPreviewLeague(league.id);
                       if (league.id === 'usau') fetchUsauTeams();
                       if (league.id === 'pul') fetchPulTeams();
+                      if (league.id === 'wfdf') fetchWfdfEvents();
                     }}
                     onFocus={() => {
                       setPreviewLeague(league.id);
                       if (league.id === 'usau') fetchUsauTeams();
                       if (league.id === 'pul') fetchPulTeams();
+                      if (league.id === 'wfdf') fetchWfdfEvents();
                     }}
                     className={[
                       'w-full flex items-center justify-between px-4 py-2.5 text-left',
@@ -547,6 +583,33 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
               {previewLeague === 'wul' && (
                 <div className="flex items-center gap-1 mb-4 pb-3 border-b border-hairline">
                   {WUL_NAV_ITEMS.map((item) => {
+                    const active = isGamesNavActive(pathname, item);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        role="menuitem"
+                        aria-current={active ? 'page' : undefined}
+                        onClick={() => setOpen(false)}
+                        className={[
+                          'px-3 py-1.5 rounded',
+                          'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
+                          'transition-colors duration-150 no-underline',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                          active ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
+                        ].join(' ')}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* WFDF sub-page row — Events / Scores / Teams / Players. */}
+              {previewLeague === 'wfdf' && (
+                <div className="flex items-center gap-1 mb-4 pb-3 border-b border-hairline">
+                  {WFDF_NAV_ITEMS.map((item) => {
                     const active = isGamesNavActive(pathname, item);
                     return (
                       <Link
@@ -751,6 +814,58 @@ function GamesDropdown({ activeApp, pathname }: GamesDropdownProps) {
                       </Link>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* ── WFDF: recent Worlds events (lazy fetch) ──────────────── */}
+              {previewLeague === 'wfdf' && (
+                <div>
+                  <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">
+                    Recent Events
+                  </p>
+                  {wfdfLoading && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                      {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="h-7 rounded bg-surface animate-pulse" />
+                      ))}
+                    </div>
+                  )}
+                  {!wfdfLoading && wfdfError && (
+                    <div className="py-3 text-[12px] text-muted">
+                      Couldn&apos;t load events —{' '}
+                      <Link
+                        href="/wfdf/events"
+                        onClick={() => setOpen(false)}
+                        className="text-ink underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                      >
+                        browse all
+                      </Link>
+                    </div>
+                  )}
+                  {!wfdfLoading && !wfdfError && wfdfEvents && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                      {wfdfEvents.map((e) => (
+                        <Link
+                          key={e.slug}
+                          href={`/wfdf/events/${e.slug}`}
+                          role="menuitem"
+                          onClick={() => setOpen(false)}
+                          className={[
+                            'flex items-center gap-2 px-1 py-1 rounded',
+                            'text-[12px] font-medium font-tight text-ink',
+                            'transition-colors duration-150 no-underline',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                            'hover:bg-surface',
+                          ].join(' ')}
+                        >
+                          <span className="text-[10px] font-bold text-faint tabular w-8 text-right flex-shrink-0">
+                            {e.year}
+                          </span>
+                          <span className="truncate">{e.name}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

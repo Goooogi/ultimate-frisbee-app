@@ -34,6 +34,16 @@ const TABS: Tab[] = [
   { id: 'players',  label: 'Players',  href: '/players',  match: '/players',  icon: 'players' },
 ];
 
+// WFDF is event-scoped and lives entirely under /wfdf/* (no ?league= param), so
+// the shared TABS above would bounce a WFDF user back to UFA. When on any
+// /wfdf/* page we swap in WFDF's own tab set so Teams/Players stay in WFDF.
+const WFDF_TABS: Tab[] = [
+  { id: 'events',  label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events',  icon: 'games' },
+  { id: 'scores',  label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores',  icon: 'schedule' },
+  { id: 'teams',   label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams',   aliases: ['/wfdf/teams'], icon: 'teams' },
+  { id: 'players', label: 'Players', href: '/wfdf/players', match: '/wfdf/players', aliases: ['/wfdf/players'], icon: 'players' },
+];
+
 function isActive(pathname: string, tab: Tab): boolean {
   const matches = (prefix: string) =>
     pathname === prefix || pathname.startsWith(`${prefix}/`);
@@ -44,6 +54,11 @@ function isActive(pathname: string, tab: Tab): boolean {
 export function MobileBottomNav() {
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
+  // WFDF is event-scoped and self-contained under /wfdf/* — its tabs carry no
+  // ?league= qs, and using them here keeps Teams/Players inside WFDF instead of
+  // bouncing to UFA (inferLeagueFromPath doesn't recognise /wfdf).
+  const isWfdf = pathname.startsWith('/wfdf');
+
   // Preserve the active league when switching tabs so navigating
   // /scores?league=usau → /teams stays on the USAU side.
   const activeLeague = searchParams.get('league')
@@ -52,17 +67,20 @@ export function MobileBottomNav() {
   const activeDivision = parseDivisionParam(searchParams.get('div'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision);
 
+  const tabs = isWfdf ? WFDF_TABS : TABS;
+  const qs = isWfdf ? '' : leagueQs;
+
   return (
     <nav
       aria-label="Mobile navigation"
       className="lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-bg/95 backdrop-blur px-1.5 pt-2 pb-[max(env(safe-area-inset-bottom),12px)] grid grid-cols-4"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = isActive(pathname, tab);
         return (
           <Link
             key={tab.id}
-            href={`${tab.href}${leagueQs}`}
+            href={`${tab.href}${qs}`}
             aria-current={active ? 'page' : undefined}
             className="flex flex-col items-center gap-1 px-2 py-1 no-underline"
           >

@@ -105,13 +105,19 @@ export default async function WfdfTeamPage({ params }: Props) {
                     <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-left tabular text-faint font-tight w-10">
                       {p.jerseyNumber ?? '—'}
                     </td>
-                    {/* Roster names are plain text: WFDF isn't an anchor league
-                        (players have no standalone WFDF id), so a WFDF-only
-                        player has no profile to link to. The integration works
-                        the other way — a player's WFDF stints surface on their
-                        existing (UFA/USAU/PUL/WUL) profile via name-match. */}
-                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
-                      {p.fullName}
+                    {/* Roster names link to a name-resolver route. WFDF isn't
+                        an anchor league (players have no standalone WFDF id), so
+                        the link goes to /wfdf/players/by-name/[name], which
+                        redirects to the person's unified profile if they exist
+                        in an anchor league (USAU/UFA), else shows a WFDF-only
+                        career view. Never a dead end. */}
+                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight">
+                      <Link
+                        href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                        className="text-ink hover:text-accent transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                      >
+                        {p.fullName}
+                      </Link>
                     </td>
                     <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
                       {p.goals ?? '—'}
@@ -148,39 +154,54 @@ export default async function WfdfTeamPage({ params }: Props) {
               const oppId = isHome ? g.awayTeamId : g.homeTeamId;
               const done = g.status === 'completed' && us != null && them != null;
               const won = done && (us ?? 0) > (them ?? 0);
+              const sotg = g.awaySotg ?? g.homeSotg;
+              const timeLabel = formatGameTime(g.scheduledAt);
+              const hasFooter = timeLabel != null || sotg != null;
               return (
                 <div
                   key={g.id}
-                  className="flex items-center justify-between gap-3 rounded-md border border-hairline bg-surface px-3 py-2.5"
+                  className="rounded-md border border-hairline bg-surface px-3 py-2.5"
                 >
-                  <span className="min-w-0 flex items-center gap-2">
-                    {done && (
-                      <span
-                        className={[
-                          'text-[9px] font-bold tracking-[0.14em] uppercase font-tight flex-shrink-0',
-                          won ? 'text-accent' : 'text-faint',
-                        ].join(' ')}
-                      >
-                        {won ? 'W' : 'L'}
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="min-w-0 flex items-center gap-2">
+                      {done && (
+                        <span
+                          className={[
+                            'text-[9px] font-bold tracking-[0.14em] uppercase font-tight flex-shrink-0',
+                            won ? 'text-accent' : 'text-faint',
+                          ].join(' ')}
+                        >
+                          {won ? 'W' : 'L'}
+                        </span>
+                      )}
+                      <span className="text-[10px] text-faint font-tight flex-shrink-0">
+                        {g.isBracket ? 'Bracket' : g.poolName ?? 'Pool'}
                       </span>
-                    )}
-                    <span className="text-[10px] text-faint font-tight flex-shrink-0">
-                      {g.isBracket ? 'Bracket' : g.poolName ?? 'Pool'}
+                      {oppId ? (
+                        <Link
+                          href={`/wfdf/teams/${oppId}`}
+                          className="text-[13px] font-tight text-ink truncate hover:text-accent"
+                        >
+                          {oppName ?? 'TBD'}
+                        </Link>
+                      ) : (
+                        <span className="text-[13px] font-tight text-ink truncate">{oppName ?? 'TBD'}</span>
+                      )}
                     </span>
-                    {oppId ? (
-                      <Link
-                        href={`/wfdf/teams/${oppId}`}
-                        className="text-[13px] font-tight text-ink truncate hover:text-accent"
-                      >
-                        {oppName ?? 'TBD'}
-                      </Link>
-                    ) : (
-                      <span className="text-[13px] font-tight text-ink truncate">{oppName ?? 'TBD'}</span>
-                    )}
-                  </span>
-                  <span className="font-tight text-[14px] tabular flex-shrink-0 text-ink">
-                    {done ? `${us}–${them}` : '–'}
-                  </span>
+                    <span className="font-tight text-[14px] tabular flex-shrink-0 text-ink">
+                      {done ? `${us}–${them}` : '–'}
+                    </span>
+                  </div>
+                  {hasFooter && (
+                    <div className="flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-hairline text-[10px] font-tight text-faint">
+                      <span className="truncate">{timeLabel ?? ''}</span>
+                      {sotg != null && (
+                        <span className="tabular flex-shrink-0" title="Spirit of the Game">
+                          SOTG {sotg}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -206,6 +227,21 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 
 function Divider() {
   return <span className="w-px self-stretch bg-hairline mx-3 lg:mx-4" aria-hidden="true" />;
+}
+
+// Compact "Mon 28 · 10:30" label (UTC) for a game's scheduled time; null if absent.
+function formatGameTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const day = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+  const time = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  });
+  return `${day} · ${time}`;
 }
 
 function ordinal(n: number): string {

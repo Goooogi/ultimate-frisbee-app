@@ -41,14 +41,21 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'usau', label: 'USAU', real: true  },
   { id: 'pul',  label: 'PUL',  real: true  }, // real=true: expandable with 4 sub-page links
   { id: 'wul',  label: 'WUL',  real: true  }, // real=true: expandable, but Teams-only (no scores/schedule/players yet)
-  { id: 'wfdf', label: 'WFDF', real: true  }, // direct-link → event browser (event-based Worlds)
+  { id: 'wfdf', label: 'WFDF', real: true  }, // event-scoped hub (Events/Scores/Teams/Players under /wfdf/*)
 ];
 
-// Direct-link leagues navigate on tap instead of expanding. WFDF is
-// event-based (Worlds tournaments) so it jumps to the event browser.
-const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {
-  wfdf: '/wfdf/events',
-};
+// Direct-link leagues navigate on tap instead of expanding.
+// (None today — WFDF now expands into its own /wfdf/* sub-pages.)
+const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
+
+// WFDF section — event-scoped hub. All pages live under /wfdf/* (no ?league= qs),
+// same no-qs treatment as WUL.
+const WFDF_NAV_ITEMS: GamesNavItem[] = [
+  { label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events' },
+  { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
+  { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams' },
+  { label: 'Players', href: '/wfdf/players', match: '/wfdf/players' },
+];
 
 interface GamesNavItem {
   label: string;
@@ -177,7 +184,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // Detect by ?league= param; legacy /wul,/pul prefixed paths (now redirects)
   // still resolve via the path check.
   const initialLeagueOpen: MegaLeagueId | null = initialGamesOpen
-    ? (urlLeague === 'wul' || pathname.startsWith('/wul')
+    ? (pathname.startsWith('/wfdf')
+        ? 'wfdf'
+        : urlLeague === 'wul' || pathname.startsWith('/wul')
         ? 'wul'
         : urlLeague === 'usau' ? 'usau' : urlLeague === 'pul' || pathname.startsWith('/pul') ? 'pul' : 'ufa')
     : null;
@@ -190,7 +199,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     const app = detectSubApp(pathname);
     setGamesOpen(app === 'games');
     if (app === 'games') {
-      if (pathname.startsWith('/wul')) {
+      if (pathname.startsWith('/wfdf')) {
+        setOpenLeague('wfdf');
+      } else if (pathname.startsWith('/wul')) {
         setOpenLeague('wul');
       } else if (pathname.startsWith('/pul')) {
         setOpenLeague('pul');
@@ -433,13 +444,18 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       />
                     </button>
 
-                    {/* Sub-pages for this league. WUL has its own /wul/*
-                        routes (Teams only) and takes no ?league= qs. */}
+                    {/* Sub-pages for this league. WUL + WFDF have their own
+                        /wul/* and /wfdf/* routes and take no ?league= qs. */}
                     {isLeagueOpen && (
                       <div className="bg-bg">
-                        {(league.id === 'wul' ? WUL_NAV_ITEMS : GAMES_NAV_ITEMS).map((item) => {
+                        {(league.id === 'wul'
+                          ? WUL_NAV_ITEMS
+                          : league.id === 'wfdf'
+                            ? WFDF_NAV_ITEMS
+                            : GAMES_NAV_ITEMS
+                        ).map((item) => {
                           const active = isGamesNavActive(pathname, item);
-                          const qs = league.id === 'wul' ? '' : leagueQsFor(league.id);
+                          const qs = league.id === 'wul' || league.id === 'wfdf' ? '' : leagueQsFor(league.id);
                           return (
                             <Link
                               key={item.href}

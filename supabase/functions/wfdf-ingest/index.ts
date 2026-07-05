@@ -77,7 +77,7 @@ interface IngestResult {
   games: number;
 }
 
-async function ingest(base: string): Promise<IngestResult> {
+async function ingest(base: string, seasonOverride?: string): Promise<IngestResult> {
   const supabase = db();
   const cleanBase = base.replace(/\/$/, '');
   const origin = new URL(cleanBase).origin;
@@ -85,11 +85,36 @@ async function ingest(base: string): Promise<IngestResult> {
   // 1. Heartbeat self-describes season + static path. Join STATIC_CACHE_BASE_URL
   //    to the ORIGIN (it's absolute-from-root; path events already include the
   //    path segment, so joining to cleanBase would double it up).
-  const hb = await getJson(`${cleanBase}/live/data/_heartbeat.json`);
+  //
+  // Most events carry a full `config` block. A few older-but-still-static
+  // events (e.g. AOUC 2025, app_version 1.8.x) ship a MINIMAL heartbeat with no
+  // config — for those we derive the season id from the caller override, else
+  // from the schedule page's `season=` param, and assume the default /live/data
+  // static path.
+  const hb = await getJson(`${cleanBase}/live/data/_heartbeat.json`).catch(() => ({}));
   const cfg = hb.config ?? {};
-  const seasonId: string = String(cfg.LIVE_SEASON_ID || '').replace(/[^a-zA-Z0-9]/g, '');
-  if (!seasonId) throw new Error('no LIVE_SEASON_ID in heartbeat — not a modern WFDF event');
-  const staticBase = `${origin}${cfg.STATIC_CACHE_BASE_URL}`;
+  let seasonId: string = String(cfg.LIVE_SEASON_ID || seasonOverride || '').replace(
+    /[^a-zA-Z0-9]/g,
+    '',
+  );
+  if (!seasonId) {
+    // Scrape the schedule page for its season= param.
+    try {
+      const html = await (await fetch(`${cleanBase}/?view=games`, {
+        headers: { 'User-Agent': UA, Accept: 'text/html' },
+      })).text();
+      const m = html.match(/[?&](?:sel)?season=([A-Za-z0-9_-]+)/);
+      if (m) seasonId = m[1].replace(/[^a-zA-Z0-9]/g, '');
+    } catch {
+      // fall through to the error below
+    }
+  }
+  if (!seasonId) throw new Error('no LIVE_SEASON_ID (heartbeat + schedule both empty)');
+  // Static-cache base. Prefer the config value; otherwise derive it from the
+  // event path — a subdomain event (https://x.wfdf.sport) uses /live/data/, a
+  // path event (https://results.wfdf.sport/aouc) uses /aouc/live/data/.
+  const pathPrefix = new URL(cleanBase).pathname.replace(/\/$/, ''); // '' or '/aouc'
+  const staticBase = `${origin}${cfg.STATIC_CACHE_BASE_URL || `${pathPrefix}/live/data/`}`;
   const dataUrl = (entity: string) => `${staticBase}${seasonId}_${entity}.json?cb=${Date.now()}`;
 
   // 2. Reference = master join.
@@ -323,7 +348,7 @@ Deno.serve(async (req) => {
     }
 
     if (hb && !legacyOverride) {
-      const result = await ingest(base);
+      const result = await ingest(base, body?.season);
       return new Response(JSON.stringify({ ok: true, mode: 'modern', ...result }), {
         headers: { 'Content-Type': 'application/json' },
       });
