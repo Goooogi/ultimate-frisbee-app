@@ -327,6 +327,45 @@ Deno.serve(async (req) => {
   } catch {
     // empty body ok — we'll error on missing base below
   }
+
+  // ── Live-dispatch mode (cron) ────────────────────────────────────────────
+  // { "dispatch": "live" } → re-ingest every MODERN WFDF event currently in its
+  // date window (start_date ≤ today ≤ end_date). Modern events are the ones the
+  // static-cache path can refresh cheaply (last_scraped_status = 'ok', not the
+  // 'ok-legacy' Ultiorganizer ones). Used by the every-15-min cron so a live
+  // tournament (e.g. WMUCC / WJUC) stays fresh; idle when nothing is on.
+  if (body?.dispatch === 'live') {
+    const supabase = db();
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: events, error } = await supabase
+      .from('wfdf_events')
+      .select('slug, name, source_origin, start_date, end_date, last_scraped_status')
+      .eq('last_scraped_status', 'ok') // modern static-cache events only
+      .lte('start_date', today)
+      .gte('end_date', today);
+    if (error) {
+      return new Response(JSON.stringify({ ok: false, error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const live = (events ?? []).filter((e: any) => e.source_origin);
+    const results: any[] = [];
+    // Sequential — polite to the source, and each event's ingest is quick.
+    for (const e of live) {
+      try {
+        const r = await ingest(e.source_origin as string);
+        results.push({ slug: e.slug, ok: true, teams: r.teams, games: r.games });
+      } catch (err) {
+        results.push({ slug: e.slug, ok: false, error: err instanceof Error ? err.message : String(err) });
+        console.error(`[wfdf-ingest] live re-ingest failed for ${e.slug}:`, err);
+      }
+    }
+    return new Response(JSON.stringify({ ok: true, mode: 'dispatch-live', liveEvents: live.length, results }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   const base = body?.base;
   if (!base || typeof base !== 'string' || !/^https?:\/\//.test(base)) {
     return new Response(

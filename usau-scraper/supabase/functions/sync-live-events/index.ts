@@ -92,14 +92,21 @@ async function run(body: RequestBody) {
   const db = supabase();
   const divisions = body.divisions ?? ['Men', 'Women', 'Mixed'];
   const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  // LOOKAHEAD window: pick up events starting within the next 7 days, not just
+  // "live or starting tomorrow". USAU publishes pools / seeds / the schedule
+  // up to ~a week before an event (e.g. Pro Elite Challenge West's Pools A–D
+  // seeded days before the Sat games), and this function dispatches
+  // sync-event-details = teams + pools + games. So a 7-day lookahead surfaces
+  // those pools as soon as they're posted rather than only on game day. Runs
+  // are idempotent (upserts), and a pre-event details page is a light fetch.
+  const lookahead = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
 
-  // start_date ≤ tomorrow AND end_date ≥ today → currently live or starting soon
+  // start_date ≤ today+7d AND end_date ≥ today → live now, or starting within a week
   const { data: events, error } = await db
     .from('usau_events')
     .select('id, usau_slug, name, competition_level, start_date, end_date')
     .in('competition_level', FLAGSHIP_LEVELS)
-    .lte('start_date', tomorrow)
+    .lte('start_date', lookahead)
     .gte('end_date', today)
     .order('start_date', { ascending: true });
   if (error) throw new Error(`load live events: ${stringifyErr(error)}`);

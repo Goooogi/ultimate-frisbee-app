@@ -26,6 +26,7 @@ import {
   parseLeagueParam,
 } from '@/lib/league';
 import { useTheme } from '@/lib/use-theme';
+import { LogoStrikeInline } from '@/components/logo-strike';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,109 @@ function CloseIcon() {
   );
 }
 
+// Per-sub-app line icons (20×20, 1.6 stroke) — give each top-level menu row a
+// scannable glyph. Kept simple + on-brand (disc, clipboard, trophy, spark).
+function SubAppIcon({ app, className = '' }: { app: SubApp; className?: string }) {
+  const common = {
+    className,
+    width: 19,
+    height: 19,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.7,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true,
+  };
+  switch (app) {
+    case 'games': // The League — a flying disc
+      return (
+        <svg {...common}>
+          <ellipse cx="12" cy="12" rx="9" ry="4.2" />
+          <path d="M4.2 10.5c1.4 1.2 4.3 2 7.8 2s6.4-.8 7.8-2" />
+        </svg>
+      );
+    case 'playbook': // clipboard with a play line
+      return (
+        <svg {...common}>
+          <rect x="5" y="4" width="14" height="17" rx="2" />
+          <path d="M9 4h6v2H9z" />
+          <path d="M8.5 11l3 3 4-5" />
+        </svg>
+      );
+    case 'twelve-oh': // trophy (12-0 = the perfect season)
+      return (
+        <svg {...common}>
+          <path d="M7 4h10v4a5 5 0 01-10 0V4z" />
+          <path d="M7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3" />
+          <path d="M12 13v4M9 20h6M10 20l.5-3h3l.5 3" />
+        </svg>
+      );
+    case 'fantasy': // spark / star burst
+      return (
+        <svg {...common}>
+          <path d="M12 3l1.8 5.4L19 10l-5.2 1.6L12 17l-1.8-5.4L5 10l5.2-1.6L12 3z" />
+        </svg>
+      );
+  }
+}
+
+// A top-level direct-link menu row: icon tile · label (· beta) · chevron.
+function SubAppRow({
+  app,
+  href,
+  label,
+  badge,
+  active,
+  rowBase,
+  iconTile,
+  onClose,
+}: {
+  app: SubApp;
+  href: string;
+  label: string;
+  badge?: string;
+  active: boolean;
+  rowBase: string;
+  iconTile: (active: boolean) => string;
+  onClose: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClose}
+      aria-current={active ? 'page' : undefined}
+      className={[
+        rowBase,
+        active ? 'text-ink bg-[rgb(var(--accent)/0.08)]' : 'text-ink hover:bg-surface',
+      ].join(' ')}
+    >
+      <span className={iconTile(active)}>
+        <SubAppIcon app={app} />
+      </span>
+      <span className="flex-1 flex items-center gap-1.5">
+        {label}
+        {badge && (
+          <sup className="text-[8px] font-bold tracking-[0.14em] text-accent leading-none">
+            {badge}
+          </sup>
+        )}
+      </span>
+      {/* Trailing chevron — subtle affordance that shifts toward the accent on
+          hover (group-hover from rowBase). */}
+      <svg
+        className="w-3 h-3 flex-shrink-0 text-faint group-hover:text-accent transition-colors duration-150"
+        viewBox="0 0 10 10"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="M3.5 2L6.5 5L3.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </Link>
+  );
+}
+
 // ─── MobileMenu ────────────────────────────────────────────────────────────────
 
 interface MobileMenuProps {
@@ -171,7 +275,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
-  const [theme, setTheme] = useTheme();
+  const [theme] = useTheme();
 
   // SSR guard — createPortal is browser-only.
   useEffect(() => { setMounted(true); }, []);
@@ -268,30 +372,45 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   }
 
   // ── Row helpers ─────────────────────────────────────────────────────────
-  // Shared classes for the main accordion rows (≥48px touch target).
+  // Top-level rows are rounded "cards" (the nav wrapper adds px-3 + gap). ≥52px
+  // touch target. Icon tile + label + trailing affordance.
   const rowBase = [
-    'flex items-center justify-between w-full px-5',
-    'min-h-[52px] text-left cursor-pointer',
-    'text-[12px] font-bold tracking-[0.14em] uppercase font-tight',
-    'transition-colors duration-150',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+    'group flex items-center gap-3 w-full pl-2.5 pr-3.5',
+    'min-h-[56px] rounded-xl text-left cursor-pointer',
+    'text-[13px] font-bold tracking-[0.1em] uppercase font-tight',
+    'transition-colors duration-150 no-underline',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
   ].join(' ');
 
+  // Nested league rows (inside the expanded "The League" card).
   const subRowBase = [
-    'flex items-center justify-between w-full px-8',
-    'min-h-[48px] text-left cursor-pointer',
+    'flex items-center justify-between w-full pl-5 pr-4',
+    'min-h-[46px] text-left cursor-pointer rounded-lg',
     'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-    'transition-colors duration-150',
+    'transition-colors duration-150 no-underline',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
   ].join(' ');
 
   const pageRowBase = [
-    'flex items-center w-full px-12',
-    'min-h-[44px] text-left',
-    'text-[11px] font-bold tracking-[0.12em] uppercase font-tight no-underline',
+    'flex items-center w-full pl-9 pr-4',
+    'min-h-[42px] text-left rounded-md',
+    'text-[11px] font-semibold tracking-[0.1em] uppercase font-tight no-underline',
     'transition-colors duration-150',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
   ].join(' ');
+
+  // Icon tile — the rounded square that holds each sub-app's glyph. Active rows
+  // get an accent-filled tile; resting rows a subtle surface tile that tints on
+  // hover (group-hover).
+  function iconTile(active: boolean): string {
+    return [
+      'inline-flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0',
+      'transition-colors duration-150',
+      active
+        ? 'bg-accent text-accent-ink'
+        : 'bg-[rgb(var(--ink)/0.05)] text-muted group-hover:bg-[rgb(var(--ink)/0.09)] group-hover:text-ink',
+    ].join(' ');
+  }
 
   if (!mounted) return null;
 
@@ -335,21 +454,40 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         ].join(' ')}
         style={{ transitionDuration: '220ms', transitionTimingFunction: 'ease-out' }}
       >
-        {/* Header row */}
-        <div className="flex items-center justify-between px-5 h-[52px] flex-shrink-0 border-b border-hairline">
-          <span className="text-[11px] font-bold tracking-[0.18em] uppercase font-tight text-muted">
-            Menu
-          </span>
+        {/* Accent glow bleeding down from the top-right — gives the panel a
+            branded, lit feel instead of a flat white sheet. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 top-0 h-40"
+          style={{
+            background:
+              'radial-gradient(120% 80% at 100% 0%, rgb(var(--accent) / 0.14), transparent 70%)',
+          }}
+        />
+
+        {/* Header — logo + eyebrow, close button. */}
+        <div className="relative flex items-center justify-between px-5 pt-5 pb-4 flex-shrink-0">
+          <div className="flex flex-col gap-1.5">
+            <LogoStrikeInline
+              accentColor="rgb(var(--accent))"
+              theme={theme === 'broadcast' ? 'dark' : 'light'}
+              size={0.8}
+            />
+            <span className="text-[10px] font-bold tracking-[0.2em] uppercase font-tight text-faint">
+              Menu
+            </span>
+          </div>
           <button
             ref={closeButtonRef}
             type="button"
             onClick={onClose}
             aria-label="Close menu"
             className={[
-              'inline-flex items-center justify-center w-11 h-11 rounded-full',
-              'text-ink hover:bg-surface transition-colors duration-150 cursor-pointer',
+              'inline-flex items-center justify-center w-10 h-10 rounded-full self-start',
+              'bg-surface border border-hairline text-muted',
+              'hover:text-ink hover:border-ink transition-colors duration-150 cursor-pointer',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              '-mr-2',
+              '-mr-1',
             ].join(' ')}
           >
             <CloseIcon />
@@ -357,36 +495,36 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         </div>
 
         {/* Nav list */}
-        <nav aria-label="Primary navigation" className="flex-1 pb-8">
+        <nav aria-label="Primary navigation" className="relative flex-1 px-3 pb-8 flex flex-col gap-1.5">
 
-          {/* ── GAMES accordion row ──────────────────────────────────── */}
+          {/* ── THE LEAGUE accordion row ─────────────────────────────── */}
           <button
             type="button"
             onClick={() => setGamesOpen((v) => !v)}
             aria-expanded={gamesOpen}
             className={[
               rowBase,
-              activeApp === 'games' ? 'text-ink' : 'text-ink hover:bg-surface',
-              'border-b border-hairline',
+              activeApp === 'games'
+                ? 'text-ink bg-[rgb(var(--accent)/0.08)]'
+                : 'text-ink hover:bg-surface',
             ].join(' ')}
           >
-            <span className="flex items-center gap-2">
-              The League
-              {activeApp === 'games' && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" aria-hidden="true" />
-              )}
+            <span className={iconTile(activeApp === 'games')}>
+              <SubAppIcon app="games" />
             </span>
+            <span className="flex-1">The League</span>
             <ChevronDown
               className={[
-                'flex-shrink-0 text-muted transition-transform duration-150',
+                'flex-shrink-0 text-muted transition-transform duration-200',
                 gamesOpen ? 'rotate-180' : '',
               ].join(' ')}
             />
           </button>
 
-          {/* GAMES expanded: league list */}
+          {/* THE LEAGUE expanded: league list — inset card with a left accent
+              spine so the nesting reads clearly. */}
           {gamesOpen && (
-            <div className="border-b border-hairline bg-surface/50">
+            <div className="ml-3 mb-1 pl-2 border-l-2 border-accent/25 flex flex-col gap-0.5">
               {MEGA_LEAGUES.map((league) => {
                 const isDisabled = !league.real;
                 const isLeagueOpen = openLeague === league.id;
@@ -401,8 +539,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       onClick={onClose}
                       className={[
                         subRowBase,
-                        'text-ink hover:bg-surface no-underline w-full',
-                        'border-b border-hairline last:border-0',
+                        'text-ink hover:bg-surface w-full',
                       ].join(' ')}
                     >
                       {league.label}
@@ -418,7 +555,6 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       className={[
                         subRowBase,
                         'text-faint cursor-not-allowed select-none',
-                        'border-b border-hairline last:border-0',
                       ].join(' ')}
                     >
                       {league.label}
@@ -439,14 +575,14 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       aria-expanded={isLeagueOpen}
                       className={[
                         subRowBase,
-                        'text-ink hover:bg-surface w-full',
-                        'border-b border-hairline last:border-0',
+                        isLeagueOpen ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
+                        'w-full',
                       ].join(' ')}
                     >
                       {league.label}
                       <ChevronDown
                         className={[
-                          'flex-shrink-0 text-muted transition-transform duration-150',
+                          'flex-shrink-0 text-muted transition-transform duration-200',
                           isLeagueOpen ? 'rotate-180' : '',
                         ].join(' ')}
                       />
@@ -455,7 +591,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                     {/* Sub-pages for this league. WUL + WFDF have their own
                         /wul/* and /wfdf/* routes and take no ?league= qs. */}
                     {isLeagueOpen && (
-                      <div className="bg-bg">
+                      <div className="flex flex-col gap-0.5 py-0.5">
                         {(league.id === 'wul'
                           ? WUL_NAV_ITEMS
                           : league.id === 'wfdf'
@@ -473,9 +609,8 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                               className={[
                                 pageRowBase,
                                 active
-                                  ? 'text-accent'
-                                  : 'text-ink hover:bg-surface',
-                                'border-b border-hairline last:border-0',
+                                  ? 'text-accent bg-[rgb(var(--accent)/0.07)]'
+                                  : 'text-muted hover:text-ink hover:bg-surface',
                               ].join(' ')}
                             >
                               {item.label}
@@ -493,95 +628,39 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             </div>
           )}
 
-          {/* ── PLAYBOOK row — direct link ───────────────────────────── */}
-          <Link
+          {/* ── PLAYBOOK ─────────────────────────────────────────────── */}
+          <SubAppRow
+            app="playbook"
             href="/playbook"
-            onClick={onClose}
-            aria-current={activeApp === 'playbook' ? 'page' : undefined}
-            className={[
-              rowBase,
-              activeApp === 'playbook' ? 'text-ink' : 'text-ink hover:bg-surface',
-              'border-b border-hairline',
-            ].join(' ')}
-          >
-            <span className="flex items-center gap-2">
-              PLAYBOOK
-              {activeApp === 'playbook' && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" aria-hidden="true" />
-              )}
-            </span>
-          </Link>
+            label="Playbook"
+            active={activeApp === 'playbook'}
+            rowBase={rowBase}
+            iconTile={iconTile}
+            onClose={onClose}
+          />
 
-          {/* ── FANTASY row — direct link (beta) ────────────────────── */}
-          <Link
-            href="/fantasy"
-            onClick={onClose}
-            aria-current={activeApp === 'fantasy' ? 'page' : undefined}
-            className={[
-              rowBase,
-              activeApp === 'fantasy' ? 'text-ink' : 'text-ink hover:bg-surface',
-              'border-b border-hairline no-underline',
-            ].join(' ')}
-          >
-            <span className="flex items-center gap-2">
-              FANTASY
-              <sup className="text-[8px] font-bold tracking-[0.14em] text-accent leading-none">
-                BETA
-              </sup>
-              {activeApp === 'fantasy' && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" aria-hidden="true" />
-              )}
-            </span>
-          </Link>
-
-          {/* ── 12-0 row — direct link ───────────────────────────────── */}
-          <Link
+          {/* ── 12-0 ─────────────────────────────────────────────────── */}
+          <SubAppRow
+            app="twelve-oh"
             href="/12-0"
-            onClick={onClose}
-            aria-current={activeApp === 'twelve-oh' ? 'page' : undefined}
-            className={[
-              rowBase,
-              activeApp === 'twelve-oh' ? 'text-ink' : 'text-ink hover:bg-surface',
-              'border-b border-hairline',
-            ].join(' ')}
-          >
-            <span className="flex items-center gap-2">
-              12-0
-              {activeApp === 'twelve-oh' && (
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" aria-hidden="true" />
-              )}
-            </span>
-          </Link>
+            label="12-0"
+            active={activeApp === 'twelve-oh'}
+            rowBase={rowBase}
+            iconTile={iconTile}
+            onClose={onClose}
+          />
 
-          {/* ── Theme toggle row ─────────────────────────────────────── */}
-          <button
-            type="button"
-            onClick={() => setTheme(theme === 'field' ? 'broadcast' : 'field')}
-            className={[rowBase, 'text-ink hover:bg-surface', 'border-b border-hairline'].join(' ')}
-            aria-label={`Switch to ${theme === 'field' ? 'Broadcast' : 'Field'} theme`}
-          >
-            <span>Theme</span>
-            <span className="flex items-center gap-2 text-muted normal-case tracking-normal">
-              <span className="text-[11px] font-bold tracking-[0.14em] uppercase font-tight">
-                {theme === 'field' ? 'Field' : 'Broadcast'}
-              </span>
-              {theme === 'field' ? (
-                // Sun (Field/light)
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-                  <circle cx="8" cy="8" r="3" />
-                  <line x1="8" y1="1" x2="8" y2="3" /><line x1="8" y1="13" x2="8" y2="15" />
-                  <line x1="1" y1="8" x2="3" y2="8" /><line x1="13" y1="8" x2="15" y2="8" />
-                  <line x1="3.05" y1="3.05" x2="4.46" y2="4.46" /><line x1="11.54" y1="11.54" x2="12.95" y2="12.95" />
-                  <line x1="12.95" y1="3.05" x2="11.54" y2="4.46" /><line x1="4.46" y1="11.54" x2="3.05" y2="12.95" />
-                </svg>
-              ) : (
-                // Moon (Broadcast/dark)
-                <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M13.5 9.5A5.5 5.5 0 016.5 2.5a5.5 5.5 0 107 7z" />
-                </svg>
-              )}
-            </span>
-          </button>
+          {/* ── FANTASY (beta) ───────────────────────────────────────── */}
+          <SubAppRow
+            app="fantasy"
+            href="/fantasy"
+            label="Fantasy"
+            badge="BETA"
+            active={activeApp === 'fantasy'}
+            rowBase={rowBase}
+            iconTile={iconTile}
+            onClose={onClose}
+          />
 
         </nav>
       </div>

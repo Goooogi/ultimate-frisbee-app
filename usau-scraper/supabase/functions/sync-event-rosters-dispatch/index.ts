@@ -152,15 +152,20 @@ async function run(body: RequestBody) {
     return { rowsProcessed: 0, result: { mode: 'event', ...r } };
   }
 
-  // ── Live mode (cron): every flagship event in its date window ───────────
-  // Same selection as sync-live-events: start_date ≤ tomorrow AND end_date ≥ today.
+  // ── Live mode (cron): flagship events in (or about to enter) their window ─
+  // Rosters/pools/seeds get published on USAU up to ~a week before an event
+  // starts, so we scrape a LOOKAHEAD window: start_date ≤ today + 7 days AND
+  // end_date ≥ today. This picks up pools/teams a week out (e.g. Pro Elite
+  // Challenge West's Sat pools seeded days before the event) rather than only
+  // once the event is live. (Live scores still come from sync-live-events,
+  // which keeps its tighter same-day window.)
   const today = new Date().toISOString().slice(0, 10);
-  const tomorrow = new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
+  const lookahead = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
   const { data: events, error: evErr } = await db
     .from('usau_events')
     .select('id, usau_slug, season')
     .in('competition_level', FLAGSHIP_LEVELS)
-    .lte('start_date', tomorrow)
+    .lte('start_date', lookahead)
     .gte('end_date', today)
     .order('start_date', { ascending: true });
   if (evErr) throw new Error(`load live events: ${stringifyErr(evErr)}`);
