@@ -149,7 +149,8 @@ function BracketSection({ bracket }: { bracket: Bracket }) {
         )}
       </div>
 
-      {/* Mobile: rounds stacked latest-first, then the placement rail. */}
+      {/* Mobile: rounds stacked latest-first. Final placements live in the
+          collapsible "Final Standings" table on the event page, so no rail. */}
       <div className="lg:hidden flex flex-col gap-5">
         {[...rendered].reverse().map((col) => (
           <div key={col.label}>
@@ -163,15 +164,11 @@ function BracketSection({ bracket }: { bracket: Bracket }) {
             </ul>
           </div>
         ))}
-        {bracket.rail.length > 0 && <PlacementRail rail={bracket.rail} mobile />}
       </div>
 
-      {/* Desktop: horizontal columns + placement rail. */}
+      {/* Desktop: horizontal columns only (no placement rail). */}
       <div className="hidden lg:block overflow-x-auto pb-2">
-        <div className="flex items-start gap-4 min-w-max">
-          <DesktopBracket columns={rendered} positions={positions} />
-          {bracket.rail.length > 0 && <PlacementRail rail={bracket.rail} />}
-        </div>
+        <DesktopBracket columns={rendered} positions={positions} />
       </div>
     </section>
   );
@@ -210,44 +207,6 @@ function DesktopBracket({
           })}
         </div>
       ))}
-    </div>
-  );
-}
-
-// Final-placement rail — the "9th Team / 10th Team …" column on the right.
-function PlacementRail({
-  rail,
-  mobile = false,
-}: {
-  rail: Bracket['rail'];
-  mobile?: boolean;
-}) {
-  return (
-    <div className={mobile ? '' : 'pt-[32px] min-w-[190px]'}>
-      {mobile && (
-        <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-          Final Placement
-        </div>
-      )}
-      <ul className={mobile ? 'flex flex-col gap-1' : 'flex flex-col'}>
-        {rail.map((r) => (
-          <li
-            key={r.rank}
-            className={[
-              'flex items-center gap-2 py-1.5',
-              mobile ? '' : 'border-b border-hairline last:border-0 h-[52px]',
-            ].join(' ')}
-          >
-            <span className="text-[12px] font-bold tabular text-faint w-8 flex-shrink-0">
-              {ordinal(r.rank)}
-            </span>
-            <WfdfFlag flagFile={r.flagFile} countryCode={r.countryCode} size={14} />
-            <span className="text-[13px] font-semibold text-ink font-tight truncate">
-              {r.teamName}
-            </span>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

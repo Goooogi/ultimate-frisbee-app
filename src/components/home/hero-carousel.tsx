@@ -54,8 +54,13 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
 
   if (count === 0) return null;
   if (count === 1) {
-    // Single slide — no chrome needed, render directly.
-    return <div className="relative overflow-hidden lg:min-h-[480px]">{slides[0]}</div>;
+    // Single slide — no chrome needed, render directly. Fixed height so it
+    // matches the multi-slide track (see HERO_HEIGHT note below).
+    return (
+      <div className="relative overflow-hidden h-[420px] sm:h-[440px] lg:h-[480px]">
+        {slides[0]}
+      </div>
+    );
   }
 
   return (
@@ -68,8 +73,11 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
     >
-      {/* Slide track */}
-      <div className="relative lg:min-h-[480px]">
+      {/* Slide track — FIXED height at every breakpoint so all league slides
+          (UFA game card, USAU/PUL/WUL tournament cards) occupy an identical
+          box regardless of their intrinsic content height. Each slide fills
+          this box via h-full on its wrapper below. */}
+      <div className="relative h-[420px] sm:h-[440px] lg:h-[480px]">
         {slides.map((slide, i) => (
           <div
             key={i}
@@ -78,8 +86,11 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
             aria-label={`Slide ${i + 1} of ${count}`}
             aria-hidden={i !== active}
             className={[
-              'transition-opacity duration-500',
-              i === active ? 'opacity-100' : 'opacity-0 absolute inset-0 pointer-events-none',
+              // Every slide is absolutely positioned to fill the fixed-height
+              // track; opacity cross-fades between them. (The active one isn't
+              // in normal flow either, so a taller slide can't stretch the box.)
+              'absolute inset-0 transition-opacity duration-500',
+              i === active ? 'opacity-100' : 'opacity-0 pointer-events-none',
             ].join(' ')}
           >
             {slide}

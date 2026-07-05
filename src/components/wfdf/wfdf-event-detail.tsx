@@ -51,38 +51,60 @@ export function WfdfEventDetail({ event }: Props) {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Division filter — a dropdown (WMUCC has up to 9 divisions, so a select
-          reads cleaner than a wrapping tab row and stays tidy on mobile). */}
-      <div className="flex items-center gap-3">
+      {/* Division filter — a native <select> (accessible, mobile-native picker,
+          zero-JS) dressed as a proper filter control. WMUCC has up to 9
+          divisions, so a dropdown reads cleaner than a wrapping tab row. The
+          whole control is one bordered pill: a small "Division" eyebrow, the
+          selected value, and a chevron; hover/focus light up the border +
+          surface. group-focus-within drives the accent treatment on the chevron
+          so keyboard focus is obvious. */}
+      <div
+        className={[
+          'group relative inline-flex items-center gap-2 self-start',
+          'h-10 pl-3.5 pr-3 rounded-lg',
+          'bg-surface border border-border shadow-sm',
+          'transition-colors duration-150',
+          'hover:border-ink hover:bg-[rgb(var(--surface-hi))]',
+          'focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/40',
+        ].join(' ')}
+      >
         <label
           htmlFor="wfdf-division-select"
-          className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight flex-shrink-0"
+          className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight flex-shrink-0 pointer-events-none select-none"
         >
           Division
         </label>
-        <div className="relative">
+        <span className="w-px h-4 bg-hairline flex-shrink-0" aria-hidden="true" />
+
+        {/* The real <select> is transparent + stretched to fill the pill so the
+            entire control is the click/tap target; the value text sits on top. */}
+        <span className="relative flex items-center">
           <select
             id="wfdf-division-select"
             value={activeDiv}
             onChange={(e) => setActiveDiv(e.target.value)}
+            aria-label="Filter by division"
             className={[
-              'appearance-none cursor-pointer',
-              'pl-3 pr-9 py-2 rounded-md',
-              'bg-surface border border-border text-ink',
-              'text-[12px] font-bold tracking-[0.06em] uppercase font-tight',
-              'hover:border-ink transition-colors duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'appearance-none cursor-pointer bg-transparent border-0 outline-none',
+              'pr-6 py-1.5',
+              'text-[12px] font-bold tracking-[0.04em] uppercase font-tight text-ink',
+              'focus:outline-none',
             ].join(' ')}
           >
             {divisions.map((d) => (
-              <option key={d.id} value={d.name}>
+              <option key={d.id} value={d.name} className="normal-case tracking-normal text-ink bg-bg">
                 {d.name}
               </option>
             ))}
           </select>
-          {/* Chevron */}
+          {/* Chevron — accent when the control is focused (keyboard), muted at
+              rest, ink on hover. pointer-events-none so it never blocks clicks. */}
           <svg
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-muted"
+            className={[
+              'pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3',
+              'text-muted group-hover:text-ink group-focus-within:text-accent',
+              'transition-colors duration-150',
+            ].join(' ')}
             viewBox="0 0 10 10"
             fill="none"
             aria-hidden="true"
@@ -90,12 +112,12 @@ export function WfdfEventDetail({ event }: Props) {
             <path
               d="M2 3.5L5 6.5L8 3.5"
               stroke="currentColor"
-              strokeWidth="1.5"
+              strokeWidth="1.75"
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           </svg>
-        </div>
+        </span>
       </div>
 
       {/* Bracket trees lead — people prefer the visual over the table.

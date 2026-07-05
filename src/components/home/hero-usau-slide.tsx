@@ -39,7 +39,7 @@ export function HeroUsauSlide({ event }: HeroUsauSlideProps) {
 
   return (
     <article
-      className="relative overflow-hidden p-5 sm:p-9 lg:min-h-[480px] flex flex-col justify-between"
+      className="relative overflow-hidden p-5 sm:p-9 h-full flex flex-col justify-between"
       style={{ background, color: STADIUM.text }}
     >
       {/* Corner glow */}
