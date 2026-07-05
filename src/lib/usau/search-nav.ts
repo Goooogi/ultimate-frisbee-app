@@ -47,7 +47,14 @@ export function resultHref(r: SearchResult): string {
     // Tournaments belong to USAU or WFDF; route by league.
     return r.league === 'wfdf' ? `/wfdf/events/${r.id}` : `/usau/events/${r.id}`;
   }
-  if (r.kind === 'player') return `/players/${r.id}`;
+  if (r.kind === 'player') {
+    // WFDF isn't an anchor league — its players have no /players/[id]. Route to
+    // the name-resolver, which redirects to the unified profile if the person
+    // exists in an anchor league, else shows a WFDF-only view. `id` carries the
+    // full name for WFDF player results.
+    if (r.league === 'wfdf') return `/wfdf/players/by-name/${encodeURIComponent(r.id)}`;
+    return `/players/${r.id}`;
+  }
   // team
   switch (r.league) {
     case 'ufa':

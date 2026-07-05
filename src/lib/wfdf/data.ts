@@ -558,20 +558,62 @@ export interface WfdfSearchTeam {
   eventName: string;
 }
 
+// Fuzzy (trigram) team search via the search_wfdf_teams_fuzzy RPC — tolerates
+// typos ("bonyard" → Boneyard) and reordering, ranked by similarity.
 export async function searchWfdfTeams(query: string, limit = 6): Promise<WfdfSearchTeam[]> {
   const q = query.trim();
   if (q.length < 2) return [];
   const db = supabase();
-  const { data } = await db
-    .from('wfdf_teams')
-    .select('id, name, country_code, event:event_id(name)')
-    .ilike('name', `%${q}%`)
-    .limit(limit);
-  return (data ?? []).map((t: Record<string, unknown>) => ({
+  const { data } = await db.rpc('search_wfdf_teams_fuzzy', { q, lim: limit });
+  return ((data ?? []) as Row[]).map((t) => ({
     id: t.id as string,
     name: t.name as string,
     countryCode: (t.country_code as string) ?? null,
-    eventName: ((t.event as Record<string, unknown>)?.name as string) ?? '',
+    eventName: (t.event_name as string) ?? '',
+  }));
+}
+
+export interface WfdfSearchPlayer {
+  fullName: string;
+  teamName: string;
+  countryCode: string | null;
+  eventName: string;
+}
+
+// Fuzzy roster-name search for the global search bar. Deduped by name in the
+// RPC. WFDF players have no anchor id, so results route to the by-name resolver.
+export async function searchWfdfPlayersForSearch(
+  query: string,
+  limit = 6,
+): Promise<WfdfSearchPlayer[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const db = supabase();
+  const { data } = await db.rpc('search_wfdf_players_fuzzy', { q, lim: limit });
+  return ((data ?? []) as Row[]).map((p) => ({
+    fullName: p.full_name as string,
+    teamName: (p.team_name as string) ?? '',
+    countryCode: (p.country_code as string) ?? null,
+    eventName: (p.event_name as string) ?? '',
+  }));
+}
+
+export interface WfdfSearchEvent {
+  slug: string;
+  name: string;
+  year: number;
+}
+
+// Fuzzy event search ("wmuc"/"worlds" → WMUCC events).
+export async function searchWfdfEvents(query: string, limit = 6): Promise<WfdfSearchEvent[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const db = supabase();
+  const { data } = await db.rpc('search_wfdf_events_fuzzy', { q, lim: limit });
+  return ((data ?? []) as Row[]).map((e) => ({
+    slug: e.slug as string,
+    name: e.name as string,
+    year: e.year as number,
   }));
 }
 

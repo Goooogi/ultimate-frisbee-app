@@ -11,7 +11,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { WfdfFlag } from './wfdf-flag';
-import { WfdfBracketTree } from './wfdf-bracket-tree';
+import { WfdfBracketTree, hasWfdfBracket } from './wfdf-bracket-tree';
 
 interface Props {
   event: WfdfEvent;
@@ -40,6 +40,10 @@ export function WfdfEventDetail({ event }: Props) {
 
   const poolGames = useMemo(() => games.filter((g) => !g.isBracket), [games]);
   const bracketGames = useMemo(() => games.filter((g) => g.isBracket), [games]);
+  const hasBracketTree = useMemo(
+    () => hasWfdfBracket(activeDiv, event.games, event.teams),
+    [activeDiv, event.games, event.teams],
+  );
 
   if (divisions.length === 0) {
     return <p className="text-muted font-tight text-[13px]">No divisions found for this event.</p>;
@@ -47,39 +51,101 @@ export function WfdfEventDetail({ event }: Props) {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Division tabs */}
-      <div className="flex flex-wrap gap-1.5 -mb-2">
-        {divisions.map((d) => {
-          const active = d.name === activeDiv;
-          return (
-            <button
-              key={d.id}
-              type="button"
-              onClick={() => setActiveDiv(d.name)}
-              className={[
-                'px-3 py-2 rounded-md text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
-                'border transition-colors duration-150 cursor-pointer',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                active
-                  ? 'bg-ink text-bg border-ink'
-                  : 'bg-surface text-muted border-border hover:text-ink hover:border-ink',
-              ].join(' ')}
-            >
-              {d.name}
-            </button>
-          );
-        })}
+      {/* Division filter — a dropdown (WMUCC has up to 9 divisions, so a select
+          reads cleaner than a wrapping tab row and stays tidy on mobile). */}
+      <div className="flex items-center gap-3">
+        <label
+          htmlFor="wfdf-division-select"
+          className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight flex-shrink-0"
+        >
+          Division
+        </label>
+        <div className="relative">
+          <select
+            id="wfdf-division-select"
+            value={activeDiv}
+            onChange={(e) => setActiveDiv(e.target.value)}
+            className={[
+              'appearance-none cursor-pointer',
+              'pl-3 pr-9 py-2 rounded-md',
+              'bg-surface border border-border text-ink',
+              'text-[12px] font-bold tracking-[0.06em] uppercase font-tight',
+              'hover:border-ink transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            ].join(' ')}
+          >
+            {divisions.map((d) => (
+              <option key={d.id} value={d.name}>
+                {d.name}
+              </option>
+            ))}
+          </select>
+          {/* Chevron */}
+          <svg
+            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 w-2.5 h-2.5 text-muted"
+            viewBox="0 0 10 10"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M2 3.5L5 6.5L8 3.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
       </div>
 
-      {/* Standings */}
-      <section aria-labelledby="wfdf-standings-heading">
-        <h2
-          id="wfdf-standings-heading"
-          className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
+      {/* Bracket trees lead — people prefer the visual over the table.
+          Championship + placement brackets, each a left-to-right tree with a
+          final-placement rail. Reconstructed for modern events that carry
+          round-labeled playoff games; renders nothing for divisions with no
+          derivable bracket (legacy events, pool-only) — the flat list below is
+          the fallback there. */}
+      <WfdfBracketTree divisionName={activeDiv} games={event.games} teams={event.teams} />
+
+      {/* Fallback flat bracket-games list — only when the tree couldn't render
+          (e.g. legacy events with no round labels). Modern events show the
+          trees above and skip this. */}
+      {!hasBracketTree && bracketGames.length > 0 && (
+        <GameSection heading="Bracket Games" games={bracketGames} />
+      )}
+
+      {/* Final Standings — collapsible, collapsed by default (the bracket is
+          the primary view). key forces the <details> back to closed when the
+          division changes, so it doesn't stay open across divisions. */}
+      <details key={`standings-${activeDiv}`} className="group">
+        <summary
+          className={[
+            'flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden',
+            'text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight',
+            'pb-2 border-b border-hairline',
+            'hover:text-ink transition-colors duration-150',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm',
+          ].join(' ')}
         >
-          Final Standings · {activeDiv}
-        </h2>
-        <div className="rounded-lg border border-border bg-surface overflow-hidden">
+          {/* Disclosure chevron — rotates when open. */}
+          <svg
+            className="w-2.5 h-2.5 flex-shrink-0 transition-transform duration-150 group-open:rotate-90"
+            viewBox="0 0 10 10"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M3.5 2L6.5 5L3.5 8"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          Final Standings
+          <span className="text-faint tabular ml-1">{standings.length}</span>
+        </summary>
+
+        <div className="mt-3 rounded-lg border border-border bg-surface overflow-hidden">
           <div className="hidden sm:grid grid-cols-[2.5rem_1fr_5rem_4rem] items-center px-4 py-2.5 border-b border-hairline text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
             <span>#</span>
             <span>Team</span>
@@ -123,18 +189,7 @@ export function WfdfEventDetail({ event }: Props) {
             ))}
           </ol>
         </div>
-      </section>
-
-      {/* Championship bracket tree — reconstructed for modern events that carry
-          round-labeled playoff games. Renders nothing when the division has no
-          derivable winner's tree (e.g. legacy events, pool-only divisions). */}
-      <WfdfBracketTree divisionName={activeDiv} games={event.games} teams={event.teams} />
-
-      {/* Bracket games — the full flat list (incl. placement/consolation the
-          tree prunes out). */}
-      {bracketGames.length > 0 && (
-        <GameSection heading="All Bracket Games" games={bracketGames} />
-      )}
+      </details>
 
       {/* Pool games */}
       {poolGames.length > 0 && (

@@ -18,7 +18,7 @@ import { namesMatch } from '@/lib/name-match';
 import { allUfaTeams } from '@/lib/ufa/teams';
 import { listPulTeams, listPulPlayers } from '@/lib/pul/data';
 import { listWulTeams, listWulPlayers } from '@/lib/wul/data';
-import { searchWfdfTeams } from '@/lib/wfdf/data';
+import { searchWfdfTeams, searchWfdfPlayersForSearch, searchWfdfEvents } from '@/lib/wfdf/data';
 
 /**
  * Search the year's full UFA leaderboard for players whose name includes
@@ -117,14 +117,17 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   }
 
   // ── PUL + WUL + WFDF (async — fan out in parallel) ────────────────────
-  const [pulTeams, pulPlayers, wulTeams, wulPlayers, wfdfTeams] = await Promise.all([
-    listPulTeams().catch(() => []),
-    listPulPlayers().catch(() => []),
-    listWulTeams().catch(() => []),
-    listWulPlayers().catch(() => []),
-    // WFDF teams are already DB-filtered by name (query pushed down).
-    searchWfdfTeams(query, cap).catch(() => []),
-  ]);
+  // WFDF teams/players/events are all DB-side fuzzy (trigram) searches.
+  const [pulTeams, pulPlayers, wulTeams, wulPlayers, wfdfTeams, wfdfPlayers, wfdfEvents] =
+    await Promise.all([
+      listPulTeams().catch(() => []),
+      listPulPlayers().catch(() => []),
+      listWulTeams().catch(() => []),
+      listWulPlayers().catch(() => []),
+      searchWfdfTeams(query, cap).catch(() => []),
+      searchWfdfPlayersForSearch(query, cap).catch(() => []),
+      searchWfdfEvents(query, cap).catch(() => []),
+    ]);
 
   // PUL teams — match on name OR city (so "Philadelphia" surfaces the Surge).
   const pulTeamResults: SearchResult[] = pulTeams
@@ -206,7 +209,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     }
   }
 
-  // WFDF teams — DB-filtered by name already; tag with the event for context.
+  // WFDF teams — DB fuzzy-matched already; tag with the event for context.
   const wfdfTeamResults: SearchResult[] = wfdfTeams.map((t) => ({
     kind: 'team',
     id: t.id,
@@ -214,6 +217,37 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     hint: ['WFDF', t.eventName].filter(Boolean).join(' · '),
     league: 'wfdf',
     prominence: 2, // international event teams — neutral (not a standing club/pro team)
+  }));
+
+  // WFDF players — route via the by-name resolver (no anchor id). `id` carries
+  // the full name. Dedupe against USAU rows so a US player already shown from
+  // USAU (whose unified profile merges their WFDF stints) isn't listed twice.
+  const wfdfPlayerResults: SearchResult[] = [];
+  {
+    const seen = new Set<string>();
+    for (const p of wfdfPlayers) {
+      if (wfdfPlayerResults.length >= cap) break;
+      const key = p.fullName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName))) continue;
+      wfdfPlayerResults.push({
+        kind: 'player',
+        id: p.fullName, // by-name resolver route uses the name, not a UUID
+        name: p.fullName,
+        hint: ['WFDF', p.teamName].filter(Boolean).join(' · '),
+        league: 'wfdf',
+      });
+    }
+  }
+
+  // WFDF events — tournaments (route to /wfdf/events/[slug] via resultHref).
+  const wfdfEventResults: SearchResult[] = wfdfEvents.map((e) => ({
+    kind: 'tournament',
+    id: e.slug,
+    name: e.name,
+    hint: ['WFDF', String(e.year)].filter(Boolean).join(' · '),
+    league: 'wfdf',
   }));
 
   const merged = [
@@ -225,6 +259,8 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ...wulTeamResults,
     ...wulPlayerResults,
     ...wfdfTeamResults,
+    ...wfdfPlayerResults,
+    ...wfdfEventResults,
   ];
 
   // Rank by: (1) match quality — exact (0) > starts-with (1) > contains (2);

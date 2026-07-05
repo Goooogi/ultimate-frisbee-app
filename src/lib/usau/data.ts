@@ -1638,36 +1638,34 @@ function formatEventDateRange(start: string | null, end: string | null): string 
 export async function search(query: string, limit = 8): Promise<SearchResult[]> {
   const q = query.trim();
   if (q.length < 2) return [];
-  const pattern = `%${q.replace(/[%_]/g, '\\$&')}%`;
 
   // Pull a generous N from each side (3x the display limit) so dedupe
   // doesn't starve us — if "Revolver" returns 4 rows we still want 6
   // distinct teams in the dropdown.
   const overshoot = limit * 3;
   const db = await supabase();
+  // Fuzzy (trigram) search via RPCs — tolerant of typos + word reordering,
+  // ranked by similarity server-side. Falls back to substring matches too
+  // (the RPC ORs ilike with word_similarity).
+  // The new fuzzy RPCs aren't in the generated database.types.ts yet, so the
+  // typed client rejects the names + return types — cast the client to a loose
+  // rpc surface for these three calls.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rpc = (db as any).rpc.bind(db);
   const [teamRes, playerRes, eventRes] = await Promise.all([
-    db
-      .from('usau_teams')
-      .select('id, name, state, competition_level, gender_division')
-      .ilike('name', pattern)
-      .limit(overshoot),
-    db
-      .from('usau_players')
-      .select('id, display_name, usau_rosters(usau_teams(name))')
-      .ilike('display_name', pattern)
-      .limit(overshoot),
-    db
-      .from('usau_events')
-      .select('usau_slug, name, season, start_date, end_date')
-      .ilike('name', pattern)
-      // Newest first so the current season's tournaments surface above old ones.
-      .order('start_date', { ascending: false, nullsFirst: false })
-      .limit(overshoot),
+    rpc('search_usau_teams_fuzzy', { q, lim: overshoot }),
+    rpc('search_usau_players_fuzzy', { q, lim: overshoot }),
+    rpc('search_usau_events_fuzzy', { q, lim: overshoot }),
   ]);
 
+  type TeamRow = { id: string; name: string; state: string | null; competition_level: string | null; gender_division: string | null };
+  type PlayerRow = { id: string; display_name: string };
+  type EventRow = { usau_slug: string; name: string; season: number; start_date: string | null; end_date: string | null };
+
   // ── Dedupe teams by (lower(name), competition_level) ─────────────────
+  // RPC returns rows already ranked by score; first occurrence wins.
   const teamMap = new Map<string, SearchResult>();
-  for (const t of teamRes.data ?? []) {
+  for (const t of (teamRes.data ?? []) as TeamRow[]) {
     const key = `${t.name.toLowerCase()}${t.competition_level ?? ''}`;
     if (teamMap.has(key)) continue;
     const hintParts = [t.state, t.competition_level].filter(Boolean) as string[];
@@ -1683,17 +1681,17 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
   }
 
   // ── Dedupe players by lower(display_name) ────────────────────────────
+  // The fuzzy player RPC omits the roster team (keeps it a cheap single-table
+  // scan); the profile page shows career detail, so a null hint here is fine.
   const playerMap = new Map<string, SearchResult>();
-  for (const p of playerRes.data ?? []) {
+  for (const p of (playerRes.data ?? []) as PlayerRow[]) {
     const key = p.display_name.toLowerCase();
     if (playerMap.has(key)) continue;
-    const rosters = (p as { usau_rosters?: { usau_teams: { name: string } | null }[] }).usau_rosters ?? [];
-    const team = rosters.find((r) => r.usau_teams)?.usau_teams?.name ?? null;
     playerMap.set(key, {
       kind: 'player',
       id: p.id,
       name: p.display_name,
-      hint: team,
+      hint: null,
       league: 'usau',
     });
   }
@@ -1701,8 +1699,7 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
   // ── Tournaments: keyed by usau_slug (unique per event). Hint = season +
   //    date range; the route uses the slug, not a UUID. ──────────────────────
   const tournamentMap = new Map<string, SearchResult>();
-  for (const e of eventRes.data ?? []) {
-    const ev = e as { usau_slug: string; name: string; season: number; start_date: string | null; end_date: string | null };
+  for (const ev of (eventRes.data ?? []) as EventRow[]) {
     if (tournamentMap.has(ev.usau_slug)) continue;
     const dates = formatEventDateRange(ev.start_date, ev.end_date);
     const hintParts = [String(ev.season), dates].filter(Boolean) as string[];
