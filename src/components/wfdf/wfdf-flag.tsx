@@ -1,19 +1,46 @@
-// A compact country badge for WFDF teams. WFDF is nation-oriented (even club
-// events tag a country), so this shows the 3-letter country code in a tinted
-// chip — self-contained (no external flag-image dependency, which would be
-// blocked by CSP / vary by event origin). Falls back to a neutral dot when the
-// country is unknown.
+// Country flag for WFDF teams — WFDF is nation-oriented (even club events tag a
+// country), so a team's "logo" is its country flag, matching the official
+// wfdf.sport site.
+//
+// We render an EMOJI flag derived from the team's IOC country code (mapped to
+// ISO-2 in country-flags.ts). Emoji flags are self-contained (no image assets,
+// no CSP/origin concerns) and render the real flag on every modern OS. Codes
+// that aren't a single real country (WRD/REP/UNI), or unknown codes, fall back
+// to a compact text chip (the previous behaviour) so nothing renders blank.
+
+import { countryCodeToFlagEmoji } from '@/lib/wfdf/country-flags';
 
 export function WfdfFlag({
   countryCode,
   size = 16,
 }: {
-  /** Present for API symmetry with the source's flagfile; not used (we render
-   *  the country code, not an image). */
+  /** Present for API symmetry with the source's flagfile; not used (emoji flag
+   *  is derived from the country code, not an image). */
   flagFile?: string | null;
   countryCode: string | null;
   size?: number;
 }) {
+  const emoji = countryCodeToFlagEmoji(countryCode);
+
+  // Real flag — render the emoji sized to `size`. line-height:1 + block keeps
+  // it vertically centered; the emoji glyph itself carries the rounded corners.
+  if (emoji) {
+    return (
+      <span
+        role="img"
+        aria-label={countryCode ?? 'flag'}
+        title={countryCode ?? undefined}
+        className="inline-flex items-center justify-center flex-shrink-0 leading-none select-none"
+        // Emoji flags render slightly small for their box; 1.15× nudges them to
+        // visually match the requested pixel size.
+        style={{ fontSize: size * 1.15, width: size * 1.4, height: size }}
+      >
+        {emoji}
+      </span>
+    );
+  }
+
+  // No real flag for this code — neutral dot when there's no code at all…
   if (!countryCode) {
     return (
       <span
@@ -23,6 +50,8 @@ export function WfdfFlag({
       />
     );
   }
+
+  // …or a text chip for non-country / unmapped codes (WRD, REP, UNI, …).
   return (
     <span
       aria-label={countryCode}

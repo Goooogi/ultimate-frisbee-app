@@ -48,6 +48,16 @@ const FANTASY_NAV_ITEMS: NavItem[] = [
   { label: 'My League',   href: '#',             match: '__none__', soon: true },
 ];
 
+// WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
+// it gets its own secondary-nav items (Events/Scores/Teams/Players) and no
+// league switcher, same treatment as the Fantasy sub-app.
+const WFDF_NAV_ITEMS: NavItem[] = [
+  { label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events' },
+  { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
+  { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams',   aliases: ['/wfdf/teams'] },
+  { label: 'Players', href: '/wfdf/players', match: '/wfdf/players', aliases: ['/wfdf/players'] },
+];
+
 // The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under
 // it — so plain prefix matching would light up BOTH tabs on /fantasy/team.
 // Use exact/segment-aware matching for the fantasy tabs.
@@ -82,6 +92,7 @@ const LEAGUE_PREFIXES = [
   '/usau', // usau events/teams
   '/wul',
   '/pul',
+  '/wfdf', // WFDF Worlds — event-scoped hub
 ];
 
 function isLeaguePage(pathname: string): boolean {
@@ -100,6 +111,8 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
 
   // Fantasy sub-app: its own secondary nav, no league switcher.
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+  // WFDF: event-scoped hub — own secondary nav, no ?league= qs, no switcher.
+  const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
 
   // The secondary nav belongs ONLY to league pages and the fantasy sub-app.
   // On everything else (admin, settings, playbook, 12-0, home, …) render
@@ -107,14 +120,17 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
   if (!isFantasy && !isLeaguePage(pathname)) return null;
 
   // Preserve active league + division across sub-page navigations — same
-  // logic as SidebarNav. (Not used on Fantasy pages.)
+  // logic as SidebarNav. (Not used on Fantasy / WFDF pages, which carry no qs.)
   const activeLeague = searchParams.get('league')
     ? parseLeagueParam(searchParams.get('league'))
     : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
   const activeDivision = parseDivisionParam(searchParams.get('div'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision);
 
-  const items = isFantasy ? FANTASY_NAV_ITEMS : NAV_ITEMS;
+  // Sub-app pages (Fantasy, WFDF) carry no league query string and hide the
+  // league switcher; standard league pages get the ?league= qs on every link.
+  const noQs = isFantasy || isWfdf;
+  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <div
@@ -124,10 +140,19 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
         // flex-shrink-0 keeps the bar from being squeezed by the main scroll column
         'flex-shrink-0',
       ].join(' ')}
-      aria-label={isFantasy ? 'Fantasy section navigation' : 'Games section navigation'}
+      aria-label={
+        isFantasy
+          ? 'Fantasy section navigation'
+          : isWfdf
+            ? 'WFDF section navigation'
+            : 'Games section navigation'
+      }
     >
       {/* Left: sub-page tabs */}
-      <nav className="flex items-center gap-1" aria-label={isFantasy ? 'Fantasy pages' : 'Games pages'}>
+      <nav
+        className="flex items-center gap-1"
+        aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages'}
+      >
         {items.map((item) => {
           // "Coming soon" placeholder — greyed out, non-navigable.
           if (item.soon) {
@@ -150,8 +175,8 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
           }
 
           const active = isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item);
-          // Fantasy links carry no league query string.
-          const href = isFantasy ? item.href : `${item.href}${leagueQs}`;
+          // Fantasy + WFDF links carry no league query string.
+          const href = noQs ? item.href : `${item.href}${leagueQs}`;
           return (
             <Link
               key={item.href}
@@ -176,8 +201,9 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
         })}
       </nav>
 
-      {/* Right: league switcher slot — hidden on Fantasy (not league-scoped). */}
-      {!isFantasy && leagueSlot && (
+      {/* Right: league switcher slot — hidden on Fantasy + WFDF (not part of
+          the ?league= switching system; WFDF is an event-scoped hub). */}
+      {!isFantasy && !isWfdf && leagueSlot && (
         <div className="flex items-center">
           {leagueSlot}
         </div>

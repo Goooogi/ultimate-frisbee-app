@@ -11,6 +11,7 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { WfdfFlag } from './wfdf-flag';
+import { WfdfBracketTree } from './wfdf-bracket-tree';
 
 interface Props {
   event: WfdfEvent;
@@ -124,9 +125,15 @@ export function WfdfEventDetail({ event }: Props) {
         </div>
       </section>
 
-      {/* Bracket games */}
+      {/* Championship bracket tree — reconstructed for modern events that carry
+          round-labeled playoff games. Renders nothing when the division has no
+          derivable winner's tree (e.g. legacy events, pool-only divisions). */}
+      <WfdfBracketTree divisionName={activeDiv} games={event.games} teams={event.teams} />
+
+      {/* Bracket games — the full flat list (incl. placement/consolation the
+          tree prunes out). */}
       {bracketGames.length > 0 && (
-        <GameSection heading="Bracket" games={bracketGames} />
+        <GameSection heading="All Bracket Games" games={bracketGames} />
       )}
 
       {/* Pool games */}
