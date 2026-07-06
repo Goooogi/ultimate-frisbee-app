@@ -27,6 +27,7 @@ import { HeroPulSlide } from '@/components/home/hero-pul-slide';
 import { HeroWulSlide } from '@/components/home/hero-wul-slide';
 import { HeroWfdfSlide } from '@/components/home/hero-wfdf-slide';
 import { getCurrentWfdfEvent } from '@/lib/wfdf/data';
+import { teamMeta } from '@/lib/ufa/teams';
 import { LeaguesPanel } from '@/components/home/leagues-panel';
 import {
   MultiLeagueGridSection,
@@ -189,19 +190,53 @@ export default async function HomePage() {
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
   // entries are filtered out so offseason leagues simply don't appear.
-  const slides = [
+  //
+  // Each slide is paired with a `color` — the dominant hue of its card — so the
+  // mobile control bar can tint itself to match the active slide as it rotates
+  // (HeroCarousel blends it over the shared dark stadium base). Game slides use
+  // the home team's accent (the card's bottom-right color); tournament slides
+  // use the league accent that colors their eyebrow/field lines. Keeping the
+  // color alongside the node here guarantees the two arrays stay index-aligned
+  // through the null-filter below.
+  const UFA_HERO_ACCENT = '#FF3D00'; // Field brand coral — UFA's stadium accent
+  const USAU_HERO_ACCENT = '#1D5ECC';
+  const WFDF_HERO_ACCENT = '#12B3A6';
+  const PUL_HERO_ACCENT = '#1EC98B';
+  const WUL_HERO_ACCENT = '#F5A623';
+
+  const slideEntries = [
     // UFA slide — always show the existing HeroGameCard (may render EmptyHero
     // in offseason, which is an intentional UFA-only empty state — keep it).
-    <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
+    {
+      node: <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
+      color: featured?.homeTeamID ? teamMeta(featured.homeTeamID).primary : UFA_HERO_ACCENT,
+    },
     // USAU — tournament card, null when no current event.
-    usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
+    usauEvent
+      ? { node: <HeroUsauSlide key="usau" event={usauEvent} />, color: USAU_HERO_ACCENT }
+      : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.
-    wfdfEvent ? <HeroWfdfSlide key="wfdf" event={wfdfEvent} /> : null,
+    wfdfEvent
+      ? { node: <HeroWfdfSlide key="wfdf" event={wfdfEvent} />, color: WFDF_HERO_ACCENT }
+      : null,
     // PUL — game card, null when no current/recent game.
-    pulFeatured ? <HeroPulSlide key="pul" game={pulFeatured} /> : null,
+    pulFeatured
+      ? {
+          node: <HeroPulSlide key="pul" game={pulFeatured} />,
+          color: pulFeatured.home.accentColor ?? PUL_HERO_ACCENT,
+        }
+      : null,
     // WUL — game card, null when no current/recent game.
-    wulFeatured ? <HeroWulSlide key="wul" game={wulFeatured} /> : null,
-  ].filter((s): s is React.ReactElement => s !== null);
+    wulFeatured
+      ? {
+          node: <HeroWulSlide key="wul" game={wulFeatured} />,
+          color: wulFeatured.home.accentColor ?? WUL_HERO_ACCENT,
+        }
+      : null,
+  ].filter((e): e is { node: React.ReactElement; color: string } => e !== null);
+
+  const slides = slideEntries.map((e) => e.node);
+  const slideColors = slideEntries.map((e) => e.color);
 
   return (
     <div className="min-h-screen bg-bg text-ink pb-20 lg:pb-0">
@@ -210,7 +245,7 @@ export default async function HomePage() {
 
       {/* HERO BENTO — carousel on the left, league panel stacked right */}
       <div className="px-5 lg:px-12 pt-6 lg:pt-9 pb-5 lg:pb-6 grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-5">
-        <HeroCarousel slides={slides} />
+        <HeroCarousel slides={slides} slideColors={slideColors} />
         <LeaguesPanel />
       </div>
 

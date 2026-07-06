@@ -2,10 +2,21 @@
 // Used in the Teams page, game-detail roster CTAs, anywhere we need
 // a square team mark.
 
-import type { TeamMeta } from '@/lib/ufa/teams';
+/**
+ * Structural subset of team metadata needed to render a team mark. `TeamMeta`
+ * (ufa/teams) and `TwelveOhTeamDisplay` (twelve-oh/team-display) both satisfy
+ * this shape, so this component works for any league without importing
+ * league-specific types.
+ */
+export interface TeamMark {
+  abbr: string;
+  primary: string;
+  accent: string;
+  logo?: string | null;
+}
 
 interface TeamLogoProps {
-  team: TeamMeta;
+  team: TeamMark;
   /** Size in px (square). */
   size?: number;
   /** When true, render the abbr fallback even if a logo exists (e.g., tiny sizes). */
@@ -14,7 +25,7 @@ interface TeamLogoProps {
 }
 
 export function TeamLogo({ team, size = 32, forceAbbr = false, className = '' }: TeamLogoProps) {
-  const useLogo = !forceAbbr && team.logo;
+  const useLogo = forceAbbr ? null : team.logo;
 
   return (
     <span
@@ -31,7 +42,7 @@ export function TeamLogo({ team, size = 32, forceAbbr = false, className = '' }:
     >
       {useLogo ? (
         <img
-          src={team.logo}
+          src={useLogo}
           alt=""
           className="object-contain"
           style={{ width: size * 0.84, height: size * 0.84 }}

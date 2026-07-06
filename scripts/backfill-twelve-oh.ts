@@ -507,6 +507,7 @@ async function main() {
     const huckPctNum = parseFloat(c.raw.huckPercentage as string);
 
     return {
+      league: 'ufa', // this script owns only the UFA slice of twelve_oh_players
       player_id: c.raw.playerID,
       team_slug: c.teamSlug,
       year: c.year,
@@ -552,7 +553,7 @@ async function main() {
     const batch = rows.slice(i, i + BATCH);
     const { error } = await db
       .from('twelve_oh_players')
-      .upsert(batch, { onConflict: 'player_id,team_slug,year' });
+      .upsert(batch, { onConflict: 'league,player_id,team_slug,year' });
     if (error) {
       console.error(`Batch ${i}–${i + batch.length} failed:`, error);
       process.exit(1);
@@ -569,6 +570,7 @@ async function main() {
   const { data: top15 } = await db
     .from('twelve_oh_players')
     .select('name, team_abbr, year, goals, assists, blocks, player_score')
+    .eq('league', 'ufa')
     .order('player_score', { ascending: false })
     .limit(15);
 
@@ -592,6 +594,7 @@ async function main() {
   const { data: distData } = await db
     .from('twelve_oh_players')
     .select('player_score')
+    .eq('league', 'ufa')
     .limit(20000);
   const allScores = (distData ?? []).map((r) => Number(r.player_score)).sort((a, b) => a - b);
   const totalRows = allScores.length;
@@ -626,6 +629,7 @@ async function main() {
   const { data: feltonRows } = await db
     .from('twelve_oh_players')
     .select('name, team_abbr, year, goals, assists, blocks, player_score')
+    .eq('league', 'ufa')
     .ilike('name', '%felton%')
     .eq('year', 2025);
   if (feltonRows && feltonRows.length > 0) {
@@ -640,6 +644,7 @@ async function main() {
   const { data: jagtRows } = await db
     .from('twelve_oh_players')
     .select('name, team_abbr, year, goals, assists, blocks, turnovers, drops, points_played, player_score, z_drops, z_throwaways, z_points_played')
+    .eq('league', 'ufa')
     .ilike('name', '%jagt%')
     .order('player_score', { ascending: false })
     .limit(5);
@@ -660,6 +665,7 @@ async function main() {
   const { data: henkeRows } = await db
     .from('twelve_oh_players')
     .select('name, team_abbr, year, goals, assists, blocks, player_score, z_yards_thrown, z_yards_received, z_goals, z_assists, z_blocks')
+    .eq('league', 'ufa')
     .ilike('name', '%henke%')
     .eq('year', 2019);
   if (henkeRows && henkeRows.length > 0) {
@@ -679,6 +685,7 @@ async function main() {
   const { data: allYearRows } = await db
     .from('twelve_oh_players')
     .select('year, player_score')
+    .eq('league', 'ufa')
     .limit(20000);
 
   const yearBuckets = new Map<number, number[]>();

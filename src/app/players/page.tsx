@@ -22,9 +22,10 @@ import {
   listPulPlayersCached,
   listWulPlayersCached,
 } from '@/lib/cached-readers';
-import { parseDivisionParam, parseLeagueParam } from '@/lib/league';
+import { levelLabel, parseDivisionParam, parseLeagueParam, parseLevelParam } from '@/lib/league';
 import { PlayersSearchList } from '@/components/players/players-search-list';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { SortControl } from '@/components/sort-control';
 import Link from 'next/link';
 import { Suspense } from 'react';
@@ -126,7 +127,7 @@ function formatWulPlusMinus(val: number): string {
 }
 
 interface Props {
-  searchParams: { year?: string; league?: string; div?: string; sort?: string; dir?: string; season?: string };
+  searchParams: { year?: string; league?: string; div?: string; level?: string; sort?: string; dir?: string; season?: string };
 }
 
 export default async function PlayersPage({ searchParams }: Props) {
@@ -414,18 +415,30 @@ export default async function PlayersPage({ searchParams }: Props) {
 
   if (league === 'usau') {
     const division = parseDivisionParam(searchParams.div);
-    const players = await listUsauPlayersCached({ limit: 200, genderDivision: division }).catch(
-      () => [] as UsauPlayerListRow[],
-    );
+    const level = parseLevelParam(searchParams.level);
+    // College has no Mixed division — quietly coerce so the page doesn't
+    // render empty when a user lands here via a stale `?div=mixed` link.
+    const isCollege = level === 'COLLEGE_D1' || level === 'COLLEGE_D3';
+    const effectiveDivision = isCollege && division === 'Mixed' ? 'Men' : division;
+    const players = await listUsauPlayersCached({
+      limit: 200,
+      genderDivision: effectiveDivision,
+      competitionLevel: level,
+    }).catch(() => [] as UsauPlayerListRow[]);
     return (
       <PageShell
         title="Players"
-        eyebrow={`USAU · Club · ${division}`}
-        controls={<UsauDivisionSelect />}
+        eyebrow={`USAU · ${levelLabel(level)} · ${effectiveDivision}`}
+        controls={
+          <div className="flex flex-wrap items-center gap-2">
+            <UsauLevelSelect />
+            <UsauDivisionSelect />
+          </div>
+        }
       >
         <PlayersSearchList
-          mode={{ kind: 'usau', players, division }}
-          scopeLabel={`${division}'s · all seasons`}
+          mode={{ kind: 'usau', players, division: effectiveDivision, level }}
+          scopeLabel={`${levelLabel(level)} · ${effectiveDivision}'s · all seasons`}
         />
       </PageShell>
     );

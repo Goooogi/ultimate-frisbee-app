@@ -7,6 +7,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { BAKED_BASELINE, type Baseline } from './rating';
+import type { TwelveOhLeague } from './leagues';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 
 // ─── Client ────────────────────────────────────────────────────────────────
@@ -36,6 +37,7 @@ function supabase(): AnyClient {
 // uses for PostgREST joined relations not present in the generated types.
 
 interface DbPlayerRow {
+  league: TwelveOhLeague;
   player_id: string;
   name: string;
   team_slug: string;
@@ -48,16 +50,21 @@ interface DbPlayerRow {
   hockey_assists: number;
   completion_pct: number | null;
   yards_thrown: number;
-  yards_received: number;
+  yards_received: number;   // WUL rows store TOTAL yards here (source isn't split)
   plus_minus: number;
   drops: number;
-  turnovers: number;      // = throwaways
+  turnovers: number;        // UFA: throwaways; PUL/WUL: combined turnovers
   callahans: number;
   points_played: number;
+  hucks_completed: number;
+  touches: number | null;   // PUL/WUL only (null = not tracked that season)
+  o_points: number | null;  // PUL/WUL only
+  d_points: number | null;  // PUL/WUL only
   player_score: number | string;
 }
 
 interface DbTeamYearRow {
+  league: TwelveOhLeague;
   team_slug: string;
   team_abbr: string;
   year: number;
@@ -87,8 +94,9 @@ interface DbBaselineRow {
 
 // ─── Types ─────────────────────────────────────────────────────────────────
 
-/** One entry in the spin pool — a distinct (team, year) with a roster. */
+/** One entry in the spin pool — a distinct (league, team, year) with a roster. */
 export interface TwelveOhTeamYear {
+  league: TwelveOhLeague;
   teamSlug: string;
   teamAbbr: string;
   year: number;
@@ -97,26 +105,31 @@ export interface TwelveOhTeamYear {
 
 /** Full player row for the pick screen. */
 export interface TwelveOhPlayer {
+  league: TwelveOhLeague;
   playerId: string;
   name: string;
   teamSlug: string;
   teamAbbr: string;
   year: number;
   // Display stats — ALL stats that feed the rating, so the pick screen can
-  // show exactly what determines a player's score.
+  // show exactly what determines a player's score. Which fields are populated
+  // depends on the league (see leagues.ts header for coverage).
   gamesPlayed: number;
   goals: number;
   assists: number;
   blocks: number;
-  hockeyAssists: number;
-  completionPct: number | null;   // null = low-volume thrower
-  yardsThrown: number;
-  yardsReceived: number;
+  hockeyAssists: number;          // UFA only
+  completionPct: number | null;   // UFA only; null = low-volume thrower
+  yardsThrown: number;            // UFA only
+  yardsReceived: number;          // UFA only
   plusMinus: number;
-  drops: number;
-  throwaways: number;             // stored as `turnovers` in the DB
-  callahans: number;
+  drops: number;                  // UFA only
+  throwaways: number;             // UFA: throwaways; PUL/WUL: combined turnovers
+  callahans: number;              // UFA + WUL
   pointsPlayed: number;
+  touches: number | null;         // PUL/WUL; null = not tracked that season
+  yardsTotal: number;             // WUL only (source doesn't split throw/receive)
+  hucksCompleted: number;         // WUL only
   // Rating
   playerScore: number;            // 0–100
 }
@@ -124,21 +137,24 @@ export interface TwelveOhPlayer {
 // ─── Spin pool ─────────────────────────────────────────────────────────────
 
 /**
- * All (team, year) pairs that have a roster in twelve_oh_players.
+ * All (team, year) pairs that have a roster in twelve_oh_players for a league.
  * Used by the spin mechanic to draw a random team to pick from.
  *
- * Reads the `twelve_oh_team_years` VIEW (one row per team-year, ~275 rows) —
+ * Reads the `twelve_oh_team_years` VIEW (one row per league × team-year) —
  * NOT the raw players table. The previous version selected every player row
  * and grouped client-side, but supabase-js caps a select at 1000 rows; with
  * 7900+ rows ordered by year DESC, only the most recent ~2 seasons survived
  * the cap, so the spin only ever landed on 2024–2025. The pre-aggregated view
- * is well under any cap and returns the full 2012–2025 pool.
+ * is well under any cap and returns the full pool.
  */
-export async function listTeamYears(): Promise<TwelveOhTeamYear[]> {
+export async function listTeamYears(
+  league: TwelveOhLeague = 'ufa',
+): Promise<TwelveOhTeamYear[]> {
   const db = supabase();
   const { data, error } = await db
     .from('twelve_oh_team_years')
-    .select('team_slug, team_abbr, year, player_count')
+    .select('league, team_slug, team_abbr, year, player_count')
+    .eq('league', league)
     .order('year', { ascending: false })
     .order('team_slug', { ascending: true });
 
@@ -146,6 +162,7 @@ export async function listTeamYears(): Promise<TwelveOhTeamYear[]> {
 
   return ((data ?? []) as unknown as DbTeamYearRow[])
     .map((row) => ({
+      league: row.league,
       teamSlug: row.team_slug as string,
       teamAbbr: row.team_abbr as string,
       year: row.year as number,
@@ -156,31 +173,18 @@ export async function listTeamYears(): Promise<TwelveOhTeamYear[]> {
 
 // ─── Roster ────────────────────────────────────────────────────────────────
 
-/**
- * All players for a given (teamSlug, year), sorted by player_score descending.
- * This is what the pick screen shows after the spin lands.
- */
-export async function getRoster(
-  teamSlug: string,
-  year: number,
-): Promise<TwelveOhPlayer[]> {
-  const db = supabase();
-  const { data, error } = await db
-    .from('twelve_oh_players')
-    .select(
-      'player_id, name, team_slug, team_abbr, year, ' +
-      'games_played, goals, assists, blocks, hockey_assists, ' +
-      'completion_pct, yards_thrown, yards_received, plus_minus, ' +
-      'drops, turnovers, callahans, points_played, ' +
-      'player_score',
-    )
-    .eq('team_slug', teamSlug)
-    .eq('year', year)
-    .order('player_score', { ascending: false });
+const PLAYER_SELECT =
+  'league, player_id, name, team_slug, team_abbr, year, ' +
+  'games_played, goals, assists, blocks, hockey_assists, ' +
+  'completion_pct, yards_thrown, yards_received, plus_minus, ' +
+  'drops, turnovers, callahans, points_played, ' +
+  'hucks_completed, touches, o_points, d_points, ' +
+  'player_score';
 
-  if (error) throw error;
-
-  return ((data ?? []) as unknown as DbPlayerRow[]).map((r) => ({
+function mapPlayerRow(r: DbPlayerRow): TwelveOhPlayer {
+  const isWul = r.league === 'wul';
+  return {
+    league: r.league ?? 'ufa',
     playerId: r.player_id,
     name: r.name,
     teamSlug: r.team_slug,
@@ -193,14 +197,42 @@ export async function getRoster(
     hockeyAssists: r.hockey_assists,
     completionPct: r.completion_pct != null ? Number(r.completion_pct) : null,
     yardsThrown: r.yards_thrown,
-    yardsReceived: r.yards_received,
-    plusMinus: r.plus_minus,
+    // WUL rows park their un-split TOTAL yards in yards_received; surface it
+    // as yardsTotal and zero the split fields so no UI shows it as "receiving".
+    yardsReceived: isWul ? 0 : r.yards_received,
+    yardsTotal: isWul ? (r.yards_received ?? 0) : 0,
+    plusMinus: Number(r.plus_minus),
     drops: r.drops ?? 0,
     throwaways: r.turnovers ?? 0,
     callahans: r.callahans ?? 0,
     pointsPlayed: r.points_played ?? 0,
+    touches: r.touches != null ? Number(r.touches) : null,
+    hucksCompleted: r.hucks_completed ?? 0,
     playerScore: Number(r.player_score),
-  }));
+  };
+}
+
+/**
+ * All players for a given (league, teamSlug, year), sorted by player_score
+ * descending. This is what the pick screen shows after the spin lands.
+ */
+export async function getRoster(
+  league: TwelveOhLeague,
+  teamSlug: string,
+  year: number,
+): Promise<TwelveOhPlayer[]> {
+  const db = supabase();
+  const { data, error } = await db
+    .from('twelve_oh_players')
+    .select(PLAYER_SELECT)
+    .eq('league', league)
+    .eq('team_slug', teamSlug)
+    .eq('year', year)
+    .order('player_score', { ascending: false });
+
+  if (error) throw error;
+
+  return ((data ?? []) as unknown as DbPlayerRow[]).map(mapPlayerRow);
 }
 
 // ─── Baseline ──────────────────────────────────────────────────────────────
@@ -272,41 +304,19 @@ export async function getBaseline(): Promise<Baseline | null> {
  * Not used by the game UI directly; useful for backfill verification and
  * future leaderboard features.
  */
-export async function topPlayers(limit = 25): Promise<TwelveOhPlayer[]> {
+export async function topPlayers(
+  limit = 25,
+  league: TwelveOhLeague = 'ufa',
+): Promise<TwelveOhPlayer[]> {
   const db = supabase();
   const { data, error } = await db
     .from('twelve_oh_players')
-    .select(
-      'player_id, name, team_slug, team_abbr, year, ' +
-      'games_played, goals, assists, blocks, hockey_assists, ' +
-      'completion_pct, yards_thrown, yards_received, plus_minus, ' +
-      'drops, turnovers, callahans, points_played, ' +
-      'player_score',
-    )
+    .select(PLAYER_SELECT)
+    .eq('league', league)
     .order('player_score', { ascending: false })
     .limit(limit);
 
   if (error) throw error;
 
-  return ((data ?? []) as unknown as DbPlayerRow[]).map((r) => ({
-    playerId: r.player_id,
-    name: r.name,
-    teamSlug: r.team_slug,
-    teamAbbr: r.team_abbr,
-    year: r.year,
-    gamesPlayed: r.games_played,
-    goals: r.goals,
-    assists: r.assists,
-    blocks: r.blocks,
-    hockeyAssists: r.hockey_assists,
-    completionPct: r.completion_pct != null ? Number(r.completion_pct) : null,
-    yardsThrown: r.yards_thrown,
-    yardsReceived: r.yards_received,
-    plusMinus: r.plus_minus,
-    drops: r.drops ?? 0,
-    throwaways: r.turnovers ?? 0,
-    callahans: r.callahans ?? 0,
-    pointsPlayed: r.points_played ?? 0,
-    playerScore: Number(r.player_score),
-  }));
+  return ((data ?? []) as unknown as DbPlayerRow[]).map(mapPlayerRow);
 }

@@ -287,6 +287,8 @@ function flightRankForName(name: string | null | undefined): number {
 export async function getCurrentEvent(opts?: {
   /** Filter to events whose participating teams include this division. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
+  /** Restrict to ONE competition level (e.g. 'MASTERS'). Default: all flagship levels. */
+  competitionLevel?: CompetitionLevel;
 }): Promise<{ slug: string; hasGames: boolean } | null> {
   const db = await supabase();
   const now = new Date();
@@ -300,10 +302,15 @@ export async function getCurrentEvent(opts?: {
   const windowBack = new Date(now.getTime() - 45 * 86400_000).toISOString().slice(0, 10);
   const windowForward = new Date(now.getTime() + 45 * 86400_000).toISOString().slice(0, 10);
 
+  // One explicit level filters exactly; otherwise any flagship level headlines.
+  const levelFilter = opts?.competitionLevel
+    ? [opts.competitionLevel]
+    : FLAGSHIP_LEVELS;
+
   const { data: windowEvents } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date, competition_level')
-    .in('competition_level', FLAGSHIP_LEVELS)
+    .in('competition_level', levelFilter)
     .gte('start_date', windowBack)
     .lte('start_date', windowForward)
     .order('start_date', { ascending: true });
@@ -427,7 +434,7 @@ export async function getCurrentEvent(opts?: {
   const { data: latest } = await db
     .from('usau_events')
     .select('id, usau_slug, start_date')
-    .in('competition_level', FLAGSHIP_LEVELS)
+    .in('competition_level', levelFilter)
     .order('start_date', { ascending: false, nullsFirst: false })
     .limit(80);
   for (const e of latest ?? []) {
@@ -1047,16 +1054,17 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
 export async function recentUsauTournamentCards(
   now: Date = new Date(),
   limit = 200,
+  competitionLevel: CompetitionLevel = 'CLUB',
 ): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
   const today = now.toISOString().slice(0, 10);
   const windowBack = new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 10);
 
-  // Recent completed CLUB events in the last ~2 weekends.
+  // Recent completed events at the requested level in the last ~2 weekends.
   const { data: events } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date')
-    .eq('competition_level', 'CLUB')
+    .eq('competition_level', competitionLevel)
     .lt('end_date', today)
     .gte('end_date', windowBack)
     .order('end_date', { ascending: false, nullsFirst: false });
@@ -1398,6 +1406,8 @@ export async function listUsauPlayers(opts?: {
   search?: string;
   /** Restrict to players whose team is in this gender division. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
+  /** Restrict to players whose team is at this competition level (CLUB, MASTERS…). */
+  competitionLevel?: CompetitionLevel;
 }): Promise<UsauPlayerListRow[]> {
   const limit = opts?.limit ?? 60;
   const db = await supabase();
@@ -1446,6 +1456,9 @@ export async function listUsauPlayers(opts?: {
       if (opts?.genderDivision) {
         q = q.eq('usau_teams.gender_division', opts.genderDivision);
       }
+      if (opts?.competitionLevel) {
+        q = q.eq('usau_teams.competition_level', opts.competitionLevel);
+      }
       const { data, error } = await q;
       if (error) throw error;
       rows = rows.concat((data ?? []) as unknown as RosterRow[]);
@@ -1465,6 +1478,9 @@ export async function listUsauPlayers(opts?: {
       if (opts?.genderDivision) {
         q = q.eq('usau_teams.gender_division', opts.genderDivision);
       }
+      if (opts?.competitionLevel) {
+        q = q.eq('usau_teams.competition_level', opts.competitionLevel);
+      }
       const { data, error } = await q;
       if (error) throw error;
       const page = (data ?? []) as unknown as RosterRow[];
@@ -1478,9 +1494,15 @@ export async function listUsauPlayers(opts?: {
   type Row = RosterRow;
 
   // Fetch champion map once so we can tag list rows in the same loop.
-  const championsBySeason = await getUsauClubChampionsBySeason().catch(
-    () => new Map<number, Map<string, UsauChampion>>(),
-  );
+  // The champion source is Club Nationals, so only tag when we're listing
+  // Club (or unfiltered) players — a Masters/College team that happens to
+  // share a club champion's name must not inherit the badge.
+  const isClubScope = !opts?.competitionLevel || opts.competitionLevel === 'CLUB';
+  const championsBySeason = isClubScope
+    ? await getUsauClubChampionsBySeason().catch(
+        () => new Map<number, Map<string, UsauChampion>>(),
+      )
+    : new Map<number, Map<string, UsauChampion>>();
 
   // Group by lowercased name → aggregate stats across player_id dupes.
   interface Agg {

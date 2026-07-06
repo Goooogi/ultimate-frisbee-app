@@ -451,7 +451,17 @@ export function computeRawScore(z: PlayerZScores): number {
  * maximum adds 9 more. This makes the ceiling legitimately rare.
  */
 export function normalizeScore(rawScore: number, baseline: Baseline): number {
-  const thresholds = getRawThresholds(baseline);
+  return pwlNormalize(rawScore, getRawThresholds(baseline));
+}
+
+/**
+ * League-agnostic core of normalizeScore: piecewise-linear map of a raw
+ * weighted z-sum onto the 0–100 scale via 9 percentile anchor thresholds
+ * (raw values at P0/P50/P75/P90/P95/P99/P99.5/P99.9/P100). Shared by the
+ * UFA engine above and the PUL/WUL configs in leagues.ts, so every league
+ * gets the identical score-distribution shape (median 50, star 83, etc.).
+ */
+export function pwlNormalize(rawScore: number, thresholds: number[]): number {
   const targets = NORM_TARGET_SCORES;
 
   // Below the minimum → 0
@@ -593,7 +603,9 @@ export interface TeamRecordResult {
 // pick mechanic rose ~10-12 pts, so these breakpoints span ~58-92. Monte-Carlo
 // verified (1M sims, spin + 1 skip): 12-0≈2.2%, 11-1≈4.3%, 10-2≈11%, 9-3≈21.5%,
 // 8-4≈27.7%, 7-5≈24.7%, 6-6≈7.9%. 12-0 is the deliberate ~2% chase Hunter set.
-const WIN_CURVE: ReadonlyArray<readonly [number, number]> = [
+export type WinCurve = ReadonlyArray<readonly [number, number]>;
+
+const WIN_CURVE: WinCurve = [
   [40,    0],   // floor (degenerate)
   [58,    2],
   [68,    4],
@@ -607,15 +619,15 @@ const WIN_CURVE: ReadonlyArray<readonly [number, number]> = [
   [92.5, 12],   // 12-0: strength ≥92.5 → ~2.2% (deliberate all-era GOAT hunting)
 ] as const;
 
-/** Piecewise linear interpolation over WIN_CURVE. */
-function pwlWins(strength: number): number {
-  if (strength <= WIN_CURVE[0][0]) return WIN_CURVE[0][1];
-  const last = WIN_CURVE[WIN_CURVE.length - 1];
+/** Piecewise linear interpolation over a win curve. */
+function pwlWins(strength: number, curve: WinCurve): number {
+  if (strength <= curve[0][0]) return curve[0][1];
+  const last = curve[curve.length - 1];
   if (strength >= last[0]) return last[1];
 
-  for (let i = 1; i < WIN_CURVE.length; i++) {
-    const [x1, y1] = WIN_CURVE[i];
-    const [x0, y0] = WIN_CURVE[i - 1];
+  for (let i = 1; i < curve.length; i++) {
+    const [x1, y1] = curve[i];
+    const [x0, y0] = curve[i - 1];
     if (strength <= x1) {
       const frac = (strength - x0) / (x1 - x0);
       return y0 + frac * (y1 - y0);
@@ -624,7 +636,11 @@ function pwlWins(strength: number): number {
   return last[1];
 }
 
-export function teamRecord(scores: number[]): TeamRecordResult {
+/**
+ * @param curve Optional league-specific win curve (leagues.ts). Defaults to
+ *              the UFA curve; PUL/WUL pass their own MC-calibrated curves.
+ */
+export function teamRecord(scores: number[], curve: WinCurve = WIN_CURVE): TeamRecordResult {
   if (scores.length === 0) {
     return { wins: 0, losses: 12, rationale: 'No players selected.' };
   }
@@ -639,7 +655,7 @@ export function teamRecord(scores: number[]): TeamRecordResult {
   const balanceBonus = minScore > 72 ? 0.5 : minScore > 58 ? 0.3 : 0;
   const strength = mean + balanceBonus;
 
-  const wins = Math.round(Math.max(0, Math.min(12, pwlWins(strength))));
+  const wins = Math.round(Math.max(0, Math.min(12, pwlWins(strength, curve))));
   const losses = 12 - wins;
 
   const rationale = buildRationale(scores, mean, minScore);

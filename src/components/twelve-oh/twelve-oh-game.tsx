@@ -1,14 +1,16 @@
 'use client';
 
 // 12-0 game — the whole client-side game loop.
-// State machine: 'spin' → 'loading' → 'pick' → ('spin' again) → 'result'
+// State machine: 'league-select' → 'mode-select' → 'spin' → 'loading' → 'pick' → ('spin' again) → 'result'
 // All state is ephemeral (session-only, no DB writes).
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { TwelveOhTeamYear, TwelveOhPlayer } from '@/lib/twelve-oh/data';
 import { getRoster } from '@/lib/twelve-oh/data';
 import { scoreLabel, teamRecord } from '@/lib/twelve-oh/rating';
-import { teamMeta } from '@/lib/ufa/teams';
+import type { TwelveOhLeague } from '@/lib/twelve-oh/leagues';
+import { winCurveForLeague } from '@/lib/twelve-oh/leagues';
+import type { LeagueTeamDisplayMaps, TwelveOhTeamDisplay } from '@/lib/twelve-oh/team-display';
 import { TeamLogo } from '@/components/team-logo';
 
 // ─── Types ─────────────────────────────────────────────────────────────────
@@ -17,8 +19,21 @@ interface DraftedPlayer extends TwelveOhPlayer {
   _key: string; // playerId + '|' + teamSlug + '|' + year — dedupe key
 }
 
-type GamePhase = 'mode-select' | 'spin' | 'loading' | 'pick' | 'result';
+type GamePhase = 'league-select' | 'mode-select' | 'spin' | 'loading' | 'pick' | 'result';
 type GameMode = 'classic' | 'ultiq';
+
+// League display metadata for the league-select screen and mode-select badge.
+const LEAGUE_INFO: Record<TwelveOhLeague, { abbr: string; fullName: string }> = {
+  ufa: { abbr: 'UFA', fullName: 'Ultimate Frisbee Association' },
+  pul: { abbr: 'PUL', fullName: 'Premier Ultimate League' },
+  wul: { abbr: 'WUL', fullName: 'Western Ultimate League' },
+};
+const LEAGUE_ORDER: TwelveOhLeague[] = ['ufa', 'pul', 'wul'];
+
+// Convenience lookup: teamSlug → display record (or undefined) for the
+// currently-active league. Built once per active-league change via useCallback
+// so sub-components can call it directly without threading the whole map + league.
+type TeamDisplayLookup = (teamSlug: string) => TwelveOhTeamDisplay | undefined;
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -89,7 +104,13 @@ function useSpinAnimation(
 // ─── Sub-components ────────────────────────────────────────────────────────
 
 // Roster tray — shows 7 slots, filled or empty.
-function RosterTray({ roster }: { roster: DraftedPlayer[] }) {
+function RosterTray({
+  roster,
+  teamDisplay,
+}: {
+  roster: DraftedPlayer[];
+  teamDisplay: TeamDisplayLookup;
+}) {
   return (
     <div
       className="grid gap-1.5"
@@ -99,7 +120,7 @@ function RosterTray({ roster }: { roster: DraftedPlayer[] }) {
       {Array.from({ length: ROSTER_SIZE }).map((_, i) => {
         const p = roster[i];
         if (p) {
-          const meta = teamMeta(p.teamSlug);
+          const meta = teamDisplay(p.teamSlug);
           return (
             <div
               key={p._key}
@@ -137,11 +158,13 @@ function RosterTray({ roster }: { roster: DraftedPlayer[] }) {
 function SpinDisplay({
   displayed,
   spinning,
+  teamDisplay,
 }: {
   displayed: TwelveOhTeamYear | null;
   spinning: boolean;
+  teamDisplay: TeamDisplayLookup;
 }) {
-  const meta = displayed ? teamMeta(displayed.teamSlug) : null;
+  const meta = displayed ? teamDisplay(displayed.teamSlug) : null;
 
   return (
     <div
@@ -180,6 +203,183 @@ function SpinDisplay({
         )}
       </div>
     </div>
+  );
+}
+
+// League-conditional stat grid — the exact stats tracked differ per league
+// (see leagues.ts header for coverage). Keeps the StatCell visual language
+// identical across leagues; only which cells render (and the grid shape) changes.
+function StatGrid({ player }: { player: TwelveOhPlayer }) {
+  if (player.league === 'pul') {
+    // PUL: one row of 7 on sm+, wraps 4/3 on mobile (too tight for 7 across).
+    return (
+      <div className="grid grid-cols-4 sm:grid-cols-7 gap-x-0.5 gap-y-1.5">
+        <StatCell label="G"   value={player.goals} />
+        <StatCell label="A"   value={player.assists} />
+        <StatCell label="Blk" value={player.blocks} />
+        <StatCell label="+/−" value={player.plusMinus > 0 ? `+${player.plusMinus}` : player.plusMinus} />
+        <StatCell label="TO"  value={player.throwaways} negative />
+        <StatCell label="Tch" value={player.touches !== null ? player.touches : '—'} />
+        <StatCell
+          label="PP"
+          value={player.pointsPlayed === 0 ? '—' : player.pointsPlayed}
+        />
+      </div>
+    );
+  }
+
+  if (player.league === 'wul') {
+    // WUL: 2 rows of 5.
+    return (
+      <div className="grid grid-cols-5 gap-x-0.5 gap-y-1.5">
+        <StatCell label="G"   value={player.goals} />
+        <StatCell label="A"   value={player.assists} />
+        <StatCell label="Blk" value={player.blocks} />
+        <StatCell label="Cal" value={player.callahans} />
+        <StatCell label="+/−" value={player.plusMinus > 0 ? `+${player.plusMinus}` : player.plusMinus} />
+        <StatCell label="TO"  value={player.throwaways} negative />
+        <StatCell label="Yds" value={player.yardsTotal.toLocaleString()} />
+        <StatCell label="Hck" value={player.hucksCompleted} />
+        <StatCell label="Tch" value={player.touches !== null ? player.touches : '—'} />
+        <StatCell label="PP"  value={player.pointsPlayed} />
+      </div>
+    );
+  }
+
+  // UFA (default): unchanged, 2 rows of 6.
+  return (
+    <div className="grid grid-cols-6 gap-x-0.5 gap-y-1.5">
+      {/* Row 1: offense + defense */}
+      <StatCell label="G"    value={player.goals} />
+      <StatCell label="A"    value={player.assists} />
+      <StatCell label="HA"   value={player.hockeyAssists} />
+      <StatCell label="Blk"  value={player.blocks} />
+      <StatCell label="Cal"  value={player.callahans} />
+      <StatCell label="+/−"  value={player.plusMinus > 0 ? `+${player.plusMinus}` : player.plusMinus} />
+      {/* Row 2: throwing + negatives + usage */}
+      <StatCell label="Cmp%" value={fmtPct(player.completionPct)} />
+      <StatCell label="ThY"  value={player.yardsThrown.toLocaleString()} />
+      <StatCell label="RcY"  value={player.yardsReceived.toLocaleString()} />
+      <StatCell label="Drp"  value={player.drops}      negative />
+      <StatCell label="TA"   value={player.throwaways} negative />
+      <StatCell label="PP"   value={player.pointsPlayed} />
+    </div>
+  );
+}
+
+// League glyph — small SVG mark per league, matching the mode-select icon
+// treatment (w-10 h-10 rounded-lg bg-accent/10 container, 20×20 stroke SVG).
+function LeagueGlyph({ league }: { league: TwelveOhLeague }) {
+  if (league === 'pul') {
+    // Diamond / disc-flight mark for the women's pro league.
+    return (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="text-accent">
+        <path d="M10 2 3 10l7 8 7-8-7-8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        <circle cx="10" cy="10" r="2.25" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (league === 'wul') {
+    // Mountain/west-coast mark.
+    return (
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="text-accent">
+        <path d="M2.5 15.5 7.5 7l3 4.2 2-2.7 4.5 7Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+        <circle cx="14.5" cy="5.5" r="1.5" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+  // UFA (default) — disc mark.
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true" className="text-accent">
+      <ellipse cx="10" cy="10" rx="8" ry="4.5" stroke="currentColor" strokeWidth="1.5" />
+      <ellipse cx="10" cy="10" rx="4.5" ry="2.5" stroke="currentColor" strokeWidth="1.5" opacity="0.5" />
+    </svg>
+  );
+}
+
+// League select card — one per league, same surface/border/hover/focus/CTA
+// pattern as the mode-select cards below.
+function LeagueCard({
+  league,
+  teamYears,
+  onSelect,
+}: {
+  league: TwelveOhLeague;
+  teamYears: TwelveOhTeamYear[];
+  onSelect: () => void;
+}) {
+  const info = LEAGUE_INFO[league];
+  const hasData = teamYears.length > 0;
+
+  const dataLine = useMemo(() => {
+    if (!hasData) return null;
+    const years = teamYears.map((ty) => ty.year);
+    const minYear = Math.min(...years);
+    const maxYear = Math.max(...years);
+    const yearRange = minYear === maxYear ? `${minYear}` : `${minYear}–${maxYear}`;
+    return `${yearRange} · ${teamYears.length.toLocaleString()} team-seasons`;
+  }, [hasData, teamYears]);
+
+  return (
+    <button
+      type="button"
+      onClick={hasData ? onSelect : undefined}
+      disabled={!hasData}
+      aria-label={hasData ? `Play ${info.fullName}` : `${info.fullName} — no data available`}
+      className={[
+        'group flex flex-col gap-4 p-5 rounded-xl text-left',
+        'bg-surface border border-border',
+        'motion-safe:transition-all motion-safe:duration-200',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+        'min-h-[180px]',
+        hasData
+          ? 'hover:border-accent/50 hover:shadow-sm cursor-pointer'
+          : 'opacity-50 cursor-not-allowed',
+      ].join(' ')}
+    >
+      {/* Icon */}
+      <div className="flex items-center justify-between">
+        <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
+          <LeagueGlyph league={league} />
+        </div>
+        {/* Arrow hint */}
+        {hasData && (
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+            className="text-faint group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150"
+          >
+            <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        )}
+      </div>
+
+      {/* Text */}
+      <div className="flex flex-col gap-1.5">
+        <span className="font-display text-xl font-bold text-ink leading-tight tracking-tight">
+          {info.abbr}
+        </span>
+        <span className="text-[13px] text-muted font-tight leading-snug">
+          {info.fullName}
+        </span>
+      </div>
+
+      {/* CTA / data line */}
+      <div className="mt-auto pt-2">
+        {hasData ? (
+          <span className="text-[10px] font-bold tabular text-faint font-tight tracking-[0.04em]">
+            {dataLine}
+          </span>
+        ) : (
+          <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-faint font-tight">
+            No data
+          </span>
+        )}
+      </div>
+    </button>
   );
 }
 
@@ -257,23 +457,8 @@ function PlayerCard({
               )}
             </div>
 
-            {/* Full stat grid — all 12 rank stats, 2 rows of 6 */}
-            <div className="grid grid-cols-6 gap-x-0.5 gap-y-1.5">
-              {/* Row 1: offense + defense */}
-              <StatCell label="G"    value={player.goals} />
-              <StatCell label="A"    value={player.assists} />
-              <StatCell label="HA"   value={player.hockeyAssists} />
-              <StatCell label="Blk"  value={player.blocks} />
-              <StatCell label="Cal"  value={player.callahans} />
-              <StatCell label="+/−"  value={player.plusMinus > 0 ? `+${player.plusMinus}` : player.plusMinus} />
-              {/* Row 2: throwing + negatives + usage */}
-              <StatCell label="Cmp%" value={fmtPct(player.completionPct)} />
-              <StatCell label="ThY"  value={player.yardsThrown.toLocaleString()} />
-              <StatCell label="RcY"  value={player.yardsReceived.toLocaleString()} />
-              <StatCell label="Drp"  value={player.drops}      negative />
-              <StatCell label="TA"   value={player.throwaways} negative />
-              <StatCell label="PP"   value={player.pointsPlayed} />
-            </div>
+            {/* League-conditional stat grid — see StatGrid for per-league layout */}
+            <StatGrid player={player} />
           </div>
         </div>
       )}
@@ -315,13 +500,17 @@ function StatCell({
 // Result screen.
 function ResultScreen({
   roster,
+  league,
+  teamDisplay,
   onPlayAgain,
 }: {
   roster: DraftedPlayer[];
+  league: TwelveOhLeague;
+  teamDisplay: TeamDisplayLookup;
   onPlayAgain: () => void;
 }) {
   const scores = roster.map((p) => p.playerScore);
-  const { wins, losses, rationale } = teamRecord(scores);
+  const { wins, losses, rationale } = teamRecord(scores, winCurveForLeague(league));
   const isPerfect = wins === 12;
   const mean = scores.reduce((s, x) => s + x, 0) / scores.length;
 
@@ -388,7 +577,7 @@ function ResultScreen({
         </p>
         <div className="flex flex-col gap-2">
           {roster.map((p) => {
-            const meta = teamMeta(p.teamSlug);
+            const meta = teamDisplay(p.teamSlug);
             const badge = badgeClasses(p.playerScore);
             return (
               <div
@@ -440,11 +629,13 @@ function ResultScreen({
 // ─── Main game component ────────────────────────────────────────────────────
 
 interface TwelveOhGameProps {
-  teamYears: TwelveOhTeamYear[];
+  teamYearsByLeague: Record<TwelveOhLeague, TwelveOhTeamYear[]>;
+  teamDisplay: LeagueTeamDisplayMaps;
 }
 
-export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
-  const [phase, setPhase] = useState<GamePhase>('mode-select');
+export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGameProps) {
+  const [phase, setPhase] = useState<GamePhase>('league-select');
+  const [league, setLeague] = useState<TwelveOhLeague | null>(null);
   const [mode, setMode] = useState<GameMode | null>(null);
   const [roster, setRoster] = useState<DraftedPlayer[]>([]);
   const [currentTeamYear, setCurrentTeamYear] = useState<TwelveOhTeamYear | null>(null);
@@ -461,6 +652,19 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
       ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
       : false;
 
+  // Active league's spin pool. Empty array before a league is chosen (the
+  // spin phase can't be reached from league-select, so this is only ever
+  // used once `league` is set).
+  const teamYears = league ? teamYearsByLeague[league] : [];
+
+  // Lookup: teamSlug → display record for the active league. Falls back to
+  // an empty map before a league is chosen.
+  const activeTeamDisplay = league ? teamDisplay[league] : {};
+  const lookupTeamDisplay = useCallback<TeamDisplayLookup>(
+    (teamSlug) => activeTeamDisplay[teamSlug],
+    [activeTeamDisplay],
+  );
+
   // Deduplicate picked players by playerId|teamSlug|year (same human in a
   // different season is a different entry and allowed).
   const draftedKeys = new Set(roster.map((p) => p._key));
@@ -472,7 +676,7 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
       setPhase('loading');
       setAnimating(false);
       try {
-        const players = await getRoster(ty.teamSlug, ty.year);
+        const players = await getRoster(ty.league, ty.teamSlug, ty.year);
         setCurrentRoster(players);
         setPhase('pick');
         setRosterError(null);
@@ -543,13 +747,27 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
     });
   }, []);
 
-  // Play again — full reset, return to mode select so the user can re-choose.
+  // Choose a league → mode-select. Reset any in-progress draft state so a
+  // league switch never leaves stale picks around.
+  const handleChooseLeague = useCallback((chosen: TwelveOhLeague) => {
+    setLeague(chosen);
+    setPhase('mode-select');
+  }, []);
+
+  // "Change league" from mode-select — back to league-select, mode cleared.
+  const handleChangeLeague = useCallback(() => {
+    setMode(null);
+    setPhase('league-select');
+  }, []);
+
+  // Play again — full reset, return to league select so the user can re-choose.
   const handlePlayAgain = useCallback(() => {
     setRoster([]);
     setCurrentTeamYear(null);
     setCurrentRoster([]);
     setMode(null);
-    setPhase('mode-select');
+    setLeague(null);
+    setPhase('league-select');
     setSpinning(false);
     setSkipsUsed(0);
     setRosterError(null);
@@ -579,10 +797,11 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
 
   return (
     <div className="flex flex-col min-h-0 flex-1">
-      {/* ── Page header — hidden on mode-select (the intro screen has its own
-          12-0 hero, so this top ribbon is redundant there). During play it
-          carries the draft-progress counter + roster tray. ─────────────── */}
-      {phase !== 'mode-select' && (
+      {/* ── Page header — hidden on league-select and mode-select (both intro
+          screens have their own 12-0 hero, so this top ribbon is redundant
+          there). During play it carries the draft-progress counter + roster
+          tray. ──────────────────────────────────────────────────────────── */}
+      {phase !== 'league-select' && phase !== 'mode-select' && (
         <div className="border-b border-hairline px-4 py-4 sm:px-6">
           <div className="max-w-2xl mx-auto">
             <div className="flex items-start justify-between gap-4">
@@ -607,7 +826,7 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
             {/* Roster tray — only shown once drafting has begun */}
             {picksMade > 0 && (
               <div className="mt-4">
-                <RosterTray roster={roster} />
+                <RosterTray roster={roster} teamDisplay={lookupTeamDisplay} />
               </div>
             )}
           </div>
@@ -618,14 +837,68 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
       <div className="flex-1 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
 
-          {/* MODE SELECT phase */}
-          {phase === 'mode-select' && (
+          {/* LEAGUE SELECT phase */}
+          {phase === 'league-select' && (
             <div className="flex flex-col gap-8 py-4 sm:py-8">
               {/* Hero */}
               <div className="text-center">
                 <p className="text-[11px] font-bold tracking-[0.2em] uppercase text-muted font-tight mb-3">
-                  UFA Draft Challenge
+                  Pro Ultimate Draft Challenge
                 </p>
+                <h2 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
+                  Can you go{' '}
+                  <span className="text-accent">12-0?</span>
+                </h2>
+                <p className="text-sm text-muted font-tight mt-3 max-w-[320px] mx-auto">
+                  Pick your league, spin for a team and season, draft 7 players.
+                </p>
+                <p className="text-[13px] font-bold text-ink font-tight mt-5">
+                  Choose your league
+                </p>
+              </div>
+
+              {/* League cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {LEAGUE_ORDER.map((lg) => (
+                  <LeagueCard
+                    key={lg}
+                    league={lg}
+                    teamYears={teamYearsByLeague[lg]}
+                    onSelect={() => handleChooseLeague(lg)}
+                  />
+                ))}
+              </div>
+
+              {/* Footer hint */}
+              <p className="text-center text-[10px] text-faint font-tight tracking-[0.08em]">
+                Every league scores on the same 0–100 scale — an 85 is a top-5% all-time season either way
+              </p>
+            </div>
+          )}
+
+          {/* MODE SELECT phase */}
+          {phase === 'mode-select' && league && (
+            <div className="flex flex-col gap-8 py-4 sm:py-8">
+              {/* Hero */}
+              <div className="text-center">
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-sm bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-[0.12em] font-tight">
+                    {LEAGUE_INFO[league].abbr}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleChangeLeague}
+                    className={[
+                      'text-[10px] font-bold uppercase tracking-[0.1em] text-faint font-tight',
+                      'hover:text-accent motion-safe:transition-colors motion-safe:duration-150',
+                      'cursor-pointer underline underline-offset-2 decoration-hairline',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm',
+                      'min-h-[24px] px-1',
+                    ].join(' ')}
+                  >
+                    Change league
+                  </button>
+                </div>
                 <h2 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
                   Can you go{' '}
                   <span className="text-accent">12-0?</span>
@@ -795,6 +1068,7 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
                   <SpinDisplay
                     displayed={displayedTeamYear}
                     spinning={spinning}
+                    teamDisplay={lookupTeamDisplay}
                   />
                 ) : (
                   /* Idle state — show the spin prompt */
@@ -890,7 +1164,7 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
           {phase === 'loading' && (
             <div className="flex flex-col items-center gap-4 py-16" aria-live="polite">
               {currentTeamYear && (() => {
-                const meta = teamMeta(currentTeamYear.teamSlug);
+                const meta = lookupTeamDisplay(currentTeamYear.teamSlug);
                 return (
                   <div className="flex flex-col items-center gap-3">
                     {meta && <TeamLogo team={meta} size={72} className="rounded-xl" />}
@@ -912,26 +1186,20 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
           )}
 
           {/* PICK phase */}
-          {phase === 'pick' && currentTeamYear && (
-            <div className="flex flex-col gap-5">
+          {phase === 'pick' && currentTeamYear && (() => {
+            const currentMeta = lookupTeamDisplay(currentTeamYear.teamSlug);
+            return (
+              <div className="flex flex-col gap-5">
               {/* Team header */}
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  {(() => {
-                    const meta = teamMeta(currentTeamYear.teamSlug);
-                    return meta ? <TeamLogo team={meta} size={40} className="rounded-lg" /> : null;
-                  })()}
+                  {currentMeta ? <TeamLogo team={currentMeta} size={40} className="rounded-lg" /> : null}
                   <div>
-                    {(() => {
-                      const meta = teamMeta(currentTeamYear.teamSlug);
-                      return (
-                        <p className="font-display font-bold text-xl text-ink leading-tight">
-                          {meta
-                            ? `${meta.city} ${meta.name ?? ''}`
-                            : currentTeamYear.teamAbbr}
-                        </p>
-                      );
-                    })()}
+                    <p className="font-display font-bold text-xl text-ink leading-tight">
+                      {currentMeta
+                        ? `${currentMeta.city} ${currentMeta.name ?? ''}`
+                        : currentTeamYear.teamAbbr}
+                    </p>
                     <p className="text-[11px] text-muted font-tight">
                       {currentTeamYear.year} · {currentRoster.length} players
                     </p>
@@ -982,22 +1250,36 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
                   : `Pick 1 player to add to your roster (${picksMade}/${ROSTER_SIZE} drafted)`}
               </p>
 
-              {/* Stat legend — Classic only */}
+              {/* Stat legend — Classic only, abbreviations match the active league's grid */}
               {!isUltIQ && (
                 <div className="flex flex-wrap gap-x-2.5 gap-y-1 text-[9px] font-bold tracking-[0.08em] uppercase text-faint font-tight border-b border-hairline pb-2 -mt-1">
                   <span>Score</span>
                   <span aria-hidden="true">·</span>
                   <span>G=Goals</span>
                   <span>A=Assists</span>
-                  <span>HA=Hockey&nbsp;Assists</span>
+                  {league === 'ufa' && <span>HA=Hockey&nbsp;Assists</span>}
                   <span>Blk=Blocks</span>
-                  <span>Cal=Callahans</span>
+                  {league !== 'pul' && <span>Cal=Callahans</span>}
                   <span>+/−=Plus&nbsp;Minus</span>
-                  <span>Cmp%=Completion</span>
-                  <span>ThY=Throw&nbsp;Yds</span>
-                  <span>RcY=Rec&nbsp;Yds</span>
-                  <span className="text-live/60">Drp=Drops</span>
-                  <span className="text-live/60">TA=Throwaways</span>
+                  {league === 'ufa' && (
+                    <>
+                      <span>Cmp%=Completion</span>
+                      <span>ThY=Throw&nbsp;Yds</span>
+                      <span>RcY=Rec&nbsp;Yds</span>
+                      <span className="text-live/60">Drp=Drops</span>
+                      <span className="text-live/60">TA=Throwaways</span>
+                    </>
+                  )}
+                  {league !== 'ufa' && (
+                    <span className="text-live/60">TO=Turnovers</span>
+                  )}
+                  {league === 'wul' && (
+                    <>
+                      <span>Yds=Total&nbsp;Yds</span>
+                      <span>Hck=Hucks</span>
+                    </>
+                  )}
+                  {league !== 'ufa' && <span>Tch=Touches</span>}
                   <span>PP=Points&nbsp;Played</span>
                 </div>
               )}
@@ -1019,11 +1301,17 @@ export function TwelveOhGame({ teamYears }: TwelveOhGameProps) {
                 })}
               </div>
             </div>
-          )}
+            );
+          })()}
 
           {/* RESULT phase */}
-          {phase === 'result' && (
-            <ResultScreen roster={roster} onPlayAgain={handlePlayAgain} />
+          {phase === 'result' && league && (
+            <ResultScreen
+              roster={roster}
+              league={league}
+              teamDisplay={lookupTeamDisplay}
+              onPlayAgain={handlePlayAgain}
+            />
           )}
         </div>
       </div>

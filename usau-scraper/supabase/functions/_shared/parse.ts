@@ -102,21 +102,37 @@ export function eventScheduleUrl(
   return `${BASE_URL}/events/${slug}/schedule/${gender}/${level}-${gender}/`;
 }
 
+/** Competition-level segment as it appears in USAU schedule URLs. Masters
+ *  events live at /schedule/{Gender}/Masters-{Gender}/, Grand-Masters-…,
+ *  Great-Grand-Masters-… (Grand-Masters verified 200 where Club-Women 404s).
+ *  A combined masters championships hosts SEVERAL of these levels under one
+ *  event slug — callers iterate the family. */
+export type ScheduleUrlLevel =
+  | 'Club'
+  | 'College'
+  | 'Masters'
+  | 'Grand-Masters'
+  | 'Great-Grand-Masters';
+
 /**
  * Both URL forms USAU uses for the schedule page, in the order to try.
  * The hyphenated form covers Club + older College events; the
  * unhyphenated form covers newer College championships (verified 2026).
+ * Masters-family levels use the hyphenated form only.
  */
 export function eventScheduleUrlVariants(
   slug: string,
   gender: 'Men' | 'Women' | 'Mixed',
-  level: 'Club' | 'College' = 'Club',
+  level: ScheduleUrlLevel = 'Club',
 ): string[] {
   const hyphenated = `${BASE_URL}/events/${slug}/schedule/${gender}/${level}-${gender}/`;
   const compact = `${BASE_URL}/events/${slug}/schedule/${gender}/${level}${gender}/`;
   // For College: prefer compact since current championships use it.
-  // For Club: prefer hyphenated.
-  return level === 'College' ? [compact, hyphenated] : [hyphenated, compact];
+  // For Club: prefer hyphenated. Masters family: hyphenated only (the
+  // compact form would be nonsense like "Grand-MastersMen").
+  if (level === 'College') return [compact, hyphenated];
+  if (level !== 'Club') return [hyphenated];
+  return [hyphenated, compact];
 }
 
 export function teamUrlByEventTeamId(eventTeamId: string): string {

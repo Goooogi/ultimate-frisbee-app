@@ -10,9 +10,47 @@ import type { ReactNode } from 'react';
 
 interface HeroCarouselProps {
   slides: ReactNode[];
+  /**
+   * One dominant hex color per slide (same order/length as `slides`), used to
+   * tint the mobile control bar so it matches the active card as it rotates.
+   * For game slides this is the home team's accent; for tournament slides the
+   * league accent. Falls back to the stadium base when absent/short.
+   */
+  slideColors?: string[];
 }
 
-export function HeroCarousel({ slides }: HeroCarouselProps) {
+// Shared dark "stadium" base every hero slide sits on. The mobile control bar
+// blends the active slide's color OVER this so it always reads as the same
+// family as the card while staying dark enough for the white controls.
+const STADIUM_BASE = '#0F1B2E';
+
+/** Parse a 3/6-digit hex to [r,g,b]; null on anything unparseable. */
+function hexToRgb(hex: string): [number, number, number] | null {
+  const h = hex.trim().replace('#', '');
+  const full = h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return null;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+/**
+ * The bar background for the active slide: the slide's color mixed toward the
+ * dark stadium base so the bar echoes the card's hue without ever getting light
+ * enough to wash out the white arrows/dots. `mix` = share of the slide color.
+ */
+function barBackground(color: string | undefined): string {
+  const rgb = color ? hexToRgb(color) : null;
+  if (!rgb) return STADIUM_BASE;
+  const base = hexToRgb(STADIUM_BASE)!;
+  const mix = 0.4; // enough tint to be clearly on-brand, still dark
+  const blended = rgb.map((c, i) => Math.round(c * mix + base[i] * (1 - mix)));
+  return `rgb(${blended[0]}, ${blended[1]}, ${blended[2]})`;
+}
+
+export function HeroCarousel({ slides, slideColors }: HeroCarouselProps) {
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
   const count = slides.length;
@@ -102,7 +140,10 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
           it never overlaps the slide's own footer CTAs (the bug on short
           mobile slides). On lg+ the slide is tall (480px) so we overlay it at
           the bottom as a floating control. */}
-      <div className="flex items-center justify-center gap-3 px-4 py-3 bg-[#0F1B2E] lg:bg-transparent lg:py-0 lg:px-4 lg:absolute lg:bottom-4 lg:left-0 lg:right-0 lg:pointer-events-none z-10">
+      <div
+        style={{ backgroundColor: barBackground(slideColors?.[active]) }}
+        className="flex items-center justify-center gap-3 px-4 py-3 transition-colors duration-500 lg:!bg-transparent lg:py-0 lg:px-4 lg:absolute lg:bottom-4 lg:left-0 lg:right-0 lg:pointer-events-none z-10"
+      >
         {/* Prev */}
         <button
           aria-label="Previous slide"

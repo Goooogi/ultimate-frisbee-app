@@ -22,6 +22,10 @@ import { usePathname, useSearchParams } from 'next/navigation';
 import {
   buildLeagueQs,
   parseDivisionParam,
+  parseLevelParam,
+  levelLabel,
+  USAU_LEVELS,
+  type UsauLevel,
 } from '@/lib/league';
 import { useTheme } from '@/lib/use-theme';
 import { LogoStrikeInline } from '@/components/logo-strike';
@@ -58,6 +62,10 @@ const WUL_TEAMS_LIST: WulTeamMeta[] = allWulTeams();
 type TopUsauTeam = { id: string; name: string; nationalsPlacement: number | null };
 type UsauDivision = 'Men' | 'Women' | 'Mixed';
 type UsauTeamsByDivision = Record<UsauDivision, TopUsauTeam[]>;
+// College D-I preview rows (from the official-rankings reader) — same shape
+// as TopUsauTeam but keyed by rank instead of nationals placement.
+type TopCollegeTeam = { id: string; name: string; rank: number };
+type UsauCollegeTeamsByDivision = { Men: TopCollegeTeam[]; Women: TopCollegeTeam[] };
 type TopPulTeam = { id: string; name: string; city: string; logoUrl: string | null };
 type WfdfMenuEvent = { slug: string; name: string; year: number };
 
@@ -298,6 +306,7 @@ function SubAppRow({
 
 interface FlyoutLeagueData {
   usau: { teams: UsauTeamsByDivision | null; loading: boolean; error: boolean };
+  usauCollege: { teams: UsauCollegeTeamsByDivision | null; loading: boolean; error: boolean };
   pul: { teams: TopPulTeam[] | null; loading: boolean; error: boolean };
   wfdf: { events: WfdfMenuEvent[] | null; loading: boolean; error: boolean };
 }
@@ -309,14 +318,19 @@ function LeagueFlyout({
   onBack,
   onClose,
   usau,
+  usauCollege,
   pul,
   wfdf,
+  usauLevel,
+  onUsauLevelChange,
 }: {
   league: MegaLeagueId;
   pathname: string;
   leagueQsFor: (id: MegaLeagueId) => string;
   onBack: () => void;
   onClose: () => void;
+  usauLevel: UsauLevel;
+  onUsauLevelChange: (level: UsauLevel) => void;
 } & FlyoutLeagueData) {
   const label = MEGA_LEAGUES.find((l) => l.id === league)?.label ?? '';
   // Sub-page link set: WUL + WFDF use their own routes (no ?league= qs).
@@ -347,8 +361,44 @@ function LeagueFlyout({
       </div>
 
       <div className="p-4">
+        {/* ── USAU: competition-level sub-tabs — a FILTER, not navigation.
+            Sits above the page-link row and is visually subordinate to it
+            (smaller text, muted resting state). Selecting a chip updates
+            local state; the page-link hrefs below pick up the new level. ── */}
+        {league === 'usau' && (
+          <div
+            role="tablist"
+            aria-label="Competition level"
+            className="flex items-center gap-1 mb-2.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {USAU_LEVELS.map((lvl) => {
+              const active = lvl === usauLevel;
+              return (
+                <button
+                  key={lvl}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => onUsauLevelChange(lvl)}
+                  className={[
+                    'flex-shrink-0 px-2.5 min-h-[30px] rounded-full',
+                    'text-[10px] font-bold tracking-[0.08em] uppercase font-tight whitespace-nowrap',
+                    'transition-colors duration-150 cursor-pointer',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    active
+                      ? 'text-accent bg-[rgb(var(--accent)/0.1)]'
+                      : 'text-muted hover:text-ink hover:bg-surface',
+                  ].join(' ')}
+                >
+                  {levelLabel(lvl)}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Sub-page links row. */}
-        <div className="flex flex-wrap items-center gap-1 mb-4 pb-3 border-b border-hairline">
+        <div className="flex flex-wrap items-center gap-1 mb-2.5 pb-3 border-b border-hairline">
           {navItems.map((item) => {
             const active = isGamesNavActive(pathname, item);
             const qs = noQs ? '' : leagueQsFor(league);
@@ -373,6 +423,13 @@ function LeagueFlyout({
           })}
         </div>
 
+        {/* ── USAU: Masters / Grand Masters — coming-soon caption ── */}
+        {league === 'usau' && (usauLevel === 'MASTERS' || usauLevel === 'GRAND_MASTERS') && (
+          <p className="text-[11px] text-muted mb-3 -mt-1 leading-snug">
+            2026 events are on the schedule — full results &amp; rosters coming soon.
+          </p>
+        )}
+
         {/* ── UFA: 4-division team grid (2 cols in the narrow panel) ── */}
         {league === 'ufa' && (
           <div className="grid grid-cols-2 gap-x-3 gap-y-3">
@@ -396,8 +453,13 @@ function LeagueFlyout({
           </div>
         )}
 
-        {/* ── USAU: top teams per division (lazy) ── */}
-        {league === 'usau' && (
+        {/* ── USAU: top teams per division (lazy) — source + grouping depend
+            on the selected competition level. CLUB uses the club RPC (Men/
+            Women/Mixed); COLLEGE_D1 uses the official-rankings reader (Men/
+            Women only — college has no Mixed division). COLLEGE_D3 / MASTERS
+            / GRAND_MASTERS have no cheap preview source yet, so the block is
+            hidden entirely for those levels. ── */}
+        {league === 'usau' && usauLevel === 'CLUB' && (
           <div>
             <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Top Teams</p>
             {usau.loading && <GridSkeleton />}
@@ -417,6 +479,40 @@ function LeagueFlyout({
                               {team.nationalsPlacement ?? ''}
                             </span>
                             <UsauTeamLogo name={team.name} genderDivision={div} size={20} />
+                            <span className="truncate">{team.name}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {league === 'usau' && usauLevel === 'COLLEGE_D1' && (
+          <div>
+            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Top Teams</p>
+            {usauCollege.loading && <GridSkeleton />}
+            {!usauCollege.loading && usauCollege.error && (
+              <LoadError href="/teams?league=usau&level=college-d1" onClose={onClose} />
+            )}
+            {!usauCollege.loading && !usauCollege.error && usauCollege.teams && (
+              <div className="flex flex-col gap-2.5">
+                {(['Men', 'Women'] as const).map((div) => {
+                  const teams = usauCollege.teams![div];
+                  if (!teams || teams.length === 0) return null;
+                  return (
+                    <div key={div}>
+                      <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                        {teams.map((team) => (
+                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLink}>
+                            <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
+                              {team.rank}
+                            </span>
+                            <UsauTeamLogo name={team.name} genderDivision={div} competitionLevel="COLLEGE_D1" size={20} />
                             <span className="truncate">{team.name}</span>
                           </Link>
                         ))}
@@ -590,6 +686,10 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const activeApp = detectSubApp(pathname);
   // Division persists onto the fly-out's UFA/USAU sub-page links via leagueQsFor.
   const urlDivision = parseDivisionParam(searchParams.get('div'));
+  // USAU competition-level FILTER for the flyout's sub-tab row. Seeded from
+  // the URL on open; purely local state afterward (selecting a chip doesn't
+  // navigate — only the tab links below pick it up).
+  const [usauLevel, setUsauLevel] = useState<UsauLevel>(() => parseLevelParam(searchParams.get('level')));
 
   // "The League" section is expanded by default when on a games page.
   const initialGamesOpen = activeApp === 'games';
@@ -608,6 +708,15 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const [usauLoading, setUsauLoading] = useState(false);
   const [usauError, setUsauError] = useState(false);
   const usauFetchedRef = useRef(false);
+
+  // College D-I "Top Teams" preview — fed by the cheap usau_rankings reader
+  // (listOfficialUsauRankings), NOT the club RPC. Fetched lazily the first
+  // time COLLEGE_D1 is selected in the flyout, then cached for the
+  // component's lifetime same as the club fetch above.
+  const [usauCollegeTeams, setUsauCollegeTeams] = useState<UsauCollegeTeamsByDivision | null>(null);
+  const [usauCollegeLoading, setUsauCollegeLoading] = useState(false);
+  const [usauCollegeError, setUsauCollegeError] = useState(false);
+  const usauCollegeFetchedRef = useRef(false);
 
   const [pulTeams, setPulTeams] = useState<TopPulTeam[] | null>(null);
   const [pulLoading, setPulLoading] = useState(false);
@@ -635,6 +744,29 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
       if (flyoutMountedRef.current) setUsauError(true);
     } finally {
       if (flyoutMountedRef.current) setUsauLoading(false);
+    }
+  }, []);
+
+  const fetchUsauCollegeTeams = useCallback(async () => {
+    if (usauCollegeFetchedRef.current) return;
+    usauCollegeFetchedRef.current = true;
+    setUsauCollegeLoading(true);
+    try {
+      const { listOfficialUsauRankings } = await import('@/lib/usau/data');
+      const [men, women] = await Promise.all([
+        listOfficialUsauRankings('College-Men', 8),
+        listOfficialUsauRankings('College-Women', 8),
+      ]);
+      if (flyoutMountedRef.current) {
+        setUsauCollegeTeams({
+          Men: men.teams.map((t) => ({ id: t.id, name: t.name, rank: t.rank })),
+          Women: women.teams.map((t) => ({ id: t.id, name: t.name, rank: t.rank })),
+        });
+      }
+    } catch {
+      if (flyoutMountedRef.current) setUsauCollegeError(true);
+    } finally {
+      if (flyoutMountedRef.current) setUsauCollegeLoading(false);
     }
   }, []);
 
@@ -669,13 +801,25 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     }
   }, []);
 
-  // Open the fly-out for a league + kick its lazy fetch.
+  // Open the fly-out for a league + kick its lazy fetch. USAU's top-teams
+  // source depends on which level is currently selected (e.g. deep-linking
+  // in with ?level=college-d1 already selected before the flyout opens).
   const openFlyout = useCallback((id: MegaLeagueId) => {
     setFlyoutLeague(id);
-    if (id === 'usau') fetchUsauTeams();
-    else if (id === 'pul') fetchPulTeams();
+    if (id === 'usau') {
+      if (usauLevel === 'COLLEGE_D1') fetchUsauCollegeTeams();
+      else if (usauLevel === 'CLUB') fetchUsauTeams();
+    } else if (id === 'pul') fetchPulTeams();
     else if (id === 'wfdf') fetchWfdfEvents();
-  }, [fetchUsauTeams, fetchPulTeams, fetchWfdfEvents]);
+  }, [usauLevel, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
+
+  // Selecting a division sub-tab inside the USAU flyout — pure filter state,
+  // no navigation. Lazily kicks the College D-I fetch the first time that
+  // level is chosen (CLUB is already fetched eagerly on flyout open).
+  const handleUsauLevelChange = useCallback((level: UsauLevel) => {
+    setUsauLevel(level);
+    if (level === 'COLLEGE_D1') fetchUsauCollegeTeams();
+  }, [fetchUsauCollegeTeams]);
 
   // Close the fly-out whenever the main menu closes or the route changes.
   useEffect(() => { if (!open) setFlyoutLeague(null); }, [open]);
@@ -722,8 +866,10 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   }, [open, handleKeyDown]);
 
   // ── league qs helper (mirrors GamesDropdown) ────────────────────────────
+  // USAU carries both the gender division (from the URL, unrelated to this
+  // task) and the competition level (the flyout's own filter state below).
   function leagueQsFor(lid: MegaLeagueId): string {
-    if (lid === 'usau') return buildLeagueQs('usau', urlDivision);
+    if (lid === 'usau') return buildLeagueQs('usau', urlDivision, usauLevel);
     if (lid === 'pul') return buildLeagueQs('pul', null);
     return buildLeagueQs('ufa', urlDivision);
   }
@@ -794,22 +940,25 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         aria-hidden="true"
       />
 
-      {/* Panel — anchored to the RIGHT edge, slides in from off-screen right.
-          Full-width on phones (max-w caps it into a side panel on wider
-          screens). */}
+      {/* Panel — rolls DOWN from the top of the page. Full-width, capped
+          height so it reads as a dropdown sheet (not a full-screen takeover);
+          its own content scrolls if it exceeds that. On wider screens it caps
+          to a centered max-width. Slides in via translate-y. */}
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation"
         className={[
-          'absolute inset-y-0 right-0 w-full max-w-[360px]',
-          'flex flex-col bg-bg overflow-y-auto shadow-2xl border-l border-hairline',
-          // Slide in from the right; respect reduced-motion.
+          'absolute top-0 inset-x-0 w-full sm:max-w-[420px] sm:mx-auto',
+          'max-h-[calc(100dvh-1rem)]',
+          'flex flex-col bg-bg overflow-y-auto shadow-2xl border-b border-hairline',
+          'rounded-b-2xl',
+          // Roll down from the top; respect reduced-motion.
           'transition-transform motion-reduce:transition-none',
-          open ? 'translate-x-0' : 'translate-x-full',
+          open ? 'translate-y-0' : '-translate-y-full',
         ].join(' ')}
-        style={{ transitionDuration: '220ms', transitionTimingFunction: 'ease-out' }}
+        style={{ transitionDuration: '260ms', transitionTimingFunction: 'ease-out' }}
       >
         {/* Accent glow bleeding down from the top-right — gives the panel a
             branded, lit feel instead of a flat white sheet. */}
@@ -973,24 +1122,20 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
       </div>
 
       {/* ── LEAGUE FLY-OUT ─────────────────────────────────────────────────
-          Slides in from the LEFT of the main 360px panel (desktop). On mobile
-          (<640px) there's no room beside the panel, so it overlays full-width
-          on top of the main panel with a back button. Shows the previewed
+          Overlays the rolled-down main panel full-width (same top-anchored,
+          max-width-capped box), with a back button. Shows the previewed
           league's sub-pages + team grid — the old mega-menu content. */}
       {flyoutLeague && (
         <div
           role="menu"
           aria-label={`${MEGA_LEAGUES.find((l) => l.id === flyoutLeague)?.label ?? ''} navigation`}
           className={[
-            'absolute inset-y-0 z-[1] flex flex-col bg-bg overflow-y-auto',
-            'border-l border-hairline shadow-2xl',
-            // Wide screens (md+, ≥768px): sit just left of the 360px main panel
-            // (360 + 340 = 700px fits comfortably). Narrower: full-width overlay
-            // on top of the main panel with a back button.
-            'right-0 left-0 md:left-auto md:right-[360px] md:w-[340px]',
-            'transition-transform motion-reduce:transition-none',
+            'absolute top-0 inset-x-0 z-[1] flex flex-col bg-bg overflow-y-auto',
+            'w-full sm:max-w-[420px] sm:mx-auto',
+            'max-h-[calc(100dvh-1rem)] rounded-b-2xl shadow-2xl border-b border-hairline',
+            'motion-reduce:animate-none',
           ].join(' ')}
-          style={{ animation: 'gamesDropdownIn 150ms ease-out both' }}
+          style={{ animation: 'gamesDropdownIn 160ms ease-out both' }}
         >
           <LeagueFlyout
             league={flyoutLeague}
@@ -999,8 +1144,11 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             onBack={() => setFlyoutLeague(null)}
             onClose={onClose}
             usau={{ teams: usauTeams, loading: usauLoading, error: usauError }}
+            usauCollege={{ teams: usauCollegeTeams, loading: usauCollegeLoading, error: usauCollegeError }}
             pul={{ teams: pulTeams, loading: pulLoading, error: pulError }}
             wfdf={{ events: wfdfEvents, loading: wfdfLoading, error: wfdfError }}
+            usauLevel={usauLevel}
+            onUsauLevelChange={handleUsauLevelChange}
           />
         </div>
       )}

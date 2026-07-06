@@ -39,6 +39,7 @@ async function main() {
     const { data: page } = await db
       .from('twelve_oh_players')
       .select('player_id, team_slug, year, player_score')
+      .eq('league', 'ufa')
       .range(pageFrom, pageFrom + PAGE_SIZE - 1);
     if (!page || page.length === 0) break;
     allRows.push(...page as typeof allRows);

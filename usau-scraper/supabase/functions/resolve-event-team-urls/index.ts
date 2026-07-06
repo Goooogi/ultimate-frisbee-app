@@ -18,7 +18,11 @@
 // between USAU fetches via the shared http helper.
 
 import { fetchHtml } from '../_shared/http.ts';
-import { eventScheduleUrlVariants, extractTeamNameAndSeed } from '../_shared/parse.ts';
+import {
+  eventScheduleUrlVariants,
+  extractTeamNameAndSeed,
+  type ScheduleUrlLevel,
+} from '../_shared/parse.ts';
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
 
 interface RequestBody {
@@ -75,7 +79,22 @@ async function resolveOneEvent(
   slug: string,
   competitionLevel: string | null,
 ): Promise<{ resolved: number; skipped: number; error?: string; usedSlug?: string }> {
-  const urlLevel: 'Club' | 'College' = competitionLevel?.startsWith('COLLEGE') ? 'College' : 'Club';
+  // Masters events need masters URL segments, and one combined event (the
+  // Masters Championships) hosts Masters + Grand Masters + Great Grand
+  // Masters divisions under a single slug — so for masters we try the whole
+  // segment family per gender and merge whatever resolves. Order the family
+  // by what the slug hints at so single-division regionals usually hit on
+  // the first fetch.
+  const isMastersEvent =
+    competitionLevel === 'MASTERS' || competitionLevel === 'GRAND_MASTERS';
+  const slugLower = slug.toLowerCase();
+  const levelSegments: ScheduleUrlLevel[] = isMastersEvent
+    ? slugLower.includes('great-grand')
+      ? ['Great-Grand-Masters', 'Grand-Masters', 'Masters']
+      : slugLower.includes('grand')
+        ? ['Grand-Masters', 'Great-Grand-Masters', 'Masters']
+        : ['Masters', 'Grand-Masters', 'Great-Grand-Masters']
+    : [competitionLevel?.startsWith('COLLEGE') ? 'College' : 'Club'];
 
   // Load all unresolved participations + each team's gender_division.
   // A single event can host multiple genders (e.g. Nationals has Men's,
@@ -119,24 +138,46 @@ async function resolveOneEvent(
     const urlGender: 'Men' | 'Women' | 'Mixed' =
       gender === 'Women' ? 'Women' : gender === 'Mixed' ? 'Mixed' : 'Men';
 
-    let html: string | null = null;
+    // Wanted lookup keys for this gender — lets us stop fetching further
+    // masters level segments once every team is already covered.
+    const wantedKeys = genderParts
+      .map((p) => p.usau_teams?.name?.toLowerCase().replace(/\s+/g, ' ').trim())
+      .filter((k): k is string => !!k);
+
+    const byName = new Map<string, string>();
     let usedSlug: string | null = null;
-    outer: for (const candidate of slugVariants(slug)) {
-      for (const url of eventScheduleUrlVariants(candidate, urlGender, urlLevel)) {
-        try {
-          html = await fetchHtml(url);
-          usedSlug = candidate;
-          break outer;
-        } catch (err) {
-          const msg = stringifyErr(err);
-          if (/HTTP 404/.test(msg) || /404 /.test(msg)) continue;
-          // Non-404 = real error; bubble out
-          return { resolved: totalResolved, skipped: totalSkipped, error: msg };
+
+    for (const seg of levelSegments) {
+      let html: string | null = null;
+      outer: for (const candidate of slugVariants(usedSlug ?? slug)) {
+        for (const url of eventScheduleUrlVariants(candidate, urlGender, seg)) {
+          try {
+            html = await fetchHtml(url);
+            usedSlug = candidate;
+            break outer;
+          } catch (err) {
+            const msg = stringifyErr(err);
+            // 404 is EXPECTED here: single-division masters events only have
+            // one level segment; the wrong-level candidates just miss.
+            if (/HTTP 404/.test(msg) || /404 /.test(msg)) continue;
+            // Non-404 = real error; bubble out
+            return { resolved: totalResolved, skipped: totalSkipped, error: msg };
+          }
         }
       }
+      if (html) {
+        for (const [k, v] of extractEventTeamIdsByName(html)) {
+          if (!byName.has(k)) byName.set(k, v);
+        }
+      }
+      // Non-masters events have exactly one segment; masters events can stop
+      // early once every wanted team has been seen on some level's page.
+      if (!isMastersEvent) break;
+      if (byName.size > 0 && wantedKeys.every((k) => byName.has(k))) break;
     }
-    if (!html || !usedSlug) {
-      // No schedule page for this gender — count as skipped.
+
+    if (!usedSlug || byName.size === 0) {
+      // No schedule page (or an empty one) for this gender — count as skipped.
       totalSkipped += genderParts.length;
       continue;
     }
@@ -151,12 +192,6 @@ async function resolveOneEvent(
       if (updErr) {
         console.error(`[resolver] failed to update slug ${slug} → ${usedSlug}: ${stringifyErr(updErr)}`);
       }
-    }
-
-    const byName = extractEventTeamIdsByName(html);
-    if (byName.size === 0) {
-      totalSkipped += genderParts.length;
-      continue;
     }
 
     for (const p of genderParts) {

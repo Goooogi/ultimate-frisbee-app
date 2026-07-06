@@ -8,10 +8,25 @@
 //
 // Request body:
 //   { year: number,
-//     division?: 'mens-club' | 'womens-club' | 'mixed-club' | string,
+//     division?: 'mens-club' | 'womens-club' | 'mixed-club' | 'masters' | string,
 //     page?: number       // start at this /search page (default 1)
 //     maxPages?: number   // hard cap on /search pagination from this start (default 1)
 //     dryRun?: boolean }  // skip DB writes, just report what we'd do
+//
+// MASTERS MODE (division: 'masters'):
+//   Club divisions map 1:1 to an ultirzr EventGroupName, but masters events
+//   host up to 7 age×gender groups on one EventId ('Masters - Men',
+//   'Grand Masters - Mixed', 'Great Grand Masters - Women', …) and ultirzr's
+//   /search division filter doesn't cover them. So masters mode searches by
+//   `query=masters` (name substring) and ingests EVERY masters-family group
+//   per event, classifying each group independently:
+//     - team competition_level: 'Masters - *' → MASTERS; 'Grand Masters - *'
+//       and 'Great Grand Masters - *' → GRAND_MASTERS (GGM folded in — tiny
+//       division, not worth widening the enum).
+//     - bracket_name is prefixed with a short group label ("GM Women · Pool A")
+//       so the combined championships' divisions stay distinguishable.
+//   Non-masters events surfaced by the name search (clinics, "Masters Minus"
+//   club tournaments) have no masters-family group → quietly skipped.
 //
 // Edge Functions cap CPU per invocation, so we work one /search page (20
 // events) per call. The response includes `nextPage` so the caller can
@@ -255,17 +270,22 @@ async function ingestEvent(
   // ultirzr group names sometimes have inconsistent whitespace and casing
   // year to year (e.g. 2024 has 'Club - Men ' with a trailing space, 2025
   // has 'Club - Men'). Normalize both sides before comparing.
+  //
+  // Masters mode ingests EVERY masters-family group instead (one masters
+  // event hosts up to 7 age×gender groups) — see header.
+  const isMasters = divisionFilter === 'masters';
   const wantedGroupName = divisionLabel(divisionFilter);
   const wantedNorm = wantedGroupName?.toLowerCase().replace(/\s+/g, ' ').trim();
   const groups = (e.EventGroups ?? []).filter((g) => {
+    if (isMasters) return mastersGroupMeta(g) !== null;
     if (!wantedNorm) return true;
-    const gn = (g.EventGroupName ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
-    return gn === wantedNorm;
+    return normGroupName(g) === wantedNorm;
   });
   if (groups.length === 0) {
     // Event doesn't have this division — common (e.g. an HS-only event
     // shows up in our search results because of how ultirzr handles
-    // division filtering on lookalike names). Quiet skip.
+    // division filtering on lookalike names, or a "Masters Minus" club
+    // tournament matching the masters name search). Quiet skip.
     return;
   }
 
@@ -280,8 +300,14 @@ async function ingestEvent(
   }
   if (!slug) {
     // Fall back to a synthesized slug from the event name. Not ideal but
-    // some events don't expose a UsauUrl (cancelled events, etc.).
-    slug = e.EventName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    // some events don't expose a UsauUrl (masters groups, cancelled events).
+    // Strip apostrophes BEFORE hyphenating so "Women's" → "womens" like
+    // USAU's own slugs, not "women-s" (which would miss the slug match
+    // against rows discover-events created and duplicate the event).
+    slug = e.EventName.toLowerCase()
+      .replace(/['’]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '');
   }
 
   const start = dateOnly(e.StartDate);
@@ -314,8 +340,19 @@ async function ingestEvent(
   await db.from('usau_seasons').upsert({ year: season }, { onConflict: 'year', ignoreDuplicates: true });
 
   // ── Upsert event ──
-  // Match preference: by numeric usau_event_id first (most stable), then
-  // by lowercased slug (handles legacy rows from HTML scrape).
+  // Match preference: by numeric usau_event_id first (most stable), then by
+  // lowercased slug (handles legacy rows from HTML scrape), then — masters
+  // only — by (season, name): discover-events created the 2026 masters
+  // shells with REAL USAU slugs that a synthesized slug may not hit.
+  //
+  // Event-level competition_level is single-valued but a combined masters
+  // event hosts Masters AND Grand Masters groups. We classify by the
+  // "youngest" group present (any plain Masters group → MASTERS). The
+  // per-division truth lives on the TEAMS (tagged from their group below).
+  const eventLevel = isMasters
+    ? (groups.some((g) => mastersGroupMeta(g)?.level === 'MASTERS') ? 'MASTERS' : 'GRAND_MASTERS')
+    : levelFromGroup(wantedGroupName);
+
   const eventRow = {
     usau_slug: slug,
     usau_event_id: hit.EventId,
@@ -328,20 +365,24 @@ async function ingestEvent(
     url: `https://play.usaultimate.org/events/${slug}/`,
     last_scraped_at: new Date().toISOString(),
     last_scraped_status: 'ok',
-    competition_level: levelFromGroup(wantedGroupName),
+    competition_level: eventLevel,
   };
 
-  // Try to find an existing row by usau_event_id first, then by lower(slug).
+  // On UPDATE of an existing masters row, keep its slug (discover-events
+  // stored the real USAU slug — better than our synthesized one) and its
+  // level (already classified). Club updates keep full-overwrite behavior.
+  const updatePayload = isMasters
+    ? (({ usau_slug: _s, competition_level: _l, ...rest }) => rest)(eventRow)
+    : eventRow;
+
   const { data: existingById } = await db
     .from('usau_events')
     .select('id')
     .eq('usau_event_id', hit.EventId)
     .maybeSingle();
-  let eventUuid: string;
+  let eventUuid: string | null = null;
   if (existingById) {
     eventUuid = existingById.id;
-    const { error } = await db.from('usau_events').update(eventRow).eq('id', eventUuid);
-    if (error) throw new Error(`update event ${hit.EventId}: ${stringifyErr(error)}`);
   } else {
     const { data: existingBySlug } = await db
       .from('usau_events')
@@ -350,44 +391,61 @@ async function ingestEvent(
       .maybeSingle();
     if (existingBySlug) {
       eventUuid = existingBySlug.id;
-      const { error } = await db.from('usau_events').update(eventRow).eq('id', eventUuid);
-      if (error) throw new Error(`update event by slug ${slug}: ${stringifyErr(error)}`);
-    } else {
-      const { data: inserted, error } = await db
+    } else if (isMasters) {
+      const { data: existingByName } = await db
         .from('usau_events')
-        .insert(eventRow)
         .select('id')
-        .single();
-      if (error) throw new Error(`insert event ${hit.EventId}: ${stringifyErr(error)}`);
-      eventUuid = inserted.id;
+        .eq('season', season)
+        .ilike('name', e.EventName.trim())
+        .limit(1);
+      if (existingByName && existingByName.length > 0) eventUuid = existingByName[0].id;
     }
+  }
+
+  if (eventUuid) {
+    const { error } = await db.from('usau_events').update(updatePayload).eq('id', eventUuid);
+    if (error) throw new Error(`update event ${hit.EventId}: ${stringifyErr(error)}`);
+  } else {
+    const { data: inserted, error } = await db
+      .from('usau_events')
+      .insert(eventRow)
+      .select('id')
+      .single();
+    if (error) throw new Error(`insert event ${hit.EventId}: ${stringifyErr(error)}`);
+    eventUuid = inserted.id;
   }
   stats.events++;
 
   // ── Walk every game in the wanted groups, collect teams + games ──
+  // In masters mode each group carries its own level+gender (a combined
+  // championships hosts up to 7 groups), so teams remember the group they
+  // were seen in and bracket names get a group prefix ("GM Women · Pool A")
+  // to keep the divisions distinguishable on the event page.
   type GameWithCtx = { game: UltirzrGame; bracket: string | null; stage: string | null };
-  const teamSeen = new Map<number, { name: string; seed: number | null }>();
+  const teamSeen = new Map<number, TeamSeenInfo>();
   const gameList: GameWithCtx[] = [];
 
   for (const g of groups) {
+    const meta = isMasters ? mastersGroupMeta(g) : null;
+    const prefix = meta ? `${meta.label} · ` : '';
     for (const r of g.EventRounds ?? []) {
       // Pool play
       for (const p of r.Pools ?? []) {
         for (const gm of p.Games ?? []) {
-          collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen);
-          collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen);
-          gameList.push({ game: gm, bracket: p.Name ?? 'Pool', stage: 'pool' });
+          collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen, meta);
+          collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen, meta);
+          gameList.push({ game: gm, bracket: `${prefix}${p.Name ?? 'Pool'}`, stage: 'pool' });
         }
       }
       // Bracket play
       for (const b of r.Brackets ?? []) {
         for (const st of b.Stage ?? []) {
           for (const gm of st.Games ?? []) {
-            collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen);
-            collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen);
+            collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen, meta);
+            collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen, meta);
             gameList.push({
               game: gm,
-              bracket: b.BracketName ?? null,
+              bracket: b.BracketName ? `${prefix}${b.BracketName}` : (prefix ? prefix.replace(/ · $/, '') : null),
               stage: st.StageName ?? null,
             });
           }
@@ -418,8 +476,10 @@ async function ingestEvent(
         .insert({
           usau_team_id: teamIdStr,
           name: info.name,
-          competition_level: 'CLUB',
-          gender_division: genderFromGroup(wantedGroupName),
+          // Masters teams carry the level+gender of the GROUP they were seen
+          // in (MASTERS vs GRAND_MASTERS), not the event's single level.
+          competition_level: info.meta?.level ?? 'CLUB',
+          gender_division: info.meta?.gender ?? genderFromGroup(wantedGroupName),
           last_scraped_at: new Date().toISOString(),
         })
         .select('id')
@@ -508,10 +568,18 @@ async function ingestEvent(
   }
 }
 
+interface TeamSeenInfo {
+  name: string;
+  seed: number | null;
+  /** Masters mode: the group this team plays in (level + gender). */
+  meta: MastersGroupMeta | null;
+}
+
 function collectTeam(
   id: number | undefined,
   name: string | undefined,
-  out: Map<number, { name: string; seed: number | null }>,
+  out: Map<number, TeamSeenInfo>,
+  meta: MastersGroupMeta | null,
 ): void {
   if (!id || id === 0) return;
   const split = name ? splitNameAndSeed(name) : { name: '', seed: null };
@@ -522,6 +590,7 @@ function collectTeam(
   out.set(id, {
     name: split.name || existing?.name || '',
     seed: split.seed ?? existing?.seed ?? null,
+    meta: existing?.meta ?? meta,
   });
 }
 
@@ -539,6 +608,39 @@ function divisionLabel(div: string): string | null {
     case 'mixed-club': return 'Club - Mixed';
     default: return null;
   }
+}
+
+// ─── Masters helpers ────────────────────────────────────────────────────
+
+interface MastersGroupMeta {
+  /** Our enum value. GGM folds into GRAND_MASTERS (see header). */
+  level: 'MASTERS' | 'GRAND_MASTERS';
+  gender: 'Men' | 'Women' | 'Mixed';
+  /** Short display prefix for bracket names, e.g. "GM Women". */
+  label: string;
+}
+
+/** Normalize an EventGroupName for matching (ultirzr has inconsistent
+ *  whitespace year to year, incl. trailing spaces). */
+function normGroupName(g: UltirzrGroup): string {
+  return (g.EventGroupName ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/** 'Great Grand Masters - Men ' → { GRAND_MASTERS, Men, 'GGM Men' };
+ *  null for anything outside the masters family. */
+function mastersGroupMeta(g: UltirzrGroup): MastersGroupMeta | null {
+  const m = normGroupName(g).match(
+    /^(great grand masters|grand masters|masters) - (men|women|mixed)$/,
+  );
+  if (!m) return null;
+  const gender = (m[2][0].toUpperCase() + m[2].slice(1)) as MastersGroupMeta['gender'];
+  const prefix =
+    m[1] === 'great grand masters' ? 'GGM' : m[1] === 'grand masters' ? 'GM' : 'Masters';
+  return {
+    level: m[1] === 'masters' ? 'MASTERS' : 'GRAND_MASTERS',
+    gender,
+    label: `${prefix} ${gender}`,
+  };
 }
 
 function genderFromGroup(group: string | null): 'Men' | 'Women' | 'Mixed' | null {
@@ -576,8 +678,13 @@ async function run(body: RequestBody) {
   let lastPageWalked: number = startPage - 1;
 
   for (let page = startPage; page <= endPage; page++) {
+    // Masters events aren't reachable via ultirzr's division filter — search
+    // by name substring instead (see header). Non-masters keeps division.
+    const searchQs = division === 'masters'
+      ? `year=${body.year}&query=masters&page=${page}`
+      : `year=${body.year}&division=${encodeURIComponent(division)}&page=${page}`;
     const resp = await fetchUltirzr<{ success: boolean; hits: UltirzrEventSearchHit[] }>(
-      `/events/search?year=${body.year}&division=${encodeURIComponent(division)}&page=${page}`,
+      `/events/search?${searchQs}`,
     );
     const hits = resp.hits ?? [];
     lastPageWalked = page;

@@ -12,7 +12,7 @@ import { SearchGlyph } from '@/components/search-modal';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { searchUfaPlayers } from '@/lib/ufa/search-actions';
 import { listUsauPlayers, type UsauPlayerListRow } from '@/lib/usau/data';
-import type { UsauDivision } from '@/lib/league';
+import type { UsauDivision, UsauLevel } from '@/lib/league';
 
 type Mode =
   | {
@@ -25,7 +25,7 @@ type Mode =
        *  search server action so it queries the same season. */
       year: number;
     }
-  | { kind: 'usau'; players: UsauPlayerListRow[]; division: UsauDivision };
+  | { kind: 'usau'; players: UsauPlayerListRow[]; division: UsauDivision; level: UsauLevel };
 
 interface Props {
   mode: Mode;
@@ -63,6 +63,7 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
             limit: 200,
             search: q,
             genderDivision: mode.division,
+            competitionLevel: mode.level,
           });
           if (!cancelled) {
             setUsauSearchResults(rows);
@@ -113,7 +114,7 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
       };
     }
     if (usauSearchResults != null) {
-      return { kind: 'usau' as const, players: usauSearchResults, division: mode.division };
+      return { kind: 'usau' as const, players: usauSearchResults, division: mode.division, level: mode.level };
     }
     return {
       kind: 'usau' as const,
@@ -122,6 +123,7 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
         return p.latestTeam?.toLowerCase().includes(needle) ?? false;
       }),
       division: mode.division,
+      level: mode.level,
     };
   }, [mode, needle, ufaSearchResults, usauSearchResults]);
 

@@ -10,7 +10,7 @@ import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
 import { type UsauMajorWithChampions } from '@/lib/usau/data';
 import { recentUsauTournamentCardsCached } from '@/lib/cached-readers';
-import { parseLeagueParam } from '@/lib/league';
+import { parseLeagueParam, parseLevelParam } from '@/lib/league';
 import { PageShell } from '@/components/page-shell';
 import { PulScores } from '@/components/pul/pul-scores';
 import { getPulCurrentSeason } from '@/lib/pul/data';
@@ -20,11 +20,13 @@ import { getWulCurrentSeason } from '@/lib/wul/data';
 export const revalidate = 30;
 
 interface Props {
-  searchParams: { league?: string; div?: string; season?: string };
+  searchParams: { league?: string; div?: string; level?: string; season?: string };
 }
 
 export default async function HomePage({ searchParams }: Props) {
   const league = parseLeagueParam(searchParams.league);
+  // USAU competition level (?level=club|college-d1|…). Only read on the USAU view.
+  const usauLevel = parseLevelParam(searchParams.level);
 
   // ── PUL branch ────────────────────────────────────────────────────────────
   if (league === 'pul') {
@@ -61,14 +63,21 @@ export default async function HomePage({ searchParams }: Props) {
       return [] as UfaGame[];
     }),
     league === 'usau'
-      ? recentUsauTournamentCardsCached().catch((err) => {
+      ? recentUsauTournamentCardsCached(usauLevel).catch((err) => {
           console.error('Failed to load recent USAU tournaments:', err);
           return [] as UsauMajorWithChampions[];
         })
       : Promise.resolve<UsauMajorWithChampions[]>([]),
   ]);
   const today = getToday();
-  return <FeedPage games={sortForFeed(games)} today={today} usauCards={usauCards} />;
+  return (
+    <FeedPage
+      games={sortForFeed(games)}
+      today={today}
+      usauCards={usauCards}
+      usauLevel={usauLevel}
+    />
+  );
 }
 
 /**

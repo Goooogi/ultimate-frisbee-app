@@ -9,6 +9,7 @@ import {
   inferLeagueFromPath,
   parseDivisionParam,
   parseLeagueParam,
+  parseLevelParam,
 } from '@/lib/league';
 
 interface NavItem {
@@ -51,7 +52,8 @@ export function SidebarNav() {
     ? parseLeagueParam(searchParams.get('league'))
     : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
   const activeDivision = parseDivisionParam(searchParams.get('div'));
-  const leagueQs = buildLeagueQs(activeLeague, activeDivision);
+  const activeLevel = parseLevelParam(searchParams.get('level'));
+  const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
   return (
     <aside className="w-[220px] flex-shrink-0 flex flex-col px-6 pt-6 pb-8 bg-bg border-r border-hairline">

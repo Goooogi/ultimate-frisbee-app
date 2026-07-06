@@ -89,6 +89,7 @@ async function main() {
     const { data: page, error } = await db
       .from('twelve_oh_players')
       .select('player_id, team_slug, year, name, player_score, blocks, goals, assists')
+      .eq('league', 'ufa') // this script verifies the UFA curve; PUL/WUL → tune-twelve-oh-league-curve.ts
       .order('player_score', { ascending: false })
       .range(pageFrom, pageFrom + PAGE_SIZE - 1);
     if (error) {
@@ -265,6 +266,7 @@ async function main() {
   const { data: babbittRows } = await db
     .from('twelve_oh_players')
     .select('name, team_abbr, year, goals, assists, blocks, player_score')
+    .eq('league', 'ufa')
     .ilike('name', '%babbitt%')
     .order('player_score', { ascending: false })
     .limit(5);
@@ -282,6 +284,7 @@ async function main() {
   const { data: topBlockers } = await db
     .from('twelve_oh_players')
     .select('name, team_abbr, year, blocks, goals, assists, player_score')
+    .eq('league', 'ufa')
     .order('blocks', { ascending: false })
     .limit(10);
 

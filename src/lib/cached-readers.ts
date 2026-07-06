@@ -20,6 +20,7 @@ import {
   recentUsauTournamentCards as _recentUsauTournamentCards,
   listOfficialUsauRankings as _listOfficialUsauRankings,
   listUsauPlayers as _listUsauPlayers,
+  type CompetitionLevel,
 } from '@/lib/usau/data';
 import {
   listPulPlayers as _listPulPlayers,
@@ -35,11 +36,13 @@ import {
 // DB read per window.
 const REVALIDATE_SECONDS = 300;
 
-// Wrapped as a no-arg closure so the reader's `now: Date` default stays out of
+// Wrapped as a closure so the reader's `now: Date` default stays out of
 // the cache key (a Date wouldn't serialize into one cleanly). Callers never
-// pass `now`, so this preserves behavior exactly.
+// pass `now`, so this preserves behavior exactly. The competition level IS
+// a serialized cache-key arg, so each level memoizes independently.
 export const recentUsauTournamentCardsCached = unstable_cache(
-  () => _recentUsauTournamentCards(),
+  (competitionLevel: CompetitionLevel = 'CLUB') =>
+    _recentUsauTournamentCards(undefined, undefined, competitionLevel),
   ['usau-recent-tournament-cards'],
   { revalidate: REVALIDATE_SECONDS },
 );

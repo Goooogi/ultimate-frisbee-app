@@ -75,19 +75,23 @@ export function levelLabel(level: UsauLevel): string {
 export const USAU_LEVELS: UsauLevel[] = ['CLUB', 'COLLEGE_D1', 'COLLEGE_D3', 'MASTERS', 'GRAND_MASTERS'];
 
 /**
- * Build the league + division query string, omitting params that match
- * the default so URLs stay clean (`?league=ufa&div=men` collapses to
- * an empty query). Pass `null` for either to drop it entirely.
+ * Build the league + division (+ competition level) query string, omitting
+ * params that match the default so URLs stay clean (`?league=ufa&div=men`
+ * collapses to an empty query). Pass `null` for any to drop it entirely.
  */
 export function buildLeagueQs(
   league: LeagueId | null | undefined,
   division: UsauDivision | null | undefined,
+  level?: UsauLevel | null,
 ): string {
   const params = new URLSearchParams();
   if (league && league !== DEFAULT_LEAGUE) params.set('league', league);
-  // Division only matters for USAU. Skip it for UFA links.
+  // Division + competition level only matter for USAU. Skip them for UFA links.
   if (league === 'usau' && division && division !== DEFAULT_DIVISION) {
     params.set('div', division.toLowerCase());
+  }
+  if (league === 'usau' && level && level !== DEFAULT_LEVEL) {
+    params.set('level', levelToParam(level));
   }
   const qs = params.toString();
   return qs ? `?${qs}` : '';

@@ -16,11 +16,15 @@ import { AppShell } from '@/components/page-shell';
 import { UsauMajorGrid } from '@/components/home/multi-league-grid-section';
 import type { UsauMajorWithChampions } from '@/lib/usau/data';
 import { useLeague } from '@/lib/use-league';
+import { buildLeagueQs, levelLabel, type UsauLevel } from '@/lib/league';
+import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 
 interface FeedPageProps {
   games: UfaGame[];
   today: Today;
   usauCards: UsauMajorWithChampions[];
+  /** Active USAU competition level (cards are pre-filtered server-side). */
+  usauLevel: UsauLevel;
 }
 
 // Suspense wraps the useLeague() call so Next 14 can statically
@@ -33,7 +37,7 @@ export function FeedPage(props: FeedPageProps) {
   );
 }
 
-function FeedPageInner({ games, today, usauCards }: FeedPageProps) {
+function FeedPageInner({ games, today, usauCards, usauLevel }: FeedPageProps) {
   // League state lives in ?league= — see lib/use-league.ts. We don't pass
   // a topNavSlot so AppShell's default renders: pill tabs on desktop, a
   // dropdown on mobile. Both write to the same useLeague() state via the
@@ -47,7 +51,7 @@ function FeedPageInner({ games, today, usauCards }: FeedPageProps) {
         {league === 'ufa' ? (
           <UfaFeed games={games} today={today} counts={counts} />
         ) : league === 'usau' ? (
-          <UsauFeed cards={usauCards} />
+          <UsauFeed cards={usauCards} level={usauLevel} />
         ) : league === 'pul' ? (
           <PulComingSoon page="scores" />
         ) : null}
@@ -100,24 +104,31 @@ function UfaFeed({
 // detail (games/pools/bracket) at /usau/events/[slug]. This "results overview"
 // replaced the old single-auto-picked-tournament view so we can show winners
 // across every division without choosing just one event.
-function UsauFeed({ cards }: { cards: UsauMajorWithChampions[] }) {
+function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: UsauLevel }) {
+  // Carry the active level into the schedule links so the division context
+  // survives the hop (buildLeagueQs omits the default CLUB for clean URLs;
+  // league=usau is always non-default so the qs is never empty).
+  const scheduleHref = `/schedule${buildLeagueQs('usau', null, level)}`;
   return (
     <>
       <div className="flex items-end justify-between gap-4 mb-5 lg:mb-7">
         <div className="flex flex-col gap-1">
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
-            USAU · Recent Results
+            USAU · {levelLabel(level)} · Recent Results
           </span>
           <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.04em] text-ink">
             Recent Tournaments
           </h1>
         </div>
-        <Link
-          href="/schedule?league=usau"
-          className="flex-shrink-0 text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors no-underline"
-        >
-          All tournaments →
-        </Link>
+        <div className="flex-shrink-0 flex items-center gap-3">
+          <UsauLevelSelect />
+          <Link
+            href={scheduleHref}
+            className="flex-shrink-0 text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors no-underline"
+          >
+            All tournaments →
+          </Link>
+        </div>
       </div>
 
       {cards.length > 0 ? (
@@ -125,10 +136,10 @@ function UsauFeed({ cards }: { cards: UsauMajorWithChampions[] }) {
       ) : (
         <div className="rounded-lg border border-border bg-surface p-10 text-center">
           <p className="text-[14px] text-muted font-tight">
-            No completed tournaments in the last couple of weekends yet.
+            No completed {levelLabel(level)} tournaments in the last couple of weekends yet.
           </p>
           <Link
-            href="/schedule?league=usau"
+            href={scheduleHref}
             className="inline-flex items-center gap-1.5 mt-3 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity"
           >
             Browse the schedule →

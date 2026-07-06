@@ -18,6 +18,7 @@ import {
   inferLeagueFromPath,
   parseDivisionParam,
   parseLeagueParam,
+  parseLevelParam,
 } from '@/lib/league';
 
 // ─── Nav items (mirrors SidebarNav.NAV_ITEMS) ─────────────────────────────────
@@ -125,7 +126,8 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
     ? parseLeagueParam(searchParams.get('league'))
     : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
   const activeDivision = parseDivisionParam(searchParams.get('div'));
-  const leagueQs = buildLeagueQs(activeLeague, activeDivision);
+  const activeLevel = parseLevelParam(searchParams.get('level'));
+  const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
   // Sub-app pages (Fantasy, WFDF) carry no league query string and hide the
   // league switcher; standard league pages get the ?league= qs on every link.
