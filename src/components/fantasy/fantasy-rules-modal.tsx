@@ -17,12 +17,34 @@ interface FantasyRulesModalProps {
   label?: string;
   /** Visual weight of the trigger. `ghost` = bordered subtle; `link` = text. */
   variant?: 'ghost' | 'link';
+  /** When set, auto-opens the modal ONCE per browser (first visit to Fantasy),
+   *  keyed by this localStorage flag. Subsequent visits don't auto-open — the
+   *  button still works. */
+  autoOpenOnceKey?: string;
 }
 
-export function FantasyRulesModal({ label = 'Rules', variant = 'ghost' }: FantasyRulesModalProps) {
+export function FantasyRulesModal({
+  label = 'Rules',
+  variant = 'ghost',
+  autoOpenOnceKey,
+}: FantasyRulesModalProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // First-visit auto-open: if the flag hasn't been set, open the modal and set
+  // it so it only ever happens once. Wrapped in try/catch — private-mode / SSR
+  // safe (localStorage can throw or be absent).
+  useEffect(() => {
+    if (!autoOpenOnceKey) return;
+    try {
+      if (localStorage.getItem(autoOpenOnceKey)) return;
+      localStorage.setItem(autoOpenOnceKey, '1');
+      setOpen(true);
+    } catch {
+      /* localStorage unavailable — skip the auto-open, button still works */
+    }
+  }, [autoOpenOnceKey]);
 
   const close = useCallback(() => setOpen(false), []);
 

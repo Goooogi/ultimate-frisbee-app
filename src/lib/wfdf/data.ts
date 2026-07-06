@@ -170,6 +170,50 @@ export async function listEvents(): Promise<WfdfEventCard[]> {
   }));
 }
 
+/**
+ * The "current" WFDF event for the home hero — mirrors USAU getCurrentEvent()'s
+ * weekend cadence EXACTLY so all leagues flip on the same clock:
+ *
+ *   - Before Wednesday (UTC day 0–2): look BACK — last weekend's just-finished
+ *     event headlines (e.g. WMUCC, which ended Jul 4, shows through Tuesday).
+ *   - From Wednesday on (UTC day ≥ 3): look FORWARD — the next event headlines
+ *     (e.g. WJUC, starting Jul 11, takes over Wednesday).
+ *
+ * "Ended" is by end_date so a multi-day event stays "now" through its last day.
+ * Prefer an event that actually has games ingested; fall back to the nearest by
+ * date, then to the most-recent event overall so the slide is never empty.
+ */
+export async function getCurrentWfdfEvent(): Promise<WfdfEventCard | null> {
+  const events = await listEvents();
+  if (events.length === 0) return null;
+
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const lookForward = now.getUTCDay() >= 3; // Wed(3) → flip forward, same as USAU
+
+  const endOf = (e: WfdfEventCard) => e.endDate ?? e.startDate ?? '';
+  const startOf = (e: WfdfEventCard) => e.startDate ?? '';
+
+  // Upcoming/now = not yet ended; past = ended before today. Within each bucket,
+  // the nearest weekend wins (by start date), matching the USAU sort.
+  const upcoming = events
+    .filter((e) => endOf(e) >= today)
+    .sort((a, b) => startOf(a).localeCompare(startOf(b))); // soonest first
+  const past = events
+    .filter((e) => endOf(e) < today)
+    .sort((a, b) => startOf(b).localeCompare(startOf(a))); // most-recent first
+
+  const ordered = lookForward ? [...upcoming, ...past] : [...past, ...upcoming];
+
+  // Prefer an event with games; else the nearest by date; else newest overall.
+  return (
+    ordered.find((e) => e.teamCount > 0) ??
+    ordered[0] ??
+    events[0] ??
+    null
+  );
+}
+
 export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
   const db = supabase();
   const { data: ev } = await db

@@ -39,7 +39,7 @@ export default async function FantasyLandingPage() {
                 {leaderboard.length} team{leaderboard.length !== 1 ? 's' : ''}
               </span>
             )}
-            <FantasyRulesModal label="Rules" />
+            <FantasyRulesModal label="Rules" autoOpenOnceKey="fantasy_rules_seen_v1" />
           </div>
         </div>
 

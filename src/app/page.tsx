@@ -25,6 +25,8 @@ import { HeroCarousel } from '@/components/home/hero-carousel';
 import { HeroUsauSlide } from '@/components/home/hero-usau-slide';
 import { HeroPulSlide } from '@/components/home/hero-pul-slide';
 import { HeroWulSlide } from '@/components/home/hero-wul-slide';
+import { HeroWfdfSlide } from '@/components/home/hero-wfdf-slide';
+import { getCurrentWfdfEvent } from '@/lib/wfdf/data';
 import { LeaguesPanel } from '@/components/home/leagues-panel';
 import {
   MultiLeagueGridSection,
@@ -56,7 +58,7 @@ export default async function HomePage() {
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, pulRes, wulRes, usauMajorsRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, pulRes, wulRes, usauMajorsRes, wfdfRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
@@ -76,6 +78,9 @@ export default async function HomePage() {
       (async () => listWulGames({ season: await getWulCurrentSeason() }))(),
       // USAU: recent completed majors (TCT events) with champions, for "Recent results".
       recentUsauMajorsWithChampions(3),
+      // WFDF: current Worlds event — same Wed weekend-cadence flip as USAU
+      // (e.g. WMUCC through Tue, then WJUC from Wednesday).
+      getCurrentWfdfEvent(),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -102,6 +107,18 @@ export default async function HomePage() {
   const usauUpcomingEvent =
     usauEvent && (usauEvent.endDate ?? usauEvent.startDate ?? '') >= todayIso
       ? usauEvent
+      : null;
+
+  // WFDF: current Worlds event (getCurrentWfdfEvent applies the same Wed
+  // weekend-cadence flip as USAU). WFDF events are sparse, so unlike USAU we
+  // only surface it when it's genuinely current — upcoming/in-progress, or it
+  // ended within the last ~2 weeks — otherwise a months-old Worlds would linger
+  // in the loop. (USAU can headline year-round because its calendar is dense.)
+  const wfdfPick = wfdfRes.status === 'fulfilled' ? wfdfRes.value : null;
+  const twoWeeksAgoIso = new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10);
+  const wfdfEvent =
+    wfdfPick && (wfdfPick.endDate ?? wfdfPick.startDate ?? '') >= twoWeeksAgoIso
+      ? wfdfPick
       : null;
 
   // PUL: prefer upcoming game this week; fall back to most-recent final.
@@ -169,7 +186,7 @@ export default async function HomePage() {
       .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))
       [0] ?? null;
 
-  // ── Build carousel slides (order: UFA → USAU → PUL → WUL) ──────────────
+  // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
   // entries are filtered out so offseason leagues simply don't appear.
   const slides = [
@@ -178,6 +195,8 @@ export default async function HomePage() {
     <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
     // USAU — tournament card, null when no current event.
     usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
+    // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.
+    wfdfEvent ? <HeroWfdfSlide key="wfdf" event={wfdfEvent} /> : null,
     // PUL — game card, null when no current/recent game.
     pulFeatured ? <HeroPulSlide key="pul" game={pulFeatured} /> : null,
     // WUL — game card, null when no current/recent game.

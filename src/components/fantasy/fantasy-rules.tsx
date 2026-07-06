@@ -44,7 +44,8 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
           player skews how their stats score — a defender&apos;s block pays{' '}
           <span className="text-ink font-semibold">{SCORING.defender.block} pts</span> vs{' '}
           <span className="text-ink font-semibold">{SCORING.offender.block} pts</span> as an
-          offender. Make the call before the week locks.
+          offender. Your roster locks when the week&apos;s first game starts and reopens
+          Monday, so set your lineup before kickoff.
         </p>
       </div>
 

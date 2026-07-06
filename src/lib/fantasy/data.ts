@@ -133,16 +133,18 @@ async function seasonWeekGames(year: number, client: AnyClient = anon()): Promis
 }
 
 /**
- * The week a manager is currently setting a lineup for = earliest unlocked week.
- * Returns { week, lockAt, locked } or null if no schedule.
+ * The week a manager is currently setting a lineup for = earliest editable week.
+ * Returns { week, lockAt, unlockAt, locked } or null if no schedule. lockAt is
+ * the week's first game kickoff (when it locks); unlockAt is the Monday 00:00 ET
+ * it (and thus the next week's editing) reopens.
  */
 export async function currentFantasyWeek(
   year = fantasySeasonYear(),
   now: Date = new Date(),
-): Promise<{ week: string; lockAt: string | null; locked: boolean } | null> {
+): Promise<{ week: string; lockAt: string | null; unlockAt: string | null; locked: boolean } | null> {
   const weeks = buildWeeks(await seasonWeekGames(year), now);
-  const w = activeWeek(weeks);
-  return w ? { week: w.week, lockAt: w.lockAt, locked: w.locked } : null;
+  const w = activeWeek(weeks, now);
+  return w ? { week: w.week, lockAt: w.lockAt, unlockAt: w.unlockAt, locked: w.locked } : null;
 }
 
 // ─── Team + roster reads ──────────────────────────────────────────────────────

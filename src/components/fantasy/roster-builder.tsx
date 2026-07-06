@@ -34,6 +34,7 @@ import { type FantasyRole, SCORING } from '@/lib/fantasy/scoring';
 interface WeekInfo {
   week: string;
   lockAt: string | null;
+  unlockAt: string | null;
   locked: boolean;
 }
 
@@ -606,7 +607,8 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
               <path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
             <span className="font-tight text-[13px] font-medium text-ink">
-              {weekInfo?.week} is locked — games have started. Roster changes are disabled.
+              {weekInfo?.week} is locked for the weekend
+              {weekInfo?.unlockAt ? ` — editing reopens ${formatReopen(weekInfo.unlockAt)}` : ' — roster changes are disabled'}.
             </span>
           </div>
         )}
@@ -872,6 +874,11 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
               Fill all 4 offense + 3 defense slots to save.
             </span>
           )}
+          {isComplete && !isLocked && weekInfo?.lockAt && (
+            <span className="font-tight text-[12px] text-faint">
+              Locks at first game — {formatLock(weekInfo.lockAt)}. Edit any time before then.
+            </span>
+          )}
         </div>
       </div>
 
@@ -886,4 +893,33 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
       />
     </>
   );
+}
+
+// "Fri, Jul 10, 7:00 PM ET" — when a week locks (its first game kicks off).
+// Rendered in US Eastern so the displayed time matches the lock rule regardless
+// of the viewer's browser timezone.
+function formatLock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'first game';
+  const s = d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/New_York',
+  });
+  return `${s} ET`;
+}
+
+// "Monday" (or "Mon, Jul 13") — when editing reopens for the next week. ET.
+function formatReopen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Monday';
+  return d.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'America/New_York',
+  });
 }
