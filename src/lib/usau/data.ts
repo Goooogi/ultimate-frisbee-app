@@ -915,14 +915,19 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   const db = await supabase();
   const today = new Date().toISOString().slice(0, 10);
 
-  // 1. Pull the most-recent ~20 completed CLUB events.
+  // 1. Pull the most-recent completed CLUB events. Scan wide (300 ≈ a bit over
+  // a full season of the club calendar): flight-named majors are a small
+  // fraction of it, and early in the club season a short scan only reaches ONE
+  // completed major — the home "Recent results" row wants up to 4, which means
+  // reaching back through last season's majors (Nationals, Pro Champs, US Open…)
+  // until this season catches up. Single indexed query; rows are tiny.
   const { data: events } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date')
     .eq('competition_level', 'CLUB')
     .lt('end_date', today)
     .order('end_date', { ascending: false, nullsFirst: false })
-    .limit(20);
+    .limit(300);
 
   // 2. Filter to named flights (TCT majors only).
   const majorEvents = ((events ?? []) as Array<{

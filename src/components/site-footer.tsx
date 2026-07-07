@@ -80,12 +80,32 @@ export function SiteFooter() {
         </div>
       </div>
 
-      {/* BOTTOM — copyright + version. Leaves a clean slot to restore the
-          "Developed by Altius" attribution (below) later. */}
+      {/* BOTTOM — copyright + version + legal links. Leaves a clean slot to
+          restore the "Developed by Altius" attribution (below) later. */}
       <div className="mt-7 pt-5 border-t border-hairline flex items-center justify-between gap-4">
         <span className="text-[10px] font-bold tracking-[0.16em] text-faint uppercase font-tight">
           © 2026 The Layout · v0.1
         </span>
+
+        {/* Legal */}
+        <nav aria-label="Legal" className="flex items-center gap-4">
+          {[
+            { label: 'Terms', href: '/terms' },
+            { label: 'Privacy', href: '/privacy' },
+          ].map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              className={[
+                'text-[10px] font-bold tracking-[0.16em] uppercase font-tight text-faint no-underline',
+                'motion-safe:transition-colors motion-safe:duration-150 hover:text-ink',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
+              ].join(' ')}
+            >
+              {l.label}
+            </Link>
+          ))}
+        </nav>
 
         {/* Attribution. Hidden for now (per Hunter); restore this block to show
             "Developed by Altius" again in the future. */}

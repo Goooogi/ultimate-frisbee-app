@@ -336,10 +336,12 @@ export function UsauMajorGrid({
     );
   }
 
+  // Home multi-league section: same responsive 4-up grid as the sibling
+  // UFA/PUL/WUL rows so all four league rows align column-for-column.
   return (
-    <div className="flex flex-wrap gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
       {ordered.map((m) => (
-        <div key={m.slug} className="w-full sm:w-[360px]">
+        <div key={m.slug} className="w-full">
           <UsauMajorCard major={m} />
         </div>
       ))}
@@ -347,9 +349,31 @@ export function UsauMajorGrid({
   );
 }
 
+// ─── PUL / WUL recent-results round labels ───────────────────────────────────
+// Both leagues' "Recent results" row shows up to 4 cards: the championship
+// final, both semifinals, and (to fill the row) the latest regular-season
+// game — neither league has quarterfinals. `round` picks the label + whether
+// the card gets championship (trophy) styling: ONLY 'final' does, never a
+// semifinal or regular-season game.
+
+export type RecentRound = 'final' | 'semifinal' | 'regular';
+
+/** Humanize a raw weekLabel for the card's round line, given its resolved round.
+ *  'regular' games show their actual week ("Week 10") rather than a generic
+ *  label; 'final'/'semifinal' show the round name regardless of the raw label
+ *  text (PUL's is already 'finals'/'semifinals'; WUL's raw label is just
+ *  'post' for all postseason games, so the round text carries the meaning). */
+function formatRoundLabel(round: RecentRound, weekLabel: string): string {
+  if (round === 'final') return 'Championship';
+  if (round === 'semifinal') return 'Semifinal';
+  const m = weekLabel.match(/^week-(\d+)$/i);
+  if (m) return `Week ${m[1]}`;
+  return 'Regular season';
+}
+
 // ─── PUL recent game card ────────────────────────────────────────────────────
-// Compact self-contained card for the most-recent PUL final. Matches pul-scores
-// ScoreCard style but self-contained (no async fetch).
+// Compact card sized for a 4-up grid (matches UfaTileGrid's GameTile density).
+// Matches pul-scores ScoreCard style but self-contained (no async fetch).
 
 function pulGameHref(id: string): string {
   return id.split('/').map(encodeURIComponent).join('/');
@@ -359,39 +383,42 @@ function wulGameHref(id: string): string {
   return id.split('/').map(encodeURIComponent).join('/');
 }
 
-export function PulRecentCard({ game }: { game: PulGame }) {
+export function PulRecentCard({ game, round }: { game: PulGame; round: RecentRound }) {
   const { away, home } = game;
   const awayWin = away.score !== null && home.score !== null && away.score > home.score;
   const homeWin = away.score !== null && home.score !== null && home.score > away.score;
-  const isChampion = game.weekLabel === 'finals';
+  const isChampion = round === 'final';
 
   const cardClass = [
-    'block bg-surface border rounded-md px-4 py-3.5 transition-colors duration-150',
+    'group h-full bg-surface border rounded-md px-4 py-3.5 flex flex-col gap-2.5 transition-colors duration-150',
     isChampion ? 'border-accent ring-1 ring-accent/40 hover:border-accent' : 'border-border hover:border-ink',
     'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
   ].join(' ');
 
   return (
-    // Constrain to a single grid-column width so this lone card doesn't span
-    // the full section like the multi-card UFA/USAU rows. Full width on mobile.
-    <div className="w-full sm:max-w-[360px]">
-      <Link href={`/pul/g/${pulGameHref(game.id)}`} className={cardClass}>
-        {isChampion && (
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
-            <TrophyIcon />
-            <span>Championship</span>
-          </div>
-        )}
+    <Link href={`/pul/g/${pulGameHref(game.id)}`} className={cardClass}>
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={[
+            'inline-flex items-center gap-1.5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight',
+            isChampion ? 'text-accent' : 'text-faint',
+          ].join(' ')}
+        >
+          {isChampion && <TrophyIcon />}
+          {formatRoundLabel(round, game.weekLabel)}
+        </span>
         {game.gameDate && (
-          <div className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight tabular">
+          <span className="font-mono text-[10px] text-faint tracking-[0.06em] tabular flex-shrink-0">
             {formatCardDate(game.gameDate)}
-          </div>
+          </span>
         )}
+      </div>
+      <div>
         <PulScoreRow side={away} win={awayWin} lose={homeWin} />
         <div className="h-px bg-hairline my-1" />
         <PulScoreRow side={home} win={homeWin} lose={awayWin} />
-      </Link>
-    </div>
+      </div>
+    </Link>
   );
 }
 
@@ -414,16 +441,16 @@ function PulScoreRow({
   };
   const label = [side.city, side.mascot].filter(Boolean).join(' ') || side.abbrev;
   return (
-    <div className={['flex items-center justify-between py-1.5', lose ? 'opacity-60' : ''].join(' ')}>
-      <div className="flex items-center gap-2.5 min-w-0">
-        <PulTeamLogo team={teamForLogo} size={26} />
-        <span className={['font-tight tracking-[-0.01em] text-[15px] text-ink truncate', win ? 'font-bold' : 'font-medium'].join(' ')}>
+    <div className={['flex items-center justify-between py-1', lose ? 'opacity-60' : ''].join(' ')}>
+      <div className="flex items-center gap-2 min-w-0">
+        <PulTeamLogo team={teamForLogo} size={22} />
+        <span className={['font-tight tracking-[-0.01em] text-[13.5px] text-ink truncate', win ? 'font-bold' : 'font-medium'].join(' ')}>
           {label}
         </span>
       </div>
       <span className="flex items-center gap-2 flex-shrink-0 ml-3">
         {win && <span className="w-[5px] h-[5px] rounded-full bg-accent flex-shrink-0" aria-hidden="true" />}
-        <span className={['tabular leading-none font-tight tracking-[-0.04em] text-[24px]', win ? 'font-bold text-ink' : 'font-medium text-muted'].join(' ')}>
+        <span className={['tabular leading-none font-tight tracking-[-0.03em] text-[19px]', win ? 'font-bold text-ink' : 'font-medium text-muted'].join(' ')}>
           {side.score ?? '–'}
         </span>
       </span>
@@ -431,38 +458,57 @@ function PulScoreRow({
   );
 }
 
+/** 1/2/4-col responsive grid — matches GameGridSection/UfaTileGrid exactly so
+ *  rows align across the "Recent results" section. */
+export function PulRecentGrid({ games }: { games: { game: PulGame; round: RecentRound }[] }) {
+  if (games.length === 0) return null;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {games.map(({ game, round }) => (
+        <PulRecentCard key={game.id} game={game} round={round} />
+      ))}
+    </div>
+  );
+}
+
 // ─── WUL recent game card ─────────────────────────────────────────────────────
 
-export function WulRecentCard({ game, champion = false }: { game: WulGame; champion?: boolean }) {
+export function WulRecentCard({ game, round }: { game: WulGame; round: RecentRound }) {
   const { away, home } = game;
   const awayWin = away.score !== null && home.score !== null && away.score > home.score;
   const homeWin = away.score !== null && home.score !== null && home.score > away.score;
+  const isChampion = round === 'final';
 
   const cardClass = [
-    'block bg-surface border rounded-md px-4 py-3.5 transition-colors duration-150',
-    champion ? 'border-accent ring-1 ring-accent/40 hover:border-accent' : 'border-border hover:border-ink',
+    'group h-full bg-surface border rounded-md px-4 py-3.5 flex flex-col gap-2.5 transition-colors duration-150',
+    isChampion ? 'border-accent ring-1 ring-accent/40 hover:border-accent' : 'border-border hover:border-ink',
     'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
   ].join(' ');
 
   return (
-    <div className="w-full sm:max-w-[360px]">
-      <Link href={`/wul/g/${wulGameHref(game.id)}`} className={cardClass}>
-        {champion && (
-          <div className="flex items-center gap-1.5 mb-2 text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
-            <TrophyIcon />
-            <span>Championship</span>
-          </div>
-        )}
+    <Link href={`/wul/g/${wulGameHref(game.id)}`} className={cardClass}>
+      <div className="flex items-center justify-between gap-2">
+        <span
+          className={[
+            'inline-flex items-center gap-1.5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight',
+            isChampion ? 'text-accent' : 'text-faint',
+          ].join(' ')}
+        >
+          {isChampion && <TrophyIcon />}
+          {formatRoundLabel(round, game.weekLabel)}
+        </span>
         {game.gameDate && (
-          <div className="mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight tabular">
+          <span className="font-mono text-[10px] text-faint tracking-[0.06em] tabular flex-shrink-0">
             {formatCardDate(game.gameDate)}
-          </div>
+          </span>
         )}
+      </div>
+      <div>
         <WulScoreRow side={away} win={awayWin} lose={homeWin} />
         <div className="h-px bg-hairline my-1" />
         <WulScoreRow side={home} win={homeWin} lose={awayWin} />
-      </Link>
-    </div>
+      </div>
+    </Link>
   );
 }
 
@@ -483,19 +529,32 @@ function WulScoreRow({
   };
   const label = [side.city, side.mascot].filter(Boolean).join(' ') || side.abbrev;
   return (
-    <div className={['flex items-center justify-between py-1.5', lose ? 'opacity-60' : ''].join(' ')}>
-      <div className="flex items-center gap-2.5 min-w-0">
-        <WulTeamLogo team={teamForLogo} size={26} />
-        <span className={['font-tight tracking-[-0.01em] text-[15px] text-ink truncate', win ? 'font-bold' : 'font-medium'].join(' ')}>
+    <div className={['flex items-center justify-between py-1', lose ? 'opacity-60' : ''].join(' ')}>
+      <div className="flex items-center gap-2 min-w-0">
+        <WulTeamLogo team={teamForLogo} size={22} />
+        <span className={['font-tight tracking-[-0.01em] text-[13.5px] text-ink truncate', win ? 'font-bold' : 'font-medium'].join(' ')}>
           {label}
         </span>
       </div>
       <span className="flex items-center gap-2 flex-shrink-0 ml-3">
         {win && <span className="w-[5px] h-[5px] rounded-full bg-accent flex-shrink-0" aria-hidden="true" />}
-        <span className={['tabular leading-none font-tight tracking-[-0.04em] text-[24px]', win ? 'font-bold text-ink' : 'font-medium text-muted'].join(' ')}>
+        <span className={['tabular leading-none font-tight tracking-[-0.03em] text-[19px]', win ? 'font-bold text-ink' : 'font-medium text-muted'].join(' ')}>
           {side.score ?? '–'}
         </span>
       </span>
+    </div>
+  );
+}
+
+/** 1/2/4-col responsive grid — matches GameGridSection/UfaTileGrid exactly so
+ *  rows align across the "Recent results" section. */
+export function WulRecentGrid({ games }: { games: { game: WulGame; round: RecentRound }[] }) {
+  if (games.length === 0) return null;
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      {games.map(({ game, round }) => (
+        <WulRecentCard key={game.id} game={game} round={round} />
+      ))}
     </div>
   );
 }
@@ -505,5 +564,5 @@ function WulScoreRow({
 function formatCardDate(iso: string): string {
   const [year, month, day] = iso.split('-').map(Number);
   const d = new Date(year, month - 1, day);
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }

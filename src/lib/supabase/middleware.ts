@@ -12,6 +12,24 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
+  // Anonymous request (no Supabase auth cookie) — nothing to refresh, skip the
+  // auth round-trip entirely. This is what makes running this middleware on
+  // EVERY route affordable: signed-out traffic (the vast majority) pays zero.
+  //
+  // Why every route matters: the browser client writes auth cookies via
+  // document.cookie, and iOS Safari (ITP) force-expires JS-set cookies after
+  // 7 DAYS. Cookies set via HTTP Set-Cookie response headers — which is what
+  // this middleware produces when it refreshes the session — get their full
+  // 400-day lifetime. Refreshing here on any page a signed-in user visits
+  // keeps mobile-Safari sessions alive indefinitely instead of silently
+  // logging users out within a week.
+  const hasAuthCookie = request.cookies
+    .getAll()
+    .some((c) => c.name.startsWith('sb-') && c.name.includes('-auth-token'));
+  if (!hasAuthCookie) {
+    return supabaseResponse;
+  }
+
   const supabase = createServerClient(
     supabaseUrl(),
     supabaseAnonKey(),

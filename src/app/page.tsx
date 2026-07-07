@@ -34,8 +34,8 @@ import {
   UfaTileGrid,
   UsauUpNextCard,
   UsauMajorGrid,
-  PulRecentCard,
-  WulRecentCard,
+  PulRecentGrid,
+  WulRecentGrid,
 } from '@/components/home/multi-league-grid-section';
 import { StandingsStrip } from '@/components/home/standings-strip';
 import {
@@ -77,8 +77,9 @@ export default async function HomePage() {
       (async () => listPulGames({ season: await getPulCurrentSeason() }))(),
       // WUL: same rule.
       (async () => listWulGames({ season: await getWulCurrentSeason() }))(),
-      // USAU: recent completed majors (TCT events) with champions, for "Recent results".
-      recentUsauMajorsWithChampions(3),
+      // USAU: recent completed majors (TCT events) with champions, for "Recent results"
+      // — 4 to match the other leagues' 4-card rows in that section.
+      recentUsauMajorsWithChampions(4),
       // WFDF: current Worlds event — same Wed weekend-cadence flip as USAU
       // (e.g. WMUCC through Tue, then WJUC from Wednesday).
       getCurrentWfdfEvent(),
@@ -172,20 +173,14 @@ export default async function HomePage() {
   // Recent USAU majors (TCT events with champions) — for "Recent results".
   const usauMajors = usauMajorsRes.status === 'fulfilled' ? usauMajorsRes.value : [];
 
-  // For "Recent results": most-recent final game regardless of age (the
+  // For "Recent results": up to 4 cards per league regardless of age (the
   // pickLeagueGame 7-day window is for the hero carousel only — for the
-  // results grid we want to show the championship game even if the season
-  // ended weeks ago).
-  const pulChampGame =
-    pulGames
-      .filter((g) => g.status === 'final')
-      .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))
-      [0] ?? null;
-  const wulChampGame =
-    wulGames
-      .filter((g) => g.status === 'final')
-      .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''))
-      [0] ?? null;
+  // results grid we want to show the championship weekend even if the season
+  // ended weeks ago). Order: final → semifinals (date desc) → most-recent
+  // regular-season games, filling to 4. Neither league has quarterfinals, so
+  // the 4th slot is always the latest regular-season game, not a quarter.
+  const pulRecentFour = pickPulRecentFour(pulGames);
+  const wulRecentFour = pickWulRecentFour(wulGames);
 
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
@@ -288,15 +283,13 @@ export default async function HomePage() {
           ...(usauMajors.length > 0
             ? [{ leagueKey: 'USAU', content: <UsauMajorGrid majors={usauMajors} /> }]
             : []),
-          // PUL — most-recent final game (championship emphasis when weekLabel='finals').
-          ...(pulChampGame
-            ? [{ leagueKey: 'PUL', content: <PulRecentCard game={pulChampGame} /> }]
+          // PUL — up to 4 cards: final, both semifinals, latest regular-season game.
+          ...(pulRecentFour.length > 0
+            ? [{ leagueKey: 'PUL', content: <PulRecentGrid games={pulRecentFour} /> }]
             : []),
-          // WUL — most-recent final game (champion flag when weekLabel='post' and it's
-          // the final — we pass champion=true for any 'post' game since deriving the
-          // exact postseason round here would require re-running deriveWulPostseasonRounds).
-          ...(wulChampGame
-            ? [{ leagueKey: 'WUL', content: <WulRecentCard game={wulChampGame} champion={wulChampGame.weekLabel === 'post'} /> }]
+          // WUL — up to 4 cards: final, both semifinals, latest regular-season game.
+          ...(wulRecentFour.length > 0
+            ? [{ leagueKey: 'WUL', content: <WulRecentGrid games={wulRecentFour} /> }]
             : []),
         ]}
       />
@@ -316,6 +309,7 @@ export default async function HomePage() {
 
 import type { PulGame } from '@/lib/pul/data';
 import type { WulGame } from '@/lib/wul/data';
+import { deriveWulPostseasonRounds } from '@/lib/wul/data';
 
 /** Shared minimal shape for both PulGame and WulGame. */
 type LeagueGame = { status: 'scheduled' | 'final'; gameDate: string | null };
@@ -361,4 +355,87 @@ function pickLeagueGame(games: PulGame[]): PulGame | null;
 function pickLeagueGame(games: WulGame[]): WulGame | null;
 function pickLeagueGame(games: PulGame[] | WulGame[]): PulGame | WulGame | null {
   return pickLeagueGameGeneric(games as PulGame[]);
+}
+
+// ─── "Recent results" 4-card pickers (PUL / WUL) ─────────────────────────────
+// Neither league has quarterfinals — playoffs are 2 semifinals + 1 final. To
+// fill each league's row to 4 cards (matching UFA's 4-tile row), we show the
+// championship weekend (final + both semis) plus the most recent
+// regular-season game from the latest season that has a completed final.
+// `round` drives each card's label/emphasis; only 'final' gets the trophy
+// treatment, never a bare 'week' game and never a semifinal.
+
+export type PulRecentRound = 'final' | 'semifinal' | 'regular';
+export interface PulRecentGame {
+  game: PulGame;
+  round: PulRecentRound;
+}
+
+function pickPulRecentFour(games: PulGame[]): PulRecentGame[] {
+  const finals = games.filter((g) => g.status === 'final');
+  if (finals.length === 0) return [];
+
+  // Resolve to the latest season that actually has a completed Finals game —
+  // guards against a new season's early regular-season games outranking last
+  // season's still-most-recent championship weekend.
+  const seasonsWithFinal = [...new Set(finals.filter((g) => g.weekLabel === 'finals').map((g) => g.season))];
+  if (seasonsWithFinal.length === 0) return [];
+  const season = Math.max(...seasonsWithFinal);
+  const seasonFinals = finals.filter((g) => g.season === season);
+
+  const byDateDesc = (a: PulGame, b: PulGame) => (b.gameDate ?? '').localeCompare(a.gameDate ?? '');
+
+  const finalGame = seasonFinals.find((g) => g.weekLabel === 'finals') ?? null;
+  const semis = seasonFinals.filter((g) => g.weekLabel === 'semifinals').sort(byDateDesc);
+  const regular = seasonFinals
+    .filter((g) => g.weekLabel !== 'finals' && g.weekLabel !== 'semifinals')
+    .sort(byDateDesc);
+
+  const out: PulRecentGame[] = [];
+  if (finalGame) out.push({ game: finalGame, round: 'final' });
+  for (const g of semis) out.push({ game: g, round: 'semifinal' });
+  for (const g of regular) {
+    if (out.length >= 4) break;
+    out.push({ game: g, round: 'regular' });
+  }
+  return out.slice(0, 4);
+}
+
+export type WulRecentRound = 'final' | 'semifinal' | 'regular';
+export interface WulRecentGame {
+  game: WulGame;
+  round: WulRecentRound;
+}
+
+function pickWulRecentFour(games: WulGame[]): WulRecentGame[] {
+  const finals = games.filter((g) => g.status === 'final');
+  if (finals.length === 0) return [];
+
+  const rounds = deriveWulPostseasonRounds(finals);
+  const seasonsWithFinal = [
+    ...new Set(finals.filter((g) => rounds.get(g.id) === 'final').map((g) => g.season)),
+  ];
+  if (seasonsWithFinal.length === 0) return [];
+  const season = Math.max(...seasonsWithFinal);
+  const seasonFinals = finals.filter((g) => g.season === season);
+
+  const byDateDesc = (a: WulGame, b: WulGame) => (b.gameDate ?? '').localeCompare(a.gameDate ?? '');
+
+  const finalGame = seasonFinals.find((g) => rounds.get(g.id) === 'final') ?? null;
+  const semis = seasonFinals.filter((g) => rounds.get(g.id) === 'semifinal').sort(byDateDesc);
+  // Everything else: regular season, plus any postseason game deriveWulPostseasonRounds
+  // couldn't classify (e.g. 3rd-place) or left unclassified — treated as filler,
+  // ordered most-recent first, same as regular season.
+  const filler = seasonFinals
+    .filter((g) => rounds.get(g.id) !== 'final' && rounds.get(g.id) !== 'semifinal')
+    .sort(byDateDesc);
+
+  const out: WulRecentGame[] = [];
+  if (finalGame) out.push({ game: finalGame, round: 'final' });
+  for (const g of semis) out.push({ game: g, round: 'semifinal' });
+  for (const g of filler) {
+    if (out.length >= 4) break;
+    out.push({ game: g, round: 'regular' });
+  }
+  return out.slice(0, 4);
 }

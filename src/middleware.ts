@@ -9,19 +9,20 @@ export const config = {
   // NOTE: this file must live in `src/` (next to `app/`), not the repo root —
   // for a src/-based app Next.js ignores a root-level middleware.ts.
   //
-  // Runs the Supabase session refresh ONLY on routes that read auth on the
-  // server (or SSR user-specific content): admin, the auth-gated playbook +
-  // settings, fantasy team management, and the password-recovery page. Every
-  // other route is fully public and reads no session server-side, so there's
-  // no reason to pay a getUser() round-trip there. The client-side AuthProvider
-  // keeps tokens refreshed on all pages regardless, and each protected route
-  // still enforces its own auth (assertAdmin / assertTeamEditor / client gate)
-  // — this middleware is cookie refresh, not the access gate.
+  // Runs the Supabase session refresh on EVERY page route (was: only the 5
+  // auth-reading route groups). Rationale: iOS Safari force-expires JS-set
+  // cookies after 7 days, so signed-in users who only browse public pages
+  // (scores, teams…) were silently logged out on mobile within a week — the
+  // server-set cookies this middleware produces are exempt from that cap.
+  // updateSession() short-circuits before any network call when the request
+  // has no auth cookie, so anonymous traffic pays nothing.
+  //
+  // Excluded: static assets/images (no session semantics) and /api (the UFA
+  // proxy — latency-sensitive data fetches that never read the session).
+  // Each protected route still enforces its own auth (assertAdmin /
+  // assertTeamEditor / client gate) — this middleware is cookie refresh, not
+  // the access gate.
   matcher: [
-    '/admin/:path*',
-    '/playbook/:path*',
-    '/settings/:path*',
-    '/fantasy/:path*',
-    '/reset-password/:path*',
+    '/((?!api|_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|txt|xml|css|js|map)$).*)',
   ],
 };

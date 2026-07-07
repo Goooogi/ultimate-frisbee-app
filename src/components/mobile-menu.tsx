@@ -17,14 +17,21 @@
 //
 // Layer 2 → Layer 3 presentation differs by breakpoint:
 //   MOBILE (<md): tapping a league row expands an INLINE sub-dropdown directly
-//     beneath that row (chips + tab links + coming-soon caption only — no team
-//     grids). See the `isOpen && <div className="md:hidden">` block inside the
-//     league .map() below.
+//     beneath that row — tab links only, no team grids. See the
+//     `isOpen && <div className="md:hidden">` block inside the league .map()
+//     below.
 //   DESKTOP (md+): tapping/hovering a league row opens the side-by-side
-//     LeagueFlyout panel (header + chips/tabs + team grid), rendered in a
+//     LeagueFlyout panel (header + tab links + team grid), rendered in a
 //     `hidden md:flex` container after the main nav list.
-// Both share the same `flyoutLeague` state and `LeagueFlyoutBody` content
-// component so the chips/tabs markup isn't duplicated.
+// Both breakpoints share the same `flyoutLeague` state and the
+// `LeagueFlyoutBody` tab-links component so that markup isn't duplicated.
+//
+// USAU is the one exception on BOTH breakpoints: instead of a single shared
+// tab-link row, it renders `UsauLevelAccordion` — each competition level
+// (Club/College D-I/College D-III/Masters/Grand Masters) is its own
+// expandable row. Desktop additionally passes a `renderExtra` prop so CLUB
+// and COLLEGE_D1 (the two levels with a cheap preview source) show a Top
+// Teams grid under their links; mobile omits `renderExtra` (links only).
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -325,30 +332,33 @@ interface FlyoutLeagueData {
 const gridLinkClass =
   'flex items-center gap-2 px-1.5 py-1.5 rounded-md text-[12px] font-medium font-tight text-ink transition-colors duration-150 no-underline hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
-// ── Shared body: chips + sub-page tab links + coming-soon caption ──────────
-// Used by the DESKTOP fly-out for every league, and by the MOBILE inline
-// sub-dropdown for every league EXCEPT USAU (USAU's mobile rendering is the
-// per-division accordion in UsauMobileLevelList below — a horizontal chip
-// row reading disconnected from its own tab-link row doesn't work once it's
-// stacked vertically in the accordion, so USAU gets its own mobile-only
-// component instead of reusing this one). Team grids are desktop-only and
-// live in LeagueFlyout, NOT here.
+// ── Shared body: sub-page tab links ─────────────────────────────────────────
+// Used by the DESKTOP fly-out AND the MOBILE inline sub-dropdown for every
+// league EXCEPT USAU. USAU's competition-level filter (Club/College D-I/
+// College D-III/Masters/Grand Masters) instead renders as its own accordion —
+// UsauLevelAccordion — on BOTH breakpoints: mobile because a horizontal chip
+// row above a shared tab row didn't read as "this row's own filter" once
+// stacked vertically in the mobile menu's nested-accordion structure, and
+// desktop for the same nesting reason once it needed to hold a Top Teams
+// preview per division too (see UsauLevelAccordion + its renderExtra prop).
+// This component no longer has a USAU-specific branch — callers never pass
+// league="usau" here anymore. Team grids for other leagues are desktop-only
+// and live in LeagueFlyout, NOT here.
 function LeagueFlyoutBody({
   league,
   pathname,
   leagueQsFor,
   onClose,
-  usauLevel,
-  onUsauLevelChange,
-  tabRowBase = 'flex flex-wrap items-center gap-1 mb-2.5 pb-3 border-b border-hairline',
+  // Sub-nav links stack VERTICALLY (one per row) — a horizontal pill row
+  // wraps unpredictably in narrow panels (PLAYERS was falling onto its own
+  // row on phones and in the 340px desktop fly-out).
+  tabRowBase = 'flex flex-col gap-0.5 mb-2.5 pb-3 border-b border-hairline',
   tabLinkBase,
 }: {
   league: MegaLeagueId;
   pathname: string;
   leagueQsFor: (id: MegaLeagueId) => string;
   onClose: () => void;
-  usauLevel: UsauLevel;
-  onUsauLevelChange: (level: UsauLevel) => void;
   /** Wrapper classes for the tab-link row — lets callers adjust indentation. */
   tabRowBase?: string;
   /** Per-link classes — defaults to the desktop fly-out treatment. */
@@ -362,100 +372,64 @@ function LeagueFlyoutBody({
   const linkClass =
     tabLinkBase ??
     [
-      'px-3 py-1.5 rounded-md',
+      'flex items-center w-full px-3 min-h-[42px] rounded-md',
       'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
       'transition-colors duration-150 no-underline',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
     ].join(' ');
 
   return (
-    <>
-      {/* ── USAU: competition-level sub-tabs — a FILTER, not navigation.
-          Sits above the page-link row and is visually subordinate to it
-          (smaller text, muted resting state). Selecting a chip updates
-          local state; the page-link hrefs below pick up the new level. ── */}
-      {league === 'usau' && (
-        <div
-          role="tablist"
-          aria-label="Competition level"
-          className="flex items-center gap-1 mb-2.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          {USAU_LEVELS.map((lvl) => {
-            const active = lvl === usauLevel;
-            return (
-              <button
-                key={lvl}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => onUsauLevelChange(lvl)}
-                className={[
-                  'flex-shrink-0 px-2.5 min-h-[30px] rounded-full',
-                  'text-[10px] font-bold tracking-[0.08em] uppercase font-tight whitespace-nowrap',
-                  'transition-colors duration-150 cursor-pointer',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  active
-                    ? 'text-accent bg-[rgb(var(--accent)/0.1)]'
-                    : 'text-muted hover:text-ink hover:bg-surface',
-                ].join(' ')}
-              >
-                {levelLabel(lvl)}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Sub-page links row. */}
-      <div className={tabRowBase}>
-        {navItems.map((item) => {
-          const active = isGamesNavActive(pathname, item);
-          const qs = noQs ? '' : leagueQsFor(league);
-          return (
-            <Link
-              key={item.href}
-              href={`${item.href}${qs}`}
-              role="menuitem"
-              aria-current={active ? 'page' : undefined}
-              onClick={onClose}
-              className={[
-                linkClass,
-                active ? 'text-accent bg-[rgb(var(--accent)/0.1)]' : 'text-ink hover:bg-surface',
-              ].join(' ')}
-            >
-              {item.label}
-            </Link>
-          );
-        })}
-      </div>
-
-      {/* Masters/Grand Masters data (events, games, teams, rosters) is fully
-          ingested as of 2026-07-06 — the old "coming soon" caption is gone. */}
-    </>
+    <div className={tabRowBase}>
+      {navItems.map((item) => {
+        const active = isGamesNavActive(pathname, item);
+        const qs = noQs ? '' : leagueQsFor(league);
+        return (
+          <Link
+            key={item.href}
+            href={`${item.href}${qs}`}
+            role="menuitem"
+            aria-current={active ? 'page' : undefined}
+            onClick={onClose}
+            className={[
+              linkClass,
+              active ? 'text-accent bg-[rgb(var(--accent)/0.1)]' : 'text-ink hover:bg-surface',
+            ].join(' ')}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </div>
   );
 }
 
-// ── MOBILE-ONLY: USAU's inline sub-dropdown ─────────────────────────────────
-// USAU is the one league with a competition-level filter, and on mobile that
-// filter reads better as its own vertically-stacked accordion (one division
-// per row, tap to reveal its 4 links) than as a horizontal chip row above a
+// ── USAU's per-division accordion — shared by MOBILE inline dropdown AND
+// DESKTOP fly-out ──────────────────────────────────────────────────────────
+// USAU is the one league with a competition-level filter, and it reads better
+// as its own vertically-stacked accordion (one division per row, tap to
+// reveal its content) than as a horizontal chip row sitting above a single
 // shared tab-link row — chips floating above an unrelated-looking link row
-// don't read as "this row's filter" once everything is stacked vertically.
+// don't read as "this row's filter." Mobile uses this with `renderExtra`
+// omitted (links only); desktop passes `renderExtra` to append each
+// division's Top Teams preview (where a cheap source exists) after the links,
+// reusing the exact same accordion shape instead of two parallel markups.
 // One division open at a time; defaults to whichever matches the current
-// ?level= (usauMobileExpandedLevel, seeded from the URL in MobileMenu —
-// independent of usauLevel, which drives the desktop chip row instead).
-function UsauMobileLevelList({
+// ?level=.
+function UsauLevelAccordion({
   pathname,
   urlDivision,
   expandedLevel,
   onToggleLevel,
   onClose,
+  renderExtra,
 }: {
   pathname: string;
   urlDivision: ReturnType<typeof parseDivisionParam>;
   expandedLevel: UsauLevel | null;
   onToggleLevel: (level: UsauLevel) => void;
   onClose: () => void;
+  /** Desktop-only: renders a division's Top Teams preview below its links. */
+  renderExtra?: (level: UsauLevel) => React.ReactNode;
 }) {
   const divisionRowBase = [
     'flex items-center justify-between w-full pl-3 pr-3',
@@ -466,7 +440,7 @@ function UsauMobileLevelList({
   ].join(' ');
 
   const linkClass = [
-    'inline-flex items-center px-3 min-h-[44px] rounded-md',
+    'flex items-center w-full px-3 min-h-[44px] rounded-md',
     'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
     'transition-colors duration-150 no-underline',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
@@ -500,7 +474,7 @@ function UsauMobileLevelList({
 
             {isExpanded && (
               <div className="pl-3 pt-1 pb-1.5">
-                <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex flex-col gap-0.5">
                   {GAMES_NAV_ITEMS.map((item) => {
                     const active = isGamesNavActive(pathname, item);
                     return (
@@ -520,6 +494,7 @@ function UsauMobileLevelList({
                     );
                   })}
                 </div>
+                {renderExtra?.(level)}
               </div>
             )}
           </div>
@@ -534,6 +509,7 @@ function UsauMobileLevelList({
 function LeagueFlyout({
   league,
   pathname,
+  urlDivision,
   leagueQsFor,
   onBack,
   onClose,
@@ -546,6 +522,7 @@ function LeagueFlyout({
 }: {
   league: MegaLeagueId;
   pathname: string;
+  urlDivision: ReturnType<typeof parseDivisionParam>;
   leagueQsFor: (id: MegaLeagueId) => string;
   onBack: () => void;
   onClose: () => void;
@@ -574,14 +551,101 @@ function LeagueFlyout({
       </div>
 
       <div className="p-4">
-        <LeagueFlyoutBody
-          league={league}
-          pathname={pathname}
-          leagueQsFor={leagueQsFor}
-          onClose={onClose}
-          usauLevel={usauLevel}
-          onUsauLevelChange={onUsauLevelChange}
-        />
+        {/* ── USAU: per-division accordion (Club/College D-I/College D-III/
+            Masters/Grand Masters), each expanding to its 4 page links PLUS a
+            Top Teams preview where a cheap source exists (Club, College D-I).
+            Replaces the old horizontal chip row + single shared tab row —
+            see UsauLevelAccordion for why. Every other league keeps the
+            original LeagueFlyoutBody (tabs only) + its own team grid below. ── */}
+        {league === 'usau' ? (
+          <UsauLevelAccordion
+            pathname={pathname}
+            urlDivision={urlDivision}
+            expandedLevel={usauLevel}
+            onToggleLevel={onUsauLevelChange}
+            onClose={onClose}
+            renderExtra={(level) => {
+              if (level === 'CLUB') {
+                return (
+                  <div className="mt-2.5">
+                    <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Top Teams</p>
+                    {usau.loading && <GridSkeleton />}
+                    {!usau.loading && usau.error && <LoadError href="/teams?league=usau" onClose={onClose} />}
+                    {!usau.loading && !usau.error && usau.teams && (
+                      <div className="flex flex-col gap-2.5">
+                        {(['Men', 'Women', 'Mixed'] as const).map((div) => {
+                          const teams = usau.teams![div];
+                          if (!teams || teams.length === 0) return null;
+                          return (
+                            <div key={div}>
+                              <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                                {teams.map((team) => (
+                                  <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                                    <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
+                                      {team.nationalsPlacement ?? ''}
+                                    </span>
+                                    <UsauTeamLogo name={team.name} genderDivision={div} size={20} />
+                                    <span className="truncate">{team.name}</span>
+                                  </Link>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              if (level === 'COLLEGE_D1') {
+                return (
+                  <div className="mt-2.5">
+                    <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Top Teams</p>
+                    {usauCollege.loading && <GridSkeleton />}
+                    {!usauCollege.loading && usauCollege.error && (
+                      <LoadError href="/teams?league=usau&level=college-d1" onClose={onClose} />
+                    )}
+                    {!usauCollege.loading && !usauCollege.error && usauCollege.teams && (
+                      <div className="flex flex-col gap-2.5">
+                        {(['Men', 'Women'] as const).map((div) => {
+                          const teams = usauCollege.teams![div];
+                          if (!teams || teams.length === 0) return null;
+                          return (
+                            <div key={div}>
+                              <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+                                {teams.map((team) => (
+                                  <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                                    <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
+                                      {team.rank}
+                                    </span>
+                                    <UsauTeamLogo name={team.name} genderDivision={div} competitionLevel="COLLEGE_D1" size={20} />
+                                    <span className="truncate">{team.name}</span>
+                                  </Link>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              // COLLEGE_D3 / MASTERS / GRAND_MASTERS: no cheap Top Teams
+              // source yet — links only, same as before.
+              return null;
+            }}
+          />
+        ) : (
+          <LeagueFlyoutBody
+            league={league}
+            pathname={pathname}
+            leagueQsFor={leagueQsFor}
+            onClose={onClose}
+          />
+        )}
 
         {/* ── UFA: 4-division team grid (2 cols in the narrow panel) ── */}
         {league === 'ufa' && (
@@ -603,78 +667,6 @@ function LeagueFlyout({
                 </ul>
               </div>
             ))}
-          </div>
-        )}
-
-        {/* ── USAU: top teams per division (lazy) — source + grouping depend
-            on the selected competition level. CLUB uses the club RPC (Men/
-            Women/Mixed); COLLEGE_D1 uses the official-rankings reader (Men/
-            Women only — college has no Mixed division). COLLEGE_D3 / MASTERS
-            / GRAND_MASTERS have no cheap preview source yet, so the block is
-            hidden entirely for those levels. ── */}
-        {league === 'usau' && usauLevel === 'CLUB' && (
-          <div>
-            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Top Teams</p>
-            {usau.loading && <GridSkeleton />}
-            {!usau.loading && usau.error && <LoadError href="/teams?league=usau" onClose={onClose} />}
-            {!usau.loading && !usau.error && usau.teams && (
-              <div className="flex flex-col gap-2.5">
-                {(['Men', 'Women', 'Mixed'] as const).map((div) => {
-                  const teams = usau.teams![div];
-                  if (!teams || teams.length === 0) return null;
-                  return (
-                    <div key={div}>
-                      <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                        {teams.map((team) => (
-                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                            <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
-                              {team.nationalsPlacement ?? ''}
-                            </span>
-                            <UsauTeamLogo name={team.name} genderDivision={div} size={20} />
-                            <span className="truncate">{team.name}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-
-        {league === 'usau' && usauLevel === 'COLLEGE_D1' && (
-          <div>
-            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Top Teams</p>
-            {usauCollege.loading && <GridSkeleton />}
-            {!usauCollege.loading && usauCollege.error && (
-              <LoadError href="/teams?league=usau&level=college-d1" onClose={onClose} />
-            )}
-            {!usauCollege.loading && !usauCollege.error && usauCollege.teams && (
-              <div className="flex flex-col gap-2.5">
-                {(['Men', 'Women'] as const).map((div) => {
-                  const teams = usauCollege.teams![div];
-                  if (!teams || teams.length === 0) return null;
-                  return (
-                    <div key={div}>
-                      <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                        {teams.map((team) => (
-                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                            <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
-                              {team.rank}
-                            </span>
-                            <UsauTeamLogo name={team.name} genderDivision={div} competitionLevel="COLLEGE_D1" size={20} />
-                            <span className="truncate">{team.name}</span>
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         )}
 
@@ -985,14 +977,19 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     else if (id === 'wfdf') fetchWfdfEvents();
   }, [usauLevel, isDesktopViewport, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
 
-  // Selecting a division sub-tab inside the USAU flyout — pure filter state,
-  // no navigation. Lazily kicks the College D-I fetch the first time that
-  // level is chosen (CLUB is already fetched eagerly on flyout open) — desktop
-  // only, same reasoning as openFlyout above.
+  // Expanding a division row inside the USAU flyout (DESKTOP — used as
+  // UsauLevelAccordion's onToggleLevel there) — pure filter/expand state, no
+  // navigation. Lazily kicks the CLUB or College D-I fetch the first time
+  // that division is expanded (each fetch has its own ref guard, so this is
+  // a no-op if already loaded — e.g. CLUB was already fetched eagerly by
+  // openFlyout on initial flyout open). Desktop only: both fetches feed team
+  // grids that only render on md+.
   const handleUsauLevelChange = useCallback((level: UsauLevel) => {
     setUsauLevel(level);
-    if (level === 'COLLEGE_D1' && isDesktopViewport()) fetchUsauCollegeTeams();
-  }, [fetchUsauCollegeTeams, isDesktopViewport]);
+    if (!isDesktopViewport()) return;
+    if (level === 'CLUB') fetchUsauTeams();
+    else if (level === 'COLLEGE_D1') fetchUsauCollegeTeams();
+  }, [fetchUsauTeams, fetchUsauCollegeTeams, isDesktopViewport]);
 
   // MOBILE-ONLY: toggling a division row in UsauMobileLevelList. Pure
   // accordion state — no data fetch (mobile never shows the team grids that
@@ -1284,13 +1281,13 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                     {/* ── MOBILE inline sub-dropdown ──────────────────────
                         Renders directly beneath the row instead of the side
                         fly-out (which is desktop-only, see below). USAU gets
-                        its own per-division accordion (UsauMobileLevelList);
-                        every other league gets the shared LeagueFlyoutBody
-                        (sub-page tab links only — no team grids on mobile). */}
+                        its own per-division accordion (UsauLevelAccordion,
+                        no renderExtra — links only, no team grids on mobile);
+                        every other league gets the shared LeagueFlyoutBody. */}
                     {isOpen && (
                       <div className="md:hidden pl-5 pr-2 pt-1 pb-2">
                         {league.id === 'usau' ? (
-                          <UsauMobileLevelList
+                          <UsauLevelAccordion
                             pathname={pathname}
                             urlDivision={urlDivision}
                             expandedLevel={usauMobileExpandedLevel}
@@ -1303,11 +1300,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                             pathname={pathname}
                             leagueQsFor={leagueQsFor}
                             onClose={onClose}
-                            usauLevel={usauLevel}
-                            onUsauLevelChange={handleUsauLevelChange}
-                            tabRowBase="flex flex-wrap items-center gap-1.5"
+                            tabRowBase="flex flex-col gap-0.5"
                             tabLinkBase={[
-                              'inline-flex items-center px-3 min-h-[44px] rounded-md',
+                              'flex items-center w-full px-3 min-h-[44px] rounded-md',
                               'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
                               'transition-colors duration-150 no-underline',
                               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
@@ -1382,6 +1377,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           <LeagueFlyout
             league={flyoutLeague}
             pathname={pathname}
+            urlDivision={urlDivision}
             leagueQsFor={leagueQsFor}
             onBack={() => setFlyoutLeague(null)}
             onClose={onClose}
