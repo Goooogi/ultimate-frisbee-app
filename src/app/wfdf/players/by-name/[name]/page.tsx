@@ -53,6 +53,7 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
   return (
     <PageShell
       title={name}
+      stickyName={name}
       eyebrow="WFDF · International"
       breadcrumbs={[
         { label: 'Home', href: '/' },

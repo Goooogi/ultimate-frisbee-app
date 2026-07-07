@@ -13,14 +13,23 @@ const OPTIONS: { value: UsauLevel; label: string }[] = USAU_LEVELS.map((v) => ({
   label: levelLabel(v),
 }));
 
-export function UsauLevelSelect() {
+/**
+ * `restrictTo` — when provided, only these levels are offered (kept in the
+ * canonical Club → GM order). Used on the event page so a combined masters
+ * championships offers just Masters / Grand Masters. Omitted → all 5.
+ */
+export function UsauLevelSelect({ restrictTo }: { restrictTo?: UsauLevel[] } = {}) {
   const [level, setLevel] = useLevel();
+  const options =
+    restrictTo && restrictTo.length > 0
+      ? OPTIONS.filter((o) => restrictTo.includes(o.value))
+      : OPTIONS;
   return (
     <PillSelect
       value={level}
       onChange={setLevel}
       ariaLabel="Select competition level"
-      options={OPTIONS}
+      options={options}
     />
   );
 }

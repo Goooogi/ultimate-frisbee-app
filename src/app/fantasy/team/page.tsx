@@ -35,6 +35,7 @@ export default async function FantasyTeamPage() {
     <PageShell
       title="My Team"
       eyebrow="Fantasy · Beta"
+      hideFooterMobile
       subtitle={
         weekInfo
           ? `${weekInfo.week}${weekInfo.locked ? ' · Locked' : ' · Open'}`

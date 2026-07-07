@@ -8,11 +8,12 @@
 // Mobile (<lg): AppRail (top, carries league switcher via gamesSlotMobile) + content + MobileBottomNav.
 //   The league pill lives IN the AppRail on mobile — no separate below-rail strip.
 
-import { Suspense } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { AppRail } from '@/components/app-rail';
 import { GamesSubnav } from '@/components/games-subnav';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
+import { SiteFooter } from '@/components/site-footer';
 
 // Hooks like useSearchParams() must be wrapped in Suspense for Next 14
 // static prerendering — otherwise the whole tree falls back to CSR and
@@ -25,6 +26,10 @@ interface AppShellProps {
    * switcher was retired (league switching lives in the AppRail mega-menu), so
    * this defaults to empty; pass a node only if a page needs its own control. */
   topNavSlot?: React.ReactNode;
+  /** Hide the SiteFooter on mobile (<lg) only. Desktop keeps it. Fantasy uses
+   *  this — its own bottom nav + tall content leave no room for the footer on
+   *  a phone, and it reads as clutter there. */
+  hideFooterMobile?: boolean;
   children: React.ReactNode;
 }
 
@@ -33,7 +38,7 @@ interface AppShellProps {
  * (FeedPage, GameDetail). Pages that want the standard title/eyebrow row
  * should use `PageShell` instead — it composes AppShell + PageHeader.
  */
-export function AppShell({ topNavSlot, children }: AppShellProps) {
+export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellProps) {
   // The in-page league switcher has been retired — league switching now lives
   // in the "The League" mega-menu in the top AppRail, so showing pills/dropdown
   // here too is redundant. We only render a top-nav slot when a page explicitly
@@ -64,18 +69,23 @@ export function AppShell({ topNavSlot, children }: AppShellProps) {
           flex-shrink-0 keeps it from being compressed by the scrolling main. */}
       <GamesSubnav leagueSlot={tab} />
 
-      {/* ── Mobile (<lg) ── */}
+      {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
+          sits above the fixed bottom nav's reserved space (pb-[88px]). */}
       <div className="lg:hidden flex-1 overflow-y-auto pb-[88px]">
         {children}
+        {!hideFooterMobile && <SiteFooter />}
         <Suspense fallback={SUSPENSE_FALLBACK}>
           <MobileBottomNav />
         </Suspense>
       </div>
 
-      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. ── */}
+      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. The footer
+          rides at the bottom of the scrolling main so it clears short pages
+          (flex-1 content) yet scrolls into view on tall ones. ── */}
       <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
         <main className="flex-1 overflow-y-auto flex flex-col">
           <div className="flex-1">{children}</div>
+          <SiteFooter />
         </main>
       </div>
     </div>
@@ -97,6 +107,13 @@ interface PageShellProps {
   /** Optional breadcrumb trail rendered above the title. Shallowest first;
    *  last entry is the current page (rendered as plain text). */
   breadcrumbs?: Crumb[];
+  /** When set, a slim name bar sticks to the top on mobile once the page's
+   *  big <h1> title scrolls out of view — so long stat tables (player
+   *  profiles) never lose their "whose stats are these" context. Desktop
+   *  is unaffected (plenty of vertical space there already). */
+  stickyName?: string;
+  /** Hide the SiteFooter on mobile (<lg) only; desktop keeps it. See AppShell. */
+  hideFooterMobile?: boolean;
   children: React.ReactNode;
 }
 
@@ -107,16 +124,72 @@ export function PageShell({
   controls,
   topNavSlot,
   breadcrumbs,
+  stickyName,
+  hideFooterMobile,
   children,
 }: PageShellProps) {
   return (
-    <AppShell topNavSlot={topNavSlot}>
+    <AppShell topNavSlot={topNavSlot} hideFooterMobile={hideFooterMobile}>
       <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
+        {stickyName && <StickyName name={stickyName} />}
         {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />}
         <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />
+        {stickyName && <StickySentinel />}
         {children}
       </div>
     </AppShell>
+  );
+}
+
+// AppShell renders `children` twice (once per breakpoint's scroll pane), so a
+// single ref/state pair in PageShell can only ever attach to one of the two
+// mounted copies — whichever wins is effectively random, and the desktop copy
+// (permanently `lg:hidden`, zero-size) breaks the observer if it wins. Each of
+// these renders as its own self-contained instance instead, so both the
+// mobile and desktop copies work correctly independently.
+const STICKY_NAME_ID = 'page-shell-sticky-sentinel';
+
+function StickySentinel() {
+  return <div id={STICKY_NAME_ID} aria-hidden="true" />;
+}
+
+function StickyName({ name }: { name: string }) {
+  const [titleVisible, setTitleVisible] = useState(true);
+  const barRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar) return;
+    // The sentinel is a sibling further down this same subtree — find it
+    // within this instance's own DOM branch, not the other breakpoint's copy.
+    const el = bar.parentElement?.querySelector<HTMLDivElement>(`#${STICKY_NAME_ID}`);
+    if (!el) return;
+    const root = bar.closest('.overflow-y-auto');
+    const observer = new IntersectionObserver(([entry]) => setTitleVisible(entry.isIntersecting), {
+      root,
+      // Fires as soon as the title crosses under the sticky 52px app rail.
+      rootMargin: '-52px 0px 0px 0px',
+      threshold: 0,
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={barRef}
+      aria-hidden={titleVisible}
+      className={[
+        'lg:hidden sticky top-[52px] z-40 overflow-hidden',
+        'bg-bg/95 backdrop-blur border-hairline',
+        'transition-[max-height,opacity] duration-150',
+        titleVisible ? 'max-h-0 opacity-0 border-b-0' : 'max-h-11 opacity-100 border-b',
+      ].join(' ')}
+    >
+      <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
+        {name}
+      </span>
+    </div>
   );
 }
 

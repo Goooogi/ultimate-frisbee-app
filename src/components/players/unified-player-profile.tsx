@@ -70,7 +70,13 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
   ];
 
   return (
-    <PageShell title={profile.displayName} eyebrow={eyebrow} topNavSlot={topNavSlot} breadcrumbs={crumbs}>
+    <PageShell
+      title={profile.displayName}
+      stickyName={profile.displayName}
+      eyebrow={eyebrow}
+      topNavSlot={topNavSlot}
+      breadcrumbs={crumbs}
+    >
       {/* Championship banners — one per league when applicable. */}
       {profile.championYearsUsau.length > 0 && (
         <ChampionBanner years={profile.championYearsUsau} label="USAU National Champion" />

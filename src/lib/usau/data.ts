@@ -2315,6 +2315,11 @@ export interface UsauEventSummary {
     /** "Men" | "Women" | "Mixed" | "Open" — used to split mixed-gender events
      *  like College Championships into separate Men's/Women's brackets. */
     genderDivision: string | null;
+    /** The TEAM's competition level ("MASTERS" | "GRAND_MASTERS" | …).
+     *  Combined masters championships host both levels in ONE event, with
+     *  each team tagged per-group — this is what lets the event page split
+     *  a Masters Men bracket from a GM Men bracket. */
+    competitionLevel: string | null;
   }>;
   games: Array<{
     id: string;
@@ -2336,10 +2341,17 @@ export interface UsauEventSummary {
 
 export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const db = await supabase();
+  // Case-INSENSITIVE slug match. USAU slugs are canonically lowercase, but the
+  // HTML pipeline historically stored some mixed-case (e.g. "Glazed-Daze-2026")
+  // and a later ultirzr re-ingest normalizes them to lowercase — which would
+  // 404 any link built from the old casing. ilike keeps both forms working.
+  // Slugs are unique case-insensitively, so maybeSingle() stays correct.
+  // Escape LIKE metacharacters so a slug can't act as a wildcard pattern.
+  const slugPattern = slug.replace(/[%_\\]/g, (c) => `\\${c}`);
   const { data: event, error } = await db
     .from('usau_events')
     .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level, url')
-    .eq('usau_slug', slug)
+    .ilike('usau_slug', slugPattern)
     .maybeSingle();
   if (error) throw error;
   if (!event) return null;
@@ -2347,7 +2359,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const [partRes, gameRes] = await Promise.all([
     db
       .from('usau_event_teams')
-      .select('team_id, seed, pool, final_placement, usau_teams(name, gender_division)')
+      .select('team_id, seed, pool, final_placement, usau_teams(name, gender_division, competition_level)')
       .eq('event_id', event.id),
     db
       .from('usau_games')
@@ -2363,7 +2375,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   ]);
 
   const teams = (partRes.data ?? []).map((p) => {
-    const t = (p as { usau_teams: { name: string; gender_division: string | null } | null }).usau_teams;
+    const t = (p as { usau_teams: { name: string; gender_division: string | null; competition_level: string | null } | null }).usau_teams;
     return {
       teamId: p.team_id,
       teamName: t?.name ?? 'Unknown',
@@ -2371,6 +2383,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
       pool: p.pool,
       finalPlacement: p.final_placement,
       genderDivision: t?.gender_division ?? null,
+      competitionLevel: t?.competition_level ?? null,
     };
   });
 
@@ -2772,6 +2785,18 @@ export async function listRankedTeams(opts?: {
     if (!row.usau_teams) continue;
     const t = row.usau_teams;
     if (opts?.genderDivision && t.gender_division !== opts.genderDivision) continue;
+    // Masters and Grand Masters share events (combined regionals/championships
+    // are tagged one event-level but host teams of BOTH levels, each team
+    // tagged per-group). Filtering events alone therefore mixes the levels —
+    // also require the TEAM's own level to match. Scoped to masters/GM only:
+    // club/college teams are sometimes mis-tagged in source data, and their
+    // events never mix levels, so the event filter alone stays correct there.
+    if (
+      (compLevel === 'MASTERS' || compLevel === 'GRAND_MASTERS') &&
+      t.competition_level !== compLevel
+    ) {
+      continue;
+    }
 
     const isNationals = nationalsIds.has(row.event_id);
     const entry = byTeam.get(t.id) ?? {

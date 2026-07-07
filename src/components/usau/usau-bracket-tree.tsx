@@ -44,20 +44,38 @@ interface RoundColumn {
 // height ≈ 88px; we leave a bit of breathing room.
 const ROW_PITCH_PX = 104;
 
+/** The group prefix of a combined-event bracket name ("GM Women · 1st
+ *  Place" → "GM Women"); '' when unprefixed. Combined masters championships
+ *  run several INDEPENDENT championship brackets in one event (Masters /
+ *  GM / GGM per gender) — the prefix is the only reliable way to tell a GM
+ *  Women game from a GGM Women game (GGM teams share the GRAND_MASTERS
+ *  level tag, so team-level filtering can't separate them). */
+export function bracketGroupPrefix(name: string | null | undefined): string {
+  if (!name) return '';
+  const i = name.lastIndexOf('·');
+  return i >= 0 ? name.slice(0, i).trim() : '';
+}
+
 export function UsauBracketTree({ games }: Props) {
-  // ── Pull championship-bracket games only ───────────────────────────────
-  const champGames = useMemo(
-    () => games.filter((g) => isChampionshipBracket(g)),
-    [games],
-  );
+  // ── Pull championship-bracket games, split by group prefix ─────────────
+  // One tree per independent championship bracket. Single-group events
+  // (nearly all) render exactly as before; combined masters championships
+  // render one labeled tree per group instead of merging unrelated
+  // brackets into overlapping cards.
+  const groups = useMemo(() => {
+    const champGames = games.filter((g) => isChampionshipBracket(g));
+    const byPrefix = new Map<string, Game[]>();
+    for (const g of champGames) {
+      const k = bracketGroupPrefix(g.bracketName);
+      if (!byPrefix.has(k)) byPrefix.set(k, []);
+      byPrefix.get(k)!.push(g);
+    }
+    return Array.from(byPrefix.entries())
+      .map(([label, gs]) => ({ label, games: gs }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [games]);
 
-  // ── Split into round columns + assign vertical positions ───────────────
-  const columns = useMemo(() => buildColumns(champGames), [champGames]);
-  const positions = useMemo(() => assignPositions(columns), [columns]);
-
-  if (columns.every((c) => c.games.length === 0)) {
-    return null;
-  }
+  if (groups.length === 0) return null;
 
   return (
     <section className="mb-10" aria-labelledby="bracket-heading">
@@ -67,6 +85,35 @@ export function UsauBracketTree({ games }: Props) {
       >
         Championship bracket
       </h2>
+      <div className="flex flex-col gap-8">
+        {groups.map((group) => (
+          <BracketTreeGroup
+            key={group.label || 'main'}
+            games={group.games}
+            label={groups.length > 1 ? group.label : null}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BracketTreeGroup({ games, label }: { games: Game[]; label: string | null }) {
+  // ── Split into round columns + assign vertical positions ───────────────
+  const columns = useMemo(() => buildColumns(games), [games]);
+  const positions = useMemo(() => assignPositions(columns), [columns]);
+
+  if (columns.every((c) => c.games.length === 0)) {
+    return null;
+  }
+
+  return (
+    <div>
+      {label && (
+        <h3 className="font-display italic font-bold text-[20px] leading-tight tracking-[-0.02em] text-ink mb-3">
+          {label}
+        </h3>
+      )}
 
       {/* Mobile: vertical stack by round, latest round FIRST (Final → SF → QF
           → R1). On a phone the result you care about is the championship, so it
@@ -94,7 +141,7 @@ export function UsauBracketTree({ games }: Props) {
       <div className="hidden lg:block overflow-x-auto pb-2">
         <DesktopBracket columns={columns} positions={positions} />
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -107,12 +154,11 @@ function DesktopBracket({
   columns: RoundColumn[];
   positions: Map<string, number>;
 }) {
-  // Determine total height needed. R1 has the most games and pitches at
-  // ROW_PITCH_PX per game. The +1 leaves room for the round-label row above.
-  const r1Count = columns.find((c) => c.key === 'r1')?.games.length ?? 0;
-  const qfCount = columns.find((c) => c.key === 'qf')?.games.length ?? 0;
-  const baseCount = Math.max(r1Count, qfCount);
-  const totalHeight = Math.max(baseCount, 4) * ROW_PITCH_PX + 32; // 32 for header row
+  // Determine total height needed: the tallest column sets the pitch count
+  // (small regionals brackets are just 2 semis + a final — don't reserve
+  // four rows of blank space for those). 32 covers the round-label row.
+  const baseCount = Math.max(0, ...columns.map((c) => c.games.length));
+  const totalHeight = Math.max(baseCount, 2) * ROW_PITCH_PX + 32;
 
   // Column count drives grid template.
   const renderedColumns = columns.filter((c) => c.games.length > 0);
@@ -291,11 +337,15 @@ function statusLabel(game: Game): string {
 function gameTime(game: Game): string {
   if (!game.scheduledAt) return '';
   const d = new Date(game.scheduledAt);
+  // scheduled_at stores the VENUE-LOCAL clock time with a Z suffix (neither
+  // USAU nor ultirzr exposes a timezone, so ingest can't do better). Format
+  // in UTC to display that clock time as-is; converting to the viewer's zone
+  // would shift a 9:45 AM game to 3:45 AM. No zone label — we don't know it.
   return d.toLocaleString('en-US', {
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
-    timeZoneName: 'short',
+    timeZone: 'UTC',
   });
 }
 
@@ -400,14 +450,12 @@ function buildColumns(games: Game[]): RoundColumn[] {
 function assignPositions(columns: RoundColumn[]): Map<string, number> {
   const positions = new Map<string, number>();
 
-  // R1: position evenly. Each game takes ROW_PITCH_PX of vertical space.
-  const r1 = columns.find((c) => c.key === 'r1');
-  const qf = columns.find((c) => c.key === 'qf');
-
-  // The base "row scale" is determined by R1 (or QF if no R1) so column
-  // height matches the longest column.
-  const baseColumn = (r1?.games.length ?? 0) > 0 ? r1! : qf!;
-  if (!baseColumn || baseColumn.games.length === 0) return positions;
+  // The base "row scale" is the FIRST NON-EMPTY column (r1 → qf → sf →
+  // final) so column height matches the longest column. Small brackets
+  // (regionals: 2 semis + a final, no quarters) previously bailed here and
+  // left every card at top=0 — the semis rendered stacked on each other.
+  const baseColumn = columns.find((c) => c.games.length > 0);
+  if (!baseColumn) return positions;
 
   // Assign R1 positions: 0, pitch, 2*pitch, ...
   baseColumn.games.forEach((g, i) => {

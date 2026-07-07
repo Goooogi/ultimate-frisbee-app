@@ -19,9 +19,25 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision, type UsauDivision } from '@/lib/use-division';
-import { UsauBracketTree, isChampionshipBracket } from './usau-bracket-tree';
+import { useLevel, type UsauLevel } from '@/lib/use-level';
+import { USAU_LEVELS } from '@/lib/league';
+import { UsauBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+
+// Masters combined events prefix every bracket with its group ("GM Women ·
+// Pool A", "Masters Mixed · 1st Place"). Pool detection and display labels
+// need the tail, not the raw name.
+function bracketTail(name: string): string {
+  const i = name.lastIndexOf('·');
+  return i >= 0 ? name.slice(i + 1).trim() : name;
+}
+
+function isPoolBracket(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return bracketTail(name).toLowerCase().startsWith('pool');
+}
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -31,14 +47,39 @@ interface Props {
 }
 
 export function UsauEventDetail({ event }: Props) {
-  // ── Detect available genders ──────────────────────────────────────────
-  const availableGenders = useMemo(() => {
+  // ── Detect available competition levels ───────────────────────────────
+  // Combined masters championships host Masters AND Grand Masters groups in
+  // ONE event (each team is tagged per-group). Those must be viewed one
+  // level at a time — mixing them would blend two unrelated brackets.
+  // Single-level events (all club, all D-I, …) skip this entirely.
+  const availableLevels = useMemo(() => {
     const set = new Set<string>();
     for (const t of event.teams) {
+      if (t.competitionLevel) set.add(t.competitionLevel);
+    }
+    return USAU_LEVELS.filter((l) => set.has(l));
+  }, [event.teams]);
+
+  const [urlLevel] = useLevel();
+  const level: UsauLevel | '' =
+    availableLevels.length > 1
+      ? (availableLevels.includes(urlLevel) ? urlLevel : availableLevels[0])
+      : '';
+
+  // Teams narrowed to the active level (no-op for single-level events).
+  const levelTeams = useMemo(
+    () => (level ? event.teams.filter((t) => t.competitionLevel === level) : event.teams),
+    [event.teams, level],
+  );
+
+  // ── Detect available genders (within the active level) ────────────────
+  const availableGenders = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of levelTeams) {
       if (t.genderDivision) set.add(t.genderDivision);
     }
     return Array.from(set);
-  }, [event.teams]);
+  }, [levelTeams]);
 
   // Source of truth: the global ?div URL param, set by the
   // UsauDivisionSelect dropdown at the top of the page.
@@ -60,27 +101,50 @@ export function UsauEventDetail({ event }: Props) {
   // cleanly partitions pools per gender. For single-gender events the
   // filter is a no-op (every team passes).
   const { teams, games } = useMemo(() => {
-    if (!gender) return { teams: event.teams, games: event.games };
-
-    const teamIds = new Set(
-      event.teams.filter((t) => t.genderDivision === gender).map((t) => t.teamId),
-    );
-    const filteredTeams = event.teams.filter((t) => t.genderDivision === gender);
+    const filteredTeams = gender
+      ? levelTeams.filter((t) => t.genderDivision === gender)
+      : levelTeams;
+    // Nothing narrowed (single-level, single-gender event) → pass through.
+    if (filteredTeams.length === event.teams.length) {
+      return { teams: event.teams, games: event.games };
+    }
+    const teamIds = new Set(filteredTeams.map((t) => t.teamId));
     const filteredGames = event.games.filter(
       (g) =>
         (g.teamAId && teamIds.has(g.teamAId)) ||
         (g.teamBId && teamIds.has(g.teamBId)),
     );
     return { teams: filteredTeams, games: filteredGames };
-  }, [event.teams, event.games, gender]);
+  }, [event.teams, event.games, levelTeams, gender]);
+
+  // ── Group-prefix awareness ────────────────────────────────────────────
+  // A filtered view can still contain MULTIPLE independent bracket groups:
+  // GGM teams share the GRAND_MASTERS level tag, so the GM Women view of a
+  // combined championships holds both "GM Women · …" and "GGM Women · …"
+  // games. When that happens, show FULL bracket names (the prefix is the
+  // only disambiguator); single-group views strip the redundant prefix.
+  const showGroupPrefixes = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of games) {
+      const p = bracketGroupPrefix(g.bracketName);
+      if (p) set.add(p);
+    }
+    return set.size > 1;
+  }, [games]);
+  const bracketLabel = (name: string) => (showGroupPrefixes ? name : bracketTail(name));
 
   // ── Pools (from filtered teams) ───────────────────────────────────────
+  // Entry-level pool values ("Pool D") carry no group scoping, so on a
+  // multi-group view two groups' Pool D would merge — prefer the
+  // game-derived pools (group-prefixed bracket names) in that case.
   let pools: Array<{ name: string; teams: Team[] }> = [];
   const teamsByPool = new Map<string, Team[]>();
-  for (const t of teams) {
-    if (!t.pool) continue;
-    if (!teamsByPool.has(t.pool)) teamsByPool.set(t.pool, []);
-    teamsByPool.get(t.pool)!.push(t);
+  if (!showGroupPrefixes) {
+    for (const t of teams) {
+      if (!t.pool) continue;
+      if (!teamsByPool.has(t.pool)) teamsByPool.set(t.pool, []);
+      teamsByPool.get(t.pool)!.push(t);
+    }
   }
   if (teamsByPool.size > 0) {
     pools = Array.from(teamsByPool.entries())
@@ -90,10 +154,11 @@ export function UsauEventDetail({ event }: Props) {
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } else {
-    // Derive pools from games whose bracket_name starts with "Pool ".
+    // Derive pools from games whose bracket_name is a pool ("Pool A", or
+    // group-prefixed "Masters Mixed · Pool A" on combined masters events).
     const poolTeamIds = new Map<string, Set<string>>();
     for (const g of games) {
-      if (!g.bracketName?.toLowerCase().startsWith('pool')) continue;
+      if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
       if (!poolTeamIds.has(g.bracketName)) poolTeamIds.set(g.bracketName, new Set());
       if (g.teamAId) poolTeamIds.get(g.bracketName)!.add(g.teamAId);
       if (g.teamBId) poolTeamIds.get(g.bracketName)!.add(g.teamBId);
@@ -118,7 +183,7 @@ export function UsauEventDetail({ event }: Props) {
   const bracketKey = (g: Game) => g.bracketName ?? 'Bracket';
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
-    if (g.bracketName?.toLowerCase().startsWith('pool')) continue;
+    if (isPoolBracket(g.bracketName)) continue;
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
     if (!byBracket.has(k)) byBracket.set(k, []);
@@ -134,7 +199,7 @@ export function UsauEventDetail({ event }: Props) {
   // ── Pool play games ───────────────────────────────────────────────────
   const poolGames = new Map<string, Game[]>();
   for (const g of games) {
-    if (!g.bracketName?.toLowerCase().startsWith('pool')) continue;
+    if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
     if (!poolGames.has(g.bracketName)) poolGames.set(g.bracketName, []);
     poolGames.get(g.bracketName)!.push(g);
   }
@@ -165,11 +230,13 @@ export function UsauEventDetail({ event }: Props) {
     }
   }
 
-  // ── Championship final (for the top-of-page result banner) ─────────────
-  // The completed title game. We surface it ABOVE the bracket tree so a
+  // ── Championship finals (for the top-of-page result banners) ───────────
+  // The completed title game(s). Surfaced ABOVE the bracket tree so a
   // finished tournament leads with its champion — most valuable on mobile,
   // where the horizontal bracket tree otherwise buries the final off-screen.
-  const finalGame = useMemo(() => {
+  // One per bracket GROUP: a multi-group view (GM + GGM Women in a combined
+  // championships) gets one labeled banner per group.
+  const champFinals = useMemo(() => {
     const finals = games.filter(
       (g) =>
         isChampionshipBracket(g) &&
@@ -179,13 +246,18 @@ export function UsauEventDetail({ event }: Props) {
         g.scoreB != null &&
         g.scoreA !== g.scoreB,
     );
-    if (finals.length === 0) return null;
-    // USAU sometimes labels BOTH the semi and the title game round='final' under
-    // "1st Place". The actual title game is the LAST one played, so pick the
-    // latest scheduledAt (fall back to array order when timestamps are missing).
-    return finals.reduce((latest, g) =>
-      (g.scheduledAt ?? '') > (latest.scheduledAt ?? '') ? g : latest,
-    );
+    // USAU sometimes labels BOTH the semi and the title game round='final'
+    // under "1st Place". The actual title game is the LAST one played, so
+    // keep the latest scheduledAt per group.
+    const byGroup = new Map<string, Game>();
+    for (const g of finals) {
+      const k = bracketGroupPrefix(g.bracketName);
+      const prev = byGroup.get(k);
+      if (!prev || (g.scheduledAt ?? '') > (prev.scheduledAt ?? '')) byGroup.set(k, g);
+    }
+    return Array.from(byGroup.entries())
+      .map(([label, game]) => ({ label, game }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [games]);
 
   // ── Pool leader (fallback winner when there's no bracket final) ─────────
@@ -194,7 +266,7 @@ export function UsauEventDetail({ event }: Props) {
   // for first is ambiguous, so we show no banner). Skipped entirely when a
   // bracket final exists (that's the real champion).
   const poolLeader = useMemo(() => {
-    if (finalGame) return null;
+    if (champFinals.length > 0) return null;
     const teamById = new Map(teams.map((t) => [t.teamId, t] as const));
     const standings = Array.from(poolRecords.entries())
       .filter(([id]) => teamById.has(id))
@@ -209,7 +281,7 @@ export function UsauEventDetail({ event }: Props) {
     if (tiedForFirst > 1) return null;
     return top;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finalGame, teams, games]);
+  }, [champFinals, teams, games]);
 
   // Divisions this event actually fielded, in canonical order — drives the
   // scoped division switcher below (only shown when there's more than one).
@@ -222,35 +294,50 @@ export function UsauEventDetail({ event }: Props) {
       {/* Champion banner — leads the page for a finished tournament so the
           title result is the first thing seen (esp. on mobile, where the
           bracket tree scrolls horizontally and hides the final). */}
-      {finalGame && (
+      {champFinals.map(({ label, game }) => (
         <ChampionBanner
-          game={finalGame}
-          competitionLevel={event.competitionLevel}
+          key={game.id}
+          game={game}
+          label={showGroupPrefixes ? label || null : null}
+          competitionLevel={level || event.competitionLevel}
           genderDivision={gender || null}
         />
-      )}
+      ))}
 
       {/* Pool leader — shown for a pool-play-only division (no bracket final).
           The best (unique) pool record is the de-facto winner. */}
-      {!finalGame && poolLeader && (
+      {champFinals.length === 0 && poolLeader && (
         <PoolLeaderBanner
           team={poolLeader.team}
           wins={poolLeader.wins}
           losses={poolLeader.losses}
-          competitionLevel={event.competitionLevel}
+          competitionLevel={level || event.competitionLevel}
         />
       )}
 
-      {/* Division switcher — only when the event fielded 2+ divisions (most
-          TCT/Nationals events do; single-division sectionals don't need it).
-          Scoped to the divisions this event actually has. Writes ?div=, which
-          the filter above reads via useDivision(). */}
-      {eventDivisions.length > 1 && (
-        <div className="mb-6 flex items-center gap-3">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-            Division
-          </span>
-          <UsauDivisionSelect restrictTo={eventDivisions} />
+      {/* Level + Division switchers — each only when the event fielded 2+.
+          Level: combined masters championships host Masters AND Grand Masters
+          groups in one event (writes ?level=, read via useLevel() above).
+          Division: most TCT/Nationals events field 2-3 genders (writes ?div=,
+          read via useDivision()). Both scoped to what this event actually has. */}
+      {(availableLevels.length > 1 || eventDivisions.length > 1) && (
+        <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+          {availableLevels.length > 1 && (
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                Level
+              </span>
+              <UsauLevelSelect restrictTo={availableLevels} />
+            </div>
+          )}
+          {eventDivisions.length > 1 && (
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                Division
+              </span>
+              <UsauDivisionSelect restrictTo={eventDivisions} />
+            </div>
+          )}
         </div>
       )}
 
@@ -271,8 +358,8 @@ export function UsauEventDetail({ event }: Props) {
             {pools.map((pool) => (
               <PoolCard
                 key={pool.name}
-                pool={pool}
-                competitionLevel={event.competitionLevel}
+                pool={{ name: bracketLabel(pool.name), teams: pool.teams }}
+                competitionLevel={level || event.competitionLevel}
                 records={poolRecords}
               />
             ))}
@@ -284,7 +371,7 @@ export function UsauEventDetail({ event }: Props) {
                 .map(([poolName, gs]) => (
                   <div key={poolName}>
                     <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-                      {poolName} games
+                      {bracketLabel(poolName)} games
                     </div>
                     <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {gs.map((g) => (
@@ -310,7 +397,10 @@ export function UsauEventDetail({ event }: Props) {
           </h2>
           <div className="flex flex-col gap-7">
             {placementBrackets.map((bracket) => (
-              <BracketBlock key={bracket.name} bracket={bracket} />
+              <BracketBlock
+                key={bracket.name}
+                bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
+              />
             ))}
           </div>
         </section>
@@ -349,10 +439,14 @@ function PoolGamesEmpty({ slug }: { slug: string }) {
 
 function ChampionBanner({
   game,
+  label,
   competitionLevel,
   genderDivision,
 }: {
   game: Game;
+  /** Bracket-group qualifier ("GGM Women") when the view holds multiple
+   *  independent championship brackets; null on single-group views. */
+  label?: string | null;
   competitionLevel: string;
   genderDivision: string | null;
 }) {
@@ -388,7 +482,7 @@ function ChampionBanner({
       <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
         <TrophyIcon />
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
-          Champion
+          Champion{label ? ` · ${label}` : ''}
         </span>
       </div>
       <div className="flex items-center justify-between gap-3 px-4 py-4">

@@ -52,6 +52,7 @@ export default async function FantasyTeamPage({ params }: Props) {
     <PageShell
       title={team.teamName}
       eyebrow="Fantasy · Beta"
+      hideFooterMobile
       subtitle={
         team.ownerDisplayName || team.ownerUsername
           ? `${team.ownerDisplayName ?? `@${team.ownerUsername}`}${

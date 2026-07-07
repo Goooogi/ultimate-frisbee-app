@@ -220,19 +220,48 @@ function classifyStatus(raw: string | undefined): string {
   return 'scheduled';
 }
 
-/** Heuristic: classify a bracket/stage name into our game_round enum. */
+/** Heuristic: classify a bracket/stage name into our game_round enum.
+ *
+ *  USAU (and therefore ultirzr) labels the championship title game
+ *  "First Place" inside a "1st Place" bracket — NOT "Final". The scraper's
+ *  classifier (sync-event-details) already knows this vocabulary; this one
+ *  originally didn't, which left every ultirzr-ingested title game tagged
+ *  'other' (no champion banner, no final column in the bracket tree). */
 function classifyRound(stageName: string | undefined, bracketName: string | undefined): string {
-  const t = `${bracketName ?? ''} ${stageName ?? ''}`.toLowerCase();
-  if (/(prequarter|pre-quarter)/.test(t)) return 'prequarter';
-  if (/(^|\s)final(s)?($|\s)/.test(t) && !/semi|quarter|third|fifth|seventh|placement/.test(t)) {
-    return 'final';
-  }
+  const stage = (stageName ?? '').toLowerCase().trim();
+  const bracket = (bracketName ?? '').toLowerCase().trim();
+  const t = `${bracket} ${stage}`;
+  if (/(prequarter|pre-quarter|pre quarter)/.test(t)) return 'prequarter';
   if (/semi/.test(t)) return 'semi';
   if (/quarter/.test(t)) return 'quarter';
-  if (/(third place|fifth place|seventh place|ninth|11th|13th|15th|placement)/.test(t)) {
+  if (/consolation/.test(t)) return 'consolation';
+  // Championship title game: a "First Place"/"final" stage inside a
+  // championship/1st-place bracket (semis/quarters already returned above).
+  // Masters combined events prefix brackets with the group ("GM Women ·
+  // 1st Place"), so match by inclusion, not equality.
+  const isChampBracket =
+    bracket.includes('championship') ||
+    bracket.includes('1st place') ||
+    bracket.includes('first place') ||
+    bracket === '';
+  if (
+    isChampBracket &&
+    (stage.includes('first place') || stage.includes('1st place') || stage.includes('final') || stage === '1st')
+  ) {
+    return 'final';
+  }
+  if (/(^|\s)final(s)?($|\s)/.test(t) && !/third|fifth|seventh|placement/.test(t)) {
+    return 'final';
+  }
+  // "2nd Place" … "15th Place" (but NOT "1st Place" — that's the champ
+  // bracket; an unmatched stage there stays 'other', e.g. "Round 1").
+  if (
+    /\b([2-9]|\d{2})(nd|rd|th|st)\s+place\b/.test(t) ||
+    /placement/.test(t) ||
+    (/^\d+(st|nd|rd|th)$/.test(stage) && stage !== '1st')
+  ) {
     return 'placement';
   }
-  if (/consolation/.test(t)) return 'consolation';
   return 'other';
 }
 

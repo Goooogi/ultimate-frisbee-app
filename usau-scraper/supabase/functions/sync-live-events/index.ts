@@ -100,14 +100,25 @@ async function run(body: RequestBody) {
   // those pools as soon as they're posted rather than only on game day. Runs
   // are idempotent (upserts), and a pre-event details page is a light fetch.
   const lookahead = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
+  // TRAILING window: keep re-scraping an event for 2 days AFTER it ends. USAU
+  // often reports the Sunday-evening final (and other late results) after our
+  // last live pass while the tournament was in-window; without this tail the
+  // event drops out the moment end_date passes and those finals are never
+  // captured (this is exactly how Glazed Daze 2026 lost its championship game).
+  // Re-scraping the same slug via the same HTML pipeline just upserts the
+  // now-complete bracket over the existing rows — no duplication. Cheap: only a
+  // handful of events sit in a 2-day trailing window at once, and a settled
+  // event's schedule page is one light fetch per division.
+  const trailing = new Date(Date.now() - 2 * 86400_000).toISOString().slice(0, 10);
 
-  // start_date ≤ today+7d AND end_date ≥ today → live now, or starting within a week
+  // start_date ≤ today+7d AND end_date ≥ today-2d → live now, starting within a
+  // week, or ended within the last 2 days (catch late-reported finals).
   const { data: events, error } = await db
     .from('usau_events')
     .select('id, usau_slug, name, competition_level, start_date, end_date')
     .in('competition_level', FLAGSHIP_LEVELS)
     .lte('start_date', lookahead)
-    .gte('end_date', today)
+    .gte('end_date', trailing)
     .order('start_date', { ascending: true });
   if (error) throw new Error(`load live events: ${stringifyErr(error)}`);
 

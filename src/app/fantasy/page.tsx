@@ -18,6 +18,7 @@ export default async function FantasyLandingPage() {
       title="Leaderboard"
       eyebrow="Fantasy · Beta"
       subtitle="Every team, ranked by cumulative points."
+      hideFooterMobile
     >
       {/* ── Global Leaderboard ────────────────────────────────────────────── */}
       <section aria-labelledby="leaderboard-heading">
@@ -111,17 +112,14 @@ export default async function FantasyLandingPage() {
                         {rank}
                       </span>
 
-                      {/* Team name + owner (display name · @handle) */}
+                      {/* Team name + owner display name (no @handle) */}
                       <span className="min-w-0 flex flex-col gap-0.5">
                         <span className="font-tight text-[14px] font-semibold text-ink truncate">
                           {row.teamName}
                         </span>
                         {(row.ownerDisplayName || row.ownerUsername) && (
                           <span className="font-tight text-[11px] text-muted truncate">
-                            {row.ownerDisplayName ?? `@${row.ownerUsername}`}
-                            {row.ownerDisplayName && row.ownerUsername && (
-                              <span className="text-faint"> · @{row.ownerUsername}</span>
-                            )}
+                            {row.ownerDisplayName ?? row.ownerUsername}
                           </span>
                         )}
                       </span>
