@@ -326,10 +326,13 @@ const gridLinkClass =
   'flex items-center gap-2 px-1.5 py-1.5 rounded-md text-[12px] font-medium font-tight text-ink transition-colors duration-150 no-underline hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
 // ── Shared body: chips + sub-page tab links + coming-soon caption ──────────
-// This is the part BOTH the desktop fly-out and the mobile inline sub-dropdown
-// render identically. Team grids are desktop-only and live in LeagueFlyout,
-// NOT here — the mobile inline dropdown never shows them (see task note on
-// mobile-menu.tsx: mobile keeps only chips/tabs/caption, no data grids).
+// Used by the DESKTOP fly-out for every league, and by the MOBILE inline
+// sub-dropdown for every league EXCEPT USAU (USAU's mobile rendering is the
+// per-division accordion in UsauMobileLevelList below — a horizontal chip
+// row reading disconnected from its own tab-link row doesn't work once it's
+// stacked vertically in the accordion, so USAU gets its own mobile-only
+// component instead of reusing this one). Team grids are desktop-only and
+// live in LeagueFlyout, NOT here.
 function LeagueFlyoutBody({
   league,
   pathname,
@@ -429,6 +432,100 @@ function LeagueFlyoutBody({
       {/* Masters/Grand Masters data (events, games, teams, rosters) is fully
           ingested as of 2026-07-06 — the old "coming soon" caption is gone. */}
     </>
+  );
+}
+
+// ── MOBILE-ONLY: USAU's inline sub-dropdown ─────────────────────────────────
+// USAU is the one league with a competition-level filter, and on mobile that
+// filter reads better as its own vertically-stacked accordion (one division
+// per row, tap to reveal its 4 links) than as a horizontal chip row above a
+// shared tab-link row — chips floating above an unrelated-looking link row
+// don't read as "this row's filter" once everything is stacked vertically.
+// One division open at a time; defaults to whichever matches the current
+// ?level= (usauMobileExpandedLevel, seeded from the URL in MobileMenu —
+// independent of usauLevel, which drives the desktop chip row instead).
+function UsauMobileLevelList({
+  pathname,
+  urlDivision,
+  expandedLevel,
+  onToggleLevel,
+  onClose,
+}: {
+  pathname: string;
+  urlDivision: ReturnType<typeof parseDivisionParam>;
+  expandedLevel: UsauLevel | null;
+  onToggleLevel: (level: UsauLevel) => void;
+  onClose: () => void;
+}) {
+  const divisionRowBase = [
+    'flex items-center justify-between w-full pl-3 pr-3',
+    'min-h-[44px] text-left cursor-pointer rounded-md',
+    'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
+    'transition-colors duration-150 no-underline',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+  ].join(' ');
+
+  const linkClass = [
+    'inline-flex items-center px-3 min-h-[44px] rounded-md',
+    'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
+    'transition-colors duration-150 no-underline',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+  ].join(' ');
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {USAU_LEVELS.map((level) => {
+        const isExpanded = expandedLevel === level;
+        // CLUB is the default level — buildLeagueQs omits it from the qs.
+        const qs = buildLeagueQs('usau', urlDivision, level);
+        return (
+          <div key={level}>
+            <button
+              type="button"
+              aria-expanded={isExpanded}
+              onClick={() => onToggleLevel(level)}
+              className={[
+                divisionRowBase,
+                isExpanded ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
+              ].join(' ')}
+            >
+              {levelLabel(level)}
+              <ChevronDown
+                className={[
+                  'flex-shrink-0 transition-transform duration-200',
+                  isExpanded ? 'rotate-180 text-accent' : 'text-faint',
+                ].join(' ')}
+              />
+            </button>
+
+            {isExpanded && (
+              <div className="pl-3 pt-1 pb-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {GAMES_NAV_ITEMS.map((item) => {
+                    const active = isGamesNavActive(pathname, item);
+                    return (
+                      <Link
+                        key={item.href}
+                        href={`${item.href}${qs}`}
+                        role="menuitem"
+                        aria-current={active ? 'page' : undefined}
+                        onClick={onClose}
+                        className={[
+                          linkClass,
+                          active ? 'text-accent bg-[rgb(var(--accent)/0.1)]' : 'text-ink hover:bg-surface',
+                        ].join(' ')}
+                      >
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -747,6 +844,16 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // navigate — only the tab links below pick it up).
   const [usauLevel, setUsauLevel] = useState<UsauLevel>(() => parseLevelParam(searchParams.get('level')));
 
+  // MOBILE-ONLY: which USAU division row is expanded in the inline
+  // sub-dropdown accordion (UsauMobileLevelList). Independent of usauLevel
+  // above (that one drives the DESKTOP chip row) but defaults to the same
+  // URL-derived level so a user arriving at ?level=college-d1 sees College
+  // D-I pre-expanded on mobile too. One division open at a time; null = all
+  // collapsed (reachable by tapping the open division again).
+  const [usauMobileExpandedLevel, setUsauMobileExpandedLevel] = useState<UsauLevel | null>(
+    () => parseLevelParam(searchParams.get('level')),
+  );
+
   // "The League" section is expanded by default when on a games page.
   const initialGamesOpen = activeApp === 'games';
   const [gamesOpen, setGamesOpen] = useState(initialGamesOpen);
@@ -886,6 +993,14 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     setUsauLevel(level);
     if (level === 'COLLEGE_D1' && isDesktopViewport()) fetchUsauCollegeTeams();
   }, [fetchUsauCollegeTeams, isDesktopViewport]);
+
+  // MOBILE-ONLY: toggling a division row in UsauMobileLevelList. Pure
+  // accordion state — no data fetch (mobile never shows the team grids that
+  // fetch feeds), no navigation. Tapping the already-expanded division
+  // collapses it; tapping another switches to it (one open at a time).
+  const handleUsauMobileLevelToggle = useCallback((level: UsauLevel) => {
+    setUsauMobileExpandedLevel((prev) => (prev === level ? null : level));
+  }, []);
 
   // Close the fly-out whenever the main menu closes or the route changes.
   useEffect(() => { if (!open) setFlyoutLeague(null); }, [open]);
@@ -1167,28 +1282,38 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                     </button>
 
                     {/* ── MOBILE inline sub-dropdown ──────────────────────
-                        Renders directly beneath the row instead of the
-                        side fly-out (which is desktop-only, see below).
-                        Same content as the fly-out minus the header and
-                        team grids: chips (USAU) + sub-page tab links +
-                        coming-soon caption. */}
+                        Renders directly beneath the row instead of the side
+                        fly-out (which is desktop-only, see below). USAU gets
+                        its own per-division accordion (UsauMobileLevelList);
+                        every other league gets the shared LeagueFlyoutBody
+                        (sub-page tab links only — no team grids on mobile). */}
                     {isOpen && (
                       <div className="md:hidden pl-5 pr-2 pt-1 pb-2">
-                        <LeagueFlyoutBody
-                          league={league.id}
-                          pathname={pathname}
-                          leagueQsFor={leagueQsFor}
-                          onClose={onClose}
-                          usauLevel={usauLevel}
-                          onUsauLevelChange={handleUsauLevelChange}
-                          tabRowBase="flex flex-wrap items-center gap-1.5"
-                          tabLinkBase={[
-                            'inline-flex items-center px-3 min-h-[44px] rounded-md',
-                            'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
-                            'transition-colors duration-150 no-underline',
-                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-                          ].join(' ')}
-                        />
+                        {league.id === 'usau' ? (
+                          <UsauMobileLevelList
+                            pathname={pathname}
+                            urlDivision={urlDivision}
+                            expandedLevel={usauMobileExpandedLevel}
+                            onToggleLevel={handleUsauMobileLevelToggle}
+                            onClose={onClose}
+                          />
+                        ) : (
+                          <LeagueFlyoutBody
+                            league={league.id}
+                            pathname={pathname}
+                            leagueQsFor={leagueQsFor}
+                            onClose={onClose}
+                            usauLevel={usauLevel}
+                            onUsauLevelChange={handleUsauLevelChange}
+                            tabRowBase="flex flex-wrap items-center gap-1.5"
+                            tabLinkBase={[
+                              'inline-flex items-center px-3 min-h-[44px] rounded-md',
+                              'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
+                              'transition-colors duration-150 no-underline',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+                            ].join(' ')}
+                          />
+                        )}
                       </div>
                     )}
                   </div>

@@ -1058,19 +1058,26 @@ export async function recentUsauTournamentCards(
 ): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
   const today = now.toISOString().slice(0, 10);
-  const windowBack = new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 10);
 
-  // Recent completed events at the requested level in the last ~2 weekends.
+  // The 10 most recent COMPLETED events at this level that actually have
+  // games — no date window. A "last 2 weeks" window (the original rule) left
+  // sparse calendars (Masters/GM play a handful of weekends a year, College
+  // in summer, everyone in the offseason) with an empty scores page while
+  // /schedule clearly had data. A fixed count keeps the page populated
+  // year-round: in-season it reads the same as before, offseason it shows
+  // the final tournaments of the season. The games inner-join keeps
+  // result-less catalog shells from wasting one of the 10 slots.
+  const RECENT_EVENT_COUNT = 10;
   const { data: events } = await db
     .from('usau_events')
-    .select('id, usau_slug, name, start_date, end_date')
+    .select('id, usau_slug, name, start_date, end_date, usau_games!inner(id)')
     .eq('competition_level', competitionLevel)
     .lt('end_date', today)
-    .gte('end_date', windowBack)
-    .order('end_date', { ascending: false, nullsFirst: false });
+    .order('end_date', { ascending: false, nullsFirst: false })
+    .limit(1, { foreignTable: 'usau_games' })
+    .limit(RECENT_EVENT_COUNT);
 
-  // ALL club events in the window (not just ranked-flight flagships). We show
-  // every tournament from the past ~2 weekends as a full list, ordered by
+  // ALL events at the level (not just ranked-flight flagships), ordered by
   // flight status below. Flight tags exist only on marquee events today, so
   // most sort to the bottom (no flight) — that's expected until more get tagged.
   const recent = ((events ?? []) as Array<{

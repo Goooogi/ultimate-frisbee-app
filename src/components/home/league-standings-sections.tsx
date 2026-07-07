@@ -65,7 +65,7 @@ export async function PulStandingsSection() {
     >
       <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
         {/* Dark left panel — same chrome as StandingsStrip */}
-        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-between gap-3 min-h-[160px]">
+        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-start gap-3 min-h-[160px]">
           <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
             PUL · Final Standings
           </span>
@@ -147,7 +147,7 @@ export async function WulStandingsSection() {
     >
       <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
         {/* Dark left panel */}
-        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-between gap-3 min-h-[160px]">
+        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-start gap-3 min-h-[160px]">
           <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
             WUL · Final Standings
           </span>
@@ -309,7 +309,7 @@ export async function UsauRankingsSection() {
         className="px-5 lg:px-12 pt-2 pb-8 lg:pb-10"
       >
         <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
-          <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-between gap-3 min-h-[160px]">
+          <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-start gap-3 min-h-[160px]">
             <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
               USAU · Official Rankings
             </span>
@@ -354,7 +354,7 @@ export async function UsauRankingsSection() {
     >
       <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
         {/* Dark left panel */}
-        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-between gap-3 min-h-[180px]">
+        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-start gap-3 min-h-[180px]">
           <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
             USAU · Official Rankings
           </span>

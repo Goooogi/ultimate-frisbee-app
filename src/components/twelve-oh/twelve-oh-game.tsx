@@ -597,7 +597,7 @@ function ResultScreen({
       {/* Roster breakdown */}
       <div className="w-full">
         <p className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight mb-3">
-          Your 7-Man Roster
+          Your 7-Player Roster
         </p>
         <div className="flex flex-col gap-2">
           {roster.map((p) => {

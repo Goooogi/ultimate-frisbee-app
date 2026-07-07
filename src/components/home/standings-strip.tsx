@@ -84,7 +84,9 @@ export function StandingsStrip({
       <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
         {/* Dark left panel — design element paired with the dark stadium
             hero card. Kept dark in both themes. */}
-        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-between gap-3 min-h-[180px]">
+        {/* justify-start: the Top-3 text block sits at the TOP under the
+            eyebrow (was justify-between, which pinned it to the bottom). */}
+        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-start gap-3 min-h-[180px]">
           <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
             Top of the league
           </span>
