@@ -1246,10 +1246,18 @@ async function bestPoolRecordWinners(
     team_b: TeamRef;
   };
 
-  // Pull all pool-play games (round='pool') across the candidate events, with
-  // each side's team name + division for grouping and display. Page through —
-  // across every club event in a 2-weekend window, pool games easily exceed
-  // PostgREST's 1000-row cap, which would silently truncate records.
+  // Pull all pool-play games across the candidate events, with each side's team
+  // name + division for grouping and display. Page through — across every club
+  // event in a 2-weekend window, pool games easily exceed PostgREST's 1000-row
+  // cap, which would silently truncate records.
+  //
+  // Detect pool games by BRACKET NAME ("Pool A", "Pool Apple", …), NOT by
+  // round='pool'. The ultirzr ingest tags pool games round='other' (its
+  // classifyRound has no pool case), so ~90% of pool games in the DB are
+  // round='other' — filtering on round would miss them and make round-robin
+  // events read as "Results pending" even though the event page (which keys on
+  // bracket_name) correctly shows a pool leader. Matching bracket_name keeps
+  // the card and the event page in agreement.
   const PAGE = 1000;
   const poolGames: Row[] = [];
   for (let from = 0; ; from += PAGE) {
@@ -1261,7 +1269,7 @@ async function bestPoolRecordWinners(
           'team_b:usau_teams!team_b_id(name, gender_division)',
       )
       .in('event_id', eventIds)
-      .eq('round', 'pool')
+      .ilike('bracket_name', 'pool%')
       .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
       .range(from, from + PAGE - 1);
     const rows = (page ?? []) as unknown as Row[];

@@ -20,11 +20,13 @@ import {
   getMyTeamRoster,
   getMyProfile,
   isUsernameAvailable,
+  renameMyTeam,
   USERNAME_RE,
   fantasySeasonYear,
   type FantasyPlayerHit,
   type FantasyTeamView,
   type RosterSlot,
+  type MyProfile,
 } from '@/lib/fantasy/data';
 import { playerSeasonPreview } from '@/lib/fantasy/data';
 import { type FantasyRole, SCORING } from '@/lib/fantasy/scoring';
@@ -44,6 +46,10 @@ interface RosterBuilderProps {
   /** The user's already-saved roster, used to pre-fill the slots so returning
    *  to "My Team" shows their picks instead of empty search boxes. */
   existingRoster?: RosterSlot[];
+  /** The signed-in user's profile (display name + handle), resolved server-side
+   *  so the handle field / display-name prefill are correct on first paint
+   *  instead of flashing in after a client fetch. null when signed out. */
+  initialProfile?: MyProfile | null;
 }
 
 interface SlotState {
@@ -375,18 +381,26 @@ function useUsernameCheck(username: string): UsernameStatus {
 
 // ─── RosterBuilder (main component) ───────────────────────────────────────────
 
-export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: RosterBuilderProps) {
+export function RosterBuilder({
+  weekInfo,
+  existingTeam,
+  existingRoster,
+  initialProfile,
+}: RosterBuilderProps) {
   const { user } = useAuth();
   const router = useRouter();
 
   // Auth modal state — opened only on write attempt when logged out.
   const [authOpen, setAuthOpen] = useState(false);
 
-  // Form state
-  const [teamName, setTeamName] = useState(existingTeam?.teamName ?? '');
-  const [handle, setHandle] = useState('');
+  // Form state. Team name seeds from the existing team, else the server-provided
+  // profile's display name — both known at first paint, so no prefill flash.
+  const [teamName, setTeamName] = useState(
+    existingTeam?.teamName ?? (existingTeam ? '' : initialProfile?.displayName ?? ''),
+  );
+  const [handle, setHandle] = useState(initialProfile?.username ?? '');
   // Whether the user already has a handle set in their profile (post-registration users will).
-  const [hasExistingHandle, setHasExistingHandle] = useState(false);
+  const [hasExistingHandle, setHasExistingHandle] = useState(!!initialProfile?.username);
   // Seed the slots from any already-saved roster so "My Team" shows the user's
   // real picks on first paint, not empty search boxes.
   const [slots, setSlots] = useState<SlotState[]>(() =>
@@ -398,10 +412,26 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedTeamId, setSavedTeamId] = useState<string | null>(null);
 
-  // Load profile once user is known: prefill team name from display name (if no existing team),
-  // and load their existing handle (hide the handle field if already set).
+  // ── Existing-team banner: inline rename ───────────────────────────────────
+  // Local mirror of the team name so a successful rename reflects immediately
+  // without waiting on a server refetch of `existingTeam` (which only changes
+  // on next navigation).
+  const [displayTeamName, setDisplayTeamName] = useState(existingTeam?.teamName ?? '');
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameDraft, setRenameDraft] = useState(existingTeam?.teamName ?? '');
+  const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+
+  // Load profile once user is known: prefill team name from display name (if no
+  // existing team), and load their existing handle (hide the handle field if
+  // already set). The server already provided this via `initialProfile` for the
+  // page's initial render (no flash) — this is a FALLBACK for the case where the
+  // user signs in via the auth modal on an initially-logged-out render, so the
+  // server had no profile to hand us. Skip it when we already have the profile.
   useEffect(() => {
     if (!user) return;
+    if (initialProfile) return; // already seeded server-side — no re-fetch
     getMyProfile().then((profile) => {
       if (profile?.username) {
         setHandle(profile.username);
@@ -413,7 +443,7 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
       }
     }).catch(() => null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user]);
+  }, [user, initialProfile]);
 
   // Load existing roster if we already have a team (for the current week).
   useEffect(() => {
@@ -421,6 +451,7 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
     // If team already exists, pre-fill the team name.
     setTeamName(existingTeam.teamName);
     setSavedTeamId(existingTeam.id);
+    setDisplayTeamName(existingTeam.teamName);
   }, [existingTeam, weekInfo]);
 
   const handleStatus = useUsernameCheck(user ? '' : handle); // only validate pre-auth
@@ -517,6 +548,50 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
     }
   };
 
+  // ── Existing-team banner: inline rename handlers ──────────────────────────
+
+  const startRename = () => {
+    setRenameDraft(displayTeamName);
+    setRenameError(null);
+    setIsRenaming(true);
+  };
+
+  const cancelRename = () => {
+    setRenameDraft(displayTeamName);
+    setRenameError(null);
+    setIsRenaming(false);
+  };
+
+  // Autofocus the input as soon as it mounts.
+  useEffect(() => {
+    if (isRenaming) renameInputRef.current?.focus();
+  }, [isRenaming]);
+
+  const trimmedRenameDraft = renameDraft.trim();
+  const renameUnchanged = trimmedRenameDraft === displayTeamName.trim();
+  const canSaveRename = trimmedRenameDraft.length > 0 && !renameUnchanged && !renameSaving;
+
+  const handleRenameSave = async () => {
+    if (!existingTeam) return;
+    if (!canSaveRename) return;
+
+    setRenameSaving(true);
+    setRenameError(null);
+    try {
+      const savedName = await renameMyTeam(existingTeam.id, renameDraft);
+      setDisplayTeamName(savedName);
+      setTeamName(savedName);
+      setIsRenaming(false);
+      // Best-effort — the rename already succeeded, so a revalidation hiccup
+      // shouldn't surface as a user-facing failure.
+      revalidateFantasy(existingTeam.id).catch(() => {});
+    } catch (err) {
+      setRenameError(err instanceof Error ? err.message : 'Could not rename your team. Please try again.');
+    } finally {
+      setRenameSaving(false);
+    }
+  };
+
   // After sign-in, re-load existing team + its saved roster. This covers the
   // case where the page was rendered logged-out (empty existingRoster) and the
   // user signed in via the modal — without this, their picks wouldn't appear
@@ -528,6 +603,7 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
       if (t) {
         setTeamName(t.teamName);
         setSavedTeamId(t.id);
+        setDisplayTeamName(t.teamName);
       }
     }).catch(() => null);
 
@@ -720,24 +796,128 @@ export function RosterBuilder({ weekInfo, existingTeam, existingRoster }: Roster
           </div>
         )}
 
-        {/* Show existing team info */}
-        {existingTeam && (
+        {/* Show existing team info — name is inline-editable */}
+        {existingTeam && !isRenaming && (
           <div className="flex items-center gap-3 px-4 py-3 rounded-md bg-surface border border-border">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0 text-accent">
               <path d="M3 8l4 4 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span className="font-tight text-[13px] text-ink">
-              Team <span className="font-bold">{existingTeam.teamName}</span>{' '}
+            <span className="font-tight text-[13px] text-ink min-w-0 truncate">
+              Team <span className="font-bold">{displayTeamName}</span>{' '}
               {existingTeam.ownerUsername && (
                 <span className="text-muted">· @{existingTeam.ownerUsername}</span>
               )}
             </span>
+            <button
+              type="button"
+              onClick={startRename}
+              aria-label="Rename your team"
+              className={[
+                'ml-auto flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-md',
+                'text-faint hover:text-ink hover:bg-[rgb(var(--ink)/0.06)]',
+                'transition-colors duration-150 cursor-pointer',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              ].join(' ')}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M11.3 2.3a1.5 1.5 0 012.1 2.1l-7.2 7.2-2.6.6.6-2.6 7.1-7.3z"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
             <Link
               href={`/fantasy/team/${existingTeam.id}`}
-              className="ml-auto text-[11px] font-bold text-accent font-tight hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+              className="flex-shrink-0 text-[11px] font-bold text-accent font-tight hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
             >
               View team
             </Link>
+          </div>
+        )}
+
+        {existingTeam && isRenaming && (
+          <div className="rounded-md bg-surface border border-border p-4">
+            <label
+              htmlFor="rename-team"
+              className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
+            >
+              Team Name
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-start">
+              <div className="flex-1 min-w-0">
+                <input
+                  ref={renameInputRef}
+                  id="rename-team"
+                  type="text"
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && canSaveRename) handleRenameSave();
+                    if (e.key === 'Escape') cancelRename();
+                  }}
+                  maxLength={40}
+                  disabled={renameSaving}
+                  aria-describedby={renameError ? 'rename-team-error' : undefined}
+                  className={[
+                    'w-full px-3 py-2.5 rounded-md border border-border bg-bg',
+                    'font-tight text-[14px] text-ink placeholder:text-faint',
+                    'focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent',
+                    'min-h-[44px]',
+                    renameSaving ? 'opacity-60 cursor-not-allowed' : '',
+                  ].join(' ')}
+                />
+                <p className="mt-1 text-[11px] text-faint font-tight">
+                  {trimmedRenameDraft.length}/40 characters
+                </p>
+              </div>
+              <div className="flex gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={handleRenameSave}
+                  disabled={!canSaveRename}
+                  className={[
+                    'inline-flex items-center justify-center gap-2 px-4 rounded-md min-h-[44px]',
+                    'font-tight text-[12px] font-bold tracking-[0.04em] uppercase transition-all duration-150',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
+                    canSaveRename
+                      ? 'bg-accent text-[rgb(var(--accent-ink))] hover:opacity-90 cursor-pointer'
+                      : 'bg-[rgb(var(--ink)/0.08)] text-faint cursor-not-allowed',
+                  ].join(' ')}
+                >
+                  {renameSaving && (
+                    <div
+                      className="w-4 h-4 rounded-full border-2 border-current/30 border-t-current animate-spin"
+                      aria-hidden="true"
+                    />
+                  )}
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelRename}
+                  disabled={renameSaving}
+                  className={[
+                    'inline-flex items-center justify-center px-4 rounded-md min-h-[44px]',
+                    'font-tight text-[12px] font-bold tracking-[0.04em] uppercase transition-colors duration-150',
+                    'text-muted hover:text-ink hover:bg-[rgb(var(--ink)/0.06)] border border-border',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    renameSaving ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
+                  ].join(' ')}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+            <div aria-live="polite">
+              {renameError && (
+                <p id="rename-team-error" className="mt-2 font-tight text-[12px] text-[rgb(var(--live))]">
+                  {renameError}
+                </p>
+              )}
+            </div>
           </div>
         )}
 

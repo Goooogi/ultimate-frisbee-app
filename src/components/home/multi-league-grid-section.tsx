@@ -131,9 +131,16 @@ export function UsauUpNextCard({ event }: { event: UsauEventSummary }) {
   const divByTeamId = new Map<string, string | null>();
   for (const t of event.teams) divByTeamId.set(t.teamId, t.genderDivision);
 
-  // Show up to 4 pool games (round='pool', scored).
+  // Show up to 4 pool games (scored). Detect pools by BRACKET NAME, not
+  // round='pool' — the ultirzr ingest tags most pool games round='other', so
+  // filtering on round would show nothing for the many events ingested that
+  // way (matches how UsauEventDetail and the pool-leader card detect pools).
   const poolGames = event.games
-    .filter((g) => g.round === 'pool' && (g.scoreA !== null || g.scoreB !== null))
+    .filter(
+      (g) =>
+        (g.bracketName ?? '').toLowerCase().startsWith('pool') &&
+        (g.scoreA !== null || g.scoreB !== null),
+    )
     .slice(0, 4);
 
   return (

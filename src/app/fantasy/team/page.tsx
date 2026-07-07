@@ -4,12 +4,20 @@
 // client RosterBuilder component.
 
 import { PageShell } from '@/components/page-shell';
-import { currentFantasyWeek, getMyTeam, getMyTeamRoster } from '@/lib/fantasy/data';
+import { currentFantasyWeek } from '@/lib/fantasy/data';
+import {
+  getMyTeamServer,
+  getMyTeamRosterServer,
+  getMyProfileServer,
+} from '@/lib/fantasy/server';
 import { RosterBuilder } from '@/components/fantasy/roster-builder';
 import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
 import type { Crumb } from '@/components/breadcrumbs';
 
 export const revalidate = 0; // builder needs fresh week/team state
+// Per-request render: the team/roster/profile are user-specific (server-auth),
+// so this route can't be statically cached across users.
+export const dynamic = 'force-dynamic';
 
 const BREADCRUMBS: Crumb[] = [
   { label: 'Fantasy', href: '/fantasy' },
@@ -17,18 +25,21 @@ const BREADCRUMBS: Crumb[] = [
 ];
 
 export default async function FantasyTeamPage() {
-  // Both fetches are safe to run server-side as anon / session-aware
-  // respectively — getMyTeam returns null when not signed in (no crash).
-  const [weekInfo, myTeam] = await Promise.all([
+  // Resolve everything server-side with the cookie-aware server client so the
+  // signed-in user's team name, roster, and profile are baked into the initial
+  // HTML — no post-hydration empty→filled flash. All three return null/[] when
+  // signed out (no crash), so the logged-out builder still renders fine.
+  const [weekInfo, myTeam, myProfile] = await Promise.all([
     currentFantasyWeek().catch(() => null),
-    getMyTeam().catch(() => null),
+    getMyTeamServer().catch(() => null),
+    getMyProfileServer().catch(() => null),
   ]);
 
   // Pre-fill the builder with the user's already-saved roster so "My Team"
   // shows their picks instead of empty search boxes. Needs a week to key on;
   // if the schedule has no active week we skip it (builder starts empty).
   const existingRoster = weekInfo
-    ? await getMyTeamRoster(weekInfo.week).catch(() => [])
+    ? await getMyTeamRosterServer(weekInfo.week).catch(() => [])
     : [];
 
   return (
@@ -46,7 +57,12 @@ export default async function FantasyTeamPage() {
       <div className="flex justify-end mb-6">
         <FantasyRulesModal label="How scoring works" />
       </div>
-      <RosterBuilder weekInfo={weekInfo} existingTeam={myTeam} existingRoster={existingRoster} />
+      <RosterBuilder
+        weekInfo={weekInfo}
+        existingTeam={myTeam}
+        existingRoster={existingRoster}
+        initialProfile={myProfile}
+      />
     </PageShell>
   );
 }

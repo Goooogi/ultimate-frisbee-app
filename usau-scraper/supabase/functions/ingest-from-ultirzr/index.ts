@@ -231,6 +231,12 @@ function classifyRound(stageName: string | undefined, bracketName: string | unde
   const stage = (stageName ?? '').toLowerCase().trim();
   const bracket = (bracketName ?? '').toLowerCase().trim();
   const t = `${bracket} ${stage}`;
+  // Pool play. The pool-ingest path passes stage='pool' and bracket='Pool X'
+  // (see the Pools loop below); without this, pool games fell through to
+  // 'other', which made round-robin events read as "Results pending" on the
+  // scores cards (the pool-leader fallback keyed on round='pool'). Check FIRST
+  // so a group prefix like "GM Women · Pool A" can't be mis-hit by later rules.
+  if (stage === 'pool' || /(^|·\s*)pool\b/.test(bracket)) return 'pool';
   if (/(prequarter|pre-quarter|pre quarter)/.test(t)) return 'prequarter';
   if (/semi/.test(t)) return 'semi';
   if (/quarter/.test(t)) return 'quarter';

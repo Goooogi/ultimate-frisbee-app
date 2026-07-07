@@ -63,12 +63,8 @@ export default async function FantasyTeamPage({ params }: Props) {
       breadcrumbs={BREADCRUMBS}
     >
       {/* ── Stats header ──────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-8">
+      <div className="grid grid-cols-2 gap-3 mb-8">
         <StatCard label="Total Points" value={team.totalPoints} unit="pts" highlight />
-        <StatCard
-          label="Weeks Scored"
-          value={team.weeklyPoints.filter((w) => w.points > 0).length}
-        />
         {team.weeklyPoints.length > 0 && (
           <StatCard
             label="Best Week"
@@ -85,24 +81,15 @@ export default async function FantasyTeamPage({ params }: Props) {
             Weekly Points
           </div>
           <div className="rounded-lg border border-border bg-surface overflow-hidden">
-            <div className="hidden sm:grid grid-cols-[1fr_auto] px-4 py-2.5 border-b border-hairline">
-              <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
-                Week
-              </span>
-              <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight text-right">
-                Points
-              </span>
-            </div>
             <ol aria-label="Weekly point breakdown">
               {team.weeklyPoints.map((w, idx) => (
                 <li
                   key={w.week}
                   className={[
-                    'grid grid-cols-[1fr_auto] items-center px-4 py-3',
+                    'flex items-center justify-end px-4 py-3',
                     idx > 0 ? 'border-t border-hairline' : '',
                   ].join(' ')}
                 >
-                  <span className="font-tight text-[13px] font-medium text-ink">{w.week}</span>
                   <span className="font-tight text-[14px] font-bold tabular text-right text-ink">
                     {w.points}
                     <span className="text-[11px] font-medium text-faint ml-1">pts</span>

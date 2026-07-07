@@ -412,6 +412,38 @@ export async function createMyTeam(
   return data.id as string;
 }
 
+/**
+ * Rename the signed-in user's team. Same validation + moderation as
+ * createMyTeam's name rule (1–40 chars, moderated). The UPDATE is gated by RLS
+ * ("fantasy_teams update own": owner_id = auth.uid() in both USING and
+ * WITH CHECK), so a user can only rename a team they own — we pass the id but
+ * ownership is enforced at the DB, not trusted from the client. Returns the
+ * trimmed name so the caller can reflect it without a refetch.
+ */
+export async function renameMyTeam(teamId: string, teamName: string): Promise<string> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const name = teamName.trim();
+  if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
+  const bad = moderateName(name, 'Team name');
+  if (bad) throw new Error(bad);
+
+  const { error, count } = await supabase
+    .from('fantasy_teams')
+    .update({ team_name: name }, { count: 'exact' })
+    .eq('id', teamId)
+    .eq('owner_id', user.id);
+  if (error) throw error;
+  // RLS would have blocked a non-owner (0 rows) — surface it rather than
+  // silently reporting success.
+  if (count === 0) throw new Error('Could not rename this team.');
+  return name;
+}
+
 export interface RosterInput {
   playerId: string;
   role: FantasyRole;
