@@ -327,22 +327,27 @@ function LeagueCard({
       disabled={!hasData}
       aria-label={hasData ? `Play ${info.fullName}` : `${info.fullName} — no data available`}
       className={[
-        'group flex flex-col gap-4 p-5 rounded-xl text-left',
+        'group text-left rounded-xl',
         'bg-surface border border-border',
         'motion-safe:transition-all motion-safe:duration-200',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
-        'min-h-[180px]',
+        // Mobile: compact horizontal row. sm+: tall card (unchanged).
+        'flex items-center gap-3 p-3',
+        'sm:flex-col sm:gap-4 sm:p-5 sm:min-h-[180px]',
         hasData
           ? 'hover:border-accent/50 hover:shadow-sm cursor-pointer'
           : 'opacity-50 cursor-not-allowed',
       ].join(' ')}
     >
-      {/* Icon */}
-      <div className="flex items-center justify-between">
+      {/* Icon tile — shared by both layouts */}
+      <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0 sm:hidden">
+        <LeagueGlyph league={league} />
+      </div>
+      <div className="hidden sm:flex sm:items-center sm:justify-between sm:w-full">
         <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
           <LeagueGlyph league={league} />
         </div>
-        {/* Arrow hint */}
+        {/* Arrow hint — desktop, top-right */}
         {hasData && (
           <svg
             width="16"
@@ -357,18 +362,37 @@ function LeagueCard({
         )}
       </div>
 
-      {/* Text */}
-      <div className="flex flex-col gap-1.5">
-        <span className="font-display text-xl font-bold text-ink leading-tight tracking-tight">
+      {/* Text column — mobile: abbr + full name + data line stacked tight.
+          sm+: abbr + full name only (data line moves to the pinned footer). */}
+      <div className="flex-1 min-w-0 flex flex-col gap-0.5 sm:gap-1.5">
+        <span className="font-display text-lg sm:text-xl font-bold text-ink leading-tight tracking-tight">
           {info.abbr}
         </span>
-        <span className="text-[13px] text-muted font-tight leading-snug">
+        <span className="text-[13px] text-muted font-tight leading-snug truncate sm:whitespace-normal">
           {info.fullName}
+        </span>
+        {/* Data line — mobile only, stacked under the text column */}
+        <span className="sm:hidden text-[10px] font-bold tabular text-faint font-tight tracking-[0.04em] truncate">
+          {hasData ? dataLine : 'No data'}
         </span>
       </div>
 
-      {/* CTA / data line */}
-      <div className="mt-auto pt-2">
+      {/* Arrow hint — mobile, far right */}
+      {hasData && (
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+          className="sm:hidden flex-shrink-0 text-faint group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150"
+        >
+          <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
+
+      {/* CTA / data line — desktop only, pinned to bottom */}
+      <div className="hidden sm:block sm:mt-auto sm:pt-2 sm:w-full">
         {hasData ? (
           <span className="text-[10px] font-bold tabular text-faint font-tight tracking-[0.04em]">
             {dataLine}
@@ -835,30 +859,30 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
 
       {/* ── Phase content ────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-3 sm:py-6">
 
           {/* LEAGUE SELECT phase */}
           {phase === 'league-select' && (
-            <div className="flex flex-col gap-8 py-4 sm:py-8">
+            <div className="flex flex-col gap-4 sm:gap-8 py-1 sm:py-8">
               {/* Hero */}
               <div className="text-center">
-                <p className="text-[11px] font-bold tracking-[0.2em] uppercase text-muted font-tight mb-3">
+                <p className="text-[11px] font-bold tracking-[0.2em] uppercase text-muted font-tight mb-1.5 sm:mb-3">
                   Pro Ultimate Draft Challenge
                 </p>
-                <h2 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
+                <h2 className="font-display text-3xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
                   Can you go{' '}
                   <span className="text-accent">12-0?</span>
                 </h2>
-                <p className="text-sm text-muted font-tight mt-3 max-w-[320px] mx-auto">
+                <p className="text-sm text-muted font-tight mt-2 sm:mt-3 max-w-[320px] mx-auto">
                   Pick your league, spin for a team and season, draft 7 players.
                 </p>
-                <p className="text-[13px] font-bold text-ink font-tight mt-5">
+                <p className="text-[13px] font-bold text-ink font-tight mt-3 sm:mt-5">
                   Choose your league
                 </p>
               </div>
 
               {/* League cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-4">
                 {LEAGUE_ORDER.map((lg) => (
                   <LeagueCard
                     key={lg}

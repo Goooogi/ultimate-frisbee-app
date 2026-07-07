@@ -14,6 +14,17 @@
 //
 // Accordion default-open state: opens to the branch that matches the current URL
 // so a user in USAU Teams sees The League→USAU expanded with Teams highlighted.
+//
+// Layer 2 → Layer 3 presentation differs by breakpoint:
+//   MOBILE (<md): tapping a league row expands an INLINE sub-dropdown directly
+//     beneath that row (chips + tab links + coming-soon caption only — no team
+//     grids). See the `isOpen && <div className="md:hidden">` block inside the
+//     league .map() below.
+//   DESKTOP (md+): tapping/hovering a league row opens the side-by-side
+//     LeagueFlyout panel (header + chips/tabs + team grid), rendered in a
+//     `hidden md:flex` container after the main nav list.
+// Both share the same `flyoutLeague` state and `LeagueFlyoutBody` content
+// component so the chips/tabs markup isn't duplicated.
 
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -311,6 +322,118 @@ interface FlyoutLeagueData {
   wfdf: { events: WfdfMenuEvent[] | null; loading: boolean; error: boolean };
 }
 
+const gridLinkClass =
+  'flex items-center gap-2 px-1.5 py-1.5 rounded-md text-[12px] font-medium font-tight text-ink transition-colors duration-150 no-underline hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+
+// ── Shared body: chips + sub-page tab links + coming-soon caption ──────────
+// This is the part BOTH the desktop fly-out and the mobile inline sub-dropdown
+// render identically. Team grids are desktop-only and live in LeagueFlyout,
+// NOT here — the mobile inline dropdown never shows them (see task note on
+// mobile-menu.tsx: mobile keeps only chips/tabs/caption, no data grids).
+function LeagueFlyoutBody({
+  league,
+  pathname,
+  leagueQsFor,
+  onClose,
+  usauLevel,
+  onUsauLevelChange,
+  tabRowBase = 'flex flex-wrap items-center gap-1 mb-2.5 pb-3 border-b border-hairline',
+  tabLinkBase,
+}: {
+  league: MegaLeagueId;
+  pathname: string;
+  leagueQsFor: (id: MegaLeagueId) => string;
+  onClose: () => void;
+  usauLevel: UsauLevel;
+  onUsauLevelChange: (level: UsauLevel) => void;
+  /** Wrapper classes for the tab-link row — lets callers adjust indentation. */
+  tabRowBase?: string;
+  /** Per-link classes — defaults to the desktop fly-out treatment. */
+  tabLinkBase?: string;
+}) {
+  // Sub-page link set: WUL + WFDF use their own routes (no ?league= qs).
+  const navItems =
+    league === 'wul' ? WUL_NAV_ITEMS : league === 'wfdf' ? WFDF_NAV_ITEMS : GAMES_NAV_ITEMS;
+  const noQs = league === 'wul' || league === 'wfdf';
+
+  const linkClass =
+    tabLinkBase ??
+    [
+      'px-3 py-1.5 rounded-md',
+      'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
+      'transition-colors duration-150 no-underline',
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+    ].join(' ');
+
+  return (
+    <>
+      {/* ── USAU: competition-level sub-tabs — a FILTER, not navigation.
+          Sits above the page-link row and is visually subordinate to it
+          (smaller text, muted resting state). Selecting a chip updates
+          local state; the page-link hrefs below pick up the new level. ── */}
+      {league === 'usau' && (
+        <div
+          role="tablist"
+          aria-label="Competition level"
+          className="flex items-center gap-1 mb-2.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {USAU_LEVELS.map((lvl) => {
+            const active = lvl === usauLevel;
+            return (
+              <button
+                key={lvl}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => onUsauLevelChange(lvl)}
+                className={[
+                  'flex-shrink-0 px-2.5 min-h-[30px] rounded-full',
+                  'text-[10px] font-bold tracking-[0.08em] uppercase font-tight whitespace-nowrap',
+                  'transition-colors duration-150 cursor-pointer',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  active
+                    ? 'text-accent bg-[rgb(var(--accent)/0.1)]'
+                    : 'text-muted hover:text-ink hover:bg-surface',
+                ].join(' ')}
+              >
+                {levelLabel(lvl)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Sub-page links row. */}
+      <div className={tabRowBase}>
+        {navItems.map((item) => {
+          const active = isGamesNavActive(pathname, item);
+          const qs = noQs ? '' : leagueQsFor(league);
+          return (
+            <Link
+              key={item.href}
+              href={`${item.href}${qs}`}
+              role="menuitem"
+              aria-current={active ? 'page' : undefined}
+              onClick={onClose}
+              className={[
+                linkClass,
+                active ? 'text-accent bg-[rgb(var(--accent)/0.1)]' : 'text-ink hover:bg-surface',
+              ].join(' ')}
+            >
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
+
+      {/* Masters/Grand Masters data (events, games, teams, rosters) is fully
+          ingested as of 2026-07-06 — the old "coming soon" caption is gone. */}
+    </>
+  );
+}
+
+// Desktop-only fly-out: header + shared body + team grids. Rendered by the
+// caller inside a `hidden md:flex` wrapper — mobile never mounts this.
 function LeagueFlyout({
   league,
   pathname,
@@ -333,13 +456,6 @@ function LeagueFlyout({
   onUsauLevelChange: (level: UsauLevel) => void;
 } & FlyoutLeagueData) {
   const label = MEGA_LEAGUES.find((l) => l.id === league)?.label ?? '';
-  // Sub-page link set: WUL + WFDF use their own routes (no ?league= qs).
-  const navItems =
-    league === 'wul' ? WUL_NAV_ITEMS : league === 'wfdf' ? WFDF_NAV_ITEMS : GAMES_NAV_ITEMS;
-  const noQs = league === 'wul' || league === 'wfdf';
-
-  const gridLink =
-    'flex items-center gap-2 px-1.5 py-1.5 rounded-md text-[12px] font-medium font-tight text-ink transition-colors duration-150 no-underline hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
   return (
     <div className="flex flex-col">
@@ -361,74 +477,14 @@ function LeagueFlyout({
       </div>
 
       <div className="p-4">
-        {/* ── USAU: competition-level sub-tabs — a FILTER, not navigation.
-            Sits above the page-link row and is visually subordinate to it
-            (smaller text, muted resting state). Selecting a chip updates
-            local state; the page-link hrefs below pick up the new level. ── */}
-        {league === 'usau' && (
-          <div
-            role="tablist"
-            aria-label="Competition level"
-            className="flex items-center gap-1 mb-2.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          >
-            {USAU_LEVELS.map((lvl) => {
-              const active = lvl === usauLevel;
-              return (
-                <button
-                  key={lvl}
-                  type="button"
-                  role="tab"
-                  aria-selected={active}
-                  onClick={() => onUsauLevelChange(lvl)}
-                  className={[
-                    'flex-shrink-0 px-2.5 min-h-[30px] rounded-full',
-                    'text-[10px] font-bold tracking-[0.08em] uppercase font-tight whitespace-nowrap',
-                    'transition-colors duration-150 cursor-pointer',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                    active
-                      ? 'text-accent bg-[rgb(var(--accent)/0.1)]'
-                      : 'text-muted hover:text-ink hover:bg-surface',
-                  ].join(' ')}
-                >
-                  {levelLabel(lvl)}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Sub-page links row. */}
-        <div className="flex flex-wrap items-center gap-1 mb-2.5 pb-3 border-b border-hairline">
-          {navItems.map((item) => {
-            const active = isGamesNavActive(pathname, item);
-            const qs = noQs ? '' : leagueQsFor(league);
-            return (
-              <Link
-                key={item.href}
-                href={`${item.href}${qs}`}
-                role="menuitem"
-                aria-current={active ? 'page' : undefined}
-                onClick={onClose}
-                className={[
-                  'px-3 py-1.5 rounded-md',
-                  'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
-                  'transition-colors duration-150 no-underline',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  active ? 'text-accent bg-[rgb(var(--accent)/0.1)]' : 'text-ink hover:bg-surface',
-                ].join(' ')}
-              >
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-
-        {/* ── USAU: Masters / Grand Masters — coming-soon caption ── */}
-        {league === 'usau' && (usauLevel === 'MASTERS' || usauLevel === 'GRAND_MASTERS') && (
-          <p className="text-[11px] text-muted mb-3 -mt-1 leading-snug">
-            2026 events are on the schedule — full results &amp; rosters coming soon.
-          </p>
-        )}
+        <LeagueFlyoutBody
+          league={league}
+          pathname={pathname}
+          leagueQsFor={leagueQsFor}
+          onClose={onClose}
+          usauLevel={usauLevel}
+          onUsauLevelChange={onUsauLevelChange}
+        />
 
         {/* ── UFA: 4-division team grid (2 cols in the narrow panel) ── */}
         {league === 'ufa' && (
@@ -441,7 +497,7 @@ function LeagueFlyout({
                 <ul className="space-y-0.5">
                   {UFA_BY_DIVISION[div].map((team) => (
                     <li key={team.id}>
-                      <Link href={`/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLink}>
+                      <Link href={`/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                         <TeamLogo team={team} size={20} />
                         <span className="truncate">{team.city}</span>
                       </Link>
@@ -474,7 +530,7 @@ function LeagueFlyout({
                       <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                         {teams.map((team) => (
-                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLink}>
+                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                             <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
                               {team.nationalsPlacement ?? ''}
                             </span>
@@ -508,7 +564,7 @@ function LeagueFlyout({
                       <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                         {teams.map((team) => (
-                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLink}>
+                          <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                             <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
                               {team.rank}
                             </span>
@@ -534,7 +590,7 @@ function LeagueFlyout({
             {!pul.loading && !pul.error && pul.teams && (
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                 {pul.teams.map((team) => (
-                  <Link key={team.id} href={`/pul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLink}>
+                  <Link key={team.id} href={`/pul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                     <PulTeamLogoMini logoUrl={team.logoUrl} city={team.city} />
                     <span className="truncate">{team.city}</span>
                   </Link>
@@ -550,7 +606,7 @@ function LeagueFlyout({
             <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Teams</p>
             <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
               {WUL_TEAMS_LIST.map((team) => (
-                <Link key={team.id} href={`/wul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLink}>
+                <Link key={team.id} href={`/wul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                   <WulTeamLogoMini team={team} />
                   <span className="truncate">{team.city}</span>
                 </Link>
@@ -568,7 +624,7 @@ function LeagueFlyout({
             {!wfdf.loading && !wfdf.error && wfdf.events && (
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
                 {wfdf.events.map((e) => (
-                  <Link key={e.slug} href={`/wfdf/events/${e.slug}`} role="menuitem" onClick={onClose} className={gridLink}>
+                  <Link key={e.slug} href={`/wfdf/events/${e.slug}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                     <span className="text-[10px] font-bold text-faint tabular w-8 text-right flex-shrink-0">{e.year}</span>
                     <span className="truncate">{e.name}</span>
                   </Link>
@@ -801,25 +857,35 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     }
   }, []);
 
+  // Team grids (the thing these fetches feed) only render on md+ — the
+  // mobile inline sub-dropdown shows just chips/tabs/caption. Skip the
+  // network calls entirely on narrow viewports so opening a league on
+  // mobile doesn't fetch data nothing will display.
+  const isDesktopViewport = useCallback(() => {
+    return typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches;
+  }, []);
+
   // Open the fly-out for a league + kick its lazy fetch. USAU's top-teams
   // source depends on which level is currently selected (e.g. deep-linking
   // in with ?level=college-d1 already selected before the flyout opens).
   const openFlyout = useCallback((id: MegaLeagueId) => {
     setFlyoutLeague(id);
+    if (!isDesktopViewport()) return;
     if (id === 'usau') {
       if (usauLevel === 'COLLEGE_D1') fetchUsauCollegeTeams();
       else if (usauLevel === 'CLUB') fetchUsauTeams();
     } else if (id === 'pul') fetchPulTeams();
     else if (id === 'wfdf') fetchWfdfEvents();
-  }, [usauLevel, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
+  }, [usauLevel, isDesktopViewport, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
 
   // Selecting a division sub-tab inside the USAU flyout — pure filter state,
   // no navigation. Lazily kicks the College D-I fetch the first time that
-  // level is chosen (CLUB is already fetched eagerly on flyout open).
+  // level is chosen (CLUB is already fetched eagerly on flyout open) — desktop
+  // only, same reasoning as openFlyout above.
   const handleUsauLevelChange = useCallback((level: UsauLevel) => {
     setUsauLevel(level);
-    if (level === 'COLLEGE_D1') fetchUsauCollegeTeams();
-  }, [fetchUsauCollegeTeams]);
+    if (level === 'COLLEGE_D1' && isDesktopViewport()) fetchUsauCollegeTeams();
+  }, [fetchUsauCollegeTeams, isDesktopViewport]);
 
   // Close the fly-out whenever the main menu closes or the route changes.
   useEffect(() => { if (!open) setFlyoutLeague(null); }, [open]);
@@ -940,25 +1006,33 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         aria-hidden="true"
       />
 
-      {/* Panel — rolls DOWN from the top of the page. Full-width, capped
-          height so it reads as a dropdown sheet (not a full-screen takeover);
-          its own content scrolls if it exceeds that. On wider screens it caps
-          to a centered max-width. Slides in via translate-y. */}
+      {/* Panel — two geometries by breakpoint:
+          - MOBILE (<md): rolls DOWN from the top as a full-width dropdown
+            sheet with a height cap + rounded bottom (translate-y animation).
+          - DESKTOP (md+): the original right-anchored 360px side drawer
+            sliding in from the right (translate-x animation). The league
+            fly-out's md:right-[360px] positioning depends on this. */}
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Navigation"
         className={[
-          'absolute top-0 inset-x-0 w-full sm:max-w-[420px] sm:mx-auto',
-          'max-h-[calc(100dvh-1rem)]',
-          'flex flex-col bg-bg overflow-y-auto shadow-2xl border-b border-hairline',
-          'rounded-b-2xl',
-          // Roll down from the top; respect reduced-motion.
+          // Mobile: top roll-down sheet.
+          'absolute top-0 inset-x-0 w-full max-h-[calc(100dvh-1rem)]',
+          'rounded-b-2xl border-b border-hairline',
+          // Desktop: right side drawer (original geometry).
+          'md:inset-y-0 md:left-auto md:right-0 md:max-w-[360px] md:max-h-none',
+          'md:rounded-none md:border-b-0 md:border-l',
+          'flex flex-col bg-bg overflow-y-auto shadow-2xl',
+          // Mobile animates translate-y, desktop translate-x — both compose
+          // into one transform, so the md: overrides neutralize the other axis.
           'transition-transform motion-reduce:transition-none',
-          open ? 'translate-y-0' : '-translate-y-full',
+          open
+            ? 'translate-y-0 translate-x-0'
+            : '-translate-y-full md:translate-y-0 md:translate-x-full',
         ].join(' ')}
-        style={{ transitionDuration: '260ms', transitionTimingFunction: 'ease-out' }}
+        style={{ transitionDuration: '240ms', transitionTimingFunction: 'ease-out' }}
       >
         {/* Accent glow bleeding down from the top-right — gives the panel a
             branded, lit feel instead of a flat white sheet. */}
@@ -1049,36 +1123,75 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                 }
                 const isOpen = flyoutLeague === league.id;
                 return (
-                  <button
-                    key={league.id}
-                    type="button"
-                    aria-haspopup="menu"
-                    aria-expanded={isOpen}
-                    // Desktop: hover opens the fly-out. Mobile: tap opens it
-                    // (hover never fires on touch, so the onClick is the path).
-                    onMouseEnter={() => openFlyout(league.id)}
-                    onFocus={() => openFlyout(league.id)}
-                    onClick={() => (isOpen ? setFlyoutLeague(null) : openFlyout(league.id))}
-                    className={[
-                      subRowBase,
-                      isOpen ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
-                      'w-full',
-                    ].join(' ')}
-                  >
-                    {league.label}
-                    {/* Left-pointing chevron — the fly-out opens to the LEFT. */}
-                    <svg
+                  <div key={league.id}>
+                    <button
+                      type="button"
+                      aria-haspopup="menu"
+                      aria-expanded={isOpen}
+                      // Desktop: hover/focus opens the side fly-out. Mobile:
+                      // tap toggles the inline sub-dropdown below this row.
+                      // The hover/focus handlers MUST be desktop-gated —
+                      // touch taps synthesize mouseenter+focus BEFORE click,
+                      // so ungated they'd open the dropdown and the click's
+                      // toggle would immediately close it again (tap = no-op).
+                      onMouseEnter={() => { if (isDesktopViewport()) openFlyout(league.id); }}
+                      onFocus={() => { if (isDesktopViewport()) openFlyout(league.id); }}
+                      onClick={() => (isOpen ? setFlyoutLeague(null) : openFlyout(league.id))}
                       className={[
-                        'w-3 h-3 flex-shrink-0 transition-colors duration-150',
-                        isOpen ? 'text-accent' : 'text-faint',
+                        subRowBase,
+                        isOpen ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
+                        'w-full',
                       ].join(' ')}
-                      viewBox="0 0 10 10"
-                      fill="none"
-                      aria-hidden="true"
                     >
-                      <path d="M6.5 2L3.5 5L6.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
+                      {league.label}
+                      {/* Desktop: left-pointing chevron — the fly-out opens to
+                          the side. Mobile: down chevron that flips 180° when
+                          expanded — the sub-dropdown opens BELOW this row. */}
+                      <svg
+                        className={[
+                          'hidden md:block w-3 h-3 flex-shrink-0 transition-colors duration-150',
+                          isOpen ? 'text-accent' : 'text-faint',
+                        ].join(' ')}
+                        viewBox="0 0 10 10"
+                        fill="none"
+                        aria-hidden="true"
+                      >
+                        <path d="M6.5 2L3.5 5L6.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                      <ChevronDown
+                        className={[
+                          'md:hidden flex-shrink-0 transition-transform duration-200',
+                          isOpen ? 'rotate-180 text-accent' : 'text-faint',
+                        ].join(' ')}
+                      />
+                    </button>
+
+                    {/* ── MOBILE inline sub-dropdown ──────────────────────
+                        Renders directly beneath the row instead of the
+                        side fly-out (which is desktop-only, see below).
+                        Same content as the fly-out minus the header and
+                        team grids: chips (USAU) + sub-page tab links +
+                        coming-soon caption. */}
+                    {isOpen && (
+                      <div className="md:hidden pl-5 pr-2 pt-1 pb-2">
+                        <LeagueFlyoutBody
+                          league={league.id}
+                          pathname={pathname}
+                          leagueQsFor={leagueQsFor}
+                          onClose={onClose}
+                          usauLevel={usauLevel}
+                          onUsauLevelChange={handleUsauLevelChange}
+                          tabRowBase="flex flex-wrap items-center gap-1.5"
+                          tabLinkBase={[
+                            'inline-flex items-center px-3 min-h-[44px] rounded-md',
+                            'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
+                            'transition-colors duration-150 no-underline',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+                          ].join(' ')}
+                        />
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1121,18 +1234,22 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         </nav>
       </div>
 
-      {/* ── LEAGUE FLY-OUT ─────────────────────────────────────────────────
-          Overlays the rolled-down main panel full-width (same top-anchored,
-          max-width-capped box), with a back button. Shows the previewed
-          league's sub-pages + team grid — the old mega-menu content. */}
+      {/* ── LEAGUE FLY-OUT — DESKTOP ONLY ───────────────────────────────────
+          MOBILE (<md): no overlay — the league's pages render INLINE below
+          the row it belongs to (see the sub-dropdown in the accordion above).
+          DESKTOP (md+): sits just left of the 360px main drawer (360 + 340 =
+          700px fits comfortably). Shows the previewed league's sub-pages +
+          team grid — the old mega-menu content. */}
       {flyoutLeague && (
         <div
           role="menu"
           aria-label={`${MEGA_LEAGUES.find((l) => l.id === flyoutLeague)?.label ?? ''} navigation`}
           className={[
-            'absolute top-0 inset-x-0 z-[1] flex flex-col bg-bg overflow-y-auto',
-            'w-full sm:max-w-[420px] sm:mx-auto',
-            'max-h-[calc(100dvh-1rem)] rounded-b-2xl shadow-2xl border-b border-hairline',
+            'hidden md:flex md:flex-col bg-bg overflow-y-auto shadow-2xl',
+            'absolute z-[1]',
+            // Desktop: full-height column beside the right drawer (original).
+            'md:inset-y-0 md:left-auto md:right-[360px] md:w-[340px] md:max-h-none',
+            'md:rounded-none md:border-b-0 md:border-l',
             'motion-reduce:animate-none',
           ].join(' ')}
           style={{ animation: 'gamesDropdownIn 160ms ease-out both' }}
