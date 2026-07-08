@@ -56,6 +56,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   PUL_DIMS,
   WUL_DIMS,
+  LEAGUE_TARGET_SCORES,
   computeLeagueRawScore,
   type LeagueBaseline,
   type LeagueDim,
@@ -246,7 +247,7 @@ async function main(): Promise<void> {
   const scored = candidates.map((c, i) => ({
     ...c,
     rawScore: rawScores[i],
-    playerScore: pwlNormalize(rawScores[i], baseline.anchors),
+    playerScore: pwlNormalize(rawScores[i], baseline.anchors, LEAGUE_TARGET_SCORES),
   }));
 
   // Sanity output — calibration targets are design constants (see rating.ts).

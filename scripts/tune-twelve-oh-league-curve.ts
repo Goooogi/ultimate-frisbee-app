@@ -48,8 +48,8 @@ import { createClient } from '@supabase/supabase-js';
 import { teamRecord, type WinCurve } from '../src/lib/twelve-oh/rating.js';
 
 const league = process.argv[2];
-if (league !== 'pul' && league !== 'wul') {
-  console.error('Usage: npx tsx scripts/tune-twelve-oh-league-curve.ts <pul|wul>');
+if (league !== 'pul' && league !== 'wul' && league !== 'ufa') {
+  console.error('Usage: npx tsx scripts/tune-twelve-oh-league-curve.ts <ufa|pul|wul>');
   process.exit(1);
 }
 
@@ -62,20 +62,31 @@ const db = createClient(
 // ── Constants ───────────────────────────────────────────────────────────────
 
 const PICKS_PER_TEAM = 7;
-const SKIP_THRESHOLD = 85;
+const SKIP_THRESHOLD = 88; // star line on the 2K 50–99 scale
 const N_SIM = 500_000;
 const MIN_ROSTER = 7;
 
-/** Target cumulative odds P(wins ≥ w) — UFA v5 game feel. */
-const TARGET_CUM: ReadonlyArray<readonly [number, number]> = [
-  [12, 0.022],
-  [11, 0.065],
-  [10, 0.175],
-  [9, 0.39],
-  [8, 0.667],
-  [7, 0.914],
-  [6, 0.993],
-];
+/**
+ * Target cumulative odds P(wins ≥ w), per league.
+ *
+ * UFA keeps the original tight game feel (12-0 ≈ 2.2%). PUL/WUL run
+ * "moderately looser" on purpose (2026-07-08): small leagues (~36–47 spinnable
+ * team-years vs UFA's ~275) should reward a strong draft more — 12-0 ≈ 4%,
+ * 10-2 ≈ 16%. Both hold across the NBA-2K 50–99 score scale (2026-07-08); the
+ * tuner re-derives breakpoints from the live re-scored pool.
+ */
+const TARGET_CUM_BY_LEAGUE: Record<string, ReadonlyArray<readonly [number, number]>> = {
+  ufa: [
+    [12, 0.022], [11, 0.065], [10, 0.175], [9, 0.39], [8, 0.667], [7, 0.914], [6, 0.993],
+  ],
+  pul: [
+    [12, 0.04], [11, 0.11], [10, 0.27], [9, 0.50], [8, 0.75], [7, 0.93], [6, 0.99],
+  ],
+  wul: [
+    [12, 0.04], [11, 0.11], [10, 0.27], [9, 0.50], [8, 0.75], [7, 0.93], [6, 0.99],
+  ],
+};
+const TARGET_CUM = TARGET_CUM_BY_LEAGUE[league];
 
 // ── Pool + mechanic ─────────────────────────────────────────────────────────
 
@@ -142,7 +153,7 @@ function simStrengths(pool: PlayerEntry[][], n: number): Float64Array {
     // Same strength formula as teamRecord: mean + balance bonus.
     const mean = scores.reduce((s, x) => s + x, 0) / scores.length;
     const min = Math.min(...scores);
-    strengths[sim] = mean + (min > 72 ? 0.5 : min > 58 ? 0.3 : 0);
+    strengths[sim] = mean + (min > 85 ? 0.5 : min > 78 ? 0.3 : 0);
   }
   return strengths;
 }
@@ -178,8 +189,9 @@ async function main() {
     tip[w - 1] = quantile(sorted, 1 - cum); // tip into w
   }
   // Anchor bp_12 at the middle of the target ≥12 mass, then chain down.
+  const p12 = TARGET_CUM.find(([w]) => w === 12)![1];
   const bp: Record<number, number> = {};
-  bp[12] = quantile(sorted, 1 - 0.022 / 2);
+  bp[12] = quantile(sorted, 1 - p12 / 2);
   for (let w = 11; w >= 5; w--) {
     bp[w] = 2 * tip[w] - bp[w + 1];
   }
@@ -206,9 +218,14 @@ async function main() {
     winCounts[winsFromCurve(verify[i], curve)]++;
   }
   console.log('\n  Wins  Pct       Target');
-  const targetPct: Record<number, string> = {
-    12: '2.2%', 11: '4.3%', 10: '11%', 9: '21.5%', 8: '27.7%', 7: '24.7%', 6: '7.9%',
-  };
+  // Marginal P(wins = w) = cum[w] − cum[w+1], derived from this league's TARGET_CUM.
+  const cum: Record<number, number> = {};
+  for (const [w, c] of TARGET_CUM) cum[w] = c;
+  const targetPct: Record<number, string> = {};
+  for (let w = 12; w >= 6; w--) {
+    const marginal = (cum[w] ?? 0) - (cum[w + 1] ?? 0);
+    targetPct[w] = (marginal * 100).toFixed(1) + '%';
+  }
   for (let w = 12; w >= 4; w--) {
     const pct = ((winCounts[w] / N_SIM) * 100).toFixed(2) + '%';
     console.log(`   ${String(w).padStart(2)}  ${pct.padStart(8)}  ${targetPct[w] ?? '—'}`);

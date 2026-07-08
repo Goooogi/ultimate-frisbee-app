@@ -284,6 +284,37 @@ export async function listWulPlayers(opts?: {
   return ((data ?? []) as unknown as DbPlayerRow[]).map(mapPlayer);
 }
 
+/** Lean player-search hit: one row per distinct name, most-recent season. */
+export interface WulPlayerSearchHit {
+  id: string;
+  playerName: string;
+  teamId: string;
+  teamName: string | null;
+}
+
+/**
+ * DB-side fuzzy player search (pg_trgm) via search_wul_players_fuzzy — name-
+ * filtered in Postgres, replacing the fetch-whole-roster-then-filter path.
+ */
+export async function searchWulPlayers(
+  query: string,
+  limit = 12,
+): Promise<WulPlayerSearchHit[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const db = supabase();
+  const { data, error } = await db.rpc('search_wul_players_fuzzy', { q, lim: limit });
+  if (error) throw error;
+  return ((data ?? []) as {
+    id: string; player_name: string; team_id: string; team_name: string | null;
+  }[]).map((r) => ({
+    id: r.id,
+    playerName: r.player_name,
+    teamId: r.team_id,
+    teamName: r.team_name ?? null,
+  }));
+}
+
 // ─── Career (cross-season + cross-league) ──────────────────────────────────────
 
 export interface WulSeasonStint {

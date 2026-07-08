@@ -7,11 +7,12 @@
  * baked baseline (per-stat mean/std + 9 raw-score percentile anchors) computed
  * by scripts/backfill-twelve-oh-league.ts over that league's full history.
  *
- * Because every league normalizes onto the same percentile→score curve
- * (rating.ts NORM_TARGET_SCORES: median season = 50, star = 83, all-time
- * elite = 91…), scores are comparable IN MEANING across leagues — an 85 is a
- * top-5%-all-time season in its own league — while the underlying stats and
- * weights differ per league.
+ * Every league normalizes onto the NBA-2K-style 50–99 scale (rating.ts
+ * NORM_TARGET_SCORES: floor = 50, median season = 75, star = 88, elite = 93,
+ * greatest ever = 99). Scores are comparable IN MEANING across leagues — a
+ * top-5%-all-time season reads ~88 in its own league — while the underlying
+ * stats and weights differ per league. PUL/WUL lift only the top end a couple
+ * points (LEAGUE_TARGET_SCORES below), leaving floor and median identical.
  *
  * LEAGUE STAT COVERAGE (what the sources actually track)
  * ──────────────────────────────────────────────────────
@@ -130,6 +131,22 @@ export const WUL_BAKED_BASELINE: LeagueBaseline = {
   anchors: [-5.0386, -0.7462, 1.6897, 4.3888, 6.6469, 12.3195, 13.6184, 18.0543, 23.6440],
 };
 
+// ─── Elite-score boost (PUL/WUL only) ────────────────────────────────────────
+// Both leagues use the NBA-2K-style 50–99 scale (rating.ts NORM_TARGET_SCORES:
+// floor 50, median 75, cap 99). PUL and WUL are much smaller leagues — the spin
+// pool is only ~36–47 team-years vs UFA's ~275 — so their stars should read a
+// touch more elite to feel rewarding, WITHOUT moving the floor or median (p0/p50
+// stay pinned at 50/75). This lifts only the top-end anchors: a top-5% season
+// reads 90 (vs UFA 88), a top-1% reads 95 (vs UFA 93). Applied in
+// computeLeagueScore via pwlNormalize's optional targets arg; UFA is untouched.
+//
+//   percentile:  p0  p50  p75  p90  p95  p99  p99.5 p99.9 p100
+//   UFA:         50   75   80   85   88   93    95    97    99
+//   PUL/WUL:     50   75   80   86   90   95    96    98    99
+export const LEAGUE_TARGET_SCORES: readonly number[] = [
+  50, 75, 80, 86, 90, 95, 96, 98, 99,
+];
+
 // ─── Scoring ───────────────────────────────────────────────────────────────
 
 /** Weighted z-sum over a league's dimension list. Pure, no I/O. */
@@ -157,7 +174,10 @@ export function computeLeagueScore(
   baseline: LeagueBaseline,
 ): { playerScore: number; rawScore: number } {
   const rawScore = computeLeagueRawScore(stats, dims, baseline);
-  return { playerScore: pwlNormalize(rawScore, baseline.anchors), rawScore };
+  return {
+    playerScore: pwlNormalize(rawScore, baseline.anchors, LEAGUE_TARGET_SCORES),
+    rawScore,
+  };
 }
 
 // ─── Per-league win curves ─────────────────────────────────────────────────
@@ -169,18 +189,21 @@ export function computeLeagueScore(
 // vs UFA's ~81) and need their own curves to keep the same record odds.
 //
 // Derived + verified by scripts/tune-twelve-oh-league-curve.ts (500k-sim MC,
-// spin + 1 skip, 2026-07-06). Both leagues verify to the UFA v5 game feel:
-// 12-0≈2.2%, 11-1≈4.3%, 10-2≈11%, 9-3≈21.5%, 8-4≈27.7%, 7-5≈24.7%, 6-6≈7.9%.
+// spin + 1 skip, 2026-07-08). PUL/WUL are tuned "moderately looser" than UFA
+// on purpose — small spin pools (~36–47 team-years) should reward a strong
+// draft — and this pairs with the LEAGUE_TARGET_SCORES elite boost above.
+// Both leagues verify to: 12-0≈4%, 11-1≈7%, 10-2≈16%, 9-3≈23%, 8-4≈25%,
+// 7-5≈18%, 6-6≈6%. UFA keeps its own tighter curve (rating.ts).
 // Re-run the tuner after each backfill (new seasons shift the distribution).
 
 export const PUL_WIN_CURVE: WinCurve = [
-  [40, 0], [70.63, 2], [74.63, 5], [78.72, 6], [82.48, 7],
-  [85.11, 8], [87.02, 9], [89.02, 10], [90.25, 11], [91.54, 12],
+  [40, 0], [82.33, 2], [86.33, 5], [88.76, 6], [89.63, 7],
+  [91.77, 8], [92.08, 9], [93.76, 10], [93.83, 11], [95.09, 12],
 ];
 
 export const WUL_WIN_CURVE: WinCurve = [
-  [40, 0], [67.5, 2], [71.5, 5], [76.38, 6], [80.67, 7],
-  [83.59, 8], [85.87, 9], [88.09, 10], [89.51, 11], [90.9, 12],
+  [40, 0], [80.92, 2], [84.92, 5], [87.64, 6], [88.77, 7],
+  [91.02, 8], [91.52, 9], [93.31, 10], [93.44, 11], [94.75, 12],
 ];
 
 /** League-keyed lookup used by the game UI. `undefined` = UFA default curve. */

@@ -61,19 +61,20 @@ const db = createClient(SUPABASE_URL, SERVICE_KEY, {
 });
 
 // ── Targets ──────────────────────────────────────────────────────────────────
-// Design targets after 2026-06-07 recalibration.
+// v5 game feel (2026-06-08), unchanged across the 2K-scale move (2026-07-08).
 const TARGETS: Record<number, string> = {
-  12: '0.4–0.8%  (≈0.5%)',
-  11: '3–4%',
-  10: '8–9%',
-   9: '~18%',
-   8: '~30%',
-   7: '~35%',
+  12: '≈2.2%',
+  11: '≈4.3%',
+  10: '≈11%',
+   9: '≈21.5%',
+   8: '≈27.7%',
+   7: '≈24.7%',
+   6: '≈7.9%',
 };
 
 // Mechanic constants
 const PICKS_PER_TEAM = 7;
-const SKIP_THRESHOLD = 85;   // skip a spin if best available < this (once per build)
+const SKIP_THRESHOLD = 88;   // skip a spin if best available < this (star line, 2K scale; once per build)
 const N_SIM          = 1_000_000;
 
 async function main() {
@@ -200,13 +201,15 @@ async function main() {
   console.log('  Wins  Count       Pct       Target            Status');
   console.log('  ────  ──────────  ────────  ────────────────  ──────');
 
+  // v5 game feel (unchanged across the 2K-scale move); ±0.6pt tolerance bands.
   const targets_map: Record<number, [number, number]> = {
-    12: [0.004, 0.008],
-    11: [0.030, 0.040],
-    10: [0.080, 0.090],
-     9: [0.165, 0.195],
-     8: [0.270, 0.330],
-     7: [0.320, 0.380],
+    12: [0.016, 0.028],
+    11: [0.037, 0.049],
+    10: [0.104, 0.116],
+     9: [0.209, 0.221],
+     8: [0.271, 0.283],
+     7: [0.241, 0.253],
+     6: [0.073, 0.085],
   };
 
   for (let w = 12; w >= 0; w--) {
@@ -233,12 +236,13 @@ async function main() {
   const rate12 = (winCounts[12] / N_SIM) * 100;
   console.log(`\n12-0 rate: ${winCounts[12].toLocaleString()}/${N_SIM.toLocaleString()} = ${rate12.toFixed(4)}%`);
 
-  if (rate12 < 0.3) {
-    console.log('  *** WARNING: 12-0 rate is BELOW 0.3% — WIN_CURVE top end is too steep. Suggest nudging [87,11] and [91,12].');
-  } else if (rate12 > 1.0) {
-    console.log('  *** WARNING: 12-0 rate is ABOVE 1.0% — WIN_CURVE top end is too lenient. Suggest raising [91,12] threshold.');
+  // v5 target is ~2.2% (Hunter's deliberate 12-0 chase), acceptable 1.6–2.8%.
+  if (rate12 < 1.6) {
+    console.log('  *** WARNING: 12-0 rate is BELOW 1.6% — WIN_CURVE top end is too steep. Suggest nudging the [.,11] and [.,12] breakpoints down.');
+  } else if (rate12 > 2.8) {
+    console.log('  *** WARNING: 12-0 rate is ABOVE 2.8% — WIN_CURVE top end is too lenient. Suggest raising the [.,12] threshold.');
   } else {
-    console.log('  12-0 rate is within acceptable range (0.3–1.0%).');
+    console.log('  12-0 rate is within acceptable range (1.6–2.8%, target ≈2.2%).');
   }
 
   // ── Best possible team (all-time top 7 by score, one per team-year slot) ─

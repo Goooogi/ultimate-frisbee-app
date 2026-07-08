@@ -11,14 +11,41 @@
 // upstream caches each page for 1h via the call() helper, so repeated
 // searches within the same hour are cheap.
 
+import { createClient } from '@supabase/supabase-js';
 import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { search as searchUsau, type SearchResult } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
 import { allUfaTeams } from '@/lib/ufa/teams';
-import { listPulTeams, listPulPlayers } from '@/lib/pul/data';
-import { listWulTeams, listWulPlayers } from '@/lib/wul/data';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { listPulTeams, searchPulPlayers } from '@/lib/pul/data';
+import { listWulTeams, searchWulPlayers } from '@/lib/wul/data';
 import { searchWfdfTeams, searchWfdfPlayersForSearch, searchWfdfEvents } from '@/lib/wfdf/data';
+
+/**
+ * DB-side fuzzy UFA player search (pg_trgm) via search_ufa_players_fuzzy.
+ * Used by the global search dropdown — replaces walking the whole UFA API
+ * leaderboard (~30 paged HTTP calls) then filtering names in Node. Reads the
+ * ufa_players table (one row per player, the same set the leaderboard covers),
+ * so no data is lost. The full-stats players page still uses searchUfaPlayers
+ * (the API walk) because it needs per-season stat rows, not just names.
+ */
+async function searchUfaPlayersDb(
+  query: string,
+  limit = 12,
+): Promise<{ id: string; fullName: string }[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const db = createClient(supabaseUrl(), supabaseAnonKey(), {
+    auth: { persistSession: false },
+  });
+  const { data, error } = await db.rpc('search_ufa_players_fuzzy', { q, lim: limit });
+  if (error) throw error;
+  return ((data ?? []) as { id: string; full_name: string }[]).map((r) => ({
+    id: r.id,
+    fullName: r.full_name,
+  }));
+}
 
 /**
  * Search the year's full UFA leaderboard for players whose name includes
@@ -65,27 +92,39 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   // dropdown. We over-fetch a little, then the final sort + slice trims.
   const cap = limit * 2;
 
-  const usau = await searchUsau(q, limit);
+  // Fan out every DB-side search (USAU + all leagues' players) + the UFA API
+  // player search in ONE parallel batch. Each is name-filtered server-side —
+  // no more "pull the whole roster, filter in Node".
+  const [usau, ufaPlayers, pulPlayers, wulPlayers, pulTeams, wulTeams, wfdfTeams, wfdfPlayers, wfdfEvents] =
+    await Promise.all([
+      searchUsau(q, limit),
+      searchUfaPlayersDb(q, cap).catch(() => []),
+      searchPulPlayers(q, cap).catch(() => []),
+      searchWulPlayers(q, cap).catch(() => []),
+      listPulTeams().catch(() => []),
+      listWulTeams().catch(() => []),
+      searchWfdfTeams(query, cap).catch(() => []),
+      searchWfdfPlayersForSearch(query, cap).catch(() => []),
+      searchWfdfEvents(query, cap).catch(() => []),
+    ]);
 
   // Names already covered by a USAU player row — used to dedupe same-human
   // matches from the other leagues' player lists (the unified /players/[id]
   // profile merges every league, so one row is enough).
   const usauPlayerNames = usau.filter((r) => r.kind === 'player').map((r) => r.name);
 
+  // ── UFA players (DB fuzzy) ────────────────────────────────────────────
   let ufaResults: SearchResult[] = [];
-  try {
-    const ufa = await searchUfaPlayers(q, currentSeasonYear(), limit * 3);
+  {
     const seen = new Set<string>();
-    for (const p of ufa) {
-      const key = p.name.toLowerCase();
+    for (const p of ufaPlayers) {
+      const key = p.fullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       // Same human as a USAU result already shown? Skip (profile merges them).
-      if (usauPlayerNames.some((n) => namesMatch(n, p.name))) continue;
-      ufaResults.push({ kind: 'player', id: p.playerID, name: p.name, hint: 'UFA', league: 'ufa' });
+      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName))) continue;
+      ufaResults.push({ kind: 'player', id: p.id, name: p.fullName, hint: 'UFA', league: 'ufa' });
     }
-  } catch {
-    ufaResults = [];
   }
 
   // ── UFA teams (synchronous, in-memory) ────────────────────────────────
@@ -116,20 +155,8 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ufaTeamResults = [];
   }
 
-  // ── PUL + WUL + WFDF (async — fan out in parallel) ────────────────────
-  // WFDF teams/players/events are all DB-side fuzzy (trigram) searches.
-  const [pulTeams, pulPlayers, wulTeams, wulPlayers, wfdfTeams, wfdfPlayers, wfdfEvents] =
-    await Promise.all([
-      listPulTeams().catch(() => []),
-      listPulPlayers().catch(() => []),
-      listWulTeams().catch(() => []),
-      listWulPlayers().catch(() => []),
-      searchWfdfTeams(query, cap).catch(() => []),
-      searchWfdfPlayersForSearch(query, cap).catch(() => []),
-      searchWfdfEvents(query, cap).catch(() => []),
-    ]);
-
-  // PUL teams — match on name OR city (so "Philadelphia" surfaces the Surge).
+  // PUL teams — tiny in-memory list (14 rows); match on name OR city so
+  // "Philadelphia" surfaces the Surge.
   const pulTeamResults: SearchResult[] = pulTeams
     .filter(
       (t) =>
@@ -147,29 +174,22 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       prominence: 3, // pro league — top-tier
     }));
 
-  // PUL players — dedupe same humans against USAU rows, then cap.
-  const pulTeamName = new Map(pulTeams.map((t) => [t.id, t.name]));
+  // PUL players — already name-filtered + deduped by the RPC (one row per
+  // name, most-recent season). Just drop same-humans covered by a USAU row.
   const pulPlayerResults: SearchResult[] = [];
-  {
-    const seen = new Set<string>();
-    for (const p of pulPlayers) {
-      if (pulPlayerResults.length >= cap) break;
-      if (!p.playerName.toLowerCase().includes(needle)) continue;
-      const key = p.playerName.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
-      pulPlayerResults.push({
-        kind: 'player',
-        id: p.id,
-        name: p.playerName,
-        hint: ['PUL', pulTeamName.get(p.teamId)].filter(Boolean).join(' · '),
-        league: 'pul',
-      });
-    }
+  for (const p of pulPlayers) {
+    if (pulPlayerResults.length >= cap) break;
+    if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+    pulPlayerResults.push({
+      kind: 'player',
+      id: p.id,
+      name: p.playerName,
+      hint: ['PUL', p.teamName].filter(Boolean).join(' · '),
+      league: 'pul',
+    });
   }
 
-  // WUL teams — match on name OR city.
+  // WUL teams — tiny in-memory list (9 rows); match on name OR city.
   const wulTeamResults: SearchResult[] = wulTeams
     .filter(
       (t) =>
@@ -187,26 +207,18 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       prominence: 3, // pro league — top-tier
     }));
 
-  // WUL players
-  const wulTeamName = new Map(wulTeams.map((t) => [t.id, t.name]));
+  // WUL players — already name-filtered + deduped by the RPC.
   const wulPlayerResults: SearchResult[] = [];
-  {
-    const seen = new Set<string>();
-    for (const p of wulPlayers) {
-      if (wulPlayerResults.length >= cap) break;
-      if (!p.playerName.toLowerCase().includes(needle)) continue;
-      const key = p.playerName.toLowerCase();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
-      wulPlayerResults.push({
-        kind: 'player',
-        id: p.id,
-        name: p.playerName,
-        hint: ['WUL', wulTeamName.get(p.teamId)].filter(Boolean).join(' · '),
-        league: 'wul',
-      });
-    }
+  for (const p of wulPlayers) {
+    if (wulPlayerResults.length >= cap) break;
+    if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+    wulPlayerResults.push({
+      kind: 'player',
+      id: p.id,
+      name: p.playerName,
+      hint: ['WUL', p.teamName].filter(Boolean).join(' · '),
+      league: 'wul',
+    });
   }
 
   // WFDF teams — DB fuzzy-matched already; tag with the event for context.

@@ -486,14 +486,14 @@ async function main() {
 
   // Verify the curve gives sensible anchor scores
   console.log('  Curve verification (spot-check against percentile anchors):');
-  console.log(`    p50  raw=${rawAtP50.toFixed(3)} → score=${normalizeScore(rawAtP50, baseline).toFixed(1)} (target: 50)`);
-  console.log(`    p75  raw=${rawAtP75.toFixed(3)} → score=${normalizeScore(rawAtP75, baseline).toFixed(1)} (target: 64)`);
-  console.log(`    p90  raw=${rawAtP90.toFixed(3)} → score=${normalizeScore(rawAtP90, baseline).toFixed(1)} (target: 75)`);
-  console.log(`    p95  raw=${rawAtP95.toFixed(3)} → score=${normalizeScore(rawAtP95, baseline).toFixed(1)} (target: 83)`);
-  console.log(`    p99  raw=${rawAtP99.toFixed(3)} → score=${normalizeScore(rawAtP99, baseline).toFixed(1)} (target: 91)`);
-  console.log(`    p99.5 raw=${rawAtP995.toFixed(3)} → score=${normalizeScore(rawAtP995, baseline).toFixed(1)} (target: 94)`);
+  console.log(`    p50  raw=${rawAtP50.toFixed(3)} → score=${normalizeScore(rawAtP50, baseline).toFixed(1)} (target: 75)`);
+  console.log(`    p75  raw=${rawAtP75.toFixed(3)} → score=${normalizeScore(rawAtP75, baseline).toFixed(1)} (target: 80)`);
+  console.log(`    p90  raw=${rawAtP90.toFixed(3)} → score=${normalizeScore(rawAtP90, baseline).toFixed(1)} (target: 85)`);
+  console.log(`    p95  raw=${rawAtP95.toFixed(3)} → score=${normalizeScore(rawAtP95, baseline).toFixed(1)} (target: 88)`);
+  console.log(`    p99  raw=${rawAtP99.toFixed(3)} → score=${normalizeScore(rawAtP99, baseline).toFixed(1)} (target: 93)`);
+  console.log(`    p99.5 raw=${rawAtP995.toFixed(3)} → score=${normalizeScore(rawAtP995, baseline).toFixed(1)} (target: 95)`);
   console.log(`    p99.9 raw=${rawAtP999.toFixed(3)} → score=${normalizeScore(rawAtP999, baseline).toFixed(1)} (target: 97)`);
-  console.log(`    max  raw=${rawAtP100.toFixed(3)} → score=${normalizeScore(rawAtP100, baseline).toFixed(1)} (target: 100)`);
+  console.log(`    max  raw=${rawAtP100.toFixed(3)} → score=${normalizeScore(rawAtP100, baseline).toFixed(1)} (target: 99)`);
 
   console.log('\nUpserting player rows...');
   const BATCH = 200;

@@ -272,6 +272,38 @@ export async function listPulPlayers(opts?: {
   return ((data ?? []) as unknown as DbPlayerRow[]).map(mapPlayer);
 }
 
+/** Lean player-search hit: one row per distinct name, most-recent season. */
+export interface PulPlayerSearchHit {
+  id: string;
+  playerName: string;
+  teamId: string;
+  teamName: string | null;
+}
+
+/**
+ * DB-side fuzzy player search (pg_trgm). Name-filtered in Postgres via the
+ * search_pul_players_fuzzy RPC — replaces pulling the whole roster and
+ * filtering in Node. Returns at most `limit` (RPC clamps to 50).
+ */
+export async function searchPulPlayers(
+  query: string,
+  limit = 12,
+): Promise<PulPlayerSearchHit[]> {
+  const q = query.trim();
+  if (q.length < 2) return [];
+  const db = supabase();
+  const { data, error } = await db.rpc('search_pul_players_fuzzy', { q, lim: limit });
+  if (error) throw error;
+  return ((data ?? []) as {
+    id: string; player_name: string; team_id: string; team_name: string | null;
+  }[]).map((r) => ({
+    id: r.id,
+    playerName: r.player_name,
+    teamId: r.team_id,
+    teamName: r.team_name ?? null,
+  }));
+}
+
 // ─── Player profile / career ─────────────────────────────────────────────────
 
 /** One season-stint of a PUL player's career (their row for a given season). */
