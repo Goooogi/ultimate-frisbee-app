@@ -1277,8 +1277,16 @@ async function bestPoolRecordWinners(
     if (rows.length < PAGE) break;
   }
 
-  // (eventId|division) → teamId → { wins, losses, name }
-  const records = new Map<string, Map<string, { wins: number; losses: number; name: string }>>();
+  // (eventId|division) → normalized team NAME → { wins, losses, name, teamId }.
+  // ROBUSTNESS (dual-pipeline dedup, same as usau-event-detail's poolRecords):
+  // the HTML + ultirzr ingest can create TWO team_ids for the same real team in
+  // one event, so keying by team_id makes one team read as two identical rows →
+  // a false tie that hides the pool winner (e.g. Brute Squad 6-0 twice → no
+  // Women's champ). We (1) dedup games by matchup+score and (2) tally by
+  // NORMALIZED NAME so duplicate team_ids collapse into one team.
+  const norm = (n: string | null | undefined) => (n ?? '').trim().toLowerCase();
+  const records = new Map<string, Map<string, { wins: number; losses: number; name: string; teamId: string }>>();
+  const seenGameKeys = new Set<string>();
 
   const bump = (
     groupKey: string,
@@ -1288,10 +1296,11 @@ async function bestPoolRecordWinners(
   ) => {
     if (!records.has(groupKey)) records.set(groupKey, new Map());
     const g = records.get(groupKey)!;
-    const r = g.get(teamId) ?? { wins: 0, losses: 0, name };
+    const nk = norm(name);
+    const r = g.get(nk) ?? { wins: 0, losses: 0, name, teamId };
     if (won) r.wins += 1;
     else r.losses += 1;
-    g.set(teamId, r);
+    g.set(nk, r);
   };
 
   for (const g of poolGames) {
@@ -1304,6 +1313,17 @@ async function bestPoolRecordWinners(
     const groupKey = `${g.event_id}|${div}`;
     if (decidedKeys.has(groupKey)) continue; // bracket already settled this one
 
+    // Dedup: one row per (event + division + unordered matchup + unordered
+    // score). A repeat of the same result from the other pipeline is dropped.
+    const na = norm(g.team_a?.name);
+    const nb = norm(g.team_b?.name);
+    if (!na || !nb) continue;
+    const pair = [na, nb].sort();
+    const scores = [g.score_a, g.score_b].sort((x, y) => x - y);
+    const gkey = `${groupKey}|${pair[0]}|${pair[1]}|${scores[0]}|${scores[1]}`;
+    if (seenGameKeys.has(gkey)) continue;
+    seenGameKeys.add(gkey);
+
     const aWon = g.score_a > g.score_b;
     bump(groupKey, g.team_a_id, g.team_a?.name ?? 'Unknown', aWon);
     bump(groupKey, g.team_b_id, g.team_b?.name ?? 'Unknown', !aWon);
@@ -1312,8 +1332,7 @@ async function bestPoolRecordWinners(
   const winners: Array<{ eventId: string; division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }> = [];
   for (const [groupKey, teamMap] of records) {
     const [eventId, division] = groupKey.split('|');
-    const standings = Array.from(teamMap.entries())
-      .map(([teamId, r]) => ({ teamId, ...r }))
+    const standings = Array.from(teamMap.values())
       .sort((a, b) => b.wins - a.wins || a.losses - b.losses);
     if (standings.length === 0) continue;
     const top = standings[0];

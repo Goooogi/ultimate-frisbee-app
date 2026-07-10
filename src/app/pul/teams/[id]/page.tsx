@@ -8,6 +8,8 @@ import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { TeamMedals } from '@/components/team-medals';
+import { ProRosterTable } from '@/components/pro-roster-table';
+import { pulTeamState, proTeamCountry, locationLine } from '@/lib/team-geo';
 import {
   getPulRoster,
   listPulTeams,
@@ -66,7 +68,7 @@ export default async function PulTeamPage({ params }: Props) {
             {team.mascot}
           </h2>
           <div className="text-[12px] text-muted font-tight mt-1.5">
-            2026 Season
+            {locationLine(team.city, pulTeamState(params.id), proTeamCountry(params.id))} · 2026 Season
           </div>
         </div>
         {podiums.length > 0 && (
@@ -102,86 +104,9 @@ export default async function PulTeamPage({ params }: Props) {
             </Link>
           </div>
         ) : (
-          <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-            <table className="w-full min-w-[620px] border-collapse">
-              <thead>
-                <tr>
-                  {[
-                    { label: '#',      title: 'Jersey number',               left: true  },
-                    { label: 'Player', title: 'Player name',                 left: true  },
-                    { label: 'G',      title: 'Goals',                       left: false },
-                    { label: 'A',      title: 'Assists',                     left: false },
-                    { label: 'Blk',    title: 'Blocks',                      left: false },
-                    { label: 'TO',     title: 'Turnovers',                   left: false },
-                    { label: 'O-Pts',  title: 'Offensive Points Played',     left: false },
-                    { label: 'D-Pts',  title: 'Defensive Points Played',     left: false },
-                    { label: '+/−',    title: 'Plus / Minus',                left: false },
-                  ].map((h) => (
-                    <th
-                      key={h.label}
-                      scope="col"
-                      title={h.title}
-                      className={[
-                        'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-                        'border-b border-border whitespace-nowrap',
-                        h.left ? 'text-left' : 'text-right',
-                      ].join(' ')}
-                    >
-                      {h.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {roster.map((player) => (
-                  <RosterRow key={player.id} player={player} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ProRosterTable players={roster} league="pul" linkNames={false} />
         )}
       </section>
     </PageShell>
   );
-}
-
-// ─── Roster row ───────────────────────────────────────────────────────────────
-
-function RosterRow({ player }: { player: PulPlayer }) {
-  return (
-    <tr className="hover:bg-surface-hi transition-colors duration-100">
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">
-        {player.jerseyNumber || '—'}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
-        {player.playerName}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {player.goals}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {player.assists}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {player.blocks}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {player.turnovers}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {player.oPoints}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {player.dPoints}
-      </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-        {formatPlusMinus(player.plusMinus)}
-      </td>
-    </tr>
-  );
-}
-
-function formatPlusMinus(val: number): string {
-  if (val > 0) return `+${val}`;
-  return String(val);
 }

@@ -123,6 +123,41 @@ export function ufaTeamState(slug: string): string | null {
 }
 
 /**
+ * Curated USAU team home-state overrides — the source of truth for corrections
+ * to the venue-modal-derived usau_teams.state (which mislabels teams in
+ * multi-state sections whose sectionals rotate venues, e.g. PoNY→MA instead of
+ * NY, and a couple of Canadian teams). Keyed "Name|GenderDivision".
+ *
+ * These are ALREADY applied to the DB (migration curate_usau_team_state_overrides);
+ * this constant is the durable record so a future re-derivation of state can
+ * re-apply them. Team home locations are effectively static, so this list rarely
+ * changes — add an entry when a known-team's displayed state is wrong.
+ */
+// NOTE (2026-07-09): USAU COLLEGE team state is backfilled from the school name
+// (the name IS the school → unambiguous state), NOT the venue-modal derivation
+// (college event venue data was too sparse). The authoritative ~145-school
+// name→state map lives in the migration `override_usau_college_team_state_authoritative`
+// (canonical source; overwrites even wrong venue-derived college states). Handles
+// " (B)"/"(C)" second-team suffixes → same school. To fix/add a college team's
+// state: edit that map + re-run. After this, ALL ranked top-100 teams across all
+// 5 divisions (Club M/W/Mx + College M/W) have 100% state coverage.
+export const USAU_TEAM_STATE_OVERRIDES: Record<string, string> = {
+  'PoNY|Men': 'NY',
+  'Chicago Machine|Men': 'IL',
+  'Truck Stop|Men': 'DC',
+  'GOAT|Men': 'ON',
+  'Philadelphia Pacmen|Men': 'PA',
+  'Florida Untied|Men': 'FL',
+  'Garden State Ultimate|Men': 'NJ',
+  'AMP|Mixed': 'PA',
+  'Pittsburgh Port Authority|Mixed': 'PA',
+  'Chicago Parlay|Mixed': 'IL',
+  'Scandal|Women': 'DC',
+  '6ixers|Women': 'ON',
+  'Indy Rogue|Women': 'IN',
+};
+
+/**
  * Given a USAU series EVENT name, return the set of states its region/section
  * covers (empty if unrecognized). Matches the LONGEST region/section phrase
  * present so "south central" wins over a bare token collision.

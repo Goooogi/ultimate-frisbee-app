@@ -51,6 +51,9 @@ import {
   type UsauLevel,
 } from '@/lib/league';
 import { useTheme } from '@/lib/use-theme';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { getMyFavorites } from '@/lib/favorites/data';
+import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
 import { LogoStrikeInline } from '@/components/logo-strike';
 import { activeTeams } from '@/lib/ufa/teams';
 import { allWulTeams, type WulTeamMeta } from '@/lib/wul/teams';
@@ -59,7 +62,7 @@ import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-type SubApp = 'games' | 'playbook' | 'fantasy' | 'twelve-oh';
+type SubApp = 'games' | 'playbook' | 'fantasy' | 'twelve-oh' | 'for-you';
 
 type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf';
 
@@ -157,6 +160,7 @@ function isGamesNavActive(pathname: string, item: GamesNavItem): boolean {
 
 // ─── APP_PREFIX_MAP (mirrors app-rail.tsx) ─────────────────────────────────────
 const APP_PREFIX_MAP: Array<[string, SubApp]> = [
+  ['/for-you',  'for-you'],
   ['/playbook', 'playbook'],
   ['/fantasy',  'fantasy'],
   ['/12-0',     'twelve-oh'],
@@ -263,6 +267,12 @@ function SubAppIcon({ app, className = '' }: { app: SubApp; className?: string }
       return (
         <svg {...common}>
           <path d="M12 3l1.8 5.4L19 10l-5.2 1.6L12 17l-1.8-5.4L5 10l5.2-1.6L12 3z" />
+        </svg>
+      );
+    case 'for-you': // bookmark — your saved/personalized feed (star is taken by Fantasy)
+      return (
+        <svg {...common}>
+          <path d="M6 4h12v16l-6-4-6 4V4z" />
         </svg>
       );
   }
@@ -848,9 +858,26 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
   const [theme] = useTheme();
+  const { user } = useAuth();
 
   // SSR guard — createPortal is browser-only.
   useEffect(() => { setMounted(true); }, []);
+
+  // "For You" appears in the menu ONLY when the signed-in user has a favorite
+  // TEAM (a favorite league alone isn't enough — the feed is team-driven).
+  // Checked whenever the menu opens or the session changes, so it lights up as
+  // soon as a team is favorited and hides if all teams are removed.
+  const [hasFavorites, setHasFavorites] = useState(false);
+  useEffect(() => {
+    if (!open || !user) { setHasFavorites(false); return; }
+    let cancelled = false;
+    getMyFavorites()
+      .then((f) => {
+        if (!cancelled) setHasFavorites(f.teams.length > 0);
+      })
+      .catch(() => { if (!cancelled) setHasFavorites(false); });
+    return () => { cancelled = true; };
+  }, [open, user]);
 
   // ── Derive initial expanded state from URL ──────────────────────────────
   const activeApp = detectSubApp(pathname);
@@ -1231,6 +1258,21 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
 
         {/* Nav list */}
         <nav aria-label="Primary navigation" className="relative flex-1 px-3 pb-8 flex flex-col gap-1.5">
+
+          {/* ── FOR YOU — first, only when the user has a favorite team ───
+              Gated off entirely by FOR_YOU_ENABLED while the page is unfinished
+              (2026-07-10). Flip the flag in lib/for-you/leagues.ts to restore. */}
+          {FOR_YOU_ENABLED && hasFavorites && (
+            <SubAppRow
+              app="for-you"
+              href="/for-you"
+              label="For You"
+              active={activeApp === 'for-you'}
+              rowBase={rowBase}
+              iconTile={iconTile}
+              onClose={onClose}
+            />
+          )}
 
           {/* ── THE LEAGUE accordion row ─────────────────────────────── */}
           <button

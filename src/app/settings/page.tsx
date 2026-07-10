@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { AuthGate } from '@/components/auth/auth-gate';
 import { AppShell } from '@/components/page-shell';
 import { ProfileSettings } from '@/components/settings/profile-settings';
+import { FavoritesSettings } from '@/components/settings/favorites-settings';
 
 export const metadata: Metadata = {
   title: 'Settings · The Layout',
@@ -29,8 +30,11 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          {/* Settings card */}
-          <ProfileSettings />
+          {/* Settings cards */}
+          <div className="flex flex-col gap-6">
+            <ProfileSettings />
+            <FavoritesSettings />
+          </div>
         </div>
       </AppShell>
     </AuthGate>

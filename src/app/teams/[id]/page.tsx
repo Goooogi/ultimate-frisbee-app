@@ -3,7 +3,6 @@
 
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
-import Link from 'next/link';
 import {
   getStandings,
   getTeamStats,
@@ -20,6 +19,9 @@ import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame, UfaPlayerStat, UfaStanding } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
+import { UfaRosterTable } from '@/components/ufa/ufa-roster-table';
+import { ufaTeamState } from '@/lib/usau/regions';
+import { locationLine } from '@/lib/team-geo';
 
 export const revalidate = 300;
 
@@ -175,7 +177,7 @@ export default async function TeamPage({ params }: Props) {
                 {meta.name}
               </div>
               <div className="text-[13px] font-medium font-sans mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                {meta.city}
+                {locationLine(meta.city, ufaTeamState(meta.id))}
               </div>
             </div>
           </div>
@@ -236,68 +238,7 @@ export default async function TeamPage({ params }: Props) {
               <span>Roster · {year}</span>
               <span className="text-faint tabular">{players.length}</span>
             </h2>
-            <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-              <table className="w-full min-w-[600px] border-collapse">
-                <thead>
-                  <tr>
-                    {[
-                      { label: '#',    title: 'Jersey number',             left: true  },
-                      { label: 'Player', title: 'Player',                   left: true  },
-                      { label: 'G',    title: 'Goals',                     left: false },
-                      { label: 'A',    title: 'Assists',                   left: false },
-                      { label: 'Blk',  title: 'Blocks',                    left: false },
-                      { label: 'D',    title: 'Drops',                     left: false },
-                      { label: 'CMP',  title: 'Completions / Attempts',    left: false },
-                      { label: 'CMP%', title: 'Completion %',              left: false },
-                      { label: '+/−',  title: 'Plus / Minus',              left: false },
-                    ].map((h) => (
-                      <th
-                        key={h.label}
-                        scope="col"
-                        title={h.title}
-                        className={[
-                          'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-                          'border-b border-border whitespace-nowrap',
-                          h.left ? 'text-left' : 'text-right',
-                        ].join(' ')}
-                      >
-                        {h.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {players.map((p, i) => {
-                    const cmp = parseFloat(p.completionPercentage as string) || 0;
-                    const completions = p.completions ?? 0;
-                    const attempts = completions + (p.throwaways ?? 0);
-                    const cmpStr = completions > 0 ? `${completions}/${attempts}` : '—';
-                    // Real jersey number from the latest game roster; fall back
-                    // to the row index when the player wasn't on that report.
-                    const jersey = jerseyByPlayer.get(p.playerID);
-                    return (
-                      <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">{jersey ?? i + 1}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
-                          <Link href={`/players/${p.playerID}?from=ufa`} className="hover:text-accent transition-colors duration-150">
-                            {p.name}
-                          </Link>
-                        </td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.goals ?? '—'}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.assists ?? '—'}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.blocks ?? '—'}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.drops ?? '—'}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{cmpStr}</td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-                          {cmp > 0 ? `${cmp.toFixed(1)}%` : '—'}
-                        </td>
-                        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{formatPlusMinus(p.plusMinus)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <UfaRosterTable players={players} jerseyByPlayer={jerseyByPlayer} year={year} />
           </section>
         )}
 
@@ -349,9 +290,4 @@ export default async function TeamPage({ params }: Props) {
       </div>
     </PageShell>
   );
-}
-
-function formatPlusMinus(val: number | undefined): string {
-  if (val == null) return '—';
-  return val >= 0 ? `+${val}` : String(val);
 }

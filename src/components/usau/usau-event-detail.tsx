@@ -15,7 +15,7 @@
 // auto-fall-back to their available division so the URL filter doesn't
 // accidentally hide everything.
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision, type UsauDivision } from '@/lib/use-division';
@@ -25,6 +25,7 @@ import { UsauBracketTree, isChampionshipBracket, bracketGroupPrefix } from './us
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import { PillSelect, type PillSelectOption } from '@/components/pill-select';
 
 // Masters combined events prefix every bracket with its group ("GM Women ·
 // Pool A", "Masters Mixed · 1st Place"). Pool detection and display labels
@@ -36,7 +37,18 @@ function bracketTail(name: string): string {
 
 function isPoolBracket(name: string | null | undefined): boolean {
   if (!name) return false;
-  return bracketTail(name).toLowerCase().startsWith('pool');
+  const t = bracketTail(name).toLowerCase();
+  // A crossover is NOT a pool even if it says "Pool B-C Crossover".
+  if (t.includes('crossover')) return false;
+  return t.startsWith('pool');
+}
+
+/** Crossover games bridge pool play and the bracket (e.g. "Pool B-C Crossover",
+ *  "9th Place Crossover X"). Identified by bracket_name — there's no crossover
+ *  round type. Their own tab keeps them out of both Pool Games and Bracket. */
+function isCrossoverBracket(name: string | null | undefined): boolean {
+  if (!name) return false;
+  return bracketTail(name).toLowerCase().includes('crossover');
 }
 
 type Game = UsauEventSummary['games'][number];
@@ -184,6 +196,7 @@ export function UsauEventDetail({ event }: Props) {
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
     if (isPoolBracket(g.bracketName)) continue;
+    if (isCrossoverBracket(g.bracketName)) continue; // crossovers have their own tab
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
     if (!byBracket.has(k)) byBracket.set(k, []);
@@ -195,6 +208,12 @@ export function UsauEventDetail({ event }: Props) {
       games: gs.slice().sort((a, b) => roundOrder(a.round) - roundOrder(b.round)),
     }))
     .sort((a, b) => bracketOrder(a.name) - bracketOrder(b.name));
+
+  // ── Crossover games (#6 tab) — bridge pool play and the bracket. ────────
+  const crossoverGames = games
+    .filter((g) => isCrossoverBracket(g.bracketName))
+    .slice()
+    .sort((a, b) => (a.bracketName ?? '').localeCompare(b.bracketName ?? ''));
 
   // ── Pool play games ───────────────────────────────────────────────────
   const poolGames = new Map<string, Game[]>();
@@ -209,25 +228,51 @@ export function UsauEventDetail({ event }: Props) {
   // Only counts finished games with a decisive score. A team with no
   // completed pool games gets no record (rendered as "—") rather than 0-0,
   // so a pool that hasn't started reads as pending, not all-tied.
-  const poolRecords = new Map<string, { wins: number; losses: number }>();
+  //
+  // ROBUSTNESS (dual-pipeline dedup): the HTML + ultirzr ingest can write the
+  // SAME real game twice with DIFFERENT team_ids/game_ids for the same team
+  // (e.g. two "Brute Squad" rows). Left unchecked that doubles every record and
+  // makes one team look like two 6-0 teams → a false tie that suppressed the
+  // pool leader. So we (1) dedup games by matchup+score, and (2) tally by
+  // NORMALIZED TEAM NAME, then mirror each name's record onto every team_id
+  // sharing that name so PoolCard's per-id lookups still resolve.
+  const normName = (n: string | null | undefined) => (n ?? '').trim().toLowerCase();
+  const nameRecords = new Map<string, { wins: number; losses: number; name: string }>();
+  const seenGameKeys = new Set<string>();
   for (const gs of poolGames.values()) {
     for (const g of gs) {
       if (g.status !== 'final') continue;
       if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) continue;
+      const na = normName(g.teamAName);
+      const nb = normName(g.teamBName);
+      if (!na || !nb) continue;
+      // Dedup: one row per (unordered matchup + unordered score). A repeat of
+      // the same result from the other pipeline is dropped.
+      const pair = [na, nb].sort();
+      const scores = [g.scoreA, g.scoreB].sort((x, y) => x - y);
+      const gkey = `${pair[0]}|${pair[1]}|${scores[0]}|${scores[1]}`;
+      if (seenGameKeys.has(gkey)) continue;
+      seenGameKeys.add(gkey);
+
       const aWon = g.scoreA > g.scoreB;
-      const winId = aWon ? g.teamAId : g.teamBId;
-      const loseId = aWon ? g.teamBId : g.teamAId;
-      if (winId) {
-        const r = poolRecords.get(winId) ?? { wins: 0, losses: 0 };
-        r.wins += 1;
-        poolRecords.set(winId, r);
-      }
-      if (loseId) {
-        const r = poolRecords.get(loseId) ?? { wins: 0, losses: 0 };
-        r.losses += 1;
-        poolRecords.set(loseId, r);
-      }
+      const winName = aWon ? na : nb;
+      const loseName = aWon ? nb : na;
+      const winDisplay = aWon ? (g.teamAName ?? '') : (g.teamBName ?? '');
+      const loseDisplay = aWon ? (g.teamBName ?? '') : (g.teamAName ?? '');
+      const rw = nameRecords.get(winName) ?? { wins: 0, losses: 0, name: winDisplay };
+      rw.wins += 1;
+      nameRecords.set(winName, rw);
+      const rl = nameRecords.get(loseName) ?? { wins: 0, losses: 0, name: loseDisplay };
+      rl.losses += 1;
+      nameRecords.set(loseName, rl);
     }
+  }
+  // Mirror each name's record onto every team_id that carries that name, so
+  // PoolCard (keyed by teamId) reads the deduped record for either dup row.
+  const poolRecords = new Map<string, { wins: number; losses: number }>();
+  for (const t of teams) {
+    const rec = nameRecords.get(normName(t.teamName));
+    if (rec) poolRecords.set(t.teamId, { wins: rec.wins, losses: rec.losses });
   }
 
   // ── Championship finals (for the top-of-page result banners) ───────────
@@ -267,19 +312,22 @@ export function UsauEventDetail({ event }: Props) {
   // bracket final exists (that's the real champion).
   const poolLeader = useMemo(() => {
     if (champFinals.length > 0) return null;
-    const teamById = new Map(teams.map((t) => [t.teamId, t] as const));
-    const standings = Array.from(poolRecords.entries())
-      .filter(([id]) => teamById.has(id))
-      .map(([id, r]) => ({ team: teamById.get(id)!, ...r }))
+    // Standings from the NAME-keyed records (already dedup'd across duplicate
+    // team_ids), so two rows of the same real team can't read as a tie. Resolve
+    // a display Team for the winner by matching name back to a team row.
+    const teamByName = new Map(teams.map((t) => [normName(t.teamName), t] as const));
+    const standings = Array.from(nameRecords.values())
+      .map((r) => ({ team: teamByName.get(normName(r.name)) ?? null, name: r.name, wins: r.wins, losses: r.losses }))
       .sort((a, b) => b.wins - a.wins || a.losses - b.losses);
     if (standings.length === 0) return null;
     const top = standings[0];
     if (top.wins === 0 && top.losses === 0) return null; // no games played yet
+    if (!top.team) return null; // couldn't resolve the team row for display
     const tiedForFirst = standings.filter(
       (s) => s.wins === top.wins && s.losses === top.losses,
     ).length;
     if (tiedForFirst > 1) return null;
-    return top;
+    return { team: top.team, wins: top.wins, losses: top.losses };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [champFinals, teams, games]);
 
@@ -288,6 +336,89 @@ export function UsauEventDetail({ event }: Props) {
   const eventDivisions = (['Men', 'Women', 'Mixed'] as const).filter((d) =>
     availableGenders.includes(d),
   ) as UsauDivision[];
+
+  // ── View tabs (#6): Pools / Crossovers / Bracket ────────────────────────
+  // Static set of button tabs. Each tab appears only when it has data. "Pools"
+  // holds BOTH the standings cards and the per-pool game lists (merged — they're
+  // the same subject). "Bracket" holds the championship tree + placement
+  // brackets (placement is a dropdown filter inside it). Default to the first
+  // tab that has content, biased toward Bracket (the headline) when finished.
+  const hasBracket = games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
+  const hasPools = pools.length > 0 || poolGames.size > 0;
+  const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
+    { key: 'pools',      label: 'Pools',      show: hasPools },
+    { key: 'crossovers', label: 'Crossovers', show: crossoverGames.length > 0 },
+    { key: 'bracket',    label: 'Bracket',    show: hasBracket },
+  ];
+  const visibleTabs = TABS.filter((t) => t.show);
+  const defaultTab: ViewTab = hasBracket
+    ? 'bracket'
+    : (visibleTabs[0]?.key ?? 'pools');
+
+  return (
+    <EventTabsView
+      event={event}
+      champFinals={champFinals}
+      poolLeader={poolLeader}
+      showGroupPrefixes={showGroupPrefixes}
+      level={level}
+      gender={gender}
+      availableLevels={availableLevels}
+      eventDivisions={eventDivisions}
+      games={games}
+      teams={teams}
+      pools={pools}
+      poolGames={poolGames}
+      poolRecords={poolRecords}
+      crossoverGames={crossoverGames}
+      placementBrackets={placementBrackets}
+      bracketLabel={bracketLabel}
+      visibleTabs={visibleTabs}
+      defaultTab={defaultTab}
+    />
+  );
+}
+
+type ViewTab = 'pools' | 'crossovers' | 'bracket';
+
+/**
+ * Presentational tabbed body. Split out from UsauEventDetail so it can hold the
+ * active-tab useState without complicating the data-derivation parent. Banners
+ * + level/division switchers stay ABOVE the tabs; the four tab views render the
+ * previously-stacked sections one at a time.
+ */
+function EventTabsView(props: {
+  event: UsauEventSummary;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  champFinals: Array<{ label: string; game: any }>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  poolLeader: any;
+  showGroupPrefixes: boolean;
+  level: UsauLevel | '';
+  gender: string;
+  availableLevels: UsauLevel[];
+  eventDivisions: UsauDivision[];
+  games: Game[];
+  teams: Team[];
+  pools: Array<{ name: string; teams: Team[] }>;
+  poolGames: Map<string, Game[]>;
+  poolRecords: Map<string, { wins: number; losses: number }>;
+  crossoverGames: Game[];
+  placementBrackets: Array<{ name: string; games: Game[] }>;
+  bracketLabel: (name: string) => string;
+  visibleTabs: Array<{ key: ViewTab; label: string; show: boolean }>;
+  defaultTab: ViewTab;
+}) {
+  const {
+    event, champFinals, poolLeader, showGroupPrefixes, level, gender,
+    availableLevels, eventDivisions, games, teams, pools, poolGames,
+    poolRecords, crossoverGames, placementBrackets, bracketLabel,
+    visibleTabs, defaultTab,
+  } = props;
+
+  const [tab, setTab] = useState<ViewTab>(defaultTab);
+  // If the div/level switch changes which tabs exist, keep the active tab valid.
+  const active = visibleTabs.some((t) => t.key === tab) ? tab : defaultTab;
 
   return (
     <>
@@ -341,29 +472,58 @@ export function UsauEventDetail({ event }: Props) {
         </div>
       )}
 
-      {/* Championship bracket tree — visual left→right flow. Renders only
-          when there are 1st-place bracket games to show. Receives the
-          already-filtered games (filtered by the global ?div URL param). */}
-      <UsauBracketTree games={games} teams={teams} />
+      {/* ── View tabs (#6) — Pools / Pool Games / Crossovers / Bracket ──── */}
+      {visibleTabs.length > 1 && (
+        <div
+          role="tablist"
+          aria-label="Tournament views"
+          className="mb-6 -mx-5 px-5 md:mx-0 md:px-0 flex gap-2 overflow-x-auto scrollbar-none"
+        >
+          {visibleTabs.map((t) => {
+            const on = t.key === active;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => setTab(t.key)}
+                className={[
+                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-md',
+                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
+                  'border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  on
+                    ? 'bg-accent text-accent-ink border-accent'
+                    : 'bg-surface text-muted border-border hover:border-ink hover:text-ink',
+                ].join(' ')}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {pools.length > 0 && (
-        <section className="mb-10" aria-labelledby="pools-heading">
-          <h2
-            id="pools-heading"
-            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
-          >
-            Pool play
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-            {pools.map((pool) => (
-              <PoolCard
-                key={pool.name}
-                pool={{ name: bracketLabel(pool.name), teams: pool.teams }}
-                competitionLevel={level || event.competitionLevel}
-                records={poolRecords}
-              />
-            ))}
-          </div>
+      {/* ── Pools — standings cards + per-pool game lists (merged) ───────── */}
+      {active === 'pools' && (
+        <section aria-labelledby="pools-heading" className="flex flex-col gap-8">
+          <h2 id="pools-heading" className="sr-only">Pools</h2>
+
+          {/* Standings cards */}
+          {pools.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              {pools.map((pool) => (
+                <PoolCard
+                  key={pool.name}
+                  pool={{ name: bracketLabel(pool.name), teams: pool.teams }}
+                  competitionLevel={level || event.competitionLevel}
+                  records={poolRecords}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Per-pool game lists */}
           {poolGames.size > 0 ? (
             <div className="flex flex-col gap-5">
               {Array.from(poolGames.entries())
@@ -382,28 +542,31 @@ export function UsauEventDetail({ event }: Props) {
                 ))}
             </div>
           ) : (
-            <PoolGamesEmpty slug={event.slug} />
+            pools.length > 0 && <PoolGamesEmpty slug={event.slug} />
           )}
         </section>
       )}
 
-      {placementBrackets.length > 0 && (
-        <section aria-labelledby="placement-heading">
-          <h2
-            id="placement-heading"
-            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
-          >
-            Placement
-          </h2>
-          <div className="flex flex-col gap-7">
-            {placementBrackets.map((bracket) => (
-              <BracketBlock
-                key={bracket.name}
-                bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
-              />
+      {/* ── Crossovers ──────────────────────────────────────────────────── */}
+      {active === 'crossovers' && crossoverGames.length > 0 && (
+        <section aria-labelledby="crossovers-heading">
+          <h2 id="crossovers-heading" className="sr-only">Crossovers</h2>
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {crossoverGames.map((g) => (
+              <GameRow key={g.id} game={g} showBracket bracketLabel={bracketLabel} />
             ))}
-          </div>
+          </ul>
         </section>
+      )}
+
+      {/* ── Bracket — championship tree + placement brackets (#7 sub-tabs) ─ */}
+      {active === 'bracket' && (
+        <BracketView
+          games={games}
+          teams={teams}
+          placementBrackets={placementBrackets}
+          bracketLabel={bracketLabel}
+        />
       )}
 
       {pools.length === 0 && placementBrackets.length === 0 && games.length === 0 && (
@@ -412,6 +575,89 @@ export function UsauEventDetail({ event }: Props) {
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * "Bracket" tab body: the championship tree + placement brackets, with the
+ * placement brackets grouped into sub-tabs by canonical placement (#7) —
+ * Championship / 5th / 9th / 13th … — so a long tournament is navigable.
+ */
+function BracketView({
+  games,
+  teams,
+  placementBrackets,
+  bracketLabel,
+}: {
+  games: Game[];
+  teams: Team[];
+  placementBrackets: Array<{ name: string; games: Game[] }>;
+  bracketLabel: (name: string) => string;
+}) {
+  const hasTree = games.some((g) => isChampionshipBracket(g));
+
+  // Group placement brackets by canonical bucket → sub-tabs. The championship
+  // tree is its own implicit "Championship" sub-tab (rendered as the tree).
+  const groups = useMemo(() => {
+    const byKey = new Map<string, { bucket: PlacementBucket; brackets: typeof placementBrackets }>();
+    for (const b of placementBrackets) {
+      const bucket = canonicalPlacement(b.name);
+      if (!byKey.has(bucket.key)) byKey.set(bucket.key, { bucket, brackets: [] });
+      byKey.get(bucket.key)!.brackets.push(b);
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.bucket.order - b.bucket.order);
+  }, [placementBrackets]);
+
+  // Placement filter options: Championship (the tree) first, then each
+  // placement bucket (5th, 9th, …). A dropdown filter rather than tabs — it's
+  // more dynamic (a big event can have many placement brackets) and stays
+  // compact. Only shown when there's more than one option.
+  const filterOptions: PillSelectOption<string>[] = [
+    ...(hasTree ? [{ value: 'championship', label: 'Championship' }] : []),
+    ...groups
+      .filter((g) => g.bucket.key !== 'championship')
+      .map((g) => ({ value: g.bucket.key, label: g.bucket.label })),
+  ];
+  const [filter, setFilter] = useState<string>(filterOptions[0]?.value ?? 'championship');
+  const activeFilter = filterOptions.some((o) => o.value === filter)
+    ? filter
+    : (filterOptions[0]?.value ?? 'championship');
+
+  return (
+    <div className="flex flex-col gap-6">
+      {filterOptions.length > 1 && (
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+            Bracket
+          </span>
+          <PillSelect
+            value={activeFilter}
+            options={filterOptions}
+            onChange={setFilter}
+            ariaLabel="Filter by placement bracket"
+          />
+        </div>
+      )}
+
+      {/* Championship tree */}
+      {activeFilter === 'championship' && hasTree && (
+        <UsauBracketTree games={games} teams={teams} />
+      )}
+
+      {/* Placement bucket blocks for the active filter */}
+      {groups
+        .filter((g) => g.bucket.key === activeFilter)
+        .map((g) => (
+          <div key={g.bucket.key} className="flex flex-col gap-7">
+            {g.brackets.map((bracket) => (
+              <BracketBlock
+                key={bracket.name}
+                bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
+              />
+            ))}
+          </div>
+        ))}
+    </div>
   );
 }
 
@@ -633,10 +879,30 @@ function PoolCard({
 }
 
 function BracketBlock({ bracket }: { bracket: { name: string; games: Game[] } }) {
+  // The ingest classifier tags a placement bracket's DECIDING game round='other'
+  // (its classifyRound has no placement-final case), so it renders as "OTHER"
+  // and — since roundOrder('other')=1 — sorts ABOVE the semis. Reclassify: when
+  // a bracket has semifinals, treat its trailing 'other' game(s) (the ones
+  // scheduled after the semis, or the sole non-semi) as the Final so the label
+  // and ordering are correct. Pure display remap — no data change.
+  const hasSemis = bracket.games.some((g) => g.round === 'semi');
+  const latestSemiAt = hasSemis
+    ? bracket.games
+        .filter((g) => g.round === 'semi')
+        .reduce((m, g) => (g.scheduledAt && g.scheduledAt > m ? g.scheduledAt : m), '')
+    : '';
+  const displayRound = (g: Game): string => {
+    if (g.round !== 'other' || !hasSemis) return g.round;
+    // An 'other' game that comes at/after the last semi is the placement final.
+    if (!g.scheduledAt || !latestSemiAt || g.scheduledAt >= latestSemiAt) return 'final';
+    return g.round;
+  };
+
   const byRound = new Map<string, Game[]>();
   for (const g of bracket.games) {
-    if (!byRound.has(g.round)) byRound.set(g.round, []);
-    byRound.get(g.round)!.push(g);
+    const r = displayRound(g);
+    if (!byRound.has(r)) byRound.set(r, []);
+    byRound.get(r)!.push(g);
   }
   const rounds = Array.from(byRound.entries()).sort(
     (a, b) => roundOrder(a[0]) - roundOrder(b[0]),
@@ -665,17 +931,32 @@ function BracketBlock({ bracket }: { bracket: { name: string; games: Game[] } })
   );
 }
 
-function GameRow({ game }: { game: Game }) {
+function GameRow({
+  game,
+  showBracket,
+  bracketLabel,
+}: {
+  game: Game;
+  /** Crossovers span several bracket_names in one list — show which one. */
+  showBracket?: boolean;
+  bracketLabel?: (name: string) => string;
+}) {
   const aWon =
     game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
 
+  const meta = showBracket && game.bracketName
+    ? (bracketLabel ? bracketLabel(game.bracketName) : game.bracketName)
+    : game.location
+      ? `Field ${game.location}`
+      : null;
+
   return (
     <li className="bg-surface border border-border rounded-md p-3">
       <div className="flex items-center justify-between mb-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight">
-        {game.location ? (
-          <span className="text-muted">Field {game.location}</span>
+        {meta ? (
+          <span className="text-muted truncate">{meta}</span>
         ) : (
           <span className="text-faint">—</span>
         )}
@@ -797,12 +1078,63 @@ function prettyRound(round: string): string {
   }
 }
 
+// ─── Placement-bracket normalization (#7) ───────────────────────────────────
+// USAU bracket_name is wildly inconsistent — "Championship Bracket", "1st Place",
+// "Championship", "1st Place Bracket", "First Place" are all THE SAME bracket,
+// and "5th Place" / "5th Place Bracket" / "Fifth Place" / "5th place" collapse
+// too. canonicalPlacement() maps any variant → a stable { key, label, order } so
+// placement games can be grouped into navigable sub-tabs.
+
+const ORDINAL_WORDS: Record<string, number> = {
+  first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6, seventh: 7,
+  eighth: 8, ninth: 9, tenth: 10, eleventh: 11, twelfth: 12, thirteenth: 13,
+  fifteenth: 15, seventeenth: 17,
+};
+
+export interface PlacementBucket {
+  /** Stable identity for grouping (e.g. 'championship', '5th'). */
+  key: string;
+  /** Sub-tab label (e.g. 'Championship', '5th Place'). */
+  label: string;
+  /** Sort order — championship first, then ascending by place. */
+  order: number;
+}
+
+/** Normalize a bracket_name into its placement bucket. */
+export function canonicalPlacement(name: string | null | undefined): PlacementBucket {
+  const t = (name ?? '').toLowerCase();
+
+  // Championship = 1st place, however it's spelled.
+  if (
+    t.includes('championship') ||
+    /\b1st\b/.test(t) || t.includes('first place') ||
+    t === 'finals' || t === 'final' || t === 'ninals'
+  ) {
+    return { key: 'championship', label: 'Championship', order: 0 };
+  }
+
+  // Numeric ordinal: "5th", "13th place", etc.
+  const num = t.match(/\b(\d+)(st|nd|rd|th)\b/);
+  let place: number | null = num ? parseInt(num[1], 10) : null;
+
+  // Word ordinal: "fifth place", "ninth place bracket".
+  if (place == null) {
+    for (const [word, n] of Object.entries(ORDINAL_WORDS)) {
+      if (t.includes(word)) { place = n; break; }
+    }
+  }
+
+  if (place != null && place >= 2) {
+    const suffix = place % 10 === 1 && place % 100 !== 11 ? 'st'
+      : place % 10 === 2 && place % 100 !== 12 ? 'nd'
+      : place % 10 === 3 && place % 100 !== 13 ? 'rd' : 'th';
+    return { key: `p${place}`, label: `${place}${suffix} Place`, order: place };
+  }
+
+  // Backdoor / consolation / anything unrecognized → an "Other" bucket last.
+  return { key: 'other', label: 'Other Brackets', order: 999 };
+}
+
 function bracketOrder(name: string): number {
-  const t = name.toLowerCase();
-  if (t.includes('championship')) return 0;
-  if (t.includes('third')) return 1;
-  if (t.includes('fifth')) return 2;
-  if (t.includes('seventh')) return 3;
-  if (t.includes('ninth')) return 4;
-  return 10;
+  return canonicalPlacement(name).order;
 }
