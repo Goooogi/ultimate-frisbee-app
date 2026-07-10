@@ -92,7 +92,7 @@ export function UsauEventsGrid() {
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
             Season
           </span>
-          <div className="inline-flex rounded-full bg-surface border border-border p-[3px]">
+          <div className="inline-flex rounded-full bg-ink/5 p-[3px]">
             {seasons.map((y) => {
               const on = y === season;
               return (
@@ -102,7 +102,7 @@ export function UsauEventsGrid() {
                   onClick={() => setSeason(y)}
                   className={[
                     'rounded-full px-3 py-1.5 text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer transition-colors',
-                    on ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink',
+                    on ? 'bg-ink text-bg' : 'text-muted hover:text-ink',
                   ].join(' ')}
                 >
                   {y}
@@ -222,13 +222,13 @@ function DivisionSection({
   return (
     <details
       open={defaultOpen}
-      className="group bg-bg border border-border rounded-md overflow-hidden [&[open]]:border-ink transition-colors"
+      className="group bg-surface rounded-card shadow-card overflow-hidden transition-shadow [&[open]]:shadow-lift"
     >
       <summary
         className={[
           'list-none cursor-pointer select-none',
-          'flex items-center gap-3 px-4 py-3',
-          'hover:bg-surface transition-colors',
+          'flex items-center gap-3 px-5 py-4',
+          'hover:bg-ink/[0.02] transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
         ].join(' ')}
       >
@@ -246,8 +246,8 @@ function DivisionSection({
         )}
       </summary>
 
-      <div className="px-4 pt-1 pb-4 border-t border-hairline">
-        <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 lg:gap-3 mt-3">
+      <div className="px-5 pt-1 pb-5 border-t border-hairline">
+        <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 lg:gap-3 mt-4">
           {section.events.map((event) => (
             <EventCard key={event.id} event={event} />
           ))}
@@ -269,7 +269,7 @@ function EventCard({ event }: { event: UsauEventCard }) {
       <Link
         href={`/usau/events/${event.slug}`}
         className={[
-          'block bg-surface border border-border rounded-md p-4 hover:border-ink transition-colors no-underline',
+          'group/card block bg-bg rounded-card-sm p-4 transition-shadow hover:shadow-card cursor-pointer no-underline',
           past ? 'opacity-75' : '',
         ].join(' ')}
       >
@@ -283,7 +283,7 @@ function EventCard({ event }: { event: UsauEventCard }) {
             </span>
           )}
         </div>
-        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2">
+        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 group-hover/card:text-accent transition-colors">
           {event.name}
         </div>
         <div className="flex items-center gap-3 text-[11px] font-medium text-muted font-tight">

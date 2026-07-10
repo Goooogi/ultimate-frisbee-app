@@ -142,10 +142,10 @@ export function PillSelect<V extends string | number>({
         onClick={() => setOpen((o) => !o)}
         onKeyDown={onTriggerKey}
         className={[
-          'inline-flex items-center gap-2 pl-3 pr-2 py-[6px] rounded-full',
+          'inline-flex items-center gap-2 pl-3.5 pr-2.5 py-[7px] rounded-full min-h-[36px]',
           'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-          'bg-surface border border-border text-ink cursor-pointer',
-          'hover:border-ink transition-colors duration-150',
+          'bg-ink/5 text-ink cursor-pointer',
+          'hover:bg-ink/10 transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           'whitespace-nowrap',
           className,
@@ -162,8 +162,8 @@ export function PillSelect<V extends string | number>({
           aria-label={ariaLabel}
           tabIndex={-1}
           className={[
-            'absolute top-full mt-1.5 z-30 min-w-[--pill-w] py-1',
-            'bg-bg border border-border rounded-md shadow-lg',
+            'absolute top-full mt-1.5 z-30 min-w-[--pill-w] py-1.5',
+            'bg-surface rounded-card shadow-lift',
             'max-h-[60vh] overflow-y-auto',
             align === 'right' ? 'right-0' : 'left-0',
           ].join(' ')}
@@ -184,12 +184,12 @@ export function PillSelect<V extends string | number>({
                   onMouseEnter={() => !o.disabled && setFocusIdx(i)}
                   onClick={() => !o.disabled && select(o.value)}
                   className={[
-                    'w-full text-left px-3 py-2 flex items-center justify-between gap-3',
+                    'w-[calc(100%-12px)] text-left px-3.5 py-2 mx-1.5 rounded-full flex items-center justify-between gap-3',
                     'text-[12px] font-bold tracking-[0.12em] uppercase font-tight transition-colors duration-100',
                     o.disabled
                       ? 'text-faint cursor-not-allowed'
                       : focused
-                        ? 'bg-surface-hi text-ink cursor-pointer'
+                        ? 'bg-ink/5 text-ink cursor-pointer'
                         : 'text-muted hover:text-ink cursor-pointer',
                   ].join(' ')}
                 >

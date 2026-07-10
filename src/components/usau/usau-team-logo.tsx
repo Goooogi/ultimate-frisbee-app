@@ -1,7 +1,10 @@
 // USAU team logo component — used in /usau/teams ranked list and team detail pages.
-// Renders a white tile with a next/image when a logo is found in the local manifest;
-// otherwise renders a colored monogram tile from the team name initials.
+// Renders a circular white disc with a next/image when a logo is found in the local
+// manifest; otherwise renders a colored monogram disc from the team name initials.
 // Local public paths need no domain config in next.config — next/image handles them natively.
+// v2: circular disc (rounded-full) matching the "Avatar/logo chips" spec in the
+// redesign style guide — callers that also wrap this in their own rounded-full
+// span (home components) are unaffected, a circle clipped again is still a circle.
 
 import Image from 'next/image';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
@@ -29,15 +32,15 @@ export function UsauTeamLogo({ name, genderDivision, competitionLevel, size = 40
   if (logoPath) {
     return (
       <span
-        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-md bg-white border border-[rgb(var(--ink)/0.08)]"
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-full bg-white"
         style={{ width: size, height: size }}
         aria-hidden="true"
       >
         <Image
           src={logoPath}
           alt=""
-          width={Math.round(size * 0.84)}
-          height={Math.round(size * 0.84)}
+          width={Math.round(size * 0.72)}
+          height={Math.round(size * 0.72)}
           className="object-contain"
         />
       </span>
@@ -54,7 +57,7 @@ export function UsauTeamLogo({ name, genderDivision, competitionLevel, size = 40
 
   return (
     <span
-      className="inline-flex items-center justify-center flex-shrink-0 relative overflow-hidden rounded-md"
+      className="inline-flex items-center justify-center flex-shrink-0 relative overflow-hidden rounded-full"
       style={{ width: size, height: size, background: MONOGRAM_BG }}
       aria-hidden="true"
     >

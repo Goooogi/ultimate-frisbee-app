@@ -110,32 +110,28 @@ export function MobileBottomNav() {
     <nav
       aria-label="Mobile navigation"
       className={[
-        'lg:hidden fixed bottom-0 inset-x-0 z-40 border-t border-border bg-bg/95 backdrop-blur',
-        'px-1.5 pt-2 pb-[max(env(safe-area-inset-bottom),12px)] grid',
-        // Fantasy has 3 tabs (Leaderboard/My Team/My League); everything else has 4.
-        isFantasy ? 'grid-cols-3' : 'grid-cols-4',
+        // Floating hub pill (Instagram-style): detached from the screen edges
+        // with margins + a bottom gap, rounded-full, elevated with shadow-lift
+        // so it clearly reads as floating above the content rather than a
+        // flush edge-to-edge bar.
+        'lg:hidden fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] inset-x-3 z-40',
+        'rounded-full border border-border bg-bg/90 backdrop-blur shadow-lift',
+        'px-2 py-2.5 flex items-center justify-around',
       ].join(' ')}
     >
       {tabs.map((tab) => {
-        // "Coming soon" placeholder — greyed out, non-navigable (mirrors the
-        // `soon` treatment in games-subnav.tsx's desktop FANTASY_NAV_ITEMS).
+        // "Coming soon" placeholder — faint, non-navigable icon only (mirrors the
+        // `soon` treatment in games-subnav.tsx's desktop FANTASY_NAV_ITEMS, minus
+        // the label since this pill is icon-only).
         if (tab.soon) {
           return (
             <span
               key={tab.id}
               aria-disabled="true"
-              className="flex flex-col items-center gap-1 px-2 py-1 cursor-not-allowed select-none"
+              aria-label={`${tab.label} (coming soon)`}
+              className="flex items-center justify-center w-11 h-11 rounded-full cursor-not-allowed select-none"
             >
               <Icon kind={tab.icon} active={false} faint />
-              <span className="flex items-center gap-1">
-                <span className="text-[10px] font-bold tracking-[0.1em] uppercase font-tight text-faint">
-                  {tab.label}
-                </span>
-                <span className="text-[8px] font-bold tracking-[0.12em] uppercase text-faint/80">
-                  Soon
-                </span>
-              </span>
-              <span aria-hidden="true" className="w-[18px] h-[2px] bg-transparent" />
             </span>
           );
         }
@@ -146,24 +142,17 @@ export function MobileBottomNav() {
             key={tab.id}
             href={`${tab.href}${qs}`}
             aria-current={active ? 'page' : undefined}
-            className="flex flex-col items-center gap-1 px-2 py-1 no-underline min-h-[44px] justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-md"
+            aria-label={tab.label}
+            className={[
+              'flex items-center justify-center w-11 h-11 rounded-full no-underline shrink-0',
+              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              // Faint accent disc behind the active icon — the only "active"
+              // signal now that labels/underlines are gone (Instagram just
+              // brightens the icon; this adds a subtle on-brand disc too).
+              active ? 'bg-accent/10' : '',
+            ].join(' ')}
           >
             <Icon kind={tab.icon} active={active} />
-            <span
-              className={[
-                'text-[10px] font-bold tracking-[0.1em] uppercase font-tight',
-                // Active tab uses the accent (lime on Broadcast, coral on Field).
-                // Inactive uses muted (not faint) so labels stay clearly legible
-                // while still reading as secondary to the accent-colored active tab.
-                active ? 'text-accent' : 'text-muted',
-              ].join(' ')}
-            >
-              {tab.label}
-            </span>
-            <span
-              aria-hidden="true"
-              className={['w-[18px] h-[2px]', active ? 'bg-accent' : 'bg-transparent'].join(' ')}
-            />
           </Link>
         );
       })}
@@ -181,8 +170,11 @@ function Icon({
   /** Renders the icon in the faint (disabled) token instead of muted/ink/accent. */
   faint?: boolean;
 }) {
-  const c = faint ? 'text-faint' : active ? 'text-ink' : 'text-muted';
-  const ball = faint ? 'text-faint' : active ? 'text-accent' : c;
+  // Icon-only pill: color is the sole active/inactive signal now that labels
+  // and underlines are gone, so every icon kind uses the same rule —
+  // accent when active, muted when inactive, faint when disabled ("soon").
+  const c = faint ? 'text-faint' : active ? 'text-accent' : 'text-muted';
+  const ball = c;
   switch (kind) {
     case 'games':
       return (

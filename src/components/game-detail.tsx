@@ -37,7 +37,9 @@ interface GameDetailProps {
 export function GameDetail({ game, today, enrichment }: GameDetailProps) {
   return (
     <AppShell>
-      <DetailBody game={game} today={today} enrichment={enrichment} />
+      <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
+        <DetailBody game={game} today={today} enrichment={enrichment} />
+      </div>
     </AppShell>
   );
 }
@@ -63,7 +65,7 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
   const matchupLabel = `${away.city ?? away.abbr} vs ${home.city ?? home.abbr}`;
 
   return (
-    <div className="bg-surface flex flex-col font-tight text-ink">
+    <div className="bg-surface rounded-card-lg shadow-card flex flex-col font-tight text-ink overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-5 py-3 md:px-14 md:py-5 flex-shrink-0">
         <Breadcrumbs
           crumbs={[
@@ -86,9 +88,14 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
           <div className="inline-flex items-center gap-2">
             {state.isLive && <LiveDotAccent size={7} />}
             <span
-              className={`text-[13px] font-bold tracking-[0.18em] uppercase ${
-                state.isLive ? 'text-accent' : state.isFinal ? 'text-ink' : 'text-muted'
-              }`}
+              className={[
+                'inline-flex items-center text-[11px] font-bold tracking-[0.16em] uppercase rounded-full px-2.5 py-[5px]',
+                state.isLive
+                  ? 'bg-accent text-accent-ink'
+                  : state.isFinal
+                    ? 'bg-ink/5 text-ink/80'
+                    : 'bg-ink/5 text-muted',
+              ].join(' ')}
             >
               {state.isLive ? 'Live' : state.isFinal ? 'Final' : 'Upcoming'}
             </span>
@@ -99,7 +106,7 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
             )}
           </div>
           {state.isUpcoming && (
-            <span className="text-[20px] md:text-[28px] font-bold tracking-[-0.03em] text-ink tabular leading-none">
+            <span className="text-[20px] md:text-[28px] font-display italic font-bold tracking-[-0.02em] text-ink tabular leading-none">
               {start}
             </span>
           )}
@@ -296,7 +303,7 @@ function ScoreHalf({
       className={[
         'relative overflow-hidden bg-surface flex flex-col justify-between gap-5',
         'px-6 py-7 md:px-12 md:py-10 min-h-[260px] md:min-h-[320px]',
-        bordered ? 'border-t md:border-t-0 md:border-l border-border' : '',
+        bordered ? 'border-t md:border-t-0 md:border-l border-hairline' : '',
       ].join(' ')}
     >
       {/* tinted gradient drifts in from the top */}
@@ -335,14 +342,14 @@ function ScoreHalf({
           <div className="font-sans text-[12px] md:text-[14px] text-muted font-medium truncate">
             {city}
           </div>
-          <div className="font-display text-[28px] md:text-[44px] font-bold text-ink tracking-[0.01em] leading-none uppercase truncate">
+          <div className="font-display italic text-[28px] md:text-[44px] font-bold text-ink tracking-[-0.02em] leading-[0.95] uppercase truncate pr-[0.14em]">
             {name}
           </div>
         </div>
       </div>
 
       <span
-        className="relative font-display font-bold tabular leading-[0.85] tracking-[-0.04em]"
+        className="relative font-display italic font-bold tabular leading-[0.85] tracking-[-0.04em]"
         style={{
           fontSize: 'clamp(80px, 12vw, 168px)',
           color: showScore
@@ -551,7 +558,7 @@ function RosterCta({
   return (
     <Link
       href={`/teams/${team.id}`}
-      className="group flex items-center justify-between gap-3 px-4 py-3.5 bg-surface border border-border hover:border-ink transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="group flex items-center justify-between gap-3 px-4 py-3.5 bg-bg rounded-card-sm hover:bg-surface-hi transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex items-center gap-3 min-w-0">
         <span
@@ -660,7 +667,7 @@ function FieldLeaderCard({
   const awayWins = awayHas && awayCount > homeCount;
   const homeWins = homeHas && homeCount > awayCount;
   return (
-    <div className="bg-surface border border-border px-3 py-3.5 md:px-4 md:py-4 flex flex-col gap-3">
+    <div className="bg-bg rounded-card-sm px-3 py-3.5 md:px-4 md:py-4 flex flex-col gap-3">
       <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight text-center">
         {title}
       </div>

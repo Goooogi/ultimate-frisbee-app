@@ -24,7 +24,7 @@ export async function PulSchedule({ season }: Props) {
 
   if (games.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
         <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
           No games scheduled
         </div>
@@ -78,26 +78,21 @@ function WeekSection({
 
   return (
     <section aria-labelledby={id}>
-      <div
-        className={[
-          'flex items-baseline justify-between gap-3 mb-3 pb-2 border-b',
-          emphasized ? 'border-ink' : 'border-hairline',
-        ].join(' ')}
-      >
+      <div className="flex items-end justify-between gap-3 mb-4">
         <span
           id={id}
           className={[
-            'text-[10px] font-bold tracking-[0.18em] uppercase font-tight',
+            'font-display italic font-bold text-[22px] lg:text-[26px] leading-[0.95] tracking-[-0.02em]',
             emphasized ? 'text-ink' : 'text-muted',
           ].join(' ')}
         >
           {label}
         </span>
-        <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
+        <span className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-faint pb-1">
           {games.length} {games.length === 1 ? 'game' : 'games'}
         </span>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 md:gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {games.map((game) => (
           <ScheduleCard key={game.id} game={game} />
         ))}
@@ -117,13 +112,7 @@ function ScheduleCard({ game }: { game: PulGame }) {
     isFinal && away.score !== null && home.score !== null && home.score > away.score;
 
   return (
-    <div
-      className={[
-        'bg-surface border border-border rounded-md',
-        'px-4 py-3.5 md:px-5 md:py-4',
-        'transition-colors duration-150 hover:border-ink',
-      ].join(' ')}
-    >
+    <div className="bg-surface rounded-card shadow-card hover:shadow-lift transition-shadow px-4 py-3.5 md:px-5 md:py-4">
       {/* Status / date row */}
       <div className="flex items-center justify-between mb-2.5">
         <span
@@ -200,7 +189,9 @@ function ScheduleRow({
     >
       {/* Logo + name */}
       <div className="flex items-center gap-2.5 md:gap-3 min-w-0">
-        <PulTeamLogo team={teamForLogo} size={28} />
+        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+          <PulTeamLogo team={teamForLogo} size={28} />
+        </span>
         <span
           className={[
             'font-tight tracking-[-0.01em] text-[15px] md:text-[17px] text-ink truncate',

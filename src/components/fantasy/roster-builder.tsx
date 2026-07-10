@@ -188,14 +188,14 @@ function PlayerTypeahead({
     return (
       <div
         className={[
-          'flex items-center gap-3 px-3 py-2.5 rounded-md border border-border bg-surface',
+          'flex items-center gap-3 px-3.5 py-2.5 rounded-card-sm bg-ink/5',
           'min-h-[44px]',
         ].join(' ')}
       >
         <span
           className={[
-            'flex-shrink-0 w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center',
-            'bg-[rgb(var(--ink)/0.08)] font-tight',
+            'flex-shrink-0 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center',
+            'bg-surface font-tight',
             roleColor,
           ].join(' ')}
           aria-label={role}
@@ -218,8 +218,8 @@ function PlayerTypeahead({
             onClick={handleClear}
             aria-label={`Remove ${currentPlayer.fullName}`}
             className={[
-              'flex-shrink-0 w-7 h-7 rounded flex items-center justify-center',
-              'text-faint hover:text-ink hover:bg-[rgb(var(--ink)/0.06)]',
+              'flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center',
+              'text-faint hover:text-ink hover:bg-ink/10',
               'transition-colors duration-150 cursor-pointer',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             ].join(' ')}
@@ -238,8 +238,8 @@ function PlayerTypeahead({
       <div className="relative flex items-center">
         <span
           className={[
-            'absolute left-3 flex-shrink-0 w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center',
-            'bg-[rgb(var(--ink)/0.08)] font-tight pointer-events-none',
+            'absolute left-3 flex-shrink-0 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center',
+            'bg-surface font-tight pointer-events-none',
             roleColor,
           ].join(' ')}
           aria-hidden="true"
@@ -258,17 +258,17 @@ function PlayerTypeahead({
           aria-autocomplete="list"
           aria-expanded={open}
           className={[
-            'w-full pl-10 pr-4 py-2.5 rounded-md border border-border bg-surface',
+            'w-full pl-10 pr-4 py-2.5 rounded-card-sm bg-ink/5',
             'font-tight text-[14px] text-ink placeholder:text-faint',
             'transition-colors duration-150',
-            'focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent',
+            'focus:outline-none focus:ring-2 focus:ring-accent',
             'min-h-[44px]',
             disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-text',
           ].join(' ')}
         />
         {loading && (
           <div
-            className="absolute right-3 w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin"
+            className="absolute right-3 w-4 h-4 rounded-full border-2 border-ink/15 border-t-accent animate-spin"
             aria-hidden="true"
           />
         )}
@@ -280,8 +280,8 @@ function PlayerTypeahead({
           role="listbox"
           aria-label="Player search results"
           className={[
-            'absolute top-full left-0 right-0 z-20 mt-1',
-            'bg-bg border border-border rounded-md shadow-lg overflow-hidden',
+            'absolute top-full left-0 right-0 z-20 mt-1.5',
+            'bg-surface rounded-card shadow-lift overflow-hidden',
             'max-h-[240px] overflow-y-auto',
           ].join(' ')}
         >
@@ -291,10 +291,10 @@ function PlayerTypeahead({
                 type="button"
                 onClick={() => handleSelect(hit)}
                 className={[
-                  'w-full flex items-center gap-3 px-3 py-2.5 text-left',
-                  'hover:bg-surface transition-colors duration-150 cursor-pointer',
-                  'focus-visible:outline-none focus-visible:bg-surface',
-                  'border-b border-hairline last:border-0',
+                  'w-full flex items-center gap-3 px-4 py-2.5 text-left',
+                  'hover:bg-surface-hi transition-colors duration-150 cursor-pointer',
+                  'focus-visible:outline-none focus-visible:bg-surface-hi',
+                  'border-t border-hairline first:border-t-0',
                 ].join(' ')}
               >
                 <span className="flex-1 min-w-0">
@@ -314,7 +314,7 @@ function PlayerTypeahead({
       )}
 
       {open && !loading && results.length === 0 && query.length >= 2 && (
-        <div className="absolute top-full left-0 right-0 z-20 mt-1 bg-bg border border-border rounded-md shadow-lg px-3 py-3">
+        <div className="absolute top-full left-0 right-0 z-20 mt-1.5 bg-surface rounded-card shadow-lift px-4 py-3">
           <span className="font-tight text-[13px] text-faint">No players found for &ldquo;{query}&rdquo;</span>
         </div>
       )}
@@ -625,8 +625,8 @@ export function RosterBuilder({
       <div className="flex items-center gap-2">
         <span
           className={[
-            'inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold font-tight',
-            'bg-[rgb(var(--ink)/0.08)]',
+            'inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold font-tight',
+            'bg-ink/[0.08]',
             role === 'offender' ? 'text-ink' : 'text-accent',
           ].join(' ')}
           aria-hidden="true"
@@ -670,14 +670,14 @@ export function RosterBuilder({
       <div className="space-y-8">
         {/* ── Week lock banner ──────────────────────────────────────────── */}
         {isLocked && (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-md bg-[rgb(var(--live)/0.08)] border border-[rgb(var(--live)/0.20)]">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-card-sm bg-live/[0.08]">
             <svg
               width="16"
               height="16"
               viewBox="0 0 16 16"
               fill="none"
               aria-hidden="true"
-              className="flex-shrink-0 text-[rgb(var(--live))]"
+              className="flex-shrink-0 text-live"
             >
               <rect x="3" y="7" width="10" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
               <path d="M5 7V5a3 3 0 116 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -690,7 +690,7 @@ export function RosterBuilder({
         )}
 
         {!weekInfo && (
-          <div className="px-4 py-3 rounded-md bg-[rgb(var(--ink)/0.04)] border border-border">
+          <div className="px-4 py-3 rounded-card-sm bg-ink/[0.04]">
             <span className="font-tight text-[13px] text-muted">
               No active week found. Check back once the season schedule is published.
             </span>
@@ -699,7 +699,7 @@ export function RosterBuilder({
 
         {/* ── Identity fields (only before team is created) ─────────────── */}
         {user && !existingTeam && !savedTeamId && (
-          <div className="rounded-lg border border-border bg-surface p-5">
+          <div className="bg-surface rounded-card shadow-card p-5">
             <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-4">
               Your Identity
             </div>
@@ -720,9 +720,9 @@ export function RosterBuilder({
                   maxLength={40}
                   placeholder="e.g. Disc Jockeys"
                   className={[
-                    'w-full px-3 py-2.5 rounded-md border border-border bg-bg',
+                    'w-full px-3.5 py-2.5 rounded-card-sm bg-ink/5',
                     'font-tight text-[14px] text-ink placeholder:text-faint',
-                    'focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent',
+                    'focus:outline-none focus:ring-2 focus:ring-accent',
                     'min-h-[44px]',
                   ].join(' ')}
                 />
@@ -754,20 +754,20 @@ export function RosterBuilder({
                       placeholder="your_handle"
                       autoComplete="username"
                       className={[
-                        'w-full pl-7 pr-4 py-2.5 rounded-md border bg-bg',
+                        'w-full pl-7 pr-4 py-2.5 rounded-card-sm bg-ink/5 ring-1 ring-inset ring-transparent',
                         'font-tight text-[14px] text-ink placeholder:text-faint',
-                        'focus:outline-none focus:ring-2 focus:border-transparent',
+                        'focus:outline-none focus:ring-2',
                         'min-h-[44px]',
                         handleStatus === 'available'
-                          ? 'border-green-500 focus:ring-green-500'
+                          ? 'ring-green-500 focus:ring-green-500'
                           : handleStatus === 'taken' || handleStatus === 'invalid'
-                          ? 'border-[rgb(var(--live))] focus:ring-[rgb(var(--live))]'
-                          : 'border-border focus:ring-accent',
+                          ? 'ring-live focus:ring-live'
+                          : 'focus:ring-accent',
                       ].join(' ')}
                     />
                     {handleStatus === 'checking' && (
                       <div
-                        className="absolute right-3 w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin"
+                        className="absolute right-3 w-4 h-4 rounded-full border-2 border-ink/15 border-t-accent animate-spin"
                         aria-hidden="true"
                       />
                     )}
@@ -777,10 +777,10 @@ export function RosterBuilder({
                       <span className="text-green-600">Handle is available</span>
                     )}
                     {handleStatus === 'taken' && (
-                      <span className="text-[rgb(var(--live))]">Handle is already taken</span>
+                      <span className="text-live">Handle is already taken</span>
                     )}
                     {handleStatus === 'invalid' && (
-                      <span className="text-[rgb(var(--live))]">
+                      <span className="text-live">
                         3–30 chars, lowercase letters/numbers/underscores only
                       </span>
                     )}
@@ -798,7 +798,7 @@ export function RosterBuilder({
 
         {/* Show existing team info — name is inline-editable */}
         {existingTeam && !isRenaming && (
-          <div className="flex items-center gap-3 px-4 py-3 rounded-md bg-surface border border-border">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-card-sm bg-surface shadow-soft">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0 text-accent">
               <path d="M3 8l4 4 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
@@ -813,8 +813,8 @@ export function RosterBuilder({
               onClick={startRename}
               aria-label="Rename your team"
               className={[
-                'ml-auto flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-md',
-                'text-faint hover:text-ink hover:bg-[rgb(var(--ink)/0.06)]',
+                'ml-auto flex-shrink-0 flex items-center justify-center w-8 h-8 rounded-full',
+                'text-faint hover:text-ink hover:bg-ink/5',
                 'transition-colors duration-150 cursor-pointer',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
@@ -831,7 +831,7 @@ export function RosterBuilder({
             </button>
             <Link
               href={`/fantasy/team/${existingTeam.id}`}
-              className="flex-shrink-0 text-[11px] font-bold text-accent font-tight hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+              className="flex-shrink-0 text-[11px] font-bold text-accent font-tight hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full"
             >
               View team
             </Link>
@@ -839,7 +839,7 @@ export function RosterBuilder({
         )}
 
         {existingTeam && isRenaming && (
-          <div className="rounded-md bg-surface border border-border p-4">
+          <div className="rounded-card-sm bg-surface shadow-card p-4">
             <label
               htmlFor="rename-team"
               className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
@@ -862,9 +862,9 @@ export function RosterBuilder({
                   disabled={renameSaving}
                   aria-describedby={renameError ? 'rename-team-error' : undefined}
                   className={[
-                    'w-full px-3 py-2.5 rounded-md border border-border bg-bg',
+                    'w-full px-3.5 py-2.5 rounded-card-sm bg-ink/5',
                     'font-tight text-[14px] text-ink placeholder:text-faint',
-                    'focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent',
+                    'focus:outline-none focus:ring-2 focus:ring-accent',
                     'min-h-[44px]',
                     renameSaving ? 'opacity-60 cursor-not-allowed' : '',
                   ].join(' ')}
@@ -879,12 +879,12 @@ export function RosterBuilder({
                   onClick={handleRenameSave}
                   disabled={!canSaveRename}
                   className={[
-                    'inline-flex items-center justify-center gap-2 px-4 rounded-md min-h-[44px]',
+                    'inline-flex items-center justify-center gap-2 px-4 rounded-full min-h-[44px]',
                     'font-tight text-[12px] font-bold tracking-[0.04em] uppercase transition-all duration-150',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
                     canSaveRename
-                      ? 'bg-accent text-[rgb(var(--accent-ink))] hover:opacity-90 cursor-pointer'
-                      : 'bg-[rgb(var(--ink)/0.08)] text-faint cursor-not-allowed',
+                      ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer'
+                      : 'bg-ink/[0.08] text-faint cursor-not-allowed',
                   ].join(' ')}
                 >
                   {renameSaving && (
@@ -900,9 +900,9 @@ export function RosterBuilder({
                   onClick={cancelRename}
                   disabled={renameSaving}
                   className={[
-                    'inline-flex items-center justify-center px-4 rounded-md min-h-[44px]',
+                    'inline-flex items-center justify-center px-4 rounded-full min-h-[44px]',
                     'font-tight text-[12px] font-bold tracking-[0.04em] uppercase transition-colors duration-150',
-                    'text-muted hover:text-ink hover:bg-[rgb(var(--ink)/0.06)] border border-border',
+                    'text-muted hover:text-ink hover:bg-ink/5 bg-ink/5',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                     renameSaving ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer',
                   ].join(' ')}
@@ -913,7 +913,7 @@ export function RosterBuilder({
             </div>
             <div aria-live="polite">
               {renameError && (
-                <p id="rename-team-error" className="mt-2 font-tight text-[12px] text-[rgb(var(--live))]">
+                <p id="rename-team-error" className="mt-2 font-tight text-[12px] text-live">
                   {renameError}
                 </p>
               )}
@@ -988,7 +988,7 @@ export function RosterBuilder({
                     ? isOff
                       ? 'bg-ink'
                       : 'bg-accent'
-                    : 'bg-[rgb(var(--ink)/0.12)]',
+                    : 'bg-ink/[0.12]',
                 ].join(' ')}
               />
             );
@@ -1000,7 +1000,7 @@ export function RosterBuilder({
 
         {/* ── Save / error ─────────────────────────────────────────────── */}
         {saveError && (
-          <div className="px-4 py-3 rounded-md bg-[rgb(var(--live)/0.08)] border border-[rgb(var(--live)/0.20)]">
+          <div className="px-4 py-3 rounded-card-sm bg-live/[0.08]">
             <span className="font-tight text-[13px] text-ink">{saveError}</span>
           </div>
         )}
@@ -1021,13 +1021,13 @@ export function RosterBuilder({
             }
             className={[
               'inline-flex items-center justify-center gap-2',
-              'px-6 py-3 rounded-md',
+              'px-6 py-3 rounded-full',
               'font-tight text-[13px] font-bold tracking-[0.06em] uppercase',
               'transition-all duration-150',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
               canSave
-                ? 'bg-accent text-[rgb(var(--accent-ink))] hover:opacity-90 cursor-pointer'
-                : 'bg-[rgb(var(--ink)/0.08)] text-faint cursor-not-allowed',
+                ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer'
+                : 'bg-ink/[0.08] text-faint cursor-not-allowed',
             ].join(' ')}
           >
             {saving ? (

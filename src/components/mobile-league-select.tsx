@@ -26,10 +26,10 @@ export function MobileLeagueSelect() {
         aria-label={`League: ${activeLeague.short}. Tap to switch.`}
         className={[
           'list-none [&::-webkit-details-marker]:hidden cursor-pointer',
-          'inline-flex items-center gap-1.5 px-3 py-[6px] rounded-full',
+          'inline-flex items-center gap-1.5 px-3.5 py-[7px] rounded-full min-h-[44px]',
           'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-          'bg-surface border border-border text-ink',
-          'hover:border-accent transition-colors duration-150',
+          'bg-ink/5 text-ink',
+          'hover:bg-ink/10 transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >
@@ -57,7 +57,7 @@ export function MobileLeagueSelect() {
       {/* Dropdown menu — z-[60] clears the rail's z-50.
           absolute left-0 top-full mt-1 anchors it directly below the trigger,
           left-aligned. min-w-[120px] keeps rows comfortable without ballooning. */}
-      <div className="absolute left-0 top-full mt-1 z-[60] min-w-[120px] border border-border bg-bg rounded-md p-1.5 shadow-lg">
+      <div className="absolute left-0 top-full mt-1.5 z-[60] min-w-[140px] bg-surface rounded-card shadow-lift p-1.5">
         {LEAGUES.map((l) => {
           const isActive = l.id === league;
           const isDisabled = l.id === 'intl';
@@ -69,7 +69,7 @@ export function MobileLeagueSelect() {
                 aria-disabled="true"
                 title="Coming soon"
                 className={[
-                  'flex items-center gap-1.5 px-3 py-2 rounded',
+                  'flex items-center gap-1.5 px-3 py-2 rounded-full',
                   'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
                   'text-faint cursor-not-allowed select-none',
                 ].join(' ')}
@@ -93,13 +93,13 @@ export function MobileLeagueSelect() {
                 if (detailsRef.current) detailsRef.current.open = false;
               }}
               className={[
-                'flex items-center gap-1.5 w-full px-3 py-2 rounded text-left',
+                'flex items-center gap-1.5 w-full px-3 py-2.5 rounded-full text-left min-h-[44px]',
                 'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
                 'transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 isActive
-                  ? 'text-ink bg-surface'
-                  : 'text-muted hover:text-ink hover:bg-surface',
+                  ? 'text-bg bg-ink'
+                  : 'text-muted hover:text-ink hover:bg-ink/5',
               ].join(' ')}
             >
               {/* Check glyph on active row; spacer keeps other rows aligned */}

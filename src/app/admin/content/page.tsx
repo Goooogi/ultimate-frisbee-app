@@ -52,7 +52,7 @@ export default async function AdminContentPage() {
         </span>
         <Link
           href="#recent"
-          className="inline-flex items-center px-3 py-1.5 rounded-full border border-border text-muted hover:text-ink hover:bg-surface transition-colors"
+          className="inline-flex items-center px-3 py-1.5 rounded-full bg-ink/5 text-muted hover:text-ink hover:bg-ink/10 transition-colors"
         >
           {recent.length} recent
         </Link>

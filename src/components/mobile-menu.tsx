@@ -10,7 +10,7 @@
 //   Layer 1 — sub-apps: The League (expandable) · PLAYBOOK · FANTASY · 12-0
 //   Layer 2 — leagues: UFA · USAU · WUL · PUL · WFDF (expandable / direct)
 //   Layer 3 — sub-pages: Scores · Schedule · Teams · Players (links with ?league=qs)
-// Plus a Theme toggle row at the foot.
+// Plus a persistent account footer (sign in/out, settings).
 //
 // Accordion default-open state: opens to the branch that matches the current URL
 // so a user in USAU Teams sees The League→USAU expanded with Teams highlighted.
@@ -59,6 +59,12 @@ import { activeTeams } from '@/lib/ufa/teams';
 import { allWulTeams, type WulTeamMeta } from '@/lib/wul/teams';
 import { TeamLogo } from '@/components/team-logo';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import dynamic from 'next/dynamic';
+
+// The auth modal is only needed once a signed-out visitor opens sign-in/up —
+// load it on demand (same pattern as account-chip.tsx) so it stays out of
+// the bundle every menu-open pays for.
+const AuthModal = dynamic(() => import('@/components/auth/auth-modal').then((m) => m.AuthModal));
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -69,15 +75,19 @@ type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf';
 interface MegaLeague {
   id: MegaLeagueId;
   label: string;
+  /** Full league name — shown as a muted subtitle next to the short label. */
+  fullName: string;
+  /** Logo image in /public (same assets as leagues-strip.tsx's LeagueMark). */
+  img: string;
   real: boolean;
 }
 
 const MEGA_LEAGUES: MegaLeague[] = [
-  { id: 'ufa',  label: 'UFA',  real: true  },
-  { id: 'usau', label: 'USAU', real: true  },
-  { id: 'pul',  label: 'PUL',  real: true  }, // real=true: expandable with 4 sub-page links
-  { id: 'wul',  label: 'WUL',  real: true  }, // real=true: expandable, but Teams-only (no scores/schedule/players yet)
-  { id: 'wfdf', label: 'WFDF', real: true  }, // event-scoped hub (Events/Scores/Teams/Players under /wfdf/*)
+  { id: 'ufa',  label: 'UFA',  fullName: 'Ultimate Frisbee Association',   img: '/UFA-red.png',     real: true },
+  { id: 'usau', label: 'USAU', fullName: 'USA Ultimate',                   img: '/USAU-logo.png',   real: true },
+  { id: 'pul',  label: 'PUL',  fullName: 'Premier Ultimate League',        img: '/PUL.webp',        real: true }, // real=true: expandable with 4 sub-page links
+  { id: 'wul',  label: 'WUL',  fullName: 'Western Ultimate League',        img: '/WUL-logo.jpeg',   real: true }, // real=true: expandable, but Teams-only (no scores/schedule/players yet)
+  { id: 'wfdf', label: 'WFDF', fullName: 'World Flying Disc Federation',   img: '/WFDF_Logo.webp',  real: true }, // event-scoped hub (Events/Scores/Teams/Players under /wfdf/*)
 ];
 
 // ─── League fly-out preview data (ported from the old desktop mega-menu) ──────
@@ -278,15 +288,14 @@ function SubAppIcon({ app, className = '' }: { app: SubApp; className?: string }
   }
 }
 
-// A top-level direct-link menu row: icon tile · label (· beta) · chevron.
+// A top-level direct-link menu row: large italic display heading · (beta) ·
+// trailing arrow. No icon tile, no leading number — text-first, matching the
+// reference design's editorial index treatment.
 function SubAppRow({
-  app,
   href,
   label,
   badge,
   active,
-  rowBase,
-  iconTile,
   onClose,
 }: {
   app: SubApp;
@@ -294,8 +303,6 @@ function SubAppRow({
   label: string;
   badge?: string;
   active: boolean;
-  rowBase: string;
-  iconTile: (active: boolean) => string;
   onClose: () => void;
 }) {
   return (
@@ -304,32 +311,62 @@ function SubAppRow({
       onClick={onClose}
       aria-current={active ? 'page' : undefined}
       className={[
-        rowBase,
-        active ? 'text-ink bg-[rgb(var(--accent)/0.08)]' : 'text-ink hover:bg-surface',
+        'group flex items-center justify-between gap-3 w-full px-2.5 py-3 rounded-xl',
+        'no-underline transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        active ? 'bg-[rgb(var(--accent)/0.08)]' : 'hover:bg-surface',
       ].join(' ')}
     >
-      <span className={iconTile(active)}>
-        <SubAppIcon app={app} />
-      </span>
-      <span className="flex-1 flex items-center gap-1.5">
-        {label}
+      <span className="flex items-center gap-2 min-w-0">
+        {/* No overflow/truncate clipping here — these labels are short, fixed
+            strings, and italic display glyphs (e.g. the "y" descender) render
+            slightly outside their advance-width box; clipping cuts them off
+            even when the text technically fits. */}
+        <span
+          className={[
+            'font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em] whitespace-nowrap',
+            active ? 'text-accent' : 'text-ink',
+          ].join(' ')}
+        >
+          {label}
+        </span>
         {badge && (
-          <sup className="text-[8px] font-bold tracking-[0.14em] text-accent leading-none">
+          <sup className="text-[9px] font-bold tracking-[0.14em] text-accent leading-none flex-shrink-0">
             {badge}
           </sup>
         )}
       </span>
-      {/* Trailing chevron — subtle affordance that shifts toward the accent on
-          hover (group-hover from rowBase). */}
+      {/* Trailing arrow — subtle affordance that shifts toward the accent on
+          hover/active. */}
       <svg
-        className="w-3 h-3 flex-shrink-0 text-faint group-hover:text-accent transition-colors duration-150"
-        viewBox="0 0 10 10"
+        className={[
+          'w-4 h-4 flex-shrink-0 transition-colors duration-150',
+          active ? 'text-accent' : 'text-faint group-hover:text-accent',
+        ].join(' ')}
+        viewBox="0 0 16 16"
         fill="none"
         aria-hidden="true"
       >
-        <path d="M3.5 2L6.5 5L3.5 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M4 8h8M8.5 4.5L12 8l-3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     </Link>
+  );
+}
+
+// League mark — compact rounded-square badge showing a league's logo (falls
+// back to its abbreviation monogram if no image loads). Same visual pattern
+// as leagues-strip.tsx's LeagueMark (home page), reused here so the menu's
+// league rows read consistently with the rest of the site.
+function LeagueMark({ label, img, size = 36 }: { label: string; img: string; size?: number }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{ width: size, height: size }}
+      className="inline-flex items-center justify-center rounded-[10px] flex-shrink-0 overflow-hidden bg-white shadow-[inset_0_0_0_1px_rgba(14,14,12,0.06)]"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={img} alt="" className="w-full h-full object-contain p-1" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+    </span>
   );
 }
 
@@ -346,6 +383,19 @@ interface FlyoutLeagueData {
 
 const gridLinkClass =
   'flex items-center gap-2 px-1.5 py-1.5 rounded-md text-[12px] font-medium font-tight text-ink transition-colors duration-150 no-underline hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+
+// Pill-tab styling for the SCORES/SCHEDULE/TEAMS/PLAYERS sub-page links —
+// active = filled accent, resting = muted bg-ink/5 (matches the segmented
+// pill control used elsewhere, e.g. games-subnav.tsx). Passed as
+// LeagueFlyoutBody's tabLinkBase so both the desktop fly-out and the mobile
+// inline dropdown render the same pill treatment.
+// Rendered inside a 4-col grid (see tabRowBase callers) so all four sub-page
+// tabs sit on ONE row — each pill fills its cell and centers, so PLAYERS no
+// longer wraps to a second line. Padding is horizontal-minimal (the grid owns
+// the width); tracking is slightly tighter so the longest label (SCHEDULE)
+// fits the narrowest cell.
+const pillLinkBase =
+  'inline-flex items-center justify-center w-full h-8 px-1 rounded-full text-[10px] font-bold tracking-[0.08em] uppercase font-tight transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
 
 // ── Shared body: sub-page tab links ─────────────────────────────────────────
 // Used by the DESKTOP fly-out AND the MOBILE inline sub-dropdown for every
@@ -384,6 +434,11 @@ function LeagueFlyoutBody({
     league === 'wul' ? WUL_NAV_ITEMS : league === 'wfdf' ? WFDF_NAV_ITEMS : GAMES_NAV_ITEMS;
   const noQs = league === 'wul' || league === 'wfdf';
 
+  // Pill mode (tabLinkBase passed by the caller — the league fly-out/dropdown
+  // treatment) gets a FILLED accent active state, matching the reference's
+  // "SCORES active = filled accent, others = muted" pill row. Any other
+  // caller (none currently) keeps the original tinted-text active state.
+  const isPillMode = tabLinkBase != null;
   const linkClass =
     tabLinkBase ??
     [
@@ -407,7 +462,9 @@ function LeagueFlyoutBody({
             onClick={onClose}
             className={[
               linkClass,
-              active ? 'text-accent bg-[rgb(var(--accent)/0.1)]' : 'text-ink hover:bg-surface',
+              active
+                ? isPillMode ? 'bg-accent text-accent-ink' : 'text-accent bg-[rgb(var(--accent)/0.1)]'
+                : isPillMode ? 'bg-ink/5 text-ink hover:bg-ink/10' : 'text-ink hover:bg-surface',
             ].join(' ')}
           >
             {item.label}
@@ -613,6 +670,7 @@ function LeagueFlyout({
   pathname,
   urlDivision,
   leagueQsFor,
+  leagueHomeHrefFor,
   onBack,
   onClose,
   pul,
@@ -626,6 +684,7 @@ function LeagueFlyout({
   pathname: string;
   urlDivision: ReturnType<typeof parseDivisionParam>;
   leagueQsFor: (id: MegaLeagueId) => string;
+  leagueHomeHrefFor: (id: MegaLeagueId) => string;
   onBack: () => void;
   onClose: () => void;
   /** DESKTOP-only: which USAU division row is expanded in the single
@@ -638,7 +697,7 @@ function LeagueFlyout({
 
   return (
     <div className="flex flex-col">
-      {/* Fly-out header: back arrow + league name. */}
+      {/* Fly-out header: back arrow + league name + "OPEN {LEAGUE} →" jump link. */}
       <div className="flex items-center gap-2 px-4 h-[52px] flex-shrink-0 border-b border-hairline sticky top-0 bg-bg z-10">
         <button
           type="button"
@@ -650,9 +709,17 @@ function LeagueFlyout({
             <path d="M6.5 2L3.5 5L6.5 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
-        <span className="text-[12px] font-bold tracking-[0.14em] uppercase font-tight text-ink">
+        <span className="text-[12px] font-bold tracking-[0.14em] uppercase font-tight text-ink flex-1">
           {label}
         </span>
+        <Link
+          href={leagueHomeHrefFor(league)}
+          onClick={onClose}
+          className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase text-accent font-tight no-underline hover:opacity-80 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+        >
+          Open {label}
+          <span aria-hidden="true">→</span>
+        </Link>
       </div>
 
       <div className="p-4">
@@ -679,87 +746,112 @@ function LeagueFlyout({
             pathname={pathname}
             leagueQsFor={leagueQsFor}
             onClose={onClose}
+            tabRowBase="grid grid-cols-4 gap-1.5 mb-3"
+            tabLinkBase={pillLinkBase}
           />
         )}
 
-        {/* ── UFA: 4-division team grid (2 cols in the narrow panel) ── */}
-        {league === 'ufa' && (
-          <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-            {UFA_DIVISIONS.map((div) => (
-              <div key={div}>
-                <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5 px-1">
-                  {div}
-                </p>
-                <ul className="space-y-0.5">
-                  {UFA_BY_DIVISION[div].map((team) => (
-                    <li key={team.id}>
-                      <Link href={`/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                        <TeamLogo team={team} size={20} />
-                        <span className="truncate">{team.city}</span>
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* ── PUL: team grid (lazy) ── */}
-        {league === 'pul' && (
-          <div>
-            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Teams</p>
-            {pul.loading && <GridSkeleton />}
-            {!pul.loading && pul.error && <LoadError href="/teams?league=pul" onClose={onClose} />}
-            {!pul.loading && !pul.error && pul.teams && (
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                {pul.teams.map((team) => (
-                  <Link key={team.id} href={`/pul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                    <PulTeamLogoMini logoUrl={team.logoUrl} city={team.city} />
-                    <span className="truncate">{team.city}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── WUL: franchise grid (static) ── */}
-        {league === 'wul' && (
-          <div>
-            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Teams</p>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-              {WUL_TEAMS_LIST.map((team) => (
-                <Link key={team.id} href={`/wul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                  <WulTeamLogoMini team={team} />
-                  <span className="truncate">{team.city}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── WFDF: recent events (lazy) ── */}
-        {league === 'wfdf' && (
-          <div>
-            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Recent Events</p>
-            {wfdf.loading && <GridSkeleton />}
-            {!wfdf.loading && wfdf.error && <LoadError href="/wfdf/events" onClose={onClose} />}
-            {!wfdf.loading && !wfdf.error && wfdf.events && (
-              <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                {wfdf.events.map((e) => (
-                  <Link key={e.slug} href={`/wfdf/events/${e.slug}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                    <span className="text-[10px] font-bold text-faint tabular w-8 text-right flex-shrink-0">{e.year}</span>
-                    <span className="truncate">{e.name}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        <LeagueTeamGrid league={league} onClose={onClose} pul={pul} wfdf={wfdf} />
       </div>
     </div>
   );
+}
+
+// ── Team grid — the previewed league's team/event list ─────────────────────
+// Shared by the DESKTOP fly-out (LeagueFlyout, above) and the MOBILE inline
+// sub-dropdown so both breakpoints show identical data from one source.
+// USAU's grid lives inside its own UsauLevelAccordion (via usauTopTeamsExtra)
+// instead of here, since it's nested per-division rather than a flat grid.
+function LeagueTeamGrid({
+  league,
+  onClose,
+  pul,
+  wfdf,
+}: {
+  league: MegaLeagueId;
+  onClose: () => void;
+} & Pick<FlyoutLeagueData, 'pul' | 'wfdf'>) {
+  if (league === 'ufa') {
+    return (
+      <div className="grid grid-cols-2 gap-x-3 gap-y-3">
+        {UFA_DIVISIONS.map((div) => (
+          <div key={div}>
+            <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5 px-1">
+              {div}
+            </p>
+            <ul className="space-y-0.5">
+              {UFA_BY_DIVISION[div].map((team) => (
+                <li key={team.id}>
+                  <Link href={`/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                    <TeamLogo team={team} size={20} />
+                    <span className="truncate">{team.city}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (league === 'pul') {
+    return (
+      <div>
+        <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Teams</p>
+        {pul.loading && <GridSkeleton />}
+        {!pul.loading && pul.error && <LoadError href="/teams?league=pul" onClose={onClose} />}
+        {!pul.loading && !pul.error && pul.teams && (
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+            {pul.teams.map((team) => (
+              <Link key={team.id} href={`/pul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                <PulTeamLogoMini logoUrl={team.logoUrl} city={team.city} />
+                <span className="truncate">{team.city}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (league === 'wul') {
+    return (
+      <div>
+        <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Teams</p>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+          {WUL_TEAMS_LIST.map((team) => (
+            <Link key={team.id} href={`/wul/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+              <WulTeamLogoMini team={team} />
+              <span className="truncate">{team.city}</span>
+            </Link>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (league === 'wfdf') {
+    return (
+      <div>
+        <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Recent Events</p>
+        {wfdf.loading && <GridSkeleton />}
+        {!wfdf.loading && wfdf.error && <LoadError href="/wfdf/events" onClose={onClose} />}
+        {!wfdf.loading && !wfdf.error && wfdf.events && (
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+            {wfdf.events.map((e) => (
+              <Link key={e.slug} href={`/wfdf/events/${e.slug}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                <span className="text-[10px] font-bold text-faint tabular w-8 text-right flex-shrink-0">{e.year}</span>
+                <span className="truncate">{e.name}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function GridSkeleton() {
@@ -841,6 +933,89 @@ function WulTeamLogoMini({ team }: { team: WulTeamMeta }) {
         {team.abbr}
       </span>
     </span>
+  );
+}
+
+// ─── Account footer ──────────────────────────────────────────────────────────
+// Persistent bottom slot in the drawer. Signed in: avatar + name + "Manage
+// account" + Settings/Sign out. Signed out: Sign in / Create account, wired
+// to the same AuthModal + useAuth pattern as account-chip.tsx (the top-bar
+// equivalent). Self-contained (owns its own useAuth + modal state) so it
+// doesn't add props to MobileMenu just to thread auth through.
+function AccountFooter({ onClose }: { onClose: () => void }) {
+  const { user, loading, signOut } = useAuth();
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+
+  if (loading) {
+    return (
+      <div className="flex-shrink-0 px-5 py-4 border-t border-hairline">
+        <div className="h-11 rounded-xl bg-surface animate-pulse" aria-hidden="true" />
+      </div>
+    );
+  }
+
+  // ── Signed out ────────────────────────────────────────────────────────
+  if (!user) {
+    return (
+      <div className="flex-shrink-0 flex items-center gap-2 px-5 py-4 border-t border-hairline">
+        <button
+          type="button"
+          onClick={() => { setAuthMode('signup'); setAuthOpen(true); }}
+          className="flex-1 inline-flex items-center justify-center h-11 rounded-xl bg-accent text-accent-ink text-[11px] font-bold tracking-[0.12em] uppercase font-tight cursor-pointer hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          Create account
+        </button>
+        <button
+          type="button"
+          onClick={() => { setAuthMode('signin'); setAuthOpen(true); }}
+          className="flex-1 inline-flex items-center justify-center h-11 rounded-xl border border-hairline text-ink text-[11px] font-bold tracking-[0.12em] uppercase font-tight cursor-pointer hover:bg-surface transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          Sign in
+        </button>
+
+        {authOpen && (
+          <AuthModal
+            open={authOpen}
+            dismissible
+            initialMode={authMode}
+            onDismiss={() => setAuthOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // ── Signed in ─────────────────────────────────────────────────────────
+  return (
+    <div className="flex-shrink-0 flex items-center gap-3 px-5 py-4 border-t border-hairline">
+      <span
+        aria-hidden="true"
+        className="inline-flex items-center justify-center flex-shrink-0 w-10 h-10 rounded-full bg-accent text-accent-ink font-bold text-[13px] font-tight"
+      >
+        {user.initials}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className="text-[13px] font-bold text-ink font-tight truncate">{user.name}</div>
+        <div className="text-[11px] text-muted font-tight truncate">Manage account</div>
+      </div>
+      <div className="flex-shrink-0 flex items-center gap-3">
+        <Link
+          href="/settings"
+          onClick={onClose}
+          className="text-[10px] font-bold tracking-[0.12em] uppercase font-tight text-muted hover:text-ink no-underline transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+        >
+          Settings
+        </Link>
+        <button
+          type="button"
+          onClick={async () => { await signOut(); onClose(); }}
+          className="text-[10px] font-bold tracking-[0.12em] uppercase font-tight text-muted hover:text-ink cursor-pointer transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+        >
+          Sign out
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -1014,10 +1189,12 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     }
   }, []);
 
-  // Team grids (the thing these fetches feed) only render on md+ — the
-  // mobile inline sub-dropdown shows just chips/tabs/caption. Skip the
-  // network calls entirely on narrow viewports so opening a league on
-  // mobile doesn't fetch data nothing will display.
+  // isDesktopViewport still gates the hover/focus auto-open behavior below
+  // (touch taps synthesize hover events that would otherwise fight the tap
+  // handler) — but the team-grid data fetches themselves are NOT gated by
+  // it: the mobile inline sub-dropdown now shows the same team grid as the
+  // desktop fly-out (LeagueTeamGrid, shared by both), so both breakpoints
+  // need the underlying data.
   const isDesktopViewport = useCallback(() => {
     return typeof window !== 'undefined' && window.matchMedia('(min-width: 768px)').matches;
   }, []);
@@ -1031,14 +1208,13 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // re-opening USAU after a prior expand-then-close starts fresh.
   const openFlyout = useCallback((id: MegaLeagueId) => {
     setFlyoutLeague(id);
-    if (id === 'usau') setUsauDesktopExpandedLevel(null);
-    if (!isDesktopViewport()) return;
     if (id === 'usau') {
+      setUsauDesktopExpandedLevel(null);
       if (usauLevel === 'COLLEGE_D1') fetchUsauCollegeTeams();
       else if (usauLevel === 'CLUB') fetchUsauTeams();
     } else if (id === 'pul') fetchPulTeams();
     else if (id === 'wfdf') fetchWfdfEvents();
-  }, [usauLevel, isDesktopViewport, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
+  }, [usauLevel, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
 
   // Retained: usauLevel/setUsauLevel is no longer changed by any desktop UI
   // interaction (the desktop accordion below has its own expand/collapse
@@ -1122,22 +1298,21 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     return buildLeagueQs('ufa', urlDivision);
   }
 
-  // ── Row helpers ─────────────────────────────────────────────────────────
-  // Top-level rows are rounded "cards" (the nav wrapper adds px-3 + gap). ≥52px
-  // touch target. Icon tile + label + trailing affordance.
-  const rowBase = [
-    'group flex items-center gap-3 w-full pl-2.5 pr-3.5',
-    'min-h-[56px] rounded-xl text-left cursor-pointer',
-    'text-[13px] font-bold tracking-[0.1em] uppercase font-tight',
-    'transition-colors duration-150 no-underline',
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-  ].join(' ');
+  // "OPEN {LEAGUE} →" href — the league's main scores page. WUL/WFDF use
+  // their own no-qs routes (same as WUL_NAV_ITEMS/WFDF_NAV_ITEMS above);
+  // everything else lands on /scores with the league's query string.
+  function leagueHomeHrefFor(lid: MegaLeagueId): string {
+    if (lid === 'wul') return '/wul/scores';
+    if (lid === 'wfdf') return '/wfdf/events';
+    return `/scores${leagueQsFor(lid)}`;
+  }
 
-  // Nested league rows (inside the expanded "The League" card).
+  // ── Row helpers ─────────────────────────────────────────────────────────
+  // Nested league rows (inside the expanded "The League" section) — icon
+  // tile + short label + full-name subtitle + trailing chevron.
   const subRowBase = [
-    'flex items-center justify-between w-full pl-5 pr-4',
-    'min-h-[46px] text-left cursor-pointer rounded-lg',
-    'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
+    'flex items-center gap-3 w-full pl-3 pr-3.5 py-2.5',
+    'min-h-[54px] text-left cursor-pointer rounded-lg',
     'transition-colors duration-150 no-underline',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
   ].join(' ');
@@ -1149,19 +1324,6 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     'transition-colors duration-150',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
   ].join(' ');
-
-  // Icon tile — the rounded square that holds each sub-app's glyph. Active rows
-  // get an accent-filled tile; resting rows a subtle surface tile that tints on
-  // hover (group-hover).
-  function iconTile(active: boolean): string {
-    return [
-      'inline-flex items-center justify-center w-9 h-9 rounded-lg flex-shrink-0',
-      'transition-colors duration-150',
-      active
-        ? 'bg-accent text-accent-ink'
-        : 'bg-[rgb(var(--ink)/0.05)] text-muted group-hover:bg-[rgb(var(--ink)/0.09)] group-hover:text-ink',
-    ].join(' ');
-  }
 
   if (!mounted) return null;
 
@@ -1200,13 +1362,17 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
         aria-modal="true"
         aria-label="Navigation"
         className={[
-          // Mobile: top roll-down sheet.
-          'absolute top-0 inset-x-0 w-full max-h-[calc(100dvh-1rem)]',
-          'rounded-b-2xl border-b border-hairline',
+          // Mobile: full-screen sheet — always covers the whole viewport
+          // regardless of how much content is expanded/collapsed.
+          'absolute inset-0 w-full h-dvh max-h-dvh',
           // Desktop: right side drawer (original geometry).
-          'md:inset-y-0 md:left-auto md:right-0 md:max-w-[360px] md:max-h-none',
-          'md:rounded-none md:border-b-0 md:border-l',
-          'flex flex-col bg-bg overflow-y-auto shadow-2xl',
+          'md:inset-y-0 md:left-auto md:right-0 md:max-w-[360px] md:h-auto md:max-h-none',
+          'md:rounded-none md:border-l',
+          // Panel itself does NOT scroll — the <nav> below is the scroll region
+          // (flex-1 min-h-0 overflow-y-auto). This keeps the header pinned at
+          // the top and the AccountFooter frozen at the bottom, so neither
+          // scrolls away when a league accordion expands and overflows.
+          'flex flex-col bg-bg overflow-hidden shadow-2xl',
           // Mobile animates translate-y, desktop translate-x — both compose
           // into one transform, so the md: overrides neutralize the other axis.
           'transition-transform motion-reduce:transition-none',
@@ -1236,7 +1402,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
               size={0.8}
             />
             <span className="text-[10px] font-bold tracking-[0.2em] uppercase font-tight text-faint">
-              Menu
+              Menu · Index
             </span>
           </div>
           <button
@@ -1256,8 +1422,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           </button>
         </div>
 
-        {/* Nav list */}
-        <nav aria-label="Primary navigation" className="relative flex-1 px-3 pb-8 flex flex-col gap-1.5">
+        {/* Nav list — the ONLY scrolling region (min-h-0 lets it shrink inside
+            the flex column so overflow scrolls here, not the whole panel). */}
+        <nav aria-label="Primary navigation" className="relative flex-1 min-h-0 overflow-y-auto px-3 pb-8 flex flex-col gap-1.5">
 
           {/* ── FOR YOU — first, only when the user has a favorite team ───
               Gated off entirely by FOR_YOU_ENABLED while the page is unfinished
@@ -1268,41 +1435,46 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
               href="/for-you"
               label="For You"
               active={activeApp === 'for-you'}
-              rowBase={rowBase}
-              iconTile={iconTile}
               onClose={onClose}
             />
           )}
 
-          {/* ── THE LEAGUE accordion row ─────────────────────────────── */}
+          {/* ── THE LEAGUE accordion row — large italic display heading,
+              matching the other top-level rows below (Playbook/12-0/Fantasy).
+              No icon tile, no leading number. ─────────────────────────── */}
           <button
             type="button"
             onClick={() => setGamesOpen((v) => !v)}
             aria-expanded={gamesOpen}
             className={[
-              rowBase,
-              activeApp === 'games'
-                ? 'text-ink bg-[rgb(var(--accent)/0.08)]'
-                : 'text-ink hover:bg-surface',
+              'group flex items-center justify-between gap-3 w-full px-2.5 py-3 rounded-xl text-left cursor-pointer',
+              'transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              activeApp === 'games' || gamesOpen ? 'bg-[rgb(var(--accent)/0.08)]' : 'hover:bg-surface',
             ].join(' ')}
           >
-            <span className={iconTile(activeApp === 'games')}>
-              <SubAppIcon app="games" />
+            <span
+              className={[
+                'font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em]',
+                activeApp === 'games' || gamesOpen ? 'text-accent' : 'text-ink',
+              ].join(' ')}
+            >
+              The League
             </span>
-            <span className="flex-1">The League</span>
             <ChevronDown
               className={[
-                'flex-shrink-0 text-muted transition-transform duration-200',
-                gamesOpen ? 'rotate-180' : '',
+                'w-4 h-4 flex-shrink-0 transition-transform duration-200',
+                gamesOpen ? 'rotate-180 text-accent' : 'text-faint',
               ].join(' ')}
             />
           </button>
 
           {/* THE LEAGUE expanded: league list. Each league is a FLY-OUT trigger
               — hover (desktop) or tap (mobile) opens the left panel showing that
-              league's pages + team grid. Inset card w/ a left accent spine. */}
+              league's pages + team grid. Inset card w/ a left accent spine on
+              the currently-open league. */}
           {gamesOpen && (
-            <div className="ml-3 mb-1 pl-2 border-l-2 border-accent/25 flex flex-col gap-0.5">
+            <div className="mb-1 flex flex-col gap-0.5">
               {MEGA_LEAGUES.map((league) => {
                 if (!league.real) {
                   return (
@@ -1311,7 +1483,11 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       aria-disabled="true"
                       className={[subRowBase, 'text-faint cursor-not-allowed select-none'].join(' ')}
                     >
-                      {league.label}
+                      <LeagueMark label={league.label} img={league.img} />
+                      <span className="flex-1 min-w-0 flex items-baseline gap-2">
+                        <span className="text-[13px] font-bold font-tight">{league.label}</span>
+                        <span className="text-[11px] text-faint font-tight truncate">{league.fullName}</span>
+                      </span>
                       <sup className="text-[8px] font-bold tracking-[0.14em] text-faint leading-none ml-1">
                         SOON
                       </sup>
@@ -1320,7 +1496,10 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                 }
                 const isOpen = flyoutLeague === league.id;
                 return (
-                  <div key={league.id}>
+                  <div
+                    key={league.id}
+                    className={isOpen ? 'border-l-2 border-accent -ml-px pl-px' : ''}
+                  >
                     <button
                       type="button"
                       aria-haspopup="menu"
@@ -1336,11 +1515,17 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       onClick={() => (isOpen ? setFlyoutLeague(null) : openFlyout(league.id))}
                       className={[
                         subRowBase,
-                        isOpen ? 'text-ink bg-surface' : 'text-ink hover:bg-surface',
+                        isOpen ? 'bg-surface' : 'hover:bg-surface',
                         'w-full',
                       ].join(' ')}
                     >
-                      {league.label}
+                      <LeagueMark label={league.label} img={league.img} />
+                      <span className="flex-1 min-w-0 flex items-baseline gap-2">
+                        <span className={['text-[13px] font-bold font-tight', isOpen ? 'text-accent' : 'text-ink'].join(' ')}>
+                          {league.label}
+                        </span>
+                        <span className="text-[11px] text-muted font-tight truncate">{league.fullName}</span>
+                      </span>
                       {/* Desktop: left-pointing chevron — the fly-out opens to
                           the side. Mobile: down chevron that flips 180° when
                           expanded — the sub-dropdown opens BELOW this row. */}
@@ -1370,8 +1555,23 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                         no renderExtra — links only, no team grids on mobile);
                         every other league gets the shared LeagueFlyoutBody. */}
                     {isOpen && (
-                      <div className="md:hidden pl-5 pr-2 pt-1 pb-2">
+                      <div className="md:hidden pl-3 pr-2 pt-1 pb-3">
+                        {/* "OPEN {LEAGUE} →" — jumps straight to the league's
+                            main scores page, same href Scores below uses. */}
+                        <div className="flex justify-end mb-2">
+                          <Link
+                            href={leagueHomeHrefFor(league.id)}
+                            onClick={onClose}
+                            className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase text-accent font-tight no-underline hover:opacity-80 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                          >
+                            Open {league.label}
+                            <span aria-hidden="true">→</span>
+                          </Link>
+                        </div>
                         {league.id === 'usau' ? (
+                          // USAU keeps its existing structure on mobile —
+                          // per-level links only, no team-grid renderExtra
+                          // (unchanged from before this restyle).
                           <UsauLevelAccordion
                             pathname={pathname}
                             urlDivision={urlDivision}
@@ -1380,19 +1580,24 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                             onClose={onClose}
                           />
                         ) : (
-                          <LeagueFlyoutBody
-                            league={league.id}
-                            pathname={pathname}
-                            leagueQsFor={leagueQsFor}
-                            onClose={onClose}
-                            tabRowBase="flex flex-col gap-0.5"
-                            tabLinkBase={[
-                              'flex items-center w-full px-3 min-h-[44px] rounded-md',
-                              'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
-                              'transition-colors duration-150 no-underline',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-                            ].join(' ')}
-                          />
+                          <>
+                            <LeagueFlyoutBody
+                              league={league.id}
+                              pathname={pathname}
+                              leagueQsFor={leagueQsFor}
+                              onClose={onClose}
+                              tabRowBase="grid grid-cols-4 gap-1.5 mb-3"
+                              tabLinkBase={pillLinkBase}
+                            />
+                            {/* Team grid — same content the desktop fly-out
+                                shows, restyled inline for the mobile sheet. */}
+                            <LeagueTeamGrid
+                              league={league.id}
+                              onClose={onClose}
+                              pul={{ teams: pulTeams, loading: pulLoading, error: pulError }}
+                              wfdf={{ events: wfdfEvents, loading: wfdfLoading, error: wfdfError }}
+                            />
+                          </>
                         )}
                       </div>
                     )}
@@ -1402,14 +1607,15 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             </div>
           )}
 
+          {/* ── Divider between The League and the standalone sub-apps ── */}
+          <div className="my-1.5 border-t border-hairline" aria-hidden="true" />
+
           {/* ── PLAYBOOK ─────────────────────────────────────────────── */}
           <SubAppRow
             app="playbook"
             href="/playbook"
             label="Playbook"
             active={activeApp === 'playbook'}
-            rowBase={rowBase}
-            iconTile={iconTile}
             onClose={onClose}
           />
 
@@ -1419,8 +1625,6 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             href="/12-0"
             label="12-0"
             active={activeApp === 'twelve-oh'}
-            rowBase={rowBase}
-            iconTile={iconTile}
             onClose={onClose}
           />
 
@@ -1431,12 +1635,13 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             label="Fantasy"
             badge="BETA"
             active={activeApp === 'fantasy'}
-            rowBase={rowBase}
-            iconTile={iconTile}
             onClose={onClose}
           />
 
         </nav>
+
+        {/* ── Account footer — persistent at the bottom of the drawer ── */}
+        <AccountFooter onClose={onClose} />
       </div>
 
       {/* ── LEAGUE FLY-OUT — DESKTOP ONLY ───────────────────────────────────
@@ -1467,6 +1672,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             pathname={pathname}
             urlDivision={urlDivision}
             leagueQsFor={leagueQsFor}
+            leagueHomeHrefFor={leagueHomeHrefFor}
             onBack={() => setFlyoutLeague(null)}
             onClose={onClose}
             usau={{ teams: usauTeams, loading: usauLoading, error: usauError }}

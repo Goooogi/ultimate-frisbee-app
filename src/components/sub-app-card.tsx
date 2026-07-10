@@ -33,9 +33,9 @@ export function SubAppCard({ index, title, description, href, status }: SubAppCa
       href={href}
       aria-disabled={isComing || undefined}
       className={[
-        'group relative block w-full bg-surface border border-border',
+        'group relative block w-full bg-surface rounded-card-lg shadow-card',
         'p-5 md:p-7 lg:p-8 flex flex-col gap-5',
-        'transition-colors duration-150 hover:border-ink hover:bg-surface-hi',
+        'transition-shadow duration-150 hover:shadow-lift cursor-pointer',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
         isComing ? 'opacity-80' : '',
       ].join(' ')}
@@ -90,7 +90,7 @@ function StatusBadge({ status }: { status?: SubAppCardProps['status'] }) {
 
   // coming soon
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-[3px] rounded-full border border-border">
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-[5px] rounded-full bg-ink/5">
       <span className="w-[5px] h-[5px] rounded-full bg-faint" aria-hidden="true" />
       <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
         {status.label ?? 'Coming soon'}

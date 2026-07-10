@@ -77,11 +77,11 @@ function UfaFeed({
       </div>
 
       <div className="flex items-center gap-2 mb-5 lg:mb-7">
-        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+        <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted font-sans">
           {badgeText(counts)}
         </span>
         <span className="mx-1.5 text-faint">·</span>
-        <span className="text-[10px] font-semibold tracking-[0.1em] text-faint uppercase font-tight">
+        <span className="text-[10.5px] font-semibold tracking-[0.1em] text-faint uppercase font-sans">
           Auto-refresh · 30s
         </span>
       </div>
@@ -112,11 +112,11 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
   return (
     <>
       <div className="flex items-end justify-between gap-4 mb-5 lg:mb-7">
-        <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+        <div className="flex flex-col gap-2">
+          <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans">
             USAU · {levelLabel(level)} · Recent Results
           </span>
-          <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.04em] text-ink">
+          <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.02em] text-ink">
             Recent Tournaments
           </h1>
         </div>
@@ -124,9 +124,12 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
           <UsauLevelSelect />
           <Link
             href={scheduleHref}
-            className="flex-shrink-0 text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors no-underline"
+            className="flex-shrink-0 text-[11px] font-bold tracking-[0.12em] uppercase text-muted hover:text-accent transition-colors no-underline inline-flex items-center gap-1.5"
           >
-            All tournaments →
+            All tournaments
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3 8H13M13 8L8.5 3.5M13 8L8.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
+            </svg>
           </Link>
         </div>
       </div>
@@ -134,7 +137,7 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
       {cards.length > 0 ? (
         <UsauMajorGrid majors={cards} fill />
       ) : (
-        <div className="rounded-lg border border-border bg-surface p-10 text-center">
+        <div className="rounded-card-lg bg-surface shadow-card p-10 text-center">
           <p className="text-[14px] text-muted font-tight">
             No completed {levelLabel(level)} tournaments in the last couple of weekends yet.
           </p>
@@ -197,7 +200,7 @@ function LiveBadge({ counts }: { counts: GameCounts }) {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
       <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2">
         No games today
       </div>
@@ -213,7 +216,7 @@ function PulComingSoon({ page }: { page: 'scores' | 'schedule' }) {
   const label = page === 'scores' ? 'game scores' : 'schedule';
   return (
     <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-      <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight mb-3">
+      <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-3">
         PUL · Premier Ultimate League
       </div>
       <div className="text-[18px] font-bold font-tight text-ink mb-2 leading-tight">

@@ -24,10 +24,10 @@ export function PlayerContentGallery({ playerKind, playerRef, playerDisplayName,
 
   return (
     <section className="mt-10" aria-labelledby="content-heading">
-      <div className="flex items-baseline justify-between mb-3">
+      <div className="flex items-end justify-between gap-4 mb-4">
         <h2
           id="content-heading"
-          className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight"
+          className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans m-0"
         >
           Content
         </h2>
@@ -75,13 +75,13 @@ function ContentTile({ item, onClick }: { item: PlayerContentItem; onClick: () =
       <button
         type="button"
         onClick={onClick}
-        className="group relative aspect-square overflow-hidden rounded-sm bg-surface border border-hairline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+        className="group relative aspect-square overflow-hidden rounded-card shadow-card hover:shadow-lift transition-shadow bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={item.publicUrl}
           alt={item.caption ?? ''}
-          className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+          className="w-full h-full object-cover"
           loading="lazy"
         />
         {item.caption && (
@@ -103,7 +103,7 @@ function ContentTile({ item, onClick }: { item: PlayerContentItem; onClick: () =
         href={item.external_url}
         target="_blank"
         rel="noopener noreferrer"
-        className="group relative aspect-square overflow-hidden rounded-sm bg-surface border border-hairline flex flex-col items-center justify-center gap-1.5 px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer hover:bg-bg transition-colors"
+        className="group relative aspect-square overflow-hidden rounded-card shadow-card hover:shadow-lift transition-shadow bg-surface flex flex-col items-center justify-center gap-1.5 px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
       >
         {/* Link glyph */}
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="text-faint group-hover:text-ink transition-colors flex-shrink-0">
@@ -127,7 +127,7 @@ function ContentTile({ item, onClick }: { item: PlayerContentItem; onClick: () =
     <button
       type="button"
       onClick={onClick}
-      className="group relative aspect-square overflow-hidden rounded-sm bg-black border border-hairline flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+      className="group relative aspect-square overflow-hidden rounded-card shadow-card hover:shadow-lift transition-shadow bg-black flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
     >
       <PlayBadge />
       <span className="absolute inset-x-0 bottom-0 px-2 py-1 text-[10px] text-bg bg-black/60 truncate font-tight">
@@ -212,7 +212,7 @@ function Lightbox({ item, onClose }: { item: PlayerContentItem; onClose: () => v
 
 function EmptyState() {
   return (
-    <div className="px-4 py-8 rounded-md border border-dashed border-border bg-surface text-center">
+    <div className="px-4 py-8 rounded-card bg-surface shadow-soft text-center">
       <p className="text-[12px] text-muted font-tight">
         No content yet. Be the first to add a photo or highlight reel.
       </p>

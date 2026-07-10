@@ -63,7 +63,7 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
       ]}
     >
       {/* Career strip */}
-      <div className="mb-8 flex flex-wrap items-stretch gap-px rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="mb-8 flex flex-wrap items-stretch gap-px bg-bg rounded-card shadow-card overflow-hidden">
         <HeroStat label="WFDF Events" value={stints.length} />
         <HeroStat label="Goals" value={totalGoals} />
         <HeroStat label="Assists" value={totalAssists} />
@@ -83,8 +83,8 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
               <Link
                 href={`/wfdf/teams/${s.teamId}`}
                 className={[
-                  'flex items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3',
-                  'no-underline hover:border-ink transition-colors duration-150',
+                  'flex items-center gap-3 bg-surface rounded-card px-4 py-3',
+                  'shadow-card transition-shadow hover:shadow-lift cursor-pointer no-underline',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 ].join(' ')}
               >

@@ -1,10 +1,23 @@
-// The Layout — editorial-bento home page.
+// The Layout — home page, restructured to the "Home v2" design spec.
 // Server component: fetches today's slate + current standings + team-stats in
 // parallel and hands shaped data to the home components.
-// Hero slot is now a cross-league carousel: UFA → USAU → PUL → WUL.
-// Any league with no current content is simply omitted (null → no slide).
+//
+// Page order (desktop, per HomeV2 in the design source, restructured so all
+// standings live together at the top):
+//   1. Nav (AppRail — untouched)
+//   2. Full-width hero carousel (UFA → USAU → WFDF → PUL → WUL)
+//   3. "Every league, one place." strip
+//   4. LEAGUE STANDINGS group — "Top of the league" (4 UFA division cards),
+//      USAU Rankings (full-width 4×4 grid of the top 16, aligned to the UFA
+//      cards above it), then PUL + WUL standings (two-up row)
+//   5. "Up next" — UFA + USAU cards, side by side on desktop
+//   6. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on desktop
+//   7. Footer
+//
+// Any league with no current content is simply omitted from the carousel.
 
 import React from 'react';
+import Link from 'next/link';
 import type { Metadata } from 'next';
 import {
   getAllGamesByYears,
@@ -28,21 +41,12 @@ import { HeroWulSlide } from '@/components/home/hero-wul-slide';
 import { HeroWfdfSlide } from '@/components/home/hero-wfdf-slide';
 import { getCurrentWfdfEvent } from '@/lib/wfdf/data';
 import { teamMeta } from '@/lib/ufa/teams';
-import { LeaguesPanel } from '@/components/home/leagues-panel';
-import {
-  MultiLeagueGridSection,
-  UfaTileGrid,
-  UsauUpNextCard,
-  UsauMajorGrid,
-  PulRecentGrid,
-  WulRecentGrid,
-} from '@/components/home/multi-league-grid-section';
+import { LeaguesStrip } from '@/components/home/leagues-strip';
 import { StandingsStrip } from '@/components/home/standings-strip';
-import {
-  PulStandingsSection,
-  WulStandingsSection,
-  UsauRankingsSection,
-} from '@/components/home/league-standings-sections';
+import { RankingsCard } from '@/components/home/rankings-card';
+import { UpNextCards } from '@/components/home/up-next-card';
+import { RecentResultsCards } from '@/components/home/recent-results-card';
+import { PulStandingsSection, WulStandingsSection } from '@/components/home/league-standings-sections';
 import { SiteFooter } from '@/components/site-footer';
 
 export const revalidate = 60;
@@ -78,7 +82,7 @@ export default async function HomePage() {
       // WUL: same rule.
       (async () => listWulGames({ season: await getWulCurrentSeason() }))(),
       // USAU: recent completed majors (TCT events) with champions, for "Recent results"
-      // — 4 to match the other leagues' 4-card rows in that section.
+      // — 4 to match the other leagues' 4-row groups in that card.
       recentUsauMajorsWithChampions(4),
       // WFDF: current Worlds event — same Wed weekend-cadence flip as USAU
       // (e.g. WMUCC through Tue, then WJUC from Wednesday).
@@ -147,13 +151,11 @@ export default async function HomePage() {
   const awayRec = recordOf(featured?.awayTeamID);
   const homeRec = recordOf(featured?.homeTeamID);
 
-  // Two derived slices fed to the home grids:
+  // Two derived slices fed to the "Up next" / "Recent results" cards:
   //  - upNext: next 4 games chronologically (Live or Upcoming, soonest first)
   //  - recent: last 4 results (Final, most recent first)
   // We intentionally don't exclude the featured (hero) game — when there's
   // only one upcoming game on the slate, hiding it leaves the row empty.
-  // Showing it twice (hero + first tile in Up Next) reads as emphasis, not
-  // duplication.
   const tsOf = (g: UfaGame): number =>
     g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0;
 
@@ -173,9 +175,9 @@ export default async function HomePage() {
   // Recent USAU majors (TCT events with champions) — for "Recent results".
   const usauMajors = usauMajorsRes.status === 'fulfilled' ? usauMajorsRes.value : [];
 
-  // For "Recent results": up to 4 cards per league regardless of age (the
+  // For "Recent results": up to 4 rows per league regardless of age (the
   // pickLeagueGame 7-day window is for the hero carousel only — for the
-  // results grid we want to show the championship weekend even if the season
+  // results card we want to show the championship weekend even if the season
   // ended weeks ago). Order: final → semifinals (date desc) → most-recent
   // regular-season games, filling to 4. Neither league has quarterfinals, so
   // the 4th slot is always the latest regular-season game, not a quarter.
@@ -185,116 +187,102 @@ export default async function HomePage() {
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
   // entries are filtered out so offseason leagues simply don't appear.
-  //
-  // Each slide is paired with a `color` — the dominant hue of its card — so the
-  // mobile control bar can tint itself to match the active slide as it rotates
-  // (HeroCarousel blends it over the shared dark stadium base). Game slides use
-  // the home team's accent (the card's bottom-right color); tournament slides
-  // use the league accent that colors their eyebrow/field lines. Keeping the
-  // color alongside the node here guarantees the two arrays stay index-aligned
-  // through the null-filter below.
-  const UFA_HERO_ACCENT = '#FF3D00'; // Field brand coral — UFA's stadium accent
-  const USAU_HERO_ACCENT = '#1D5ECC';
-  const WFDF_HERO_ACCENT = '#12B3A6';
-  const PUL_HERO_ACCENT = '#1EC98B';
-  const WUL_HERO_ACCENT = '#F5A623';
-
-  const slideEntries = [
+  const slides = [
     // UFA slide — always show the existing HeroGameCard (may render EmptyHero
     // in offseason, which is an intentional UFA-only empty state — keep it).
-    {
-      node: <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
-      color: featured?.homeTeamID ? teamMeta(featured.homeTeamID).primary : UFA_HERO_ACCENT,
-    },
+    <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
     // USAU — tournament card, null when no current event.
-    usauEvent
-      ? { node: <HeroUsauSlide key="usau" event={usauEvent} />, color: USAU_HERO_ACCENT }
-      : null,
+    usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.
-    wfdfEvent
-      ? { node: <HeroWfdfSlide key="wfdf" event={wfdfEvent} />, color: WFDF_HERO_ACCENT }
-      : null,
+    wfdfEvent ? <HeroWfdfSlide key="wfdf" event={wfdfEvent} /> : null,
     // PUL — game card, null when no current/recent game.
-    pulFeatured
-      ? {
-          node: <HeroPulSlide key="pul" game={pulFeatured} />,
-          color: pulFeatured.home.accentColor ?? PUL_HERO_ACCENT,
-        }
-      : null,
+    pulFeatured ? <HeroPulSlide key="pul" game={pulFeatured} /> : null,
     // WUL — game card, null when no current/recent game.
-    wulFeatured
-      ? {
-          node: <HeroWulSlide key="wul" game={wulFeatured} />,
-          color: wulFeatured.home.accentColor ?? WUL_HERO_ACCENT,
-        }
-      : null,
-  ].filter((e): e is { node: React.ReactElement; color: string } => e !== null);
-
-  const slides = slideEntries.map((e) => e.node);
-  const slideColors = slideEntries.map((e) => e.color);
+    wulFeatured ? <HeroWulSlide key="wul" game={wulFeatured} /> : null,
+  ].filter((s): s is React.ReactElement => s !== null);
 
   return (
     <div className="min-h-screen bg-bg text-ink pb-20 lg:pb-0">
-      {/* Global top rail — app switching + logo + account */}
+      {/* Global top rail — app switching + logo + account (untouched) */}
       <AppRail />
 
-      {/* HERO BENTO — carousel on the left, league panel stacked right */}
-      <div className="px-5 lg:px-12 pt-6 lg:pt-9 pb-5 lg:pb-6 grid grid-cols-1 lg:grid-cols-[1.55fr_1fr] gap-5">
-        <HeroCarousel slides={slides} slideColors={slideColors} />
-        <LeaguesPanel />
+      {/* 1. Full-width hero carousel */}
+      <div className="px-5 lg:px-10 pt-6 lg:pt-8">
+        <HeroCarousel slides={slides} />
       </div>
 
-      <StandingsStrip
-        standings={standings}
-        teamStats={teamStats}
-        seasonLabel={`UFA · ${year}`}
-      />
+      {/* 2. "Every league, one place." strip */}
+      <div className="px-5 lg:px-10 pt-7">
+        {/* Mobile-only section head per the v2 mobile spec — desktop puts the
+            headline inside the strip card itself. */}
+        <h2 className="lg:hidden font-display italic font-bold text-[26px] leading-[0.95] tracking-[-0.02em] text-ink m-0 mb-3">
+          Every league
+        </h2>
+        <LeaguesStrip />
+      </div>
 
-      {/* PUL, WUL, and USAU standings / rankings — each section fetches its
-          own data and returns null if that league has no data (offseason-safe). */}
-      <PulStandingsSection />
-      <WulStandingsSection />
-      <UsauRankingsSection />
+      {/* 3. LEAGUE STANDINGS group — every league's current standing, together,
+             in one vertical stack: UFA divisions → USAU rankings → PUL/WUL. */}
 
-      <MultiLeagueGridSection
-        title="Up next"
-        rightLink={{ label: 'Full schedule', href: '/schedule' }}
-        rows={[
-          // UFA — upcoming / live games.
-          ...(upNext.length > 0
-            ? [{ leagueKey: 'UFA', content: <UfaTileGrid games={upNext} /> }]
-            : []),
-          // USAU — only when the event is upcoming/in-progress (a completed
-          // event is a Recent result, not an "up next").
-          ...(usauUpcomingEvent
-            ? [{ leagueKey: 'USAU', content: <UsauUpNextCard event={usauUpcomingEvent} /> }]
-            : []),
-        ]}
-      />
+      {/* 3a. "Top of the league" — UFA division cards */}
+      {standings.length > 0 && (
+        <div className="px-5 lg:px-10 pt-9 lg:pt-11">
+          <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
+            <div>
+              <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
+                UFA · {year}
+              </span>
+              <h2 className="font-display italic font-bold text-[26px] lg:text-[34px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
+                Top of the league
+              </h2>
+            </div>
+            <Link
+              href="/teams"
+              className="text-[11px] font-bold tracking-[0.12em] uppercase text-muted no-underline inline-flex items-center gap-1.5 hover:text-accent transition-colors whitespace-nowrap pb-[3px]"
+            >
+              Standings
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3 8H13M13 8L8.5 3.5M13 8L8.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
+              </svg>
+            </Link>
+          </div>
+          <StandingsStrip standings={standings} teamStats={teamStats} />
+        </div>
+      )}
 
-      <MultiLeagueGridSection
-        title="Recent results"
-        rows={[
-          // UFA — most-recent finals.
-          ...(recent.length > 0
-            ? [{ leagueKey: 'UFA', content: <UfaTileGrid games={recent} /> }]
-            : []),
-          // USAU — completed TCT majors with champions.
-          ...(usauMajors.length > 0
-            ? [{ leagueKey: 'USAU', content: <UsauMajorGrid majors={usauMajors} /> }]
-            : []),
-          // PUL — up to 4 cards: final, both semifinals, latest regular-season game.
-          ...(pulRecentFour.length > 0
-            ? [{ leagueKey: 'PUL', content: <PulRecentGrid games={pulRecentFour} /> }]
-            : []),
-          // WUL — up to 4 cards: final, both semifinals, latest regular-season game.
-          ...(wulRecentFour.length > 0
-            ? [{ leagueKey: 'WUL', content: <WulRecentGrid games={wulRecentFour} /> }]
-            : []),
-        ]}
-      />
+      {/* 3b. USAU Rankings — full-width 4×4 grid of the top 16, sitting
+             directly below the UFA cards with matching horizontal padding so
+             its outer edges line up with the strip above. */}
+      <div className="px-5 lg:px-10 pt-5 lg:pt-6">
+        <RankingsCard />
+      </div>
 
-      <SiteFooter />
+      {/* 3c. PUL/WUL standings — two-up row */}
+      <div className="px-5 lg:px-10 pt-5 lg:pt-6 grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <PulStandingsSection />
+        <WulStandingsSection />
+      </div>
+
+      {/* 4. "Up next" — UFA + USAU cards, side by side on desktop so they
+             fill the width instead of stacking narrow in a single column. */}
+      <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <UpNextCards ufaGames={upNext} usauEvent={usauUpcomingEvent} />
+      </div>
+
+      {/* 5. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on wide
+             screens so the row packs evenly with no lopsided column. */}
+      <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
+        <RecentResultsCards
+          ufaGames={recent}
+          usauMajors={usauMajors}
+          pulGames={pulRecentFour}
+          wulGames={wulRecentFour}
+        />
+      </div>
+
+      <div className="pt-9 lg:pt-11">
+        <SiteFooter />
+      </div>
     </div>
   );
 }
@@ -357,12 +345,12 @@ function pickLeagueGame(games: PulGame[] | WulGame[]): PulGame | WulGame | null 
   return pickLeagueGameGeneric(games as PulGame[]);
 }
 
-// ─── "Recent results" 4-card pickers (PUL / WUL) ─────────────────────────────
+// ─── "Recent results" 4-row pickers (PUL / WUL) ──────────────────────────────
 // Neither league has quarterfinals — playoffs are 2 semifinals + 1 final. To
-// fill each league's row to 4 cards (matching UFA's 4-tile row), we show the
-// championship weekend (final + both semis) plus the most recent
+// fill each league's group to 4 rows (matching UFA's 4-row group), we show
+// the championship weekend (final + both semis) plus the most recent
 // regular-season game from the latest season that has a completed final.
-// `round` drives each card's label/emphasis; only 'final' gets the trophy
+// `round` drives each row's label/emphasis; only 'final' gets the trophy
 // treatment, never a bare 'week' game and never a semifinal.
 
 export type PulRecentRound = 'final' | 'semifinal' | 'regular';

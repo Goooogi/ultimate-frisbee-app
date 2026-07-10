@@ -1,19 +1,23 @@
 'use client';
 
-// USAU division toggle — interactive tab strip + ranked list.
-// Receives all 5 divisions' pre-fetched data from the server component parent;
-// no data fetching here. Only populated divisions are passed in.
+// USAU rankings division toggle — interactive tab strip + a 4×4 grid of the
+// top 16 teams in the active division. Each cell is a compact tile: mono
+// rank (accent for top 3), team logo, bold truncated name, and rating/record
+// as small mono text — sized to sit 4-across, matching the width of the UFA
+// division cards directly above this card on the home page.
+// Receives all 5 divisions' pre-fetched data from the server component
+// parent (rankings-card.tsx); no data fetching here.
 
 import { useState } from 'react';
 import Link from 'next/link';
-import type { UsauDivisionData } from '@/components/home/league-standings-sections';
+import type { UsauDivisionData } from '@/components/home/rankings-card';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 
-interface UsauDivisionToggleProps {
+interface RankingsDivisionToggleProps {
   divisions: UsauDivisionData[];
 }
 
-export function UsauDivisionToggle({ divisions }: UsauDivisionToggleProps) {
+export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProps) {
   const [activeDivKey, setActiveDivKey] = useState(divisions[0]?.key ?? '');
 
   const active = divisions.find((d) => d.key === activeDivKey) ?? divisions[0];
@@ -22,14 +26,8 @@ export function UsauDivisionToggle({ divisions }: UsauDivisionToggleProps) {
 
   return (
     <div className="flex flex-col">
-      {/* Tab strip — all divisions on one line. Each tab flexes to an equal
-          share of the width so five short labels fit without wrapping; the
-          overflow-x-auto is a safety net for extreme narrow viewports. */}
-      <div
-        className="flex gap-px border-b border-border bg-border overflow-x-auto"
-        role="tablist"
-        aria-label="USAU divisions"
-      >
+      {/* Tab strip — pill segmented control. Wraps on narrow viewports. */}
+      <div className="flex flex-wrap gap-1.5 mb-3.5" role="tablist" aria-label="USAU divisions">
         {divisions.map((div) => {
           const isActive = div.key === activeDivKey;
           return (
@@ -40,72 +38,64 @@ export function UsauDivisionToggle({ divisions }: UsauDivisionToggleProps) {
               aria-controls={`usau-panel-${div.key}`}
               onClick={() => setActiveDivKey(div.key)}
               className={[
-                'relative flex-1 min-w-0 px-1.5 py-2 font-tight text-[10px] font-bold tracking-[0.06em] uppercase whitespace-nowrap text-center transition-colors cursor-pointer',
-                isActive
-                  ? 'bg-surface text-ink'
-                  : 'bg-surface-hi text-muted hover:text-ink hover:bg-surface',
+                'px-3.5 py-2 rounded-full font-tight text-[12px] font-bold whitespace-nowrap transition-colors cursor-pointer',
+                isActive ? 'bg-ink text-bg' : 'bg-[rgb(var(--ink)/0.05)] text-muted hover:text-ink',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
             >
               {div.shortLabel}
-              {isActive && (
-                <span
-                  aria-hidden="true"
-                  className="absolute inset-x-0 bottom-0 h-[2px] bg-accent"
-                />
-              )}
             </button>
           );
         })}
       </div>
 
-      {/* Ranked list for the active division */}
+      {/* Top-16 grid for the active division — 4 across on desktop so it
+          reads as a companion block to the UFA division cards above. */}
       <div
         id={`usau-panel-${active.key}`}
         role="tabpanel"
         aria-label={active.label}
-        className="flex flex-col px-5 py-3 lg:px-6"
+        className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3"
       >
         {active.teams.length === 0 ? (
-          <span className="font-mono text-[11px] text-faint py-4">No rankings available.</span>
+          <span className="font-mono text-[11px] text-faint py-4 col-span-full">No rankings available.</span>
         ) : (
           active.teams.map((team) => {
-            const record =
-              team.wins != null && team.losses != null
-                ? `${team.wins}-${team.losses}`
-                : null;
-            const rating =
-              team.rating != null ? team.rating.toFixed(0) : null;
-            const meta = [team.state, team.region].filter(Boolean).join(' · ');
+            const record = team.wins != null && team.losses != null ? `${team.wins}-${team.losses}` : null;
+            const rating = team.rating != null ? team.rating.toFixed(0) : null;
 
             return (
               <Link
                 key={team.id}
                 href={`/usau/teams/${team.id}`}
-                className="flex items-center gap-3 py-2 border-b border-hairline last:border-b-0 hover:opacity-80 transition-opacity"
+                className="flex flex-col gap-2 rounded-card-sm border border-border bg-surface p-3 hover:border-accent hover:bg-accent/[0.03] transition-colors duration-150"
               >
-                <span className="font-mono text-[11px] text-faint w-[18px] flex-shrink-0 tabular">
-                  {String(team.rank).padStart(2, '0')}
-                </span>
-                <UsauTeamLogo
-                  name={team.name}
-                  genderDivision={active.genderDivision}
-                  competitionLevel={active.competitionLevel}
-                  size={24}
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="font-display italic font-bold text-[13px] lg:text-[14px] leading-none text-ink truncate">
-                    {team.name}
-                  </div>
-                  {(record || meta) && (
-                    <div className="font-mono text-[10px] text-muted mt-0.5 tabular truncate">
-                      {[record, meta].filter(Boolean).join('  ·  ')}
-                    </div>
-                  )}
-                </div>
-                {rating && (
-                  <span className="font-mono text-[10.5px] text-faint flex-shrink-0 tabular">
-                    {rating}
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className={[
+                      'font-mono text-[12px] font-bold tabular flex-shrink-0',
+                      team.rank <= 3 ? 'text-accent' : 'text-faint',
+                    ].join(' ')}
+                  >
+                    {String(team.rank).padStart(2, '0')}
                   </span>
+                  <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+                    <UsauTeamLogo
+                      name={team.name}
+                      genderDivision={active.genderDivision}
+                      competitionLevel={active.competitionLevel}
+                      size={24}
+                    />
+                  </span>
+                  <span className="font-sans font-bold text-[13px] text-ink truncate min-w-0">{team.name}</span>
+                </div>
+                {(rating || record) && (
+                  <div className="flex items-center justify-between gap-2 pl-[26px]">
+                    {rating && (
+                      <span className="font-display italic font-bold text-[14px] text-ink tabular">{rating}</span>
+                    )}
+                    {record && <span className="font-mono text-[10.5px] text-muted tabular">{record}</span>}
+                  </div>
                 )}
               </Link>
             );

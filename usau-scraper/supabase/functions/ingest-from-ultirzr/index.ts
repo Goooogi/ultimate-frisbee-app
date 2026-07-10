@@ -52,6 +52,16 @@ interface RequestBody {
   page?: number;
   maxPages?: number;
   dryRun?: boolean;
+  /** Optional name-search override. ultirzr's `division=` search filter is
+   *  broken for some older seasons (2015 mens/womens-club return generic HS
+   *  results), so a name query lets us reach a specific event by title while
+   *  still filtering to the requested division's GROUP. Mirrors the masters
+   *  path, which always searches by `query=masters`. */
+  query?: string;
+  /** Targeted backfill: ingest ONLY this ultirzr EventId from the search
+   *  results, skipping all other hits. Pairs with `query` to load one known
+   *  event without pulling look-alikes the fuzzy search also returns. */
+  onlyEventId?: number;
 }
 
 interface UltirzrEventSearchHit {
@@ -310,7 +320,7 @@ async function ingestEvent(
   // event hosts up to 7 age×gender groups) — see header.
   const isMasters = divisionFilter === 'masters';
   const wantedGroupName = divisionLabel(divisionFilter);
-  const wantedNorm = wantedGroupName?.toLowerCase().replace(/\s+/g, ' ').trim();
+  const wantedNorm = wantedGroupName ? normGroupKey(wantedGroupName) : undefined;
   const groups = (e.EventGroups ?? []).filter((g) => {
     if (isMasters) return mastersGroupMeta(g) !== null;
     if (!wantedNorm) return true;
@@ -366,6 +376,18 @@ async function ingestEvent(
     slug = `${slug}-${season}`;
   }
 
+  // Year-aware NAME, same reasoning as the slug. ultirzr reuses a year-less
+  // event NAME across seasons ("USA Ultimate National Championships" for
+  // 2014-2018). Downstream code keys off the year IN the name — the team-medal
+  // derivation's guard requires `event.name.includes(year)` to trust a game's
+  // season, and the UI shows the name verbatim. Overwriting a year-bearing DB
+  // name with the year-less ultirzr one silently breaks both (this dropped
+  // Revolver's 2015 title). Append the season when the name lacks any 4-digit
+  // year; modern names already carry it and are untouched.
+  const eventName = /\b(19|20)\d{2}\b/.test(e.EventName)
+    ? e.EventName
+    : `${e.EventName.trim()} ${season}`;
+
   if (dryRun) {
     stats.events++;
     return;
@@ -391,7 +413,7 @@ async function ingestEvent(
   const eventRow = {
     usau_slug: slug,
     usau_event_id: hit.EventId,
-    name: e.EventName,
+    name: eventName,
     season,
     start_date: start,
     end_date: dateOnly(e.EndDate),
@@ -655,10 +677,24 @@ interface MastersGroupMeta {
   label: string;
 }
 
-/** Normalize an EventGroupName for matching (ultirzr has inconsistent
- *  whitespace year to year, incl. trailing spaces). */
+/** Normalize an EventGroupName for matching. ultirzr's group names drift
+ *  year to year: inconsistent whitespace / trailing spaces (all years) AND a
+ *  possessive form in older seasons — 2015 uses "Club - Men's " / "Club - Women's "
+ *  where 2016+ use "Club - Men" / "Club - Women". Strip a trailing possessive
+ *  's so both forms collapse to the same key (this un-broke the 2015 Club
+ *  Nationals men's/women's ingest). "Mixed" has no possessive, so it's safe. */
 function normGroupName(g: UltirzrGroup): string {
-  return (g.EventGroupName ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return normGroupKey(g.EventGroupName ?? '');
+}
+
+/** Shared normalizer so the wanted label and the group name normalize the
+ *  same way (whitespace collapse + trailing-possessive strip). */
+function normGroupKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/'s$/, ''); // "club - men's" → "club - men"
 }
 
 /** 'Great Grand Masters - Men ' → { GRAND_MASTERS, Men, 'GGM Men' };
@@ -715,7 +751,12 @@ async function run(body: RequestBody) {
   for (let page = startPage; page <= endPage; page++) {
     // Masters events aren't reachable via ultirzr's division filter — search
     // by name substring instead (see header). Non-masters keeps division.
-    const searchQs = division === 'masters'
+    // An explicit `query` override wins (used to reach events whose division
+    // search is broken upstream — e.g. 2015 club); masters always searches by
+    // name; otherwise filter by division as usual.
+    const searchQs = body.query
+      ? `year=${body.year}&query=${encodeURIComponent(body.query)}&page=${page}`
+      : division === 'masters'
       ? `year=${body.year}&query=masters&page=${page}`
       : `year=${body.year}&division=${encodeURIComponent(division)}&page=${page}`;
     const resp = await fetchUltirzr<{ success: boolean; hits: UltirzrEventSearchHit[] }>(
@@ -726,6 +767,11 @@ async function run(body: RequestBody) {
     if (hits.length === 0) break;
 
     for (const hit of hits) {
+      // Targeted backfill guard: when `onlyEventId` is set, ingest ONLY that
+      // ultirzr EventId and skip every other search hit. Used to load a single
+      // known event (e.g. 2015 Club Nationals #2094) without also pulling the
+      // other events the fuzzy name search returns (US Open, Pan-Ams).
+      if (body.onlyEventId != null && hit.EventId !== body.onlyEventId) continue;
       try {
         await ingestEvent(db, hit, division, stats, dryRun);
       } catch (err) {

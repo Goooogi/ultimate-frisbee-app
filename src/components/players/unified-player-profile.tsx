@@ -90,11 +90,11 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
         <section className="mb-6" aria-labelledby="career-heading">
           <h2
             id="career-heading"
-            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+            className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-4"
           >
             Career totals
           </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 bg-surface rounded-card-lg shadow-card overflow-hidden">
             <CareerStat
               label={career.ufaGamesPlayed > 0 ? 'UFA Games' : 'Events'}
               value={career.ufaGamesPlayed > 0 ? career.ufaGamesPlayed : career.usauEventsPlayed}
@@ -119,11 +119,11 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
         <section className="mb-10" aria-labelledby="pul-career-heading">
           <h2
             id="pul-career-heading"
-            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+            className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-4"
           >
             PUL career
           </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 bg-surface rounded-card-lg shadow-card overflow-hidden">
             <CareerStat label="Seasons" value={profile.pul.seasonsPlayed} />
             <CareerStat label="GP" value={profile.pul.gamesPlayed} />
             <CareerStat label="Goals" value={profile.pul.goals} />
@@ -140,11 +140,11 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
         <section className="mb-10" aria-labelledby="wul-career-heading">
           <h2
             id="wul-career-heading"
-            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+            className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-4"
           >
             WUL career
           </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 bg-surface rounded-card-lg shadow-card overflow-hidden">
             <CareerStat label="Seasons" value={profile.wul.seasonsPlayed} />
             <CareerStat label="GP" value={profile.wul.gamesPlayed} />
             <CareerStat label="Goals" value={profile.wul.goals} />
@@ -165,11 +165,11 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
         <section className="mb-10" aria-labelledby="career-heading">
           <h2
             id="career-heading"
-            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
+            className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-4"
           >
             Career totals
           </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 gap-px bg-border border border-border">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 bg-surface rounded-card-lg shadow-card overflow-hidden">
             <CareerStat label="Goals" value={career.goals} />
             <CareerStat label="Assists" value={career.assists} />
             <CareerStat label="Blocks" value={career.blocks} />
@@ -180,16 +180,18 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
       {/* Year-by-year list */}
       {years.length > 0 && (
         <section aria-labelledby="seasons-heading">
-          <h2
-            id="seasons-heading"
-            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-3 font-tight"
-          >
-            <span>Season by Season</span>
-            <span className="text-faint normal-case tracking-[0.1em] text-[10px] font-semibold">
+          <div className="flex items-end justify-between gap-4 mb-4">
+            <h2
+              id="seasons-heading"
+              className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans m-0"
+            >
+              Season by Season
+            </h2>
+            <span className="text-[10px] font-semibold tracking-[0.1em] uppercase text-faint">
               Tap a year to expand
             </span>
-          </h2>
-          <div className="flex flex-col gap-2">
+          </div>
+          <div className="flex flex-col gap-3">
             {years.map((y) => (
               <YearGroup key={y.year} year={y} />
             ))}
@@ -235,9 +237,9 @@ function buildEyebrow(profile: UnifiedPlayerProfile): string {
 
 function YearGroup({ year }: { year: UnifiedYear }) {
   return (
-    <div className="bg-surface border border-border rounded-sm">
+    <div className="bg-surface rounded-card shadow-card overflow-hidden">
       <div className="px-4 py-3 flex items-center gap-3 border-b border-hairline">
-        <span className="tabular text-[15px] font-bold font-tight text-ink w-[60px] flex-shrink-0">
+        <span className="tabular font-display italic text-[17px] font-bold text-ink w-[60px] flex-shrink-0">
           {year.year}
         </span>
         <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
@@ -614,7 +616,7 @@ function PulGameLogTable({ games }: { games: PulPlayerGameRow[] }) {
         })}
       </tbody>
       <tfoot>
-        <tr className="border-t-2 border-border">
+        <tr className="border-t-2 border-hairline">
           <td colSpan={3} className={tfootLabel}>Total · {games.length} GP</td>
           <td className={tfootCell}>{sumBy(games, (g) => g.goals)}</td>
           <td className={tfootCell}>{sumBy(games, (g) => g.assists)}</td>
@@ -842,7 +844,7 @@ function WulGameLogTable({ games }: { games: WulPlayerGameRow[] }) {
         })}
       </tbody>
       <tfoot>
-        <tr className="border-t-2 border-border">
+        <tr className="border-t-2 border-hairline">
           <td colSpan={3} className={tfootLabel}>Total · {games.length} GP</td>
           <td className={tfootCell}>{sumBy(games, (g) => g.goals)}</td>
           <td className={tfootCell}>{sumBy(games, (g) => g.assists)}</td>
@@ -875,12 +877,12 @@ function WulTeamLogoInline({
   if (logoUrl) {
     return (
       <span
-        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-md bg-white border border-[rgb(var(--ink)/0.08)]"
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-full bg-white"
         style={{ width: size, height: size }}
         aria-hidden="true"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.84, height: size * 0.84 }} />
+        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.72, height: size * 0.72 }} />
       </span>
     );
   }
@@ -889,11 +891,11 @@ function WulTeamLogoInline({
   const bg = accentColor ?? '#1d2535';
   return (
     <span
-      className="inline-flex items-center justify-center flex-shrink-0 rounded-md"
+      className="inline-flex items-center justify-center flex-shrink-0 rounded-full"
       style={{ width: size, height: size, background: bg }}
       aria-hidden="true"
     >
-      <span className="font-display font-bold text-white" style={{ fontSize: Math.max(8, size * 0.3), letterSpacing: '0.04em' }}>
+      <span className="font-display italic font-bold text-white" style={{ fontSize: Math.max(8, size * 0.3), letterSpacing: '0.02em' }}>
         {initials}
       </span>
     </span>
@@ -915,12 +917,12 @@ function PulTeamLogoInline({
   if (logoUrl) {
     return (
       <span
-        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-md bg-white border border-[rgb(var(--ink)/0.08)]"
+        className="inline-flex items-center justify-center flex-shrink-0 overflow-hidden rounded-full bg-white"
         style={{ width: size, height: size }}
         aria-hidden="true"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.84, height: size * 0.84 }} />
+        <img src={logoUrl} alt="" className="object-contain" style={{ width: size * 0.72, height: size * 0.72 }} />
       </span>
     );
   }
@@ -928,11 +930,11 @@ function PulTeamLogoInline({
   const bg = teamId === 'new-york' || teamId === 'new-york-gridlock' ? '#1a1a2e' : '#1d2535';
   return (
     <span
-      className="inline-flex items-center justify-center flex-shrink-0 rounded-md"
+      className="inline-flex items-center justify-center flex-shrink-0 rounded-full"
       style={{ width: size, height: size, background: bg }}
       aria-hidden="true"
     >
-      <span className="font-display font-bold text-white" style={{ fontSize: Math.max(8, size * 0.3), letterSpacing: '0.04em' }}>
+      <span className="font-display italic font-bold text-white" style={{ fontSize: Math.max(8, size * 0.3), letterSpacing: '0.02em' }}>
         {initials}
       </span>
     </span>
@@ -1064,7 +1066,7 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
           const cmpPct = thr ? (cmp / thr) * 100 : 0;
           const huckPct = ha ? (hc / ha) * 100 : 0;
           return (
-            <tr className="border-t-2 border-border">
+            <tr className="border-t-2 border-hairline">
               <td colSpan={3} className={tfootLabel}>Total · {sorted.length} GP</td>
               <td className={tfootCell}>{g}</td>
               <td className={tfootCell}>{a}</td>

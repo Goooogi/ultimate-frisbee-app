@@ -42,7 +42,7 @@ export async function WulSchedule() {
 
   if (populated.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
         <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
           No games yet
         </div>
@@ -81,22 +81,17 @@ function SeasonSection({
   const id = `wul-schedule-${season}`;
   return (
     <section aria-labelledby={id}>
-      <div
-        className={[
-          'flex items-baseline justify-between gap-3 mb-4 pb-2 border-b',
-          emphasized ? 'border-ink' : 'border-hairline',
-        ].join(' ')}
-      >
+      <div className="flex items-end justify-between gap-3 mb-5">
         <span
           id={id}
           className={[
-            'text-[13px] font-bold tracking-[0.06em] uppercase font-tight',
+            'font-display italic font-bold text-[26px] lg:text-[30px] leading-[0.95] tracking-[-0.02em]',
             emphasized ? 'text-ink' : 'text-muted',
           ].join(' ')}
         >
           {season} Season
         </span>
-        <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
+        <span className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-faint pb-1">
           {games.length} {games.length === 1 ? 'game' : 'games'}
         </span>
       </div>
@@ -130,7 +125,7 @@ function PhaseGroup({
       >
         {label}
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 md:gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {games.map((game) => (
           <ScheduleCard key={game.id} game={game} champion={champion} />
         ))}
@@ -225,10 +220,8 @@ function ScheduleCard({ game, champion = false }: { game: WulGame; champion?: bo
   );
 
   const cardClass = [
-    'block bg-surface border rounded-md',
-    'px-4 py-3.5 md:px-5 md:py-4',
-    'transition-colors duration-150',
-    champion ? 'border-accent ring-1 ring-accent/40' : 'border-border',
+    'block bg-surface rounded-card px-4 py-3.5 md:px-5 md:py-4 transition-shadow',
+    champion ? 'shadow-card ring-1 ring-accent/40' : 'shadow-card',
   ].join(' ');
 
   // Final games are clickable into the matchup detail page.
@@ -236,7 +229,7 @@ function ScheduleCard({ game, champion = false }: { game: WulGame; champion?: bo
     return (
       <Link
         href={`/wul/g/${wulGameHref(game.id)}`}
-        className={`${cardClass} ${champion ? 'hover:border-accent' : 'hover:border-ink'} cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
+        className={`${cardClass} hover:shadow-lift cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent`}
       >
         {inner}
       </Link>
@@ -288,7 +281,9 @@ function ScheduleRow({
       ].join(' ')}
     >
       <div className="flex items-center gap-2.5 md:gap-3 min-w-0">
-        <WulTeamLogo team={teamForLogo} size={28} />
+        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+          <WulTeamLogo team={teamForLogo} size={28} />
+        </span>
         <span
           className={[
             'font-tight tracking-[-0.01em] text-[15px] md:text-[17px] text-ink truncate',

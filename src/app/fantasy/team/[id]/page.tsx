@@ -80,13 +80,13 @@ export default async function FantasyTeamPage({ params }: Props) {
           <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3">
             Weekly Points
           </div>
-          <div className="rounded-lg border border-border bg-surface overflow-hidden">
+          <div className="bg-surface rounded-card shadow-card overflow-hidden">
             <ol aria-label="Weekly point breakdown">
               {team.weeklyPoints.map((w, idx) => (
                 <li
                   key={w.week}
                   className={[
-                    'flex items-center justify-end px-4 py-3',
+                    'flex items-center justify-end px-5 py-3',
                     idx > 0 ? 'border-t border-hairline' : '',
                   ].join(' ')}
                 >
@@ -113,7 +113,7 @@ export default async function FantasyTeamPage({ params }: Props) {
         </div>
 
         {roster.length === 0 ? (
-          <div className="rounded-lg border border-border bg-surface px-5 py-8 text-center">
+          <div className="bg-surface rounded-card shadow-card px-5 py-8 text-center">
             <p className="font-tight text-[14px] text-muted">
               {latestWeek
                 ? `No roster set for ${latestWeek}.`
@@ -166,7 +166,7 @@ function StatCard({
   highlight?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-4 py-4">
+    <div className="bg-surface rounded-card shadow-card px-4 py-4">
       <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1">
         {label}
       </div>
@@ -214,8 +214,8 @@ function RosterSection({
       <div className="flex items-center gap-2 mb-2">
         <span
           className={[
-            'inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold font-tight',
-            'bg-[rgb(var(--ink)/0.08)]',
+            'inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold font-tight',
+            'bg-ink/5',
             roleColor,
           ].join(' ')}
           aria-hidden="true"
@@ -227,19 +227,19 @@ function RosterSection({
         </span>
       </div>
 
-      <div className="rounded-lg border border-border bg-surface overflow-hidden">
+      <div className="bg-surface rounded-card shadow-card overflow-hidden">
         {slots.map((slot, idx) => (
           <div
             key={slot.playerId}
             className={[
-              'flex items-center gap-3 px-4 py-3',
+              'flex items-center gap-3 px-5 py-3',
               idx > 0 ? 'border-t border-hairline' : '',
             ].join(' ')}
           >
             <span
               className={[
-                'flex-shrink-0 w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center font-tight',
-                'bg-[rgb(var(--ink)/0.06)]',
+                'flex-shrink-0 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center font-tight',
+                'bg-ink/5',
                 roleColor,
               ].join(' ')}
               aria-label={role}

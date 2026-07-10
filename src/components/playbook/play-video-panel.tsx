@@ -306,7 +306,7 @@ export function PlayVideoPanel({
   // ── render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="border border-hairline rounded-sm overflow-hidden">
+    <div className="bg-surface rounded-card shadow-card overflow-hidden">
       {/* ── header / toggle ── */}
       <button
         type="button"
@@ -316,7 +316,7 @@ export function PlayVideoPanel({
         className={[
           'w-full flex items-center justify-between gap-3 px-4 py-3',
           'text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          'transition-colors hover:bg-surface/60 cursor-pointer',
+          'transition-colors hover:bg-ink/[0.03] cursor-pointer',
         ].join(' ')}
       >
         <span className="flex items-center gap-2">
@@ -393,9 +393,9 @@ export function PlayVideoPanel({
                         placeholder="https://youtube.com/watch?v=…"
                         disabled={saving}
                         className={[
-                          'flex-1 min-w-0 bg-bg border rounded px-3 py-2',
+                          'flex-1 min-w-0 bg-bg border rounded-full px-4 py-2',
                           'text-[12px] font-tight text-ink placeholder-faint',
-                          inputError ? 'border-live' : 'border-border',
+                          inputError ? 'border-live' : 'border-transparent',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                           'disabled:opacity-50',
                         ].join(' ')}
@@ -405,7 +405,7 @@ export function PlayVideoPanel({
                         onClick={handleAttachLink}
                         disabled={saving}
                         className={[
-                          'flex-shrink-0 px-3 h-[38px] rounded',
+                          'flex-shrink-0 px-4 h-[38px] rounded-full',
                           'bg-accent text-accent-ink text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
                           'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                           'disabled:opacity-50 transition-opacity cursor-pointer',
@@ -419,7 +419,7 @@ export function PlayVideoPanel({
                         disabled={saving}
                         aria-label="Cancel"
                         className={[
-                          'flex-shrink-0 px-3 h-[38px] rounded border border-border',
+                          'flex-shrink-0 px-4 h-[38px] rounded-full bg-ink/5',
                           'text-muted hover:text-ink text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                           'disabled:opacity-50 transition-colors cursor-pointer',
@@ -475,8 +475,8 @@ export function PlayVideoPanel({
                         type="button"
                         onClick={openLinkInput}
                         className={[
-                          'inline-flex items-center gap-2 px-3 py-2 rounded',
-                          'border border-dashed border-border',
+                          'inline-flex items-center gap-2 px-4 py-2 rounded-full',
+                          'border border-dashed border-hairline bg-bg',
                           'text-[11px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
                           'hover:text-ink hover:border-ink transition-colors cursor-pointer',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
@@ -494,8 +494,8 @@ export function PlayVideoPanel({
                         type="button"
                         onClick={openUploadInput}
                         className={[
-                          'inline-flex items-center gap-2 px-3 py-2 rounded',
-                          'border border-dashed border-border',
+                          'inline-flex items-center gap-2 px-4 py-2 rounded-full',
+                          'border border-dashed border-hairline bg-bg',
                           'text-[11px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
                           'hover:text-ink hover:border-ink transition-colors cursor-pointer',
                           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
@@ -566,9 +566,9 @@ export function PlayVideoPanel({
                     onClick={handleReplace}
                     disabled={saving}
                     className={[
-                      'inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border min-h-[44px]',
+                      'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink/5 min-h-[44px]',
                       'text-[11px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-                      'hover:text-ink hover:border-ink transition-colors cursor-pointer',
+                      'hover:text-ink hover:bg-ink/10 transition-colors cursor-pointer',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                       'disabled:opacity-50',
                     ].join(' ')}
@@ -584,9 +584,9 @@ export function PlayVideoPanel({
                     onClick={handleRemove}
                     disabled={saving}
                     className={[
-                      'inline-flex items-center gap-1.5 px-3 py-2 rounded border border-border min-h-[44px]',
+                      'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-ink/5 min-h-[44px]',
                       'text-[11px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-                      'hover:text-live hover:border-live/40 transition-colors cursor-pointer',
+                      'hover:text-live hover:bg-live/10 transition-colors cursor-pointer',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                       'disabled:opacity-50',
                     ].join(' ')}

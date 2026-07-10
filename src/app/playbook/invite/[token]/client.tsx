@@ -135,13 +135,13 @@ function Acceptor({ token }: { token: string }) {
                 <button
                   type="button"
                   onClick={() => run(true)}
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
                 >
                   Try again
                 </button>
                 <Link
                   href="/playbook/teams"
-                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md bg-surface border border-border text-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase no-underline hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                  className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full bg-ink/5 text-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase no-underline hover:bg-ink/10 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   My teams
                 </Link>

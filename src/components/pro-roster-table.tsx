@@ -110,11 +110,11 @@ export function ProRosterTable({ players, league, linkNames = true, minWidth = 6
   }
 
   return (
-    <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
+    <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
       <table className="w-full border-collapse" style={{ minWidth }}>
         <thead>
           <tr>
-            {COLUMNS.map((h) => {
+            {COLUMNS.map((h, hi) => {
               const active = sortKey === h.key;
               return (
                 <th
@@ -123,11 +123,13 @@ export function ProRosterTable({ players, league, linkNames = true, minWidth = 6
                   title={`${h.title} — click to sort`}
                   aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                   className={[
-                    'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight',
-                    'border-b border-border whitespace-nowrap select-none cursor-pointer',
+                    'px-3 py-3 text-[10px] font-bold tracking-wide uppercase',
+                    'whitespace-nowrap select-none cursor-pointer',
                     'transition-colors hover:text-ink',
-                    active ? 'text-ink' : 'text-muted',
+                    active ? 'text-ink' : 'text-faint',
                     h.left ? 'text-left' : 'text-right',
+                    hi === 0 ? 'pl-5' : '',
+                    hi === COLUMNS.length - 1 ? 'pr-5' : '',
                   ].join(' ')}
                 >
                   <button
@@ -148,29 +150,32 @@ export function ProRosterTable({ players, league, linkNames = true, minWidth = 6
           </tr>
         </thead>
         <tbody>
-          {sorted.map((player) => (
-            <tr key={player.id} className="hover:bg-surface-hi transition-colors duration-100">
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">
-                {player.jerseyNumber || '—'}
-              </td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
-                {linkNames ? (
-                  <Link href={`/players/${player.id}?from=${league}`} className="hover:text-accent transition-colors duration-150">
-                    {player.playerName}
-                  </Link>
-                ) : (
-                  player.playerName
-                )}
-              </td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{player.goals}</td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{player.assists}</td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{player.blocks}</td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{player.turnovers}</td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{player.oPoints}</td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{player.dPoints}</td>
-              <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{formatPlusMinus(player.plusMinus)}</td>
-            </tr>
-          ))}
+          {sorted.map((player, i) => {
+            const rowTop = i === 0 ? '' : 'border-t border-hairline';
+            return (
+              <tr key={player.id} className="hover:bg-surface-hi transition-colors duration-100">
+                <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight pl-5 ${rowTop}`}>
+                  {player.jerseyNumber || '—'}
+                </td>
+                <td className={`px-3 py-2.5 text-[13px] text-left text-ink font-medium font-tight ${rowTop}`}>
+                  {linkNames ? (
+                    <Link href={`/players/${player.id}?from=${league}`} className="hover:text-accent transition-colors duration-150">
+                      {player.playerName}
+                    </Link>
+                  ) : (
+                    player.playerName
+                  )}
+                </td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{player.goals}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{player.assists}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{player.blocks}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{player.turnovers}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{player.oPoints}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{player.dPoints}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight pr-5 ${rowTop}`}>{formatPlusMinus(player.plusMinus)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

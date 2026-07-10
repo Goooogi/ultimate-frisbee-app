@@ -18,7 +18,7 @@ export function LeagueTabs({ active, onChange, compact = false }: LeagueTabsProp
   return (
     <div
       className={[
-        'inline-flex rounded-full bg-surface border border-border',
+        'inline-flex rounded-full bg-ink/5',
         compact ? 'p-[2px]' : 'p-[3px]',
       ].join(' ')}
     >
@@ -35,11 +35,12 @@ export function LeagueTabs({ active, onChange, compact = false }: LeagueTabsProp
             title={disabled ? 'Coming soon' : undefined}
             className={[
               'rounded-full font-sans font-bold tracking-[0.14em] uppercase transition-all duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               compact ? 'px-3 py-1.5 text-[10px]' : 'px-4 py-2 text-[11px]',
               disabled
                 ? 'bg-transparent text-faint opacity-50 cursor-not-allowed'
                 : on
-                  ? 'bg-accent text-accent-ink cursor-pointer'
+                  ? 'bg-ink text-bg cursor-pointer'
                   : 'bg-transparent text-muted cursor-pointer hover:text-ink',
             ].join(' ')}
           >

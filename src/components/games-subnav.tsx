@@ -138,7 +138,7 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
     <div
       className={[
         'hidden lg:flex items-center justify-between',
-        'h-[44px] px-6 border-b border-hairline bg-bg',
+        'h-[56px] px-6 bg-bg',
         // flex-shrink-0 keeps the bar from being squeezed by the main scroll column
         'flex-shrink-0',
       ].join(' ')}
@@ -150,9 +150,9 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
             : 'Games section navigation'
       }
     >
-      {/* Left: sub-page tabs */}
+      {/* Left: sub-page tabs — pill segmented control */}
       <nav
-        className="flex items-center gap-1"
+        className="flex items-center gap-1 bg-ink/5 rounded-full p-1"
         aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages'}
       >
         {items.map((item) => {
@@ -163,9 +163,9 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
                 key={item.label}
                 aria-disabled="true"
                 className={[
-                  'relative inline-flex items-center gap-1.5 h-[44px] px-3',
-                  'text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
-                  'text-faint border-b-2 border-transparent cursor-not-allowed select-none',
+                  'relative inline-flex items-center gap-1.5 h-8 px-3.5 rounded-full',
+                  'text-[11px] font-bold tracking-[0.14em] uppercase',
+                  'text-faint cursor-not-allowed select-none',
                 ].join(' ')}
               >
                 {item.label}
@@ -185,16 +185,13 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
               href={href}
               aria-current={active ? 'page' : undefined}
               className={[
-                'relative inline-flex items-center h-[44px] px-3',
-                'text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+                'relative inline-flex items-center h-8 px-3.5 rounded-full',
+                'text-[11px] font-bold tracking-[0.14em] uppercase',
                 'transition-colors duration-150 no-underline',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                // Active: accent underline. Inactive: full ink (black on light /
-                // white on dark) for legibility — the active state is distinguished
-                // by the accent border, not by dimming the inactive labels.
                 active
-                  ? 'text-ink border-b-2 border-accent'
-                  : 'text-ink border-b-2 border-transparent',
+                  ? 'bg-ink text-bg'
+                  : 'text-muted hover:text-ink',
               ].join(' ')}
             >
               {item.label}
@@ -241,7 +238,7 @@ function GamesSubnavSkeleton() {
   return (
     <div
       aria-hidden="true"
-      className="hidden lg:flex h-[44px] border-b border-hairline bg-bg flex-shrink-0"
+      className="hidden lg:flex h-[56px] bg-bg flex-shrink-0"
     />
   );
 }

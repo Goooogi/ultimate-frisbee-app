@@ -489,12 +489,12 @@ function EventTabsView(props: {
                 aria-selected={on}
                 onClick={() => setTab(t.key)}
                 className={[
-                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-md',
+                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
                   'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
-                  'border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                   on
-                    ? 'bg-accent text-accent-ink border-accent'
-                    : 'bg-surface text-muted border-border hover:border-ink hover:text-ink',
+                    ? 'bg-ink text-bg'
+                    : 'bg-ink/5 text-muted hover:text-ink',
                 ].join(' ')}
               >
                 {t.label}
@@ -663,7 +663,7 @@ function BracketView({
 
 function PoolGamesEmpty({ slug }: { slug: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-md border border-dashed border-border bg-surface">
+    <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-card-sm bg-ink/[0.03]">
       <span className="text-[11px] font-tight text-muted">
         Pool play games not available in our data — likely scored before our
         scraper picked up this event.
@@ -707,7 +707,7 @@ function ChampionBanner({
     <span className="flex items-center gap-3 min-w-0">
       <UsauTeamLogo name={winnerName ?? ''} genderDivision={genderDivision} competitionLevel={competitionLevel} size={40} />
       <span className="flex flex-col min-w-0">
-        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate">
+        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate pr-[0.1em] pb-[0.12em] -mb-[0.12em]">
           {winnerName ?? '—'}
         </span>
         {loserName && (
@@ -722,10 +722,10 @@ function ChampionBanner({
   return (
     <section
       aria-label="Champion"
-      className="mb-6 rounded-lg border border-border bg-surface overflow-hidden"
+      className="mb-6 rounded-card-lg shadow-card bg-surface overflow-hidden"
     >
-      {/* accent ring / trophy row */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
+      {/* accent tint / trophy row */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-accent/[0.06]">
         <TrophyIcon />
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
           Champion{label ? ` · ${label}` : ''}
@@ -767,7 +767,7 @@ function PoolLeaderBanner({
         size={40}
       />
       <span className="flex flex-col min-w-0">
-        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate">
+        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate pr-[0.1em] pb-[0.12em] -mb-[0.12em]">
           {team.teamName}
         </span>
         <span className="text-[11px] text-muted font-tight truncate mt-1">
@@ -780,9 +780,9 @@ function PoolLeaderBanner({
   return (
     <section
       aria-label="Pool leader"
-      className="mb-6 rounded-lg border border-border bg-surface overflow-hidden"
+      className="mb-6 rounded-card-lg shadow-card bg-surface overflow-hidden"
     >
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-accent/[0.06]">
         <TrophyIcon />
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
           Pool leader
@@ -839,8 +839,8 @@ function PoolCard({
     : pool.teams;
 
   return (
-    <div className="bg-surface border border-border rounded-md overflow-hidden">
-      <div className="px-3 py-2 border-b border-hairline">
+    <div className="bg-surface rounded-card shadow-card overflow-hidden">
+      <div className="px-4 py-3">
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
           {pool.name}
         </span>
@@ -849,10 +849,10 @@ function PoolCard({
         {ranked.map((t) => {
           const rec = t.teamId ? records.get(t.teamId) : undefined;
           return (
-            <li key={t.teamId} className="border-b border-hairline last:border-b-0">
+            <li key={t.teamId} className="border-t border-hairline">
               <Link
                 href={`/usau/teams/${t.teamId}`}
-                className="flex items-center gap-3 px-3 py-2 hover:bg-surface-hi transition-colors no-underline"
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-ink/[0.03] transition-colors no-underline"
               >
                 <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
                   {t.seed ?? '—'}
@@ -953,7 +953,7 @@ function GameRow({
       : null;
 
   return (
-    <li className="bg-surface border border-border rounded-md p-3">
+    <li className="bg-surface rounded-card-sm shadow-soft p-3">
       <div className="flex items-center justify-between mb-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight">
         {meta ? (
           <span className="text-muted truncate">{meta}</span>

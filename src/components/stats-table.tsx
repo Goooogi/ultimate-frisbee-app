@@ -42,7 +42,7 @@ export function StatsTable({
 }: StatsTableProps) {
   if (rows.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
         <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
           {emptyMessage}
         </div>
@@ -51,30 +51,34 @@ export function StatsTable({
   }
 
   const thBase = [
-    'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-    'border-b border-border whitespace-nowrap',
+    'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint',
+    'whitespace-nowrap',
   ].join(' ');
 
-  const tdBase = 'px-3 py-2.5 text-[13px] border-b border-hairline';
+  const tdBase = 'px-3 py-2.5 text-[13px] border-t border-hairline';
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
       <table className="w-full border-collapse">
         <thead>
           <tr>
             {showRank && (
-              <th className={`${thBase} text-right w-8`} scope="col">
+              <th className={`${thBase} text-right w-8 pl-5`} scope="col">
                 #
               </th>
             )}
-            {columns.map((col) => {
+            {columns.map((col, colIdx) => {
               const isActive = col.key === sortKey;
               const align = col.align ?? (col.key === columns[0].key ? 'left' : 'right');
               const alignClass = align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right';
+              const edgeClass = [
+                !showRank && colIdx === 0 ? 'pl-5' : '',
+                colIdx === columns.length - 1 ? 'pr-5' : '',
+              ].join(' ');
 
               if (col.sortable && onSort) {
                 return (
-                  <th key={col.key} scope="col" className={`${thBase} ${alignClass}`}>
+                  <th key={col.key} scope="col" className={`${thBase} ${alignClass} ${edgeClass}`}>
                     <button
                       onClick={() => onSort(col.key)}
                       className={[
@@ -102,7 +106,7 @@ export function StatsTable({
               }
 
               return (
-                <th key={col.key} scope="col" className={`${thBase} ${alignClass}`}>
+                <th key={col.key} scope="col" className={`${thBase} ${alignClass} ${edgeClass}`}>
                   {col.label}
                 </th>
               );
@@ -116,15 +120,19 @@ export function StatsTable({
               className="hover:bg-surface-hi transition-colors duration-100"
             >
               {showRank && (
-                <td className={`${tdBase} text-right text-faint tabular font-tight`}>
+                <td className={`${tdBase} text-right text-faint tabular font-tight pl-5`}>
                   {i + 1}
                 </td>
               )}
-              {columns.map((col) => {
+              {columns.map((col, colIdx) => {
                 const value = row[col.key];
                 const align = col.align ?? (col.key === columns[0].key ? 'left' : 'right');
                 const alignClass = align === 'left' ? 'text-left' : align === 'center' ? 'text-center' : 'text-right';
                 const isNumeric = align === 'right';
+                const edgeClass = [
+                  !showRank && colIdx === 0 ? 'pl-5' : '',
+                  colIdx === columns.length - 1 ? 'pr-5' : '',
+                ].join(' ');
 
                 const content = col.render
                   ? col.render(value, row)
@@ -137,7 +145,7 @@ export function StatsTable({
                 return (
                   <td
                     key={col.key}
-                    className={`${tdBase} ${alignClass} ${col.key === columns[0].key ? 'text-ink font-medium font-tight' : 'text-muted font-tight'}`}
+                    className={`${tdBase} ${alignClass} ${edgeClass} ${col.key === columns[0].key ? 'text-ink font-medium font-tight' : 'text-muted font-tight'}`}
                   >
                     {href ? (
                       <Link

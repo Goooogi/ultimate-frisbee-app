@@ -179,7 +179,7 @@ export default async function PlayersPage({ searchParams }: Props) {
         }
       >
         {ranked.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
             <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
               No players yet
             </div>
@@ -188,7 +188,7 @@ export default async function PlayersPage({ searchParams }: Props) {
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
+          <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
             <table className="w-full min-w-[700px] border-collapse table-fixed">
               <thead>
                 <tr>
@@ -204,15 +204,17 @@ export default async function PlayersPage({ searchParams }: Props) {
                     { label: 'O-Pts',   title: 'Offensive Points Played',  left: false, w: '' },
                     { label: 'D-Pts',   title: 'Defensive Points Played',  left: false, w: '' },
                     { label: '+/−',     title: 'Plus / Minus',             left: false, w: '' },
-                  ].map((h) => (
+                  ].map((h, hi, arr) => (
                     <th
                       key={h.label}
                       scope="col"
                       title={h.title}
                       className={[
-                        'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-                        'border-b border-border whitespace-nowrap',
+                        'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint',
+                        'whitespace-nowrap',
                         h.left ? 'text-left' : 'text-right',
+                        hi === 0 ? 'pl-5' : '',
+                        hi === arr.length - 1 ? 'pr-5' : '',
                         h.w,
                       ].join(' ')}
                     >
@@ -226,10 +228,10 @@ export default async function PlayersPage({ searchParams }: Props) {
                   const team = teamMap.get(player.teamId);
                   return (
                     <tr key={player.id} className="hover:bg-surface-hi transition-colors duration-100">
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight w-10">
+                      <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight w-10 pl-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {i + 1}
                       </td>
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left w-[140px] sm:w-[180px]">
+                      <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         <Link
                           href={`/players/${player.id}?from=pul`}
                           className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"
@@ -237,7 +239,7 @@ export default async function PlayersPage({ searchParams }: Props) {
                           {player.playerName}
                         </Link>
                       </td>
-                      <td className="px-3 py-2.5 border-b border-hairline text-left w-[120px]">
+                      <td className={`px-3 py-2.5 text-left w-[120px] ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {team ? (
                           <Link
                             href={`/pul/teams/${team.id}`}
@@ -251,11 +253,11 @@ export default async function PlayersPage({ searchParams }: Props) {
                         )}
                       </td>
                       {[player.goals, player.assists, player.blocks, player.turnovers, player.touches, player.oPoints, player.dPoints].map((val, ci) => (
-                        <td key={ci} className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                        <td key={ci} className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${i === 0 ? '' : 'border-t border-hairline'}`}>
                           {val}
                         </td>
                       ))}
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                      <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight pr-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {player.plusMinus > 0 ? `+${player.plusMinus}` : player.plusMinus}
                       </td>
                     </tr>
@@ -310,7 +312,7 @@ export default async function PlayersPage({ searchParams }: Props) {
         }
       >
         {ranked.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
             <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
               No players yet
             </div>
@@ -319,7 +321,7 @@ export default async function PlayersPage({ searchParams }: Props) {
             </div>
           </div>
         ) : (
-          <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
+          <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
             <table className="w-full min-w-[700px] border-collapse table-fixed">
               <thead>
                 <tr>
@@ -335,15 +337,17 @@ export default async function PlayersPage({ searchParams }: Props) {
                     { label: 'O-Pts',  title: 'Offensive Points Played',  left: false, w: '' },
                     { label: 'D-Pts',  title: 'Defensive Points Played',  left: false, w: '' },
                     { label: '+/−',    title: 'Plus / Minus',             left: false, w: '' },
-                  ].map((h) => (
+                  ].map((h, hi, arr) => (
                     <th
                       key={h.label}
                       scope="col"
                       title={h.title}
                       className={[
-                        'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
-                        'border-b border-border whitespace-nowrap',
+                        'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint',
+                        'whitespace-nowrap',
                         h.left ? 'text-left' : 'text-right',
+                        hi === 0 ? 'pl-5' : '',
+                        hi === arr.length - 1 ? 'pr-5' : '',
                         h.w,
                       ].join(' ')}
                     >
@@ -357,10 +361,10 @@ export default async function PlayersPage({ searchParams }: Props) {
                   const team = teamMap.get(player.teamId);
                   return (
                     <tr key={player.id} className="hover:bg-surface-hi transition-colors duration-100">
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight w-10">
+                      <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight w-10 pl-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {i + 1}
                       </td>
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left w-[140px] sm:w-[180px]">
+                      <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         <Link
                           href={`/players/${player.id}?from=wul`}
                           className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"
@@ -368,7 +372,7 @@ export default async function PlayersPage({ searchParams }: Props) {
                           {player.playerName}
                         </Link>
                       </td>
-                      <td className="px-3 py-2.5 border-b border-hairline text-left w-[120px]">
+                      <td className={`px-3 py-2.5 text-left w-[120px] ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {team ? (
                           <Link
                             href={`/wul/teams/${team.id}`}
@@ -394,12 +398,12 @@ export default async function PlayersPage({ searchParams }: Props) {
                       ].map((val, ci) => (
                         <td
                           key={ci}
-                          className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight"
+                          className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${i === 0 ? '' : 'border-t border-hairline'}`}
                         >
                           {val}
                         </td>
                       ))}
-                      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                      <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight pr-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {formatWulPlusMinus(player.plusMinus)}
                       </td>
                     </tr>

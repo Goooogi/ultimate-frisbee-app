@@ -72,7 +72,7 @@ export function AuthGate({
         <Link
           href="/"
           className={[
-            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border bg-surface',
+            'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-ink/5',
             'text-[10px] font-bold tracking-[0.16em] uppercase text-muted hover:text-ink font-tight',
             'no-underline transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
@@ -106,7 +106,7 @@ export function AuthGate({
                 setAuthOpen(true);
               }}
               className={[
-                'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md cursor-pointer',
+                'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full cursor-pointer',
                 'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
                 'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
               ].join(' ')}
@@ -120,9 +120,9 @@ export function AuthGate({
                 setAuthOpen(true);
               }}
               className={[
-                'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md cursor-pointer',
-                'bg-surface border border-border text-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
-                'hover:border-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors',
+                'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full cursor-pointer',
+                'bg-transparent border-[1.5px] border-ink/15 text-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
+                'hover:border-ink/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors',
               ].join(' ')}
             >
               Create account
@@ -131,7 +131,7 @@ export function AuthGate({
 
           <Link
             href="/"
-            className="mt-2 text-[11px] font-bold tracking-[0.16em] uppercase text-faint hover:text-ink no-underline transition-colors font-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+            className="mt-2 text-[11px] font-bold tracking-[0.16em] uppercase text-faint hover:text-ink no-underline transition-colors font-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full"
           >
             Maybe later
           </Link>

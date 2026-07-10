@@ -1,18 +1,19 @@
-// Standings strip — dark "Top of the league" panel on the left, then the
-// top 3 teams from each division on the right. Designed to read at a
-// glance: same chrome as before, but instead of one division's top 4 it
-// shows every division's top 3 stacked in a labeled column.
+// Standings strip — one floating card per division (DivisionCardA), each
+// showing its top 3 teams. Designed to read at a glance: each division gets
+// its own card so the grid reads as a set of equal, scannable panels rather
+// than one wide table. The section-level SectionHead ("Top of the league")
+// is rendered by the page, not this component — this file owns just the
+// division-card grid, per the Home v2 design spec.
 
 import Link from 'next/link';
 import type { UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { teamMeta } from '@/lib/ufa/teams';
 import { TeamLogo } from '@/components/team-logo';
+import { StandingsCarousel } from '@/components/home/standings-carousel';
 
 interface StandingsStripProps {
   standings: UfaStanding[];
   teamStats?: UfaTeamStat[];
-  /** Eyebrow label below the big number. */
-  seasonLabel?: string;
 }
 
 const TOP_N = 3;
@@ -22,11 +23,7 @@ const TOP_N = 3;
 // new/renamed divisions don't silently disappear.
 const DIVISION_ORDER = ['Atlantic', 'Central', 'South', 'West', 'East'];
 
-export function StandingsStrip({
-  standings,
-  teamStats = [],
-  seasonLabel = 'UFA · 2026',
-}: StandingsStripProps) {
+export function StandingsStrip({ standings, teamStats = [] }: StandingsStripProps) {
   if (standings.length === 0) return null;
 
   // Group by division.
@@ -66,91 +63,101 @@ export function StandingsStrip({
   // Choose a grid column count that lets every division get its own column
   // on desktop but stacks gracefully on smaller breakpoints. Most UFA
   // seasons have 4 divisions; we tier 1/2/4 to keep the math simple.
+  // Desktop grid column count — every division gets its own column on wide
+  // screens, tiered down for tablet. The MOBILE view is a swipe carousel
+  // (StandingsCarousel), so grid-cols-1 no longer matters below sm.
   const colCount = columns.length;
-  const colsClass =
+  const desktopColsClass =
     colCount >= 4
       ? 'sm:grid-cols-2 lg:grid-cols-4'
       : colCount === 3
         ? 'sm:grid-cols-2 lg:grid-cols-3'
         : colCount === 2
           ? 'sm:grid-cols-2'
-          : 'grid-cols-1';
+          : 'sm:grid-cols-1';
+
+  const cards = columns.map((col) => (
+    <DivisionCard key={col.divName} col={col} statByTeam={statByTeam} />
+  ));
 
   return (
-    <section
-      aria-label="Division standings — top 3"
-      className="px-5 lg:px-12 pt-2 pb-12 lg:pb-14"
-    >
-      <div className="bg-surface border border-border grid grid-cols-1 md:grid-cols-[200px_1fr]">
-        {/* Dark left panel — design element paired with the dark stadium
-            hero card. Kept dark in both themes. */}
-        {/* justify-start: the Top-3 text block sits at the TOP under the
-            eyebrow (was justify-between, which pinned it to the bottom). */}
-        <div className="bg-[#0E0E0C] text-[#F4F2EB] px-5 py-5 lg:px-6 lg:py-6 flex flex-col justify-start gap-3 min-h-[180px]">
-          <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-[rgba(244,242,235,0.55)]">
-            Top of the league
-          </span>
-          <div>
-            <div className="font-display italic font-bold text-[34px] lg:text-[38px] leading-[0.95] tracking-[-0.02em]">
-              Top {TOP_N}
-            </div>
-            <div className="font-sans text-[10.5px] mt-2 tracking-[0.16em] uppercase text-[rgba(244,242,235,0.55)]">
-              per division
-            </div>
-            <div className="font-mono text-[11px] mt-3 text-[rgba(244,242,235,0.55)]">
-              {seasonLabel}
-            </div>
-          </div>
-        </div>
+    <StandingsCarousel
+      cards={cards}
+      labels={columns.map((c) => c.divName)}
+      desktopColsClass={desktopColsClass}
+    />
+  );
+}
 
-        {/* One column per division, top 3 inside each. */}
-        <div className={`px-5 py-4 lg:px-6 grid grid-cols-1 ${colsClass} gap-x-6 gap-y-5`}>
-          {columns.map((col) => (
-            <div key={col.divName} className="flex flex-col">
-              <div className="flex items-center gap-2 mb-2 pb-2 border-b border-hairline">
-                <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
-                  {col.divName}
-                </span>
-                <span aria-hidden="true" className="h-px flex-1 bg-hairline" />
-              </div>
-
-              {col.rows.length === 0 ? (
-                <span className="text-[11px] text-faint font-tight py-2">No teams ranked.</span>
-              ) : (
-                col.rows.map((s) => {
-                  const meta = teamMeta(s.teamID);
-                  const ts = statByTeam.get(s.teamID);
-                  const record =
-                    s.ties > 0 ? `${s.wins}-${s.losses}-${s.ties}` : `${s.wins}-${s.losses}`;
-                  return (
-                    <Link
-                      key={s.teamID}
-                      href={`/teams/${s.teamID}`}
-                      className="flex items-center gap-3 py-2 border-b border-hairline last:border-b-0 hover:opacity-80 transition-opacity"
-                    >
-                      <span className="font-mono text-[11px] text-faint w-[18px]">
-                        {String(s.rk).padStart(2, '0')}
-                      </span>
-                      <TeamLogo team={meta} size={26} />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-display italic font-bold text-[14px] lg:text-[15px] leading-none text-ink truncate">
-                          {meta.name ?? s.teamName.split(' ').slice(-1).join(' ')}
-                        </div>
-                        <div className="font-mono text-[10.5px] text-muted mt-1 tabular">
-                          {record}
-                          {ts && ts.scoresFor != null && ts.scoresAgainst != null
-                            ? ` · ${ts.scoresFor}-${ts.scoresAgainst}`
-                            : ''}
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })
-              )}
-            </div>
-          ))}
-        </div>
+// ─── One division panel — top-3 teams. Shared by the mobile carousel and the
+// desktop grid (rendered on the server, handed to StandingsCarousel). ───────
+function DivisionCard({
+  col,
+  statByTeam,
+}: {
+  col: { divName: string; rows: Array<UfaStanding & { rk: number }> };
+  statByTeam: Map<string, UfaTeamStat>;
+}) {
+  return (
+    <div className="h-full bg-surface rounded-card-lg shadow-card px-5 pt-5 pb-2 flex flex-col">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="font-display italic font-bold text-[20px] tracking-[-0.01em] text-ink">
+          {col.divName}
+        </span>
+        <span className="font-mono text-[10px] text-faint tracking-[0.08em]">TOP {TOP_N}</span>
       </div>
-    </section>
+
+      {col.rows.length === 0 ? (
+        <span className="text-[11px] text-faint font-tight py-3">No teams ranked.</span>
+      ) : (
+        col.rows.map((s, i) => {
+          const meta = teamMeta(s.teamID);
+          const ts = statByTeam.get(s.teamID);
+          const record = s.ties > 0 ? `${s.wins}-${s.losses}-${s.ties}` : `${s.wins}-${s.losses}`;
+          const pointDiffLabel =
+            ts && ts.scoresFor != null && ts.scoresAgainst != null
+              ? `${ts.scoresFor}-${ts.scoresAgainst}`
+              : s.pointDiff !== 0
+                ? `${s.pointDiff > 0 ? '+' : ''}${s.pointDiff}`
+                : null;
+          return (
+            <Link
+              key={s.teamID}
+              href={`/teams/${s.teamID}`}
+              className={[
+                'grid grid-cols-[16px_34px_1fr_auto] gap-2.5 items-center py-[11px]',
+                i === 0 ? '' : 'border-t border-hairline',
+                'hover:opacity-80 transition-opacity',
+              ].join(' ')}
+            >
+              <span
+                className={[
+                  'font-mono text-[12px] font-bold',
+                  s.rk === 1 ? 'text-accent' : 'text-faint',
+                ].join(' ')}
+              >
+                {s.rk}
+              </span>
+              <span className="inline-flex rounded-full overflow-hidden">
+                <TeamLogo team={meta} size={30} />
+              </span>
+              <div className="min-w-0">
+                <div className="font-sans font-bold text-[14px] leading-tight text-ink truncate">
+                  {meta.name ?? s.teamName.split(' ').slice(-1).join(' ')}
+                </div>
+                {pointDiffLabel && (
+                  <div className="font-mono text-[10.5px] text-faint mt-0.5 tabular">
+                    {pointDiffLabel}
+                  </div>
+                )}
+              </div>
+              <span className="font-mono text-[12.5px] font-semibold text-ink tabular">
+                {record}
+              </span>
+            </Link>
+          );
+        })
+      )}
+    </div>
   );
 }

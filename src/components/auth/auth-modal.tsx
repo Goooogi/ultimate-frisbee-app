@@ -256,7 +256,7 @@ export function AuthModal({
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-[440px] max-h-full overflow-y-auto bg-bg border border-border rounded-md shadow-xl flex flex-col"
+        className="w-full max-w-[440px] max-h-full overflow-y-auto bg-surface rounded-card-lg shadow-hero flex flex-col"
       >
         {/* Header */}
         <div className="px-6 pt-6 pb-4 flex flex-col gap-2">
@@ -287,7 +287,7 @@ export function AuthModal({
         {/* Mode toggle — hidden during reset flow */}
         {!isReset && (
           <div className="px-6 pb-2">
-            <div className="grid grid-cols-2 gap-0 bg-surface border border-border rounded-md overflow-hidden">
+            <div className="grid grid-cols-2 gap-0 bg-ink/5 rounded-full overflow-hidden p-1">
               <ModeButton active={!isSignup} onClick={() => setMode('signin')}>
                 Sign in
               </ModeButton>
@@ -305,7 +305,7 @@ export function AuthModal({
             <>
               <div
                 role="status"
-                className="text-[13px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-3 leading-snug"
+                className="text-[13px] font-medium font-tight text-ink bg-ink/5 rounded-card-sm px-3.5 py-3 leading-snug"
               >
                 Check your inbox — if{' '}
                 <span className="font-bold">{email.trim().toLowerCase()}</span>{' '}
@@ -336,7 +336,7 @@ export function AuthModal({
                     autoComplete="name"
                     spellCheck={false}
                     maxLength={60}
-                    className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
+                    className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
                   />
                 </Field>
               )}
@@ -352,7 +352,7 @@ export function AuthModal({
                   autoComplete="email"
                   required
                   spellCheck={false}
-                  className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
+                  className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
                 />
               </Field>
 
@@ -368,7 +368,7 @@ export function AuthModal({
                     inputMode="tel"
                     spellCheck={false}
                     maxLength={20}
-                    className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors tabular"
+                    className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors tabular"
                   />
                 </Field>
               )}
@@ -402,19 +402,19 @@ export function AuthModal({
                         spellCheck={false}
                         maxLength={30}
                         className={[
-                          'w-full bg-surface pl-7 pr-10 py-2.5 text-[14px] font-semibold text-ink font-tight rounded',
-                          'focus-visible:outline-none transition-colors',
+                          'w-full bg-ink/5 pl-7 pr-10 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm ring-1 ring-inset',
+                          'focus-visible:outline-none focus-visible:ring-2 transition-colors',
                           handleStatus === 'ok'
-                            ? 'border border-[#22c55e] focus-visible:border-[#22c55e]'
+                            ? 'ring-[#22c55e] focus-visible:ring-[#22c55e]'
                             : handleStatus === 'taken' || handleStatus === 'format' || handleStatus === 'profanity'
-                            ? 'border border-[rgb(var(--live))] focus-visible:border-[rgb(var(--live))]'
-                            : 'border border-border focus-visible:border-ink',
+                            ? 'ring-live focus-visible:ring-live'
+                            : 'ring-transparent focus-visible:ring-accent',
                         ].join(' ')}
                       />
                       {/* Status indicator — right side of input */}
                       <span className="absolute right-3 flex items-center" aria-hidden="true">
                         {handleStatus === 'checking' && (
-                          <span className="w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin block" />
+                          <span className="w-4 h-4 rounded-full border-2 border-ink/15 border-t-accent animate-spin block" />
                         )}
                         {handleStatus === 'ok' && (
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -435,13 +435,13 @@ export function AuthModal({
                       <span className="text-[#22c55e]">@{handle} is available</span>
                     )}
                     {handleStatus === 'taken' && (
-                      <span className="text-[rgb(var(--live))]">That handle is already taken</span>
+                      <span className="text-live">That handle is already taken</span>
                     )}
                     {handleStatus === 'format' && (
-                      <span className="text-[rgb(var(--live))]">3–30 chars · lowercase letters, numbers, underscores only</span>
+                      <span className="text-live">3–30 chars · lowercase letters, numbers, underscores only</span>
                     )}
                     {handleStatus === 'profanity' && (
-                      <span className="text-[rgb(var(--live))]">Handle contains language that isn&apos;t allowed</span>
+                      <span className="text-live">Handle contains language that isn&apos;t allowed</span>
                     )}
                     {(handleStatus === 'idle' || handleStatus === 'checking') && (
                       <span className="text-faint">Shown on the leaderboard as @handle</span>
@@ -505,7 +505,7 @@ export function AuthModal({
               {error && (
                 <div
                   role="alert"
-                  className="text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
+                  className="text-[12px] font-medium font-tight text-live bg-live/[0.08] rounded-card-sm px-3.5 py-2"
                 >
                   {error}
                 </div>
@@ -513,7 +513,7 @@ export function AuthModal({
               {info && !error && (
                 <div
                   role="status"
-                  className="text-[12px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-2"
+                  className="text-[12px] font-medium font-tight text-ink bg-ink/5 rounded-card-sm px-3.5 py-2"
                 >
                   {info}
                 </div>
@@ -529,7 +529,7 @@ export function AuthModal({
               type="submit"
               disabled={submitting || (isSignup && handleStatus !== 'idle' && handleStatus !== 'ok' && handleStatus !== 'checking')}
               className={[
-                'inline-flex items-center justify-center gap-2 w-full py-3 rounded-md cursor-pointer',
+                'inline-flex items-center justify-center gap-2 w-full py-3 rounded-full cursor-pointer',
                 'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
                 'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
                 'disabled:opacity-60 disabled:cursor-not-allowed',
@@ -613,7 +613,7 @@ function ModeButton({
       onClick={onClick}
       aria-pressed={active}
       className={[
-        'py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight transition-colors cursor-pointer',
+        'py-2 rounded-full text-[11px] font-bold tracking-[0.16em] uppercase font-tight transition-colors cursor-pointer',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'bg-ink text-bg' : 'text-muted hover:text-ink',
       ].join(' ')}
@@ -683,11 +683,11 @@ function PasswordInput({
         required
         minLength={8}
         className={[
-          'w-full bg-surface border px-3 py-2.5 pr-10 text-[14px] font-semibold text-ink font-tight rounded',
-          'focus-visible:outline-none transition-colors',
+          'w-full bg-ink/5 px-3.5 py-2.5 pr-10 text-[14px] font-semibold text-ink font-tight rounded-card-sm ring-1 ring-inset',
+          'focus-visible:outline-none focus-visible:ring-2 transition-colors',
           mismatch
-            ? 'border-live focus-visible:border-live'
-            : 'border-border focus-visible:border-ink',
+            ? 'ring-live focus-visible:ring-live'
+            : 'ring-transparent focus-visible:ring-accent',
         ].join(' ')}
       />
       <button

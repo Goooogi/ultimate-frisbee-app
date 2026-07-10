@@ -65,7 +65,7 @@ function UsauLink({ url, name }: { url: string; name: string }) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`View ${name} on USA Ultimate`}
-      className="inline-flex items-center gap-1.5 px-3 py-[6px] rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-surface border border-border text-ink hover:border-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
+      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-ink hover:bg-ink/10 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
     >
       View on USAU
       <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

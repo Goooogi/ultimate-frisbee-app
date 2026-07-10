@@ -1,5 +1,8 @@
-// Featured game hero card — dark "stadium" background, big score, decorative
-// chalk field lines + flight arc, optional mini-stat strip, two CTAs.
+// Featured game hero card — GameSlide layout per the Home v2 design spec:
+// dark #0E1622 base, TWO team-color radial glows (one per side, using real
+// UFA team colors), chalk field lines, top row = accent pill + datetime +
+// status pill, center grid = away team | VS+week | home team, bottom row =
+// three meta blocks (Venue/Week/Broadcast) + CTA pills.
 //
 // The caller picks the game via pickGameOfTheWeek() (lib/ufa/game-of-the-week).
 // This component just renders whichever UfaGame it's handed.
@@ -17,23 +20,18 @@ interface HeroGameCardProps {
   homeRecord?: string;
 }
 
-const STADIUM = {
-  bg: '#0F1B2E',
-  line: 'rgba(244,242,235,0.06)',
-  text: '#F4F2EB',
-  textMuted: 'rgba(244,242,235,0.55)',
-};
-// Theme accent as a CSS-var reference so the hero's accent bits (live dot,
-// LIVE status, winner score, field-line arc) follow the active theme — coral
-// on Field, lime on Broadcast — even though the card's bg is always-dark.
+const BASE = '#0E1622';
+const TEXT = '#FFFFFF';
+const TEXT_MUTED = 'rgba(255,255,255,0.65)';
+// Theme accent as a CSS-var reference so the hero's accent bits (live pill,
+// week label, winning score) follow the active theme — coral on Field, lime
+// on Broadcast — even though the card's bg is always-dark.
 const ACCENT = 'rgb(var(--accent))';
 
 /** Parse a 3- or 6-digit hex color to its [r,g,b] channels (0–255). */
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace('#', '');
-  const full = h.length === 3
-    ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2]
-    : h;
+  const full = h.length === 3 ? h[0] + h[0] + h[1] + h[1] + h[2] + h[2] : h;
   return [
     parseInt(full.slice(0, 2), 16),
     parseInt(full.slice(2, 4), 16),
@@ -41,72 +39,25 @@ function hexToRgb(hex: string): [number, number, number] {
   ];
 }
 
-function rgbaStr([r, g, b]: [number, number, number], alpha: number): string {
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 /** Relative luminance (0–1) via the sRGB coefficients. Used only to decide
- *  whether a color is too dark to register against the stadium base. */
+ *  whether a color is too dark to register against the dark base. */
 function luminance([r, g, b]: [number, number, number]): number {
   return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
 }
 
-// Below this luminance a team color is indistinguishable from the dark
-// stadium base (#0F1B2E ≈ 0.08), so the gradient stop would "collapse" and
-// the other team's color visually dominates. Boston Glory's primary is pure
-// black (#000000, lum 0) — the classic offender.
-const MIN_STOP_LUMINANCE = 0.14;
+// Below this luminance a team color is indistinguishable from the dark base
+// (#0E1622 ≈ 0.02), so the glow would "collapse". Boston Glory's primary is
+// pure black (#000000, lum 0) — the classic offender.
+const MIN_GLOW_LUMINANCE = 0.14;
 
-/**
- * Pick the gradient stop color for one team. Prefer the team's primary, but
- * if the primary is too dark to read against the base, fall back to the
- * accent — but only when the accent is actually brighter (some teams have a
- * near-black accent too, e.g. Empire #0E0E0C; in that case there's nothing to
- * recover, so we keep the primary).
- */
-function stopColor(primary: string, accent: string): [number, number, number] {
-  const p = hexToRgb(primary);
-  if (luminance(p) >= MIN_STOP_LUMINANCE) return p;
-  const a = hexToRgb(accent);
-  return luminance(a) > luminance(p) ? a : p;
-}
-
-/**
- * Build a team-color gradient background for the hero article.
- *
- * Layer stack (bottom → top):
- *   1. STADIUM.bg (#0F1B2E) — solid dark base, guarantees minimum darkness.
- *   2. away radial pool — team color anchored left at 0.85, fading out by ~58%.
- *   3. home radial pool — team color anchored right at 0.85, fading out by ~58%.
- *      Each stop is the team's primary, or its accent when the primary is
- *      near-black (so a black team like Glory still contributes color — see
- *      stopColor()).
- *   4. dark scrim (top→bottom) — darkens the top and bottom bands where the
- *      light text lives, so the 0.85 color pools stay above AA contrast.
- *
- * Each team color gets its OWN radial pool anchored to its side (away→left,
- * home→right), held strong across its half and faded to transparent before
- * center. This stops a vivid color (e.g. Empire green) from bleeding across
- * the midpoint and visually swallowing a softer one (e.g. Glory gold) — the
- * earlier single linear wash let the brighter/​more-saturated hue dominate.
- * The dark base shows through the middle as a natural divider.
- */
-function buildHeroBackground(away: TeamMeta, home: TeamMeta): string {
-  // Strong on each side (0.85) so the softer of the two colors still reads.
-  const awayStop = rgbaStr(stopColor(away.primary, away.accent), 0.85);
-  const homeStop = rgbaStr(stopColor(home.primary, home.accent), 0.85);
-  return [
-    // scrim: darkens top + bottom (where text lives) so the strong 0.85 color
-    // pools below don't drop the light text under AA contrast. Lighter in the
-    // middle band where only the large "vs" sits.
-    'linear-gradient(180deg, rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.08) 42%, rgba(0,0,0,0.4) 100%)',
-    // away color pool — anchored left, fades out by ~58% across
-    `radial-gradient(120% 130% at 0% 50%, ${awayStop} 0%, transparent 58%)`,
-    // home color pool — anchored right, fades out by ~58% across
-    `radial-gradient(120% 130% at 100% 50%, ${homeStop} 0%, transparent 58%)`,
-    // solid dark base
-    STADIUM.bg,
-  ].join(', ');
+/** Pick the glow color for one team — prefer the team's real primary color
+ *  (Hunter explicitly wants real UFA colors kept), but fall back to the
+ *  team's accent when the primary is too dark to read against the base. */
+function glowColor(team: TeamMeta): string {
+  const p = hexToRgb(team.primary);
+  if (luminance(p) >= MIN_GLOW_LUMINANCE) return team.primary;
+  const a = hexToRgb(team.accent);
+  return luminance(a) > luminance(p) ? team.accent : team.primary;
 }
 
 export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps) {
@@ -115,101 +66,103 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const state = gameUiState(game);
-  const matchup = `${away.city} ${away.name} @ ${home.city} ${home.name}`;
-  const eyebrowLabel = state.isLive
-    ? `Live now · ${matchup}`
-    : state.isUpcoming
-      ? `Game of the week · ${matchup}`
-      : `Recent · ${matchup}`;
-  const statusLine = state.isLive
-    ? 'LIVE · IN PROGRESS'
-    : state.isUpcoming
-      ? formatStartCompact(game).toUpperCase()
-      : 'FINAL';
+  const awayGlow = glowColor(away);
+  const homeGlow = glowColor(home);
+
+  const eyebrowLabel = state.isLive ? 'Live now' : state.isUpcoming ? 'Game of the week' : 'Recent result';
+  const whenLabel = state.isUpcoming ? formatStartCompact(game).toUpperCase() : null;
+  const statusLine = state.isLive ? 'LIVE' : state.isFinal ? 'FINAL' : 'UPCOMING';
 
   return (
     <article
-      className="relative overflow-hidden p-5 sm:p-9 h-full flex flex-col justify-between"
-      style={{ background: buildHeroBackground(away, home), color: STADIUM.text }}
+      className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border flex flex-col justify-between"
+      style={{ background: BASE, color: TEXT }}
     >
+      {/* Two team-color glows, one per side — real UFA team colors. Each is a
+          wide horizontal (ellipse) gradient that carries its color well past
+          the halfway line and fades out gradually, so the two OVERLAP and
+          cross-blend through the center instead of both dying at ~50% and
+          leaving a hard dark seam down the middle (the old radial-62% pair
+          did exactly that on the narrow mobile card). */}
       <div
-        className="absolute inset-0 pointer-events-none"
+        className="absolute inset-y-0 -left-[10%] w-[75%] pointer-events-none"
         style={{
-          background:
-            'radial-gradient(80% 60% at 100% 0%, rgba(110,150,220,0.18), transparent 60%)',
+          background: `radial-gradient(ellipse 90% 120% at 22% 50%, ${awayGlow}88 0%, ${awayGlow}3d 45%, transparent 82%)`,
         }}
         aria-hidden="true"
       />
-      <HeroFieldLines color={STADIUM.line} accent={ACCENT} />
+      <div
+        className="absolute inset-y-0 -right-[10%] w-[75%] pointer-events-none"
+        style={{
+          background: `radial-gradient(ellipse 90% 120% at 78% 50%, ${homeGlow}88 0%, ${homeGlow}3d 45%, transparent 82%)`,
+        }}
+        aria-hidden="true"
+      />
+      <HeroFieldLines color="rgba(255,255,255,0.05)" accent={ACCENT} />
 
-      <div className="relative flex-1 flex flex-col justify-between gap-5">
-        {/* eyebrow row */}
-        <div>
-          <div className="inline-flex items-center gap-2.5 mb-2">
-            {state.isLive ? (
-              <span
-                className="w-[7px] h-[7px] rounded-full bg-accent"
-                style={{ boxShadow: '0 0 0 3px rgb(var(--accent) / 0.2)' }}
-              />
-            ) : (
-              <span className="w-[7px] h-[7px] rounded-full bg-[rgba(244,242,235,0.4)]" />
-            )}
-            <span className="font-mono text-[11px] font-bold tracking-[0.14em]" style={{ color: state.isLive ? ACCENT : STADIUM.textMuted }}>
-              {statusLine}
+      <div className="relative flex-1 flex flex-col justify-between gap-4">
+        {/* Top row — accent pill + datetime (left), status pill (right) */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <span
+              className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.12em] uppercase px-2.5 py-[5px] rounded-full flex-shrink-0"
+              style={{ color: '#fff', background: ACCENT }}
+            >
+              ◆ {eyebrowLabel}
             </span>
+            {whenLabel && (
+              <span className="font-mono text-[12px] truncate" style={{ color: TEXT_MUTED }}>
+                {whenLabel}
+              </span>
+            )}
           </div>
-          <div
-            className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase"
-            style={{ color: STADIUM.textMuted }}
+          <span
+            className="font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-[5px] rounded-full flex-shrink-0"
+            style={{ color: TEXT_MUTED, background: 'rgba(255,255,255,0.1)' }}
           >
-            {eyebrowLabel}
-          </div>
+            {statusLine}
+          </span>
         </div>
 
-        {/* matchup block — gap-4 on mobile keeps the 3-col layout within 320px */}
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-4 sm:gap-7 items-center my-3">
-          <TeamColumn
+        {/* Center grid — away team | VS + week | home team. Extra horizontal
+            padding beyond the card's own edge padding so team names never sit
+            under the carousel's side-centered 42px arrow buttons. */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-5 px-0 sm:px-8 lg:px-12">
+          <GameTeam
             slug={away.id}
             abbr={away.abbr}
             name={away.name ?? game.awayTeamName}
             rec={awayRecord ?? '—'}
-            score={game.awayScore}
-            winner={state.awayWin}
-            loser={state.homeWin}
-            showScore={state.hasScore || state.isLive || state.isFinal}
-            isUpcoming={state.isUpcoming}
           />
-          {/* "vs" only for upcoming — live/final let the scores carry the separator */}
-          {state.isUpcoming ? (
-            <div
-              className="font-display italic font-semibold text-[22px]"
-              style={{ color: STADIUM.textMuted }}
+          <div className="flex flex-col items-center gap-1.5 sm:gap-2">
+            <span
+              className="font-display italic font-bold text-[26px] sm:text-[38px] leading-none"
+              style={{ color: 'rgba(255,255,255,0.5)' }}
             >
-              vs
-            </div>
-          ) : (
-            <div aria-hidden="true" />
-          )}
-          <TeamColumn
+              VS
+            </span>
+            <span
+              className="font-mono text-[10px] sm:text-[11px] font-bold tracking-[0.14em]"
+              style={{ color: ACCENT }}
+            >
+              {game.week ? game.week.replace(/^week-/i, 'WK ') : '—'}
+            </span>
+          </div>
+          <GameTeam
             slug={home.id}
             abbr={home.abbr}
             name={home.name ?? game.homeTeamName}
             rec={homeRecord ?? '—'}
-            score={game.homeScore}
             align="right"
-            winner={state.homeWin}
-            loser={state.awayWin}
-            showScore={state.hasScore || state.isLive || state.isFinal}
-            isUpcoming={state.isUpcoming}
           />
         </div>
 
-        {/* footer: mini stats + CTAs */}
-        <div className="flex flex-wrap justify-between items-end gap-4">
-          <div className="flex flex-wrap gap-7">
-            <StatMini label="Week" value={game.week ? game.week.replace(/^week-/i, 'WK ') : '—'} />
-            <StatMini label="Status" value={state.isLive ? 'Live' : state.isFinal ? 'Final' : 'Upcoming'} accent={state.isLive} />
-            <StatMini label="Venue" value={game.locationName ? truncate(game.locationName, 22) : '—'} />
+        {/* Bottom row — meta blocks (left) + CTAs (right) */}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap gap-6 sm:gap-8">
+            <DarkMeta label="Venue" value={game.locationName ? truncate(game.locationName, 22) : '—'} />
+            <DarkMeta label="Week" value={game.week ? game.week.replace(/^week-/i, 'Week ') : '—'} />
+            <DarkMeta label="Broadcast" value="WatchUFA" />
           </div>
           <div className="flex gap-2.5">
             {game.streamingURL && (
@@ -217,7 +170,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
                 ▶ Watch live
               </CTA>
             )}
-            <CTA dark href={`/g/${game.gameID}`}>
+            <CTA href={`/g/${game.gameID}`}>
               {state.isUpcoming ? 'Preview' : 'Box score'} →
             </CTA>
           </div>
@@ -233,100 +186,70 @@ function truncate(s: string, n: number) {
 
 function EmptyHero() {
   return (
-    <div className="bg-[#0F1B2E] text-[#F4F2EB] p-5 sm:p-9 h-full flex flex-col items-center justify-center gap-4 text-center">
-      <span className="font-mono text-[11px] tracking-[0.18em]" style={{ color: STADIUM.textMuted }}>
+    <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-5" style={{ background: BASE, color: TEXT }}>
+      <span className="font-mono text-[11px] tracking-[0.18em]" style={{ color: TEXT_MUTED }}>
         OFFSEASON
       </span>
       <h2 className="font-display italic font-bold text-[40px] leading-[0.95] tracking-[-0.02em] m-0">
         No featured game today.
       </h2>
-      <p className="text-[13px] max-w-md" style={{ color: STADIUM.textMuted }}>
+      <p className="text-[13px] max-w-md" style={{ color: TEXT_MUTED }}>
         The schedule is dark. Check back during UFA season — games run April through August.
       </p>
     </div>
   );
 }
 
-function TeamColumn({
+function GameTeam({
   slug,
   abbr,
   name,
   rec,
-  score,
   align = 'left',
-  winner,
-  loser,
-  showScore,
-  isUpcoming = false,
 }: {
   slug: string;
   abbr: string;
   name: string;
   rec: string;
-  score: number;
   align?: 'left' | 'right';
-  winner: boolean;
-  loser: boolean;
-  showScore: boolean;
-  isUpcoming?: boolean;
 }) {
   const meta = teamMeta(slug);
+  const right = align === 'right';
   return (
     <div
-      className={`flex flex-col gap-2 ${align === 'right' ? 'items-end text-right' : 'items-start text-left'} transition-opacity`}
-      style={{ opacity: loser ? 0.55 : 1 }}
+      className={`flex items-center gap-2.5 sm:gap-5 min-w-0 ${right ? 'flex-row-reverse text-right' : 'text-left'}`}
     >
-      <div className={`flex items-center gap-2.5 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
-        <TeamLogo team={meta} size={36} />
-        <div>
-          <div className="font-display italic font-bold text-[18px] tracking-[-0.02em]">{abbr}</div>
-          <div className="font-mono text-[10.5px] mt-0.5" style={{ color: STADIUM.textMuted }}>
-            {rec}
-          </div>
-        </div>
-      </div>
-      {/* Score block: only render when there is an actual score to show.
-          Upcoming games have no score — suppress the block entirely so there
-          is no dead 52px "–" placeholder eating vertical space. */}
-      {showScore && (
+      <span className="inline-flex rounded-full overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.25)] flex-shrink-0 sm:hidden">
+        <TeamLogo team={meta} size={56} />
+      </span>
+      <span className="hidden sm:inline-flex rounded-full overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.25)] flex-shrink-0">
+        <TeamLogo team={meta} size={88} />
+      </span>
+      <div className="min-w-0">
         <div
-          className="font-display italic font-bold text-[52px] sm:text-[72px] lg:text-[96px] leading-[0.95] tracking-[-0.04em] tabular"
-          style={{ color: winner ? ACCENT : STADIUM.text }}
+          className="font-sans text-[11px] sm:text-[12px] font-bold tracking-[0.14em] uppercase truncate"
+          style={{ color: TEXT_MUTED }}
         >
-          {score}
+          {abbr}
         </div>
-      )}
-      {/* Team name: hidden on mobile for upcoming games (abbr+record already
-          identifies the team; no score = nothing to anchor the name below).
-          Always visible on sm+ and whenever there's a score to show. */}
-      <div
-        className={`font-sans text-[11px] font-medium${isUpcoming ? ' hidden sm:block' : ''}`}
-        style={{ color: STADIUM.textMuted }}
-      >
-        {name}
+        <div className="font-display italic font-bold text-[24px] sm:text-[50px] leading-[0.9] tracking-[-0.03em] my-1 truncate pr-[0.14em] pb-[0.14em] -mb-[0.14em]">
+          {name}
+        </div>
+        <span className="font-mono text-[11px] sm:text-[13px] font-bold" style={{ color: 'rgba(255,255,255,0.9)' }}>
+          {rec}
+        </span>
       </div>
     </div>
   );
 }
 
-function StatMini({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
+function DarkMeta({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="font-mono text-[10px] tracking-[0.1em] uppercase" style={{ color: STADIUM.textMuted }}>
+    <div className="min-w-0">
+      <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.1em]" style={{ color: TEXT_MUTED }}>
         {label}
       </div>
-      <div
-        className="font-display italic font-bold text-[20px] lg:text-[22px] mt-0.5"
-        style={{ color: accent ? ACCENT : STADIUM.text }}
-      >
+      <div className="font-sans text-[12.5px] sm:text-[14px] font-semibold mt-[3px] truncate" style={{ color: TEXT }}>
         {value}
       </div>
     </div>
@@ -336,13 +259,11 @@ function StatMini({
 function CTA({
   children,
   primary,
-  dark,
   href,
   external,
 }: {
   children: React.ReactNode;
   primary?: boolean;
-  dark?: boolean;
   href: string;
   external?: boolean;
 }) {
@@ -352,18 +273,12 @@ function CTA({
   // on-accent text color per theme (white on coral, near-black on lime).
   const cls = primary
     ? 'bg-accent text-accent-ink'
-    : dark
-      ? 'bg-[rgba(244,242,235,0.10)] text-[#F4F2EB] border border-[rgba(244,242,235,0.18)]'
-      : 'bg-white text-[#0E0E0C] border border-[#E5E1D6]';
-  const cls2 = 'inline-flex items-center gap-2 px-4 py-2.5 font-sans text-[11px] font-bold tracking-[0.12em] uppercase cursor-pointer transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+    : 'bg-white/[0.12] text-white border border-white/[0.28]';
+  const cls2 =
+    'inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full font-sans text-[12px] sm:text-[13px] font-bold tracking-[0.01em] cursor-pointer whitespace-nowrap transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
   if (external) {
     return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        className={`${cls} ${cls2}`}
-      >
+      <a href={href} target="_blank" rel="noreferrer" className={`${cls} ${cls2}`}>
         {children}
       </a>
     );

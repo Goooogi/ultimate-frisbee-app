@@ -96,10 +96,10 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
               aria-label="Select season"
               className={[
                 'appearance-none cursor-pointer',
-                'px-3 py-[6px] pr-7 rounded-full',
+                'px-3.5 py-2 pr-7 rounded-full min-h-[36px]',
                 'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-                'bg-surface border border-border text-ink',
-                'hover:border-ink transition-colors duration-150',
+                'bg-ink/5 text-ink',
+                'hover:bg-ink/10 transition-colors duration-150',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
             >
@@ -110,7 +110,7 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
               ))}
             </select>
             <svg
-              className="pointer-events-none absolute right-2 w-3 h-3 text-muted"
+              className="pointer-events-none absolute right-2.5 w-3 h-3 text-muted"
               viewBox="0 0 12 12"
               fill="none"
               aria-hidden="true"
@@ -180,9 +180,8 @@ function Section({
       <summary
         className={[
           'list-none cursor-pointer select-none',
-          'flex items-baseline justify-between gap-3 mb-3 pb-2 border-b',
+          'flex items-baseline justify-between gap-3 mb-4 pb-2 border-b border-hairline',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          emphasized ? 'border-ink' : 'border-hairline',
         ].join(' ')}
       >
         <span className="flex items-center gap-2">
@@ -218,58 +217,69 @@ function EventCard({ event }: { event: UsauEventCard }) {
   const level = prettyLevel(event.competitionLevel);
 
   // The card itself navigates to our event detail. The "USAU" pill is a
-  // separate external link, so it sits OUTSIDE the Next <Link> (no nested <a>).
+  // separate external link, so it sits OUTSIDE the Next <Link> (no nested <a>)
+  // — as a footer row in normal flow (NOT absolutely positioned) so it can
+  // never overlap a 2-line title/location, and every card fills its grid
+  // cell's full height so rows stay even.
   return (
-    <li className="relative">
-      <Link
-        href={`/usau/events/${event.slug}`}
+    <li className="h-full">
+      <div
         className={[
-          'block bg-surface border border-border rounded-md p-4 hover:border-ink transition-colors no-underline',
+          'group/card relative flex h-full flex-col bg-surface rounded-card p-4 transition-shadow shadow-card hover:shadow-lift',
           past ? 'opacity-75' : '',
         ].join(' ')}
       >
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <span className="flex items-center gap-2 min-w-0">
-            <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
-              {level}
+        <Link
+          href={`/usau/events/${event.slug}`}
+          className="flex flex-col flex-1 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded-card-sm"
+        >
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+                {level}
+              </span>
+              {event.flight && (
+                <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent bg-accent/10 rounded-full px-2 py-0.5">
+                  {FLIGHT_LABELS[event.flight]}
+                </span>
+              )}
             </span>
-            {event.flight && (
-              <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
-                {FLIGHT_LABELS[event.flight]}
+            {event.teamCount > 0 && (
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
+                {event.teamCount} teams
               </span>
             )}
-          </span>
-          {event.teamCount > 0 && (
-            <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
-              {event.teamCount} teams
-            </span>
-          )}
-        </div>
-        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 pr-14">
-          {event.name}
-        </div>
-        <div className="flex items-center gap-3 text-[11px] font-medium text-muted font-tight pr-14">
-          {dateRange && <span className="tabular">{dateRange}</span>}
-          {dateRange && location && <span className="text-faint">·</span>}
-          {location && <span className="truncate">{location}</span>}
-        </div>
-      </Link>
-      {event.url && (
-        <a
-          href={event.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`View ${event.name} on USA Ultimate`}
-          className="absolute bottom-3 right-3 inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-2.5 py-1 border border-border hover:border-ink bg-surface"
-        >
-          USAU
-          <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 1.5h5.5V7" />
-            <path d="M8.5 1.5L3.5 6.5" />
-            <path d="M7 8.5H1.5V3" />
-          </svg>
-        </a>
-      )}
+          </div>
+          <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 group-hover/card:text-accent transition-colors">
+            {event.name}
+          </div>
+          {/* mt-auto pushes the date/location to the card bottom so short and
+              tall cards align their meta rows across the grid. */}
+          <div className="mt-auto flex items-center gap-3 text-[11px] font-medium text-muted font-tight">
+            {dateRange && <span className="tabular">{dateRange}</span>}
+            {dateRange && location && <span className="text-faint">·</span>}
+            {location && <span className="truncate">{location}</span>}
+          </div>
+        </Link>
+        {event.url && (
+          <div className="mt-3 flex justify-end">
+            <a
+              href={event.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`View ${event.name} on USA Ultimate`}
+              className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full px-2.5 py-1 bg-ink/5"
+            >
+              USAU
+              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 1.5h5.5V7" />
+                <path d="M8.5 1.5L3.5 6.5" />
+                <path d="M7 8.5H1.5V3" />
+              </svg>
+            </a>
+          </div>
+        )}
+      </div>
     </li>
   );
 }

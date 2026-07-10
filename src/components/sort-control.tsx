@@ -46,10 +46,10 @@ export function SortControl({ options, currentSort, currentDir }: SortControlPro
           aria-label="Sort players by"
           className={[
             'appearance-none cursor-pointer',
-            'px-3 py-[6px] pr-7 rounded-full',
+            'px-3.5 py-[7px] pr-7 rounded-full min-h-[36px]',
             'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-            'bg-surface border border-border text-ink',
-            'hover:border-ink transition-colors duration-150',
+            'bg-ink/5 text-ink',
+            'hover:bg-ink/10 transition-colors duration-150',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           ].join(' ')}
         >
@@ -74,9 +74,9 @@ export function SortControl({ options, currentSort, currentDir }: SortControlPro
         onClick={toggleDir}
         aria-label={currentDir === 'desc' ? 'Sort ascending' : 'Sort descending'}
         className={[
-          'p-[7px] rounded-full border cursor-pointer',
-          'bg-surface border-border text-muted',
-          'hover:border-ink hover:text-ink transition-colors duration-150',
+          'p-[9px] rounded-full cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center',
+          'bg-ink/5 text-muted',
+          'hover:bg-ink/10 hover:text-ink transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >

@@ -262,7 +262,7 @@ export function ManageTeams() {
         <div className="max-w-[860px] mx-auto">
           <div className="flex flex-wrap items-end justify-between gap-4 mb-6 lg:mb-8">
             <div>
-              <h1 className="m-0 font-tight text-[28px] lg:text-[36px] font-bold tracking-[-0.03em] leading-none text-ink">
+              <h1 className="m-0 font-display italic text-[28px] lg:text-[36px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
                 Teams
               </h1>
               <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[14px]">
@@ -273,8 +273,8 @@ export function ManageTeams() {
               type="button"
               onClick={() => setShowCreate((v) => !v)}
               className={[
-                'inline-flex items-center gap-2 px-4 py-2.5 rounded-md cursor-pointer',
-                'border border-ink bg-ink text-bg hover:opacity-90 transition-opacity',
+                'inline-flex items-center gap-2 px-5 py-3 rounded-full cursor-pointer',
+                'bg-ink text-bg hover:opacity-90 transition-opacity',
                 'font-tight text-[11px] font-bold tracking-[0.16em] uppercase',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
@@ -438,10 +438,10 @@ function TeamSection({
 
             return (
               <li key={t.id}>
-                <div className="flex items-center gap-3 px-3 py-3 rounded-md border border-border bg-bg hover:border-ink transition-colors">
+                <div className="flex items-center gap-3 px-3 py-3 rounded-card bg-surface shadow-card transition-shadow hover:shadow-lift">
                   <span
                     aria-hidden="true"
-                    className="inline-flex items-center justify-center w-10 h-10 rounded-md flex-shrink-0 text-[11px] font-bold tracking-[0.04em] text-white"
+                    className="inline-flex items-center justify-center w-10 h-10 rounded-full flex-shrink-0 text-[11px] font-bold tracking-[0.04em] text-white"
                     style={{ background: t.color }}
                   >
                     {t.shortName}
@@ -474,7 +474,7 @@ function TeamSection({
                 {isExpanded && (
                   <ul className="mt-1.5 ml-12 flex flex-col gap-1">
                     {isLoadingRoster && (
-                      <li className="flex items-center gap-3 px-3 py-2 border border-hairline bg-surface rounded">
+                      <li className="flex items-center gap-3 px-3 py-2 bg-surface rounded-card-sm shadow-soft">
                         <span className="text-[12px] text-faint font-tight font-medium">
                           Loading members…
                         </span>
@@ -487,7 +487,7 @@ function TeamSection({
                       return (
                         <li
                           key={m.userID}
-                          className="flex items-center gap-3 px-3 py-2 border border-hairline bg-surface rounded"
+                          className="flex items-center gap-3 px-3 py-2 bg-surface rounded-card-sm shadow-soft"
                         >
                           <span
                             className={[
@@ -514,7 +514,7 @@ function TeamSection({
                     {invites.map((inv) => (
                       <li
                         key={inv.id}
-                        className="flex items-center gap-3 px-3 py-2 border border-hairline bg-surface rounded"
+                        className="flex items-center gap-3 px-3 py-2 bg-surface rounded-card-sm shadow-soft"
                       >
                         <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
                           Pending
@@ -576,7 +576,7 @@ function CreateTeamForm({
         }
         onCreate(name, sn, color);
       }}
-      className="mt-2 mb-2 p-4 border border-border bg-surface flex flex-col gap-3 rounded-md"
+      className="mt-2 mb-2 p-4 bg-surface flex flex-col gap-3 rounded-card shadow-card"
     >
       <div className="flex flex-col sm:flex-row gap-3">
         <label className="flex-1 flex flex-col gap-1.5 min-w-0">
@@ -661,7 +661,7 @@ function InviteForm({
         if (!trimmed) return;
         onSubmit(trimmed, role);
       }}
-      className="mt-1.5 ml-12 p-3 border border-accent border-dashed bg-surface flex items-center gap-2 flex-wrap rounded"
+      className="mt-1.5 ml-12 p-3 border border-dashed border-accent/40 bg-surface flex items-center gap-2 flex-wrap rounded-card-sm shadow-soft"
     >
       <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-faint font-tight">
         Invite to {teamName}
@@ -707,13 +707,13 @@ function SmallButton({
   disabled?: boolean;
 }) {
   const base =
-    'inline-flex items-center px-2.5 py-1.5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded disabled:opacity-50 disabled:pointer-events-none';
+    'inline-flex items-center px-3 py-1.5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full disabled:opacity-50 disabled:pointer-events-none';
   const variantCls =
     variant === 'primary'
-      ? 'bg-ink text-bg hover:opacity-90 border border-ink'
+      ? 'bg-ink text-bg hover:opacity-90'
       : variant === 'danger'
-        ? 'bg-transparent text-faint hover:text-live border border-transparent'
-        : 'bg-transparent text-muted hover:text-ink border border-border';
+        ? 'bg-transparent text-faint hover:text-live'
+        : 'bg-ink/5 text-muted hover:text-ink hover:bg-ink/10';
   return (
     <button
       type={type}

@@ -41,7 +41,7 @@ export async function UsauTeamsRanked({
 
   if (teams.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border rounded-md">
+      <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
         <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
           No ranked teams
         </div>
@@ -69,7 +69,7 @@ export async function UsauTeamsRanked({
           derived them from bracket games). What we DO have is each
           team's entry seed at each event. Re-orderable to true finish
           once we add a placement-derivation pass. */}
-      <div className="text-[11px] font-medium text-faint font-tight bg-surface border border-border rounded px-3 py-2">
+      <div className="text-[11px] font-medium text-faint font-tight bg-surface rounded-card-sm shadow-soft px-4 py-3">
         <span className="font-bold text-muted uppercase tracking-[0.16em] text-[10px]">
           Note ·
         </span>{' '}
@@ -79,17 +79,17 @@ export async function UsauTeamsRanked({
       </div>
 
       {madeNats.length > 0 && (
-        <section aria-labelledby="ranked-heading">
+        <section aria-labelledby="ranked-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
           <h2
             id="ranked-heading"
-            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-3 pb-2 border-b border-hairline font-tight"
+            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
           >
             <span>{season} Nationals · by seed</span>
             <span className="text-faint normal-case tracking-[0.1em]">
               {madeNats.length} teams
             </span>
           </h2>
-          <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border border border-border">
+          <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
             {madeNats.map((t, idx) => (
               <RankedRow
                 key={t.id}
@@ -107,17 +107,17 @@ export async function UsauTeamsRanked({
       )}
 
       {others.length > 0 && (
-        <section aria-labelledby="others-heading">
+        <section aria-labelledby="others-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
           <h2
             id="others-heading"
-            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-3 pb-2 border-b border-hairline font-tight"
+            className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
           >
             <span>Other teams · {season} Regionals</span>
             <span className="text-faint normal-case tracking-[0.1em]">
               {others.length}
             </span>
           </h2>
-          <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border border border-border">
+          <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
             {others.map((t, idx) => (
               <RankedRow
                 key={t.id}
@@ -148,15 +148,15 @@ function OfficialRankings({
 }) {
   return (
     <div className="flex flex-col gap-7">
-      <section aria-labelledby="official-ranked-heading">
+      <section aria-labelledby="official-ranked-heading" className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
         <h2
           id="official-ranked-heading"
-          className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-3 pb-2 border-b border-hairline font-tight"
+          className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-4 font-tight"
         >
           <span>Official USAU rankings</span>
           <span className="text-faint normal-case tracking-[0.1em]">{data.teams.length} teams</span>
         </h2>
-        <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border border border-border">
+        <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4">
           {data.teams.map((t) => (
             <RankedRow
               key={t.id}
@@ -204,24 +204,24 @@ function RankedRow({
   // tinted background so the podium reads at a glance.
   const podium = isTop && rank != null && rank <= 3;
   return (
-    <li className="bg-surface">
+    <li className="border-t border-hairline first:border-t-0">
       <Link
         href={href}
         className={[
-          'flex items-center gap-3 px-4 py-3 hover:bg-surface-hi transition-colors no-underline',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+          'flex items-center gap-3 px-1 py-3 hover:opacity-80 transition-opacity no-underline',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-card-sm',
         ].join(' ')}
       >
         <span
           aria-hidden="true"
           className={[
-            'flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0',
+            'flex items-center justify-center w-8 h-8 rounded-full flex-shrink-0',
             'tabular text-[13px] font-bold font-tight',
             podium
               ? rank === 1
                 ? 'bg-accent text-accent-ink'
                 : 'bg-ink text-bg'
-              : 'bg-bg border border-border text-muted',
+              : 'bg-ink/5 text-muted',
           ].join(' ')}
         >
           {rank ?? '—'}

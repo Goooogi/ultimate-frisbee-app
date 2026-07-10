@@ -184,60 +184,73 @@ function DivisionView({
   }
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 lg:gap-5">
       {divisionOrder.map((divName) => {
         const rows = byDiv.get(divName) ?? [];
         return (
-          <section key={divName} aria-labelledby={`div-${divName}`}>
-            <h2
-              id={`div-${divName}`}
-              className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-2 pb-2 border-b border-hairline"
-            >
-              {divName}
-            </h2>
-            <div className="flex flex-col gap-px bg-border border border-border">
-              {rows.map((s, i) => {
-                const meta = teamMeta(s.teamID);
-                const ts = statsByTeam.get(s.teamID);
-                return (
-                  <Link
-                    key={s.teamID}
-                    href={`/teams/${s.teamID}`}
-                    className="flex items-center gap-3 bg-surface px-4 py-3 hover:bg-surface-hi transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
-                  >
-                    {/* Rank */}
-                    <span className="text-[11px] font-bold text-faint tabular font-tight w-4 flex-shrink-0">
-                      {i + 1}
-                    </span>
-
-                    {/* Team logo */}
-                    <TeamLogo team={meta} size={36} />
-
-                    {/* Team name */}
-                    <div className="flex flex-col min-w-0 flex-1">
-                      <span className="text-[11px] font-semibold tracking-[0.08em] uppercase text-muted font-tight truncate">
-                        {s.teamName.split(' ').slice(0, -1).join(' ')}
-                      </span>
-                      <span className="text-[15px] font-bold font-tight text-ink leading-tight truncate">
-                        {s.teamName.split(' ').slice(-1).join(' ')}
-                      </span>
-                    </div>
-
-                    {/* Record */}
-                    <div className="flex flex-col items-end flex-shrink-0 gap-0.5">
-                      <span className="tabular text-[15px] font-bold font-tight text-ink">
-                        {s.wins}–{s.losses}{s.ties > 0 ? `–${s.ties}` : ''}
-                      </span>
-                      {ts && (
-                        <span className="text-[10px] text-faint font-tight tabular">
-                          {Number(ts.scoresFor) > 0 ? `${ts.scoresFor}–${ts.scoresAgainst}` : null}
-                        </span>
-                      )}
-                    </div>
-                  </Link>
-                );
-              })}
+          <section
+            key={divName}
+            aria-labelledby={`div-${divName}`}
+            className="bg-surface rounded-card-lg shadow-card px-5 pt-4 pb-1 flex flex-col"
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <h2
+                id={`div-${divName}`}
+                className="font-display italic font-bold text-[20px] tracking-[-0.01em] text-ink m-0"
+              >
+                {divName}
+              </h2>
+              <span className="font-mono text-[10px] text-faint tracking-[0.08em]">
+                {rows.length} {rows.length === 1 ? 'TEAM' : 'TEAMS'}
+              </span>
             </div>
+            {rows.map((s, i) => {
+              const meta = teamMeta(s.teamID);
+              const ts = statsByTeam.get(s.teamID);
+              return (
+                <Link
+                  key={s.teamID}
+                  href={`/teams/${s.teamID}`}
+                  className={[
+                    'grid grid-cols-[16px_36px_1fr_auto] gap-3 items-center py-2.5',
+                    i === 0 ? '' : 'border-t border-hairline',
+                    'hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm',
+                  ].join(' ')}
+                >
+                  {/* Rank */}
+                  <span className="font-mono text-[12px] font-bold text-faint tabular flex-shrink-0">
+                    {i + 1}
+                  </span>
+
+                  {/* Team logo */}
+                  <span className="inline-flex rounded-full overflow-hidden">
+                    <TeamLogo team={meta} size={32} />
+                  </span>
+
+                  {/* Team name */}
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-[10.5px] font-semibold tracking-[0.08em] uppercase text-faint font-sans truncate">
+                      {s.teamName.split(' ').slice(0, -1).join(' ')}
+                    </span>
+                    <span className="text-[15px] font-bold font-sans text-ink leading-tight truncate">
+                      {s.teamName.split(' ').slice(-1).join(' ')}
+                    </span>
+                  </div>
+
+                  {/* Record */}
+                  <div className="flex flex-col items-end flex-shrink-0 gap-0.5">
+                    <span className="tabular font-mono text-[13.5px] font-bold text-ink">
+                      {s.wins}–{s.losses}{s.ties > 0 ? `–${s.ties}` : ''}
+                    </span>
+                    {ts && (
+                      <span className="font-mono text-[10px] text-faint tabular">
+                        {Number(ts.scoresFor) > 0 ? `${ts.scoresFor}–${ts.scoresAgainst}` : null}
+                      </span>
+                    )}
+                  </div>
+                </Link>
+              );
+            })}
           </section>
         );
       })}
@@ -250,14 +263,14 @@ function DivisionView({
 function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
   if (stats.length === 0) return <EmptyState message="No team stats available for this season." />;
 
-  const thBase = 'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted border-b border-border whitespace-nowrap text-right';
+  const thBase = 'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint whitespace-nowrap text-right';
 
   return (
-    <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
+    <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
       <table className="w-full min-w-[560px] border-collapse">
         <thead>
           <tr>
-            <th className={`${thBase} text-left`} scope="col">Team</th>
+            <th className={`${thBase} text-left pl-5`} scope="col">Team</th>
             <th className={thBase} scope="col">GP</th>
             <th className={thBase} scope="col">W</th>
             <th className={thBase} scope="col">L</th>
@@ -265,31 +278,37 @@ function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
             <th className={thBase} scope="col">PA</th>
             <th className={thBase} scope="col">Cmp</th>
             <th className={thBase} scope="col">TO</th>
-            <th className={thBase} scope="col">Blk</th>
+            <th className={`${thBase} pr-5`} scope="col">Blk</th>
           </tr>
         </thead>
         <tbody>
-          {stats.map((t) => {
-            const meta = teamMeta(t.teamID);
-            return (
-              <tr key={t.teamID} className="hover:bg-surface-hi transition-colors duration-100">
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left">
-                  <Link
-                    href={`/teams/${t.teamID}`}
-                    className="inline-flex items-center gap-2 hover:opacity-80 transition-opacity"
-                  >
-                    <TeamLogo team={meta} size={24} />
-                    <span className="font-medium font-tight text-ink">{t.teamName}</span>
-                  </Link>
+          {stats.map((t, i) => (
+            <tr key={t.teamID} className="hover:bg-surface-hi transition-colors duration-100">
+              <td className={`px-3 py-2.5 text-[13px] text-left pl-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
+                <Link
+                  href={`/teams/${t.teamID}`}
+                  className="inline-flex items-center gap-2 hover:opacity-80 transition-opacity"
+                >
+                  <span className="inline-flex rounded-full overflow-hidden">
+                    <TeamLogo team={teamMeta(t.teamID)} size={24} />
+                  </span>
+                  <span className="font-medium font-tight text-ink">{t.teamName}</span>
+                </Link>
+              </td>
+              {[t.gamesPlayed, t.wins, t.losses, t.scoresFor, t.scoresAgainst, t.completions, t.turnovers, t.blocks].map((val, ci) => (
+                <td
+                  key={ci}
+                  className={[
+                    'px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight',
+                    i === 0 ? '' : 'border-t border-hairline',
+                    ci === 6 ? 'pr-5' : '',
+                  ].join(' ')}
+                >
+                  {val ?? '—'}
                 </td>
-                {[t.gamesPlayed, t.wins, t.losses, t.scoresFor, t.scoresAgainst, t.completions, t.turnovers, t.blocks].map((val, i) => (
-                  <td key={i} className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
-                    {val ?? '—'}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
+              ))}
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
@@ -298,7 +317,7 @@ function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
       <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
         No data available
       </div>
@@ -314,9 +333,9 @@ function PulTeamCard({ team }: { team: PulTeam }) {
     <Link
       href={`/pul/teams/${team.id}`}
       className={[
-        'flex flex-col items-center gap-3 bg-surface border border-border p-4 rounded-md',
+        'flex flex-col items-center gap-3 bg-surface rounded-card shadow-card p-4',
         'text-ink no-underline',
-        'hover:border-[rgb(var(--ink)/0.3)] hover:bg-surface-hi transition-colors duration-150',
+        'hover:shadow-lift transition-shadow cursor-pointer',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
       ].join(' ')}
     >
@@ -338,9 +357,9 @@ function WulTeamCard({ team }: { team: WulTeam }) {
     <Link
       href={`/wul/teams/${team.id}`}
       className={[
-        'flex flex-col items-center gap-3 bg-surface border border-border p-4 rounded-md',
+        'flex flex-col items-center gap-3 bg-surface rounded-card shadow-card p-4',
         'text-ink no-underline',
-        'hover:border-[rgb(var(--ink)/0.3)] hover:bg-surface-hi transition-colors duration-150',
+        'hover:shadow-lift transition-shadow cursor-pointer',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
       ].join(' ')}
     >

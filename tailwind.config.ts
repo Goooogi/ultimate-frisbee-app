@@ -18,6 +18,22 @@ const config: Config = {
         notify: 'rgb(var(--notify) / <alpha-value>)',
         accent: 'rgb(var(--accent) / <alpha-value>)',
         'accent-ink': 'rgb(var(--accent-ink) / <alpha-value>)',
+        'bg-warm': 'rgb(var(--bg-warm) / <alpha-value>)',
+      },
+      // v2 "Editorial Calm" — elevation replaces hairline borders. Values are
+      // per-theme CSS variables (dark adds a faint ring; see globals.css).
+      boxShadow: {
+        card: 'var(--shadow-card)',
+        soft: 'var(--shadow-soft)',
+        hero: 'var(--shadow-hero)',
+        lift: 'var(--shadow-lift)',
+      },
+      // v2 radius scale (design tokens R.sm/md/lg/xl)
+      borderRadius: {
+        'card-sm': '12px',
+        card: '18px',
+        'card-lg': '24px',
+        'card-xl': '32px',
       },
       fontFamily: {
         // Wired up via next/font in app/layout.tsx

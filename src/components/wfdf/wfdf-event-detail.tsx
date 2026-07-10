@@ -61,11 +61,11 @@ export function WfdfEventDetail({ event }: Props) {
       <div
         className={[
           'group relative inline-flex items-center gap-2 self-start',
-          'h-10 pl-3.5 pr-3 rounded-lg',
-          'bg-surface border border-border shadow-sm',
-          'transition-colors duration-150',
-          'hover:border-ink hover:bg-[rgb(var(--surface-hi))]',
-          'focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/40',
+          'h-10 pl-4 pr-3.5 rounded-full',
+          'bg-surface shadow-soft',
+          'transition-shadow duration-150',
+          'hover:shadow-card',
+          'focus-within:ring-2 focus-within:ring-accent/40',
         ].join(' ')}
       >
         <label
@@ -167,7 +167,7 @@ export function WfdfEventDetail({ event }: Props) {
           <span className="text-faint tabular ml-1">{standings.length}</span>
         </summary>
 
-        <div className="mt-3 rounded-lg border border-border bg-surface overflow-hidden">
+        <div className="mt-3 bg-surface rounded-card-lg shadow-card overflow-hidden">
           <div className="hidden sm:grid grid-cols-[2.5rem_1fr_5rem_4rem] items-center px-4 py-2.5 border-b border-hairline text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
             <span>#</span>
             <span>Team</span>
@@ -181,7 +181,7 @@ export function WfdfEventDetail({ event }: Props) {
                   href={`/wfdf/teams/${t.id}`}
                   className={[
                     'grid grid-cols-[2.5rem_1fr_auto] sm:grid-cols-[2.5rem_1fr_5rem_4rem] items-center px-4 py-3',
-                    'no-underline transition-colors duration-150 hover:bg-[rgb(var(--surface-hi))]',
+                    'no-underline transition-colors duration-150 hover:bg-surface-hi',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
                     i > 0 ? 'border-t border-hairline' : '',
                   ].join(' ')}
@@ -282,7 +282,7 @@ function GameRow({ game: g }: { game: Game }) {
   const timeLabel = formatGameTime(g.scheduledAt);
   const hasFooter = timeLabel != null || sotg != null || (!done && g.status === 'scheduled');
   return (
-    <div className="rounded-md border border-hairline bg-surface px-3 py-2.5">
+    <div className="bg-surface rounded-card shadow-card px-3 py-2.5">
       <TeamLine
         name={g.homeTeam}
         teamId={g.homeTeamId}

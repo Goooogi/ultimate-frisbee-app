@@ -63,13 +63,15 @@ export default async function WulTeamPage({ params }: Props) {
       ]}
     >
       {/* Team hero band */}
-      <div className="flex flex-wrap items-center gap-5 mb-8 pb-6 border-b border-hairline">
-        <WulTeamLogo team={team} size={72} />
+      <div className="flex flex-wrap items-center gap-5 mb-8 p-5 lg:p-7 bg-surface rounded-card-lg shadow-card">
+        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+          <WulTeamLogo team={team} size={72} />
+        </span>
         <div>
-          <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-1">
+          <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-1.5">
             {team.city}
           </div>
-          <h2 className="text-[28px] lg:text-[36px] font-bold font-tight text-ink leading-none tracking-[-0.02em]">
+          <h2 className="font-display italic text-[28px] lg:text-[36px] font-bold text-ink leading-[0.95] tracking-[-0.02em]">
             {team.mascot}
           </h2>
           <div className="text-[12px] text-muted font-tight mt-1.5">
@@ -85,16 +87,22 @@ export default async function WulTeamPage({ params }: Props) {
 
       {/* Roster */}
       <section aria-labelledby="roster-heading">
-        <h2
-          id="roster-heading"
-          className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
-        >
-          <span>Roster · {season}</span>
-          <span className="text-faint tabular">{roster.length}</span>
-        </h2>
+        <div className="flex items-end justify-between gap-4 mb-4">
+          <div>
+            <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
+              {season} Season
+            </span>
+            <h2 id="roster-heading" className="font-display italic font-bold text-[22px] lg:text-[26px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
+              Roster
+            </h2>
+          </div>
+          <span className="text-[11px] font-bold tracking-[0.12em] uppercase text-faint tabular pb-1">
+            {roster.length} {roster.length === 1 ? 'player' : 'players'}
+          </span>
+        </div>
 
         {roster.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-14 px-6 text-center bg-surface border border-border rounded-md">
+          <div className="flex flex-col items-center justify-center py-14 px-6 text-center bg-surface rounded-card-lg shadow-card">
             <p className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted font-tight">
               Roster coming soon
             </p>
@@ -109,7 +117,9 @@ export default async function WulTeamPage({ params }: Props) {
             </Link>
           </div>
         ) : (
-          <ProRosterTable players={roster} league="wul" />
+          <div className="bg-surface rounded-card-lg shadow-card p-5">
+            <ProRosterTable players={roster} league="wul" />
+          </div>
         )}
       </section>
     </PageShell>

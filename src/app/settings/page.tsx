@@ -19,10 +19,10 @@ export default function SettingsPage() {
         <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[640px]">
           {/* Page header */}
           <div className="mb-6 lg:mb-8">
-            <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted mb-2 font-tight">
+            <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent mb-2 font-sans">
               Account
             </div>
-            <h1 className="m-0 font-tight text-[36px] lg:text-[48px] font-bold tracking-[-0.04em] leading-none text-ink">
+            <h1 className="m-0 font-display italic text-[36px] lg:text-[48px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
               Settings
             </h1>
             <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[15px]">

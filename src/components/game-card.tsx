@@ -31,9 +31,9 @@ function FieldGameCard({ game }: { game: UfaGame }) {
     <Link
       href={`/g/${game.gameID}`}
       className={[
-        'block w-full bg-surface border border-border cursor-pointer',
+        'block w-full bg-surface rounded-card shadow-card cursor-pointer',
         'px-4 py-3.5 pb-4 md:px-5 md:py-[18px] md:pb-5',
-        'transition-colors duration-150 hover:border-ink',
+        'transition-shadow duration-150 hover:shadow-lift',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
       ].join(' ')}
     >
@@ -75,9 +75,8 @@ function FieldGameCard({ game }: { game: UfaGame }) {
       />
 
       {state.isClose && (
-        <div className="mt-2.5 md:mt-3 flex items-center gap-2">
-          <span className="w-3.5 h-px bg-accent flex-shrink-0" aria-hidden="true" />
-          <span className="text-[10px] font-semibold tracking-[0.12em] uppercase text-accent font-tight">
+        <div className="mt-2.5 md:mt-3">
+          <span className="inline-flex items-center text-[10.5px] font-bold tracking-[0.12em] uppercase text-accent bg-accent/10 rounded-full px-2.5 py-[5px]">
             Close game
           </span>
         </div>
@@ -150,9 +149,9 @@ function BcastGameCard({ game }: { game: UfaGame }) {
     <Link
       href={`/g/${game.gameID}`}
       className={[
-        'block w-full bg-surface border border-border cursor-pointer',
+        'block w-full bg-surface rounded-card shadow-card cursor-pointer',
         'px-4 py-3.5 pb-4 md:px-6 md:py-5 md:pb-[22px]',
-        'relative overflow-hidden transition-colors duration-150 hover:bg-surface-hi',
+        'relative overflow-hidden transition-shadow duration-150 hover:shadow-lift',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
       ].join(' ')}
     >

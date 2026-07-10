@@ -20,6 +20,15 @@
   --accent: 255 61 0;         /* #FF3D00 — coral */
   --accent-ink: 255 255 255;
   --notify: 225 29 72;        /* #E11D48 — notification red (same in both themes) */
+  --bg-warm: 237 233 222;     /* #EDE9DE — deeper cream for tonal sections */
+
+  /* ── v2 elevation (Editorial Calm) ───
+     Separation comes from layered soft shadows instead of 1px borders.
+     Dark theme swaps these for ring+black stacks below. */
+  --shadow-card: 0 1px 2px rgba(14, 14, 12, 0.04), 0 8px 24px -12px rgba(14, 14, 12, 0.14);
+  --shadow-soft: 0 1px 2px rgba(14, 14, 12, 0.03), 0 4px 16px -10px rgba(14, 14, 12, 0.12);
+  --shadow-hero: 0 2px 4px rgba(14, 14, 12, 0.06), 0 30px 60px -24px rgba(14, 14, 12, 0.4);
+  --shadow-lift: 0 1px 2px rgba(14, 14, 12, 0.04), 0 18px 40px -20px rgba(14, 14, 12, 0.22);
 }
 
 :root[data-theme='broadcast'] {
@@ -35,10 +44,21 @@
   --faint: 140 138 130;       /* #8C8A82 */
   --border: 28 28 25;         /* derived from rgba(244,242,235,0.08) */
   --hairline: 22 22 19;       /* derived from rgba(244,242,235,0.05) */
-  --live: 217 255 58;         /* #D9FF3A — volt (broadcast uses accent for live too) */
-  --accent: 217 255 58;       /* #D9FF3A — volt */
-  --accent-ink: 10 10 9;
+  --live: 255 61 0;           /* #FF3D00 — coral (broadcast uses accent for live too) */
+  --accent: 255 61 0;         /* #FF3D00 — coral. Orange stays the accent in dark
+                                 mode too (Hunter's call), matching the light theme
+                                 rather than the old volt green. */
+  --accent-ink: 255 255 255;  /* white text on the orange accent (orange is dark
+                                 enough to need light ink, unlike the old volt). */
   --notify: 244 63 94;        /* #F43F5E — notification red, kept red on dark for legibility */
+  --bg-warm: 16 16 14;        /* elevated near-black for tonal sections */
+
+  /* Dark elevation: drop shadows are invisible on near-black, so each stack
+     leads with a faint 1px ring for card separation, backed by a deep shadow. */
+  --shadow-card: 0 0 0 1px rgba(244, 242, 235, 0.07), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+  --shadow-soft: 0 0 0 1px rgba(244, 242, 235, 0.06), 0 4px 16px -10px rgba(0, 0, 0, 0.5);
+  --shadow-hero: 0 0 0 1px rgba(244, 242, 235, 0.08), 0 30px 60px -24px rgba(0, 0, 0, 0.75);
+  --shadow-lift: 0 0 0 1px rgba(244, 242, 235, 0.07), 0 18px 40px -20px rgba(0, 0, 0, 0.65);
 }
 
 html, body {

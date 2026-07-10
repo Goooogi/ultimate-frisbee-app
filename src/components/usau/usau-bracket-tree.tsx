@@ -206,10 +206,8 @@ function MatchCard({ game, compact = false }: { game: Game; compact?: boolean })
   return (
     <article
       className={[
-        'bg-surface border rounded-md overflow-hidden',
-        tone === 'live'
-          ? 'border-accent shadow-[0_0_0_3px_rgba(255,61,0,0.08)]'
-          : 'border-border',
+        'bg-surface rounded-card-sm overflow-hidden transition-shadow',
+        tone === 'live' ? 'shadow-lift ring-1 ring-accent/40' : 'shadow-card',
       ].join(' ')}
     >
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
