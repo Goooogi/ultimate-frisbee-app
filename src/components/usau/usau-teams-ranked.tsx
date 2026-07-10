@@ -146,29 +146,14 @@ function OfficialRankings({
   genderDivision?: 'Men' | 'Women' | 'Mixed';
   competitionLevel?: UsauLevel;
 }) {
-  const scrapedLabel = data.scrapedAt
-    ? new Date(data.scrapedAt).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      })
-    : null;
-
   return (
     <div className="flex flex-col gap-7">
-      <div className="text-[11px] font-medium text-faint font-tight bg-surface border border-border rounded px-3 py-2">
-        <span className="font-bold text-muted uppercase tracking-[0.16em] text-[10px]">
-          Official USAU rankings ·
-        </span>{' '}
-        {data.season} power ratings{scrapedLabel ? ` · updated ${scrapedLabel}` : ''}.
-      </div>
-
       <section aria-labelledby="official-ranked-heading">
         <h2
           id="official-ranked-heading"
           className="flex items-baseline justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted mb-3 pb-2 border-b border-hairline font-tight"
         >
-          <span>Top {data.teams.length} · USAU rating</span>
+          <span>Official USAU rankings</span>
           <span className="text-faint normal-case tracking-[0.1em]">{data.teams.length} teams</span>
         </h2>
         <ol className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border border border-border">
