@@ -75,34 +75,23 @@ export function pickGameOfTheWeek(
 }
 
 /**
- * "Top" hero game — the ongoing story. Prefers the best LIVE game (by the same
- * quality × closeness metric); when nothing is live, falls back to the MOST
- * RECENT final so the slide always has something current to show. Returns
- * undefined only when there are no live/final games at all (pure off-season).
+ * "Top" hero game — the LIVE game only. Returns the best in-progress game (by
+ * the quality × closeness metric) when one exists, else undefined so the caller
+ * DROPS the slide entirely. Deliberately no recent-final / upcoming fallback:
+ * the "Top game" slide is strictly for a game happening right now, so it never
+ * shows a different future/past game than the "Game of the week" highlight.
  *
- * Pairs with pickUpcomingGameOfWeek(): together they let the homepage carousel
- * show a "Top" (live/recent) slide AND a distinct "Game of the week" (best
- * upcoming) slide, instead of one slide that has to choose.
+ * Pairs with pickUpcomingGameOfWeek() — together the carousel shows a live
+ * "Top game" slide (only while a game is on) AND the upcoming "Game of the
+ * week" slide.
  */
 export function pickTopGame(
   games: UfaGame[],
   standings: UfaStanding[],
 ): UfaGame | undefined {
-  if (games.length === 0) return undefined;
-
   const live = games.filter((g) => gameUiState(g).isLive);
-  if (live.length > 0) {
-    return pickBest(live.map((g) => scoreGame(g, standings))).game;
-  }
-
-  // No live game → most recent final (latest start timestamp among finals).
-  const finals = games.filter((g) => gameUiState(g).isFinal);
-  if (finals.length === 0) return undefined;
-  return [...finals].sort(
-    (a, b) =>
-      (b.startTimestamp ? new Date(b.startTimestamp).getTime() : 0) -
-      (a.startTimestamp ? new Date(a.startTimestamp).getTime() : 0),
-  )[0];
+  if (live.length === 0) return undefined;
+  return pickBest(live.map((g) => scoreGame(g, standings))).game;
 }
 
 /**

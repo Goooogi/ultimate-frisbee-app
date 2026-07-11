@@ -132,13 +132,16 @@ function formatDateRange(
     });
   };
   if (!end || start === end) return fmt(start);
-  // Same month → "Jun 27–29"; different → "Jun 27 – Jul 2"
-  const startDate = new Date(
-    ...( start.split('-').map(Number) as [number, number, number])
-  );
-  const endDate = new Date(
-    ...( end.split('-').map(Number) as [number, number, number])
-  );
+  // Same month → "Jun 27–29"; different → "Jun 27 – Jul 2".
+  // NOTE: JS Date months are 0-indexed, so the month component MUST be `m - 1`
+  // (matching fmt() above). The previous spread passed the raw 1-based month,
+  // which shifted every date forward a month ("Jul 11" → "Aug 11").
+  const toLocal = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const startDate = toLocal(start);
+  const endDate = toLocal(end);
   if (startDate.getMonth() === endDate.getMonth()) {
     return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${endDate.getDate()}`;
   }

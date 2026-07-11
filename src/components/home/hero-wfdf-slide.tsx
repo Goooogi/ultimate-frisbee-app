@@ -130,8 +130,15 @@ function formatDateRange(start: string | null, end: string | null): string | nul
     return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
   if (!end || start === end) return fmt(start);
-  const startDate = new Date(...(start.split('-').map(Number) as [number, number, number]));
-  const endDate = new Date(...(end.split('-').map(Number) as [number, number, number]));
+  // JS Date months are 0-indexed → month MUST be `m - 1` (matching fmt above).
+  // The old spread passed the raw 1-based month, shifting dates a month forward
+  // ("Jul 11" → "Aug 11").
+  const toLocal = (iso: string) => {
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
+  const startDate = toLocal(start);
+  const endDate = toLocal(end);
   if (startDate.getMonth() === endDate.getMonth()) {
     return `${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${endDate.getDate()}`;
   }
