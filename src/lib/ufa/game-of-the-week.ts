@@ -74,6 +74,61 @@ export function pickGameOfTheWeek(
   return upcoming[0];
 }
 
+/**
+ * "Top" hero game — the ongoing story. Prefers the best LIVE game (by the same
+ * quality × closeness metric); when nothing is live, falls back to the MOST
+ * RECENT final so the slide always has something current to show. Returns
+ * undefined only when there are no live/final games at all (pure off-season).
+ *
+ * Pairs with pickUpcomingGameOfWeek(): together they let the homepage carousel
+ * show a "Top" (live/recent) slide AND a distinct "Game of the week" (best
+ * upcoming) slide, instead of one slide that has to choose.
+ */
+export function pickTopGame(
+  games: UfaGame[],
+  standings: UfaStanding[],
+): UfaGame | undefined {
+  if (games.length === 0) return undefined;
+
+  const live = games.filter((g) => gameUiState(g).isLive);
+  if (live.length > 0) {
+    return pickBest(live.map((g) => scoreGame(g, standings))).game;
+  }
+
+  // No live game → most recent final (latest start timestamp among finals).
+  const finals = games.filter((g) => gameUiState(g).isFinal);
+  if (finals.length === 0) return undefined;
+  return [...finals].sort(
+    (a, b) =>
+      (b.startTimestamp ? new Date(b.startTimestamp).getTime() : 0) -
+      (a.startTimestamp ? new Date(a.startTimestamp).getTime() : 0),
+  )[0];
+}
+
+/**
+ * Best UPCOMING marquee matchup — the "Game of the week" proper, WITHOUT the
+ * live-game override that pickGameOfTheWeek applies. Scoped to the soonest week
+ * that has upcoming games. Returns undefined when nothing is upcoming (so the
+ * caller can drop the slide). Use this alongside pickTopGame() so the live game
+ * lives on the "Top" slide and this stays the forward-looking headline.
+ */
+export function pickUpcomingGameOfWeek(
+  games: UfaGame[],
+  standings: UfaStanding[],
+): UfaGame | undefined {
+  const upcoming = games.filter((g) => gameUiState(g).isUpcoming);
+  if (upcoming.length === 0) return undefined;
+
+  const byWeek = groupByWeek(upcoming);
+  const orderedWeeks = Array.from(byWeek.keys()).sort((a, b) => weekNum(a) - weekNum(b));
+  for (const week of orderedWeeks) {
+    const slate = byWeek.get(week)!;
+    if (slate.length === 0) continue;
+    return pickBest(slate.map((g) => scoreGame(g, standings))).game;
+  }
+  return upcoming[0];
+}
+
 // ── scoring ────────────────────────────────────────────────────────────
 
 function scoreGame(game: UfaGame, standings: UfaStanding[]): ScoredGame {

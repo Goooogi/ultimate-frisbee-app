@@ -27,7 +27,7 @@ import {
   currentSeasonYear,
 } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
-import { pickGameOfTheWeek } from '@/lib/ufa/game-of-the-week';
+import { pickTopGame, pickUpcomingGameOfWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { getCurrentEvent, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
 import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
@@ -136,20 +136,23 @@ export default async function HomePage() {
   const wulGames = wulRes.status === 'fulfilled' ? wulRes.value : [];
   const wulFeatured = pickLeagueGame(wulGames);
 
-  // Pick "Game of the Week" — most evenly-matched current-week game between
-  // two good teams. See pickGameOfTheWeek() for the heuristic; the UFA API
-  // doesn't expose a featured-game flag so we derive it from standings.
-  const featured = pickGameOfTheWeek(games, standings) ?? games[0];
+  // Two UFA hero games, shown as SEPARATE carousel slides:
+  //  - topGame  → the ongoing story: best LIVE game, else most recent final.
+  //  - gotwGame → best UPCOMING marquee matchup (no live override, so the live
+  //               game stays on the "Top" slide rather than hijacking this one).
+  // If nothing is upcoming, gotwGame is undefined and that slide drops. topGame
+  // falls back to games[0] only so the UFA slide never fully disappears mid-
+  // season (EmptyHero still renders for a truly empty slate).
+  const topGame = pickTopGame(games, standings) ?? games[0];
+  const gotwGame = pickUpcomingGameOfWeek(games, standings);
 
-  // Records for the featured game's two teams (from current standings).
+  // Records for a game's two teams (from current standings).
   const recordOf = (slug?: string): string | undefined => {
     if (!slug) return undefined;
     const s = standings.find((row) => row.teamID === slug);
     if (!s) return undefined;
     return s.ties > 0 ? `${s.wins}-${s.losses}-${s.ties}` : `${s.wins}-${s.losses}`;
   };
-  const awayRec = recordOf(featured?.awayTeamID);
-  const homeRec = recordOf(featured?.homeTeamID);
 
   // Two derived slices fed to the "Up next" / "Recent results" cards:
   //  - upNext: next 4 games chronologically (Live or Upcoming, soonest first)
@@ -187,10 +190,35 @@ export default async function HomePage() {
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
   // entries are filtered out so offseason leagues simply don't appear.
+  // Whether the "Top" slide is showing a live game (drives its eyebrow copy).
+  const topIsLive = topGame ? gameUiState(topGame).isLive : false;
+  // Drop the Game-of-the-week slide if it would just repeat the Top slide's
+  // game (e.g. off-week: Top falls back to a final and GotW picked the same, or
+  // no upcoming exists at all) — no point showing the identical card twice.
+  const showGotw = gotwGame != null && gotwGame.gameID !== topGame?.gameID;
+
   const slides = [
-    // UFA slide — always show the existing HeroGameCard (may render EmptyHero
-    // in offseason, which is an intentional UFA-only empty state — keep it).
-    <HeroGameCard key="ufa" game={featured} awayRecord={awayRec} homeRecord={homeRec} />,
+    // UFA "Top" slide — the ongoing story (live game, else most recent final).
+    // Always shown (EmptyHero renders for a truly empty slate). Eyebrow reads
+    // "Top game" when live, else falls through to the card's state-derived label.
+    <HeroGameCard
+      key="ufa-top"
+      game={topGame}
+      awayRecord={recordOf(topGame?.awayTeamID)}
+      homeRecord={recordOf(topGame?.homeTeamID)}
+      eyebrow={topIsLive ? 'Top game' : undefined}
+    />,
+    // UFA "Game of the week" slide — best UPCOMING marquee matchup. Only when
+    // it's a distinct game from the Top slide.
+    showGotw ? (
+      <HeroGameCard
+        key="ufa-gotw"
+        game={gotwGame}
+        awayRecord={recordOf(gotwGame?.awayTeamID)}
+        homeRecord={recordOf(gotwGame?.homeTeamID)}
+        eyebrow="Game of the week"
+      />
+    ) : null,
     // USAU — tournament card, null when no current event.
     usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.

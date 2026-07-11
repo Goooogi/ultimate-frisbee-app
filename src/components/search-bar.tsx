@@ -109,6 +109,31 @@ export function SearchBar() {
   const playerResults = results.filter((r) => r.kind === 'player');
   const tournamentResults = results.filter((r) => r.kind === 'tournament');
 
+  // Order groups by best match quality (not a fixed Teams-first rule), so a
+  // full-word player hit like "hunter"→"Hunter May" can lead over a weaker team
+  // match. Teams win ties. Mirrors the same logic in search-modal.tsx.
+  const KIND_TIEBREAK: Record<'team' | 'player' | 'tournament', number> = {
+    team: 0,
+    player: 1,
+    tournament: 2,
+  };
+  const bestRank = (rs: SearchResult[]): number =>
+    rs.reduce((m, r) => Math.min(m, r.matchRank ?? 3), Infinity);
+  const groups = (
+    [
+      { kind: 'team' as const, label: 'Teams', items: teamResults },
+      { kind: 'player' as const, label: 'Players', items: playerResults },
+      { kind: 'tournament' as const, label: 'Tournaments', items: tournamentResults },
+    ] as const
+  )
+    .filter((g) => g.items.length > 0)
+    .sort((a, b) => {
+      const ra = bestRank(a.items);
+      const rb = bestRank(b.items);
+      if (ra !== rb) return ra - rb;
+      return KIND_TIEBREAK[a.kind] - KIND_TIEBREAK[b.kind];
+    });
+
   return (
     <div ref={wrapperRef} className="relative">
       {/* Pill input wrapper */}
@@ -200,9 +225,9 @@ export function SearchBar() {
             </div>
           ) : (
             <>
-              {teamResults.length > 0 && (
-                <ResultGroup label="Teams">
-                  {teamResults.map((r) => {
+              {groups.map((g) => (
+                <ResultGroup key={g.kind} label={g.label}>
+                  {g.items.map((r) => {
                     const i = results.indexOf(r);
                     return (
                       <ResultRow
@@ -216,41 +241,7 @@ export function SearchBar() {
                     );
                   })}
                 </ResultGroup>
-              )}
-              {playerResults.length > 0 && (
-                <ResultGroup label="Players">
-                  {playerResults.map((r) => {
-                    const i = results.indexOf(r);
-                    return (
-                      <ResultRow
-                        key={r.id}
-                        id={`search-bar-option-${i}`}
-                        result={r}
-                        active={i === highlight}
-                        onMouseEnter={() => setHighlight(i)}
-                        onClick={() => navigate(r)}
-                      />
-                    );
-                  })}
-                </ResultGroup>
-              )}
-              {tournamentResults.length > 0 && (
-                <ResultGroup label="Tournaments">
-                  {tournamentResults.map((r) => {
-                    const i = results.indexOf(r);
-                    return (
-                      <ResultRow
-                        key={r.id}
-                        id={`search-bar-option-${i}`}
-                        result={r}
-                        active={i === highlight}
-                        onMouseEnter={() => setHighlight(i)}
-                        onClick={() => navigate(r)}
-                      />
-                    );
-                  })}
-                </ResultGroup>
-              )}
+              ))}
             </>
           )}
         </div>

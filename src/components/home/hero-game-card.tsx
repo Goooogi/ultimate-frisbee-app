@@ -18,6 +18,12 @@ interface HeroGameCardProps {
   game: UfaGame | undefined;
   awayRecord?: string;
   homeRecord?: string;
+  /** Overrides the auto-derived eyebrow label ("Game of the week" / "Live now"
+   *  / "Recent result"). Lets the carousel label two UFA slides distinctly —
+   *  e.g. a "Top" (live/recent) slide vs the "Game of the week" slide — instead
+   *  of both showing the same state-derived text. When omitted, the label is
+   *  derived from the game's live/upcoming/final state as before. */
+  eyebrow?: string;
 }
 
 const BASE = '#0E1622';
@@ -60,7 +66,7 @@ function glowColor(team: TeamMeta): string {
   return luminance(a) > luminance(p) ? team.accent : team.primary;
 }
 
-export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps) {
+export function HeroGameCard({ game, awayRecord, homeRecord, eyebrow }: HeroGameCardProps) {
   if (!game) return <EmptyHero />;
 
   const away = teamMeta(game.awayTeamID);
@@ -69,7 +75,8 @@ export function HeroGameCard({ game, awayRecord, homeRecord }: HeroGameCardProps
   const awayGlow = glowColor(away);
   const homeGlow = glowColor(home);
 
-  const eyebrowLabel = state.isLive ? 'Live now' : state.isUpcoming ? 'Game of the week' : 'Recent result';
+  const eyebrowLabel =
+    eyebrow ?? (state.isLive ? 'Live now' : state.isUpcoming ? 'Game of the week' : 'Recent result');
   const whenLabel = state.isUpcoming ? formatStartCompact(game).toUpperCase() : null;
   const statusLine = state.isLive ? 'LIVE' : state.isFinal ? 'FINAL' : 'UPCOMING';
 

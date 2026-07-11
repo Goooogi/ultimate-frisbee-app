@@ -30,13 +30,16 @@ interface Tab {
   href: string;
   match: string;
   aliases?: string[];
-  icon: 'games' | 'schedule' | 'teams' | 'players' | 'leaderboard' | 'myteam' | 'myleague';
+  icon: 'home' | 'games' | 'schedule' | 'teams' | 'players' | 'leaderboard' | 'myteam' | 'myleague';
   /** Rendered greyed-out, non-navigable — a "coming soon" placeholder tab. */
   soon?: boolean;
 }
 
 const TABS: Tab[] = [
-  { id: 'games',    label: 'Games',    href: '/scores',   match: '/scores',   aliases: ['/g', '/usau/events'], icon: 'games' },
+  // "Home" tab still opens the games hub (/scores) — the rename is per user
+  // feedback; the Recents/Upcoming/Other shortcuts that idea also mentioned are
+  // deferred until the destination UX is decided (backlog #8).
+  { id: 'games',    label: 'Home',     href: '/scores',   match: '/scores',   aliases: ['/g', '/usau/events'], icon: 'home' },
   { id: 'schedule', label: 'Schedule', href: '/schedule', match: '/schedule', icon: 'schedule' },
   { id: 'teams',    label: 'Teams',    href: '/teams',    match: '/teams',    aliases: ['/usau/teams'], icon: 'teams' },
   { id: 'players',  label: 'Players',  href: '/players',  match: '/players',  icon: 'players' },
@@ -176,6 +179,19 @@ function Icon({
   const c = faint ? 'text-faint' : active ? 'text-accent' : 'text-muted';
   const ball = c;
   switch (kind) {
+    case 'home':
+      // House glyph — reads as "home" at a glance, distinct from the disc.
+      return (
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+          <path
+            d="M3.5 9.5 11 3.5l7.5 6M5 8.5v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      );
     case 'games':
       return (
         <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={ball}>

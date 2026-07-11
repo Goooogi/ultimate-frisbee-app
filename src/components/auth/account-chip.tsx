@@ -22,6 +22,11 @@ import dynamic from 'next/dynamic';
 // once a signed-out visitor opens sign-in/up. Load it on demand so it stays
 // out of the global-nav bundle that ships on every page.
 const AuthModal = dynamic(() => import('./auth-modal').then((m) => m.AuthModal));
+// Feedback modal is only pulled in when a signed-in user opens it — keep it out
+// of the global-nav bundle.
+const FeedbackModal = dynamic(() =>
+  import('@/components/feedback/feedback-modal').then((m) => m.FeedbackModal),
+);
 import { useTheme } from '@/lib/use-theme';
 import { usePendingContentCount } from '@/lib/player-content/use-pending-count';
 import type { Theme } from '@/lib/theme';
@@ -47,6 +52,7 @@ export function AccountChip({
   const [menuOpen, setMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
   // Close popover on outside click + Esc.
@@ -216,6 +222,20 @@ export function AccountChip({
               )}
             </Link>
           )}
+          {user.isAdmin && (
+            <Link
+              href="/admin/feedback"
+              role="menuitem"
+              onClick={() => setMenuOpen(false)}
+              className={[
+                'flex items-center gap-2 w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+                'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
+                'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink',
+              ].join(' ')}
+            >
+              Feedback inbox
+            </Link>
+          )}
 
           {/* Settings link */}
           <Link
@@ -230,6 +250,24 @@ export function AccountChip({
           >
             Settings
           </Link>
+
+          {/* Feedback — opens the submit modal. Available to every signed-in
+              user; submissions land in the admin feedback inbox. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              setFeedbackOpen(true);
+            }}
+            className={[
+              'flex items-center gap-2 w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+              'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
+              'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink',
+            ].join(' ')}
+          >
+            Feedback
+          </button>
 
           {/* Appearance / theme toggle row */}
           <div className="px-3 py-2.5 flex items-center justify-between border-b border-hairline">
@@ -256,6 +294,8 @@ export function AccountChip({
           </button>
         </div>
       )}
+
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }

@@ -3,6 +3,8 @@ import { AuthGate } from '@/components/auth/auth-gate';
 import { AppShell } from '@/components/page-shell';
 import { ProfileSettings } from '@/components/settings/profile-settings';
 import { FavoritesSettings } from '@/components/settings/favorites-settings';
+import { DeleteAccountSettings } from '@/components/settings/delete-account-settings';
+import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
 
 export const metadata: Metadata = {
   title: 'Settings · The Layout',
@@ -33,7 +35,12 @@ export default function SettingsPage() {
           {/* Settings cards */}
           <div className="flex flex-col gap-6">
             <ProfileSettings />
-            <FavoritesSettings />
+            {/* Favorites capture is gated behind the same FOR_YOU_ENABLED flag
+                that hides the /for-you page + hamburger row + onboarding modal.
+                Hidden while For You is unfinished (backlog #14); re-appears
+                automatically when the flag flips to true. */}
+            {FOR_YOU_ENABLED && <FavoritesSettings />}
+            <DeleteAccountSettings />
           </div>
         </div>
       </AppShell>
