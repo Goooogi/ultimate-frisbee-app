@@ -45,6 +45,7 @@
 //     from sync-event-rosters (HTML scrape of the team page).
 
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
+import { tzForState, localWallTimeToUtcIso } from '../_shared/tz.ts';
 
 interface RequestBody {
   year?: number;
@@ -192,23 +193,34 @@ function dateOnly(iso: string | undefined | null): string | null {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
-/** Their per-game StartDate is "MM/DD/YYYY" plus a separate StartTime. */
-function combineDateTime(date?: string, time?: string): string | null {
+/** Their per-game StartDate is "MM/DD/YYYY" plus a separate StartTime, both
+ *  in the VENUE'S LOCAL clock (ultirzr mirrors USAU verbatim). Convert to a
+ *  true UTC instant via the event's venue timezone — writing the wall clock
+ *  with a bare `Z` (the old behavior) stored a wrong instant that clashed
+ *  with the HTML pipeline's correct UTC and broke time display + "upcoming"
+ *  comparisons. When the zone is unknown, keep date-only (midnight) rather
+ *  than a wrong instant; with a known zone, date-only means venue midnight. */
+function combineDateTime(date?: string, time?: string, tz?: string | null): string | null {
   if (!date) return null;
   const md = date.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (!md) return null;
   const [, mm, dd, yyyy] = md;
+  const year = parseInt(yyyy, 10);
+  const month = parseInt(mm, 10);
+  const day = parseInt(dd, 10);
   const isoDate = `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
-  if (!time) return `${isoDate}T00:00:00Z`;
   // "9:00 AM" / "12:30 PM"
-  const mt = time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!mt) return `${isoDate}T00:00:00Z`;
+  const mt = time ? time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i) : null;
+  if (!tz) return `${isoDate}T00:00:00Z`; // zone unknown → date-only
+  if (!mt) {
+    return localWallTimeToUtcIso(year, month, day, 0, 0, tz) ?? `${isoDate}T00:00:00Z`;
+  }
   let h = parseInt(mt[1], 10);
-  const min = mt[2];
+  const min = parseInt(mt[2], 10);
   const ampm = mt[3].toUpperCase();
   if (ampm === 'PM' && h < 12) h += 12;
   if (ampm === 'AM' && h === 12) h = 0;
-  return `${isoDate}T${String(h).padStart(2, '0')}:${min}:00Z`;
+  return localWallTimeToUtcIso(year, month, day, h, min, tz) ?? `${isoDate}T00:00:00Z`;
 }
 
 /** Pull the lowercase slug out of UsauUrl. ultirzr returns URLs like
@@ -585,6 +597,8 @@ async function ingestEvent(
   // schedule stubs) and games with no real score updates pending — we
   // still want to record scheduled-not-played games so the bracket
   // renders, but we skip the ones with no resolved teams.
+  // Venue timezone for converting ultirzr's local schedule clocks → UTC.
+  const venueTz = tzForState(e.State ?? hit.State ?? null);
   for (const { game: gm, bracket, stage } of gameList) {
     if (!gm.EventGameId) continue;
     const homeId = gm.HomeTeamId ?? 0;
@@ -612,7 +626,7 @@ async function ingestEvent(
       score_a: scoreA,
       score_b: scoreB,
       location: gm.FieldName?.trim() || null,
-      scheduled_at: combineDateTime(gm.StartDate, gm.StartTime),
+      scheduled_at: combineDateTime(gm.StartDate, gm.StartTime, venueTz),
       status: classifyStatus(gm.GameStatus),
       source_url: `https://play.usaultimate.org/events/${slug}/`,
     };

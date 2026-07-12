@@ -19,6 +19,7 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
+import { formatGameTime } from '@/lib/usau/venue-tz';
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -29,6 +30,9 @@ interface Props {
    *  bye seeds explicitly); the bracket tree itself derives everything
    *  from the games array. */
   teams: Team[];
+  /** The event's US state — game times are shown as the VENUE's wall clock
+   *  (scheduled_at is a true UTC instant; see lib/usau/venue-tz). */
+  venueState?: string | null;
 }
 
 interface RoundColumn {
@@ -56,7 +60,7 @@ export function bracketGroupPrefix(name: string | null | undefined): string {
   return i >= 0 ? name.slice(0, i).trim() : '';
 }
 
-export function UsauBracketTree({ games }: Props) {
+export function UsauBracketTree({ games, venueState }: Props) {
   // ── Pull championship-bracket games, split by group prefix ─────────────
   // One tree per independent championship bracket. Single-group events
   // (nearly all) render exactly as before; combined masters championships
@@ -91,6 +95,7 @@ export function UsauBracketTree({ games }: Props) {
             key={group.label || 'main'}
             games={group.games}
             label={groups.length > 1 ? group.label : null}
+            venueState={venueState ?? null}
           />
         ))}
       </div>
@@ -98,7 +103,15 @@ export function UsauBracketTree({ games }: Props) {
   );
 }
 
-function BracketTreeGroup({ games, label }: { games: Game[]; label: string | null }) {
+function BracketTreeGroup({
+  games,
+  label,
+  venueState,
+}: {
+  games: Game[];
+  label: string | null;
+  venueState: string | null;
+}) {
   // ── Split into round columns + assign vertical positions ───────────────
   const columns = useMemo(() => buildColumns(games), [games]);
   const positions = useMemo(() => assignPositions(columns), [columns]);
@@ -129,7 +142,7 @@ function BracketTreeGroup({ games, label }: { games: Game[]; label: string | nul
                 </div>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {col.games.map((g) => (
-                    <MatchCard key={g.id} game={g} compact />
+                    <MatchCard key={g.id} game={g} venueState={venueState} compact />
                   ))}
                 </ul>
               </div>
@@ -139,7 +152,7 @@ function BracketTreeGroup({ games, label }: { games: Game[]; label: string | nul
 
       {/* Desktop: horizontal columns with absolute-positioned cards */}
       <div className="hidden lg:block overflow-x-auto pb-2">
-        <DesktopBracket columns={columns} positions={positions} />
+        <DesktopBracket columns={columns} positions={positions} venueState={venueState} />
       </div>
     </div>
   );
@@ -150,9 +163,11 @@ function BracketTreeGroup({ games, label }: { games: Game[]; label: string | nul
 function DesktopBracket({
   columns,
   positions,
+  venueState,
 }: {
   columns: RoundColumn[];
   positions: Map<string, number>;
+  venueState: string | null;
 }) {
   // Determine total height needed: the tallest column sets the pitch count
   // (small regionals brackets are just 2 semis + a final — don't reserve
@@ -184,7 +199,7 @@ function DesktopBracket({
                 className="absolute left-0 right-0"
                 style={{ top: `${top + 32}px` }}
               >
-                <MatchCard game={g} />
+                <MatchCard game={g} venueState={venueState} />
               </div>
             );
           })}
@@ -196,7 +211,15 @@ function DesktopBracket({
 
 // ── Match card ────────────────────────────────────────────────────────────
 
-function MatchCard({ game, compact = false }: { game: Game; compact?: boolean }) {
+function MatchCard({
+  game,
+  venueState,
+  compact = false,
+}: {
+  game: Game;
+  venueState: string | null;
+  compact?: boolean;
+}) {
   const aWon =
     game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const bWon =
@@ -213,7 +236,7 @@ function MatchCard({ game, compact = false }: { game: Game; compact?: boolean })
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
         <StatusPill tone={tone} label={statusLabel(game)} />
         <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular">
-          {gameTime(game)}
+          {formatGameTime(game.scheduledAt, venueState)}
         </span>
       </div>
       <TeamLine
@@ -331,22 +354,6 @@ function statusLabel(game: Game): string {
   if (!game.teamAName && !game.teamBName) return 'TBD';
   return 'Upcoming';
 }
-
-function gameTime(game: Game): string {
-  if (!game.scheduledAt) return '';
-  const d = new Date(game.scheduledAt);
-  // scheduled_at stores the VENUE-LOCAL clock time with a Z suffix (neither
-  // USAU nor ultirzr exposes a timezone, so ingest can't do better). Format
-  // in UTC to display that clock time as-is; converting to the viewer's zone
-  // would shift a 9:45 AM game to 3:45 AM. No zone label — we don't know it.
-  return d.toLocaleString('en-US', {
-    weekday: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'UTC',
-  });
-}
-
 
 // ── Helpers: filter, columns, position assignment ────────────────────────
 

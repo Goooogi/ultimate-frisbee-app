@@ -27,6 +27,7 @@ import {
   extractTeamNameAndSeed,
 } from '../_shared/parse.ts';
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
+import { tzForState, localWallTimeToUtcIso, dateOnlyIso } from '../_shared/tz.ts';
 
 function stringifyErr(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -84,8 +85,11 @@ interface ParsedGame {
   usau_event_game_id: string | null;
   round: GameRound;
   bracket_name: string | null;
-  home_event_team_id: string;
-  away_event_team_id: string;
+  /** null = TBD slot (bracket game whose feeder hasn't finished — "W of
+   *  Semifinals G2"). Only bracket games may carry null sides; pool rows
+   *  always have both teams. */
+  home_event_team_id: string | null;
+  away_event_team_id: string | null;
   home_seed: number | null;
   away_seed: number | null;
   score_home: number | null;
@@ -130,9 +134,11 @@ function classifyRound(h4Label: string | null, h3Label: string | null): GameRoun
 
   // Placement finals: any "Nth Place" section, or a bare ordinal h4 round
   // ("3rd", "5th", "7th", "9th", "11th", …). These are the placement bracket's
-  // deciding game.
+  // deciding game. USAU also spells ordinals out ("Third Place", "Seventh
+  // Place" — seen at PEC West 2026), so match word ordinals too.
   if (
     /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||  // "3rd place", "13th place"
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fifteenth|seventeenth)\s+place\b/.test(t) ||
     /placement/.test(t) ||
     /^\d+(st|nd|rd|th)$/.test(h4)              // bare "3rd", "5th", "9th"
   ) {
@@ -166,72 +172,9 @@ function parseScore(s: string | null): number | null {
 // the page. The runtime is UTC, so naively parsing "9:00 AM" yields 09:00Z =
 // 3 AM local — wrong by the offset. We derive the venue zone from the event's
 // US state and convert the local wall-clock time to the correct UTC instant
-// (DST-aware via Intl). When the state/zone is unknown we DROP the time and
-// keep date-only (midnight UTC) rather than store a wrong instant.
-
-const STATE_TO_TZ: Record<string, string> = {
-  // Eastern
-  CT: 'America/New_York', DE: 'America/New_York', DC: 'America/New_York',
-  FL: 'America/New_York', GA: 'America/New_York', IN: 'America/Indiana/Indianapolis',
-  ME: 'America/New_York', MD: 'America/New_York', MA: 'America/New_York',
-  MI: 'America/Detroit', NH: 'America/New_York', NJ: 'America/New_York',
-  NY: 'America/New_York', NC: 'America/New_York', OH: 'America/New_York',
-  PA: 'America/New_York', RI: 'America/New_York', SC: 'America/New_York',
-  VT: 'America/New_York', VA: 'America/New_York', WV: 'America/New_York',
-  // Central
-  AL: 'America/Chicago', AR: 'America/Chicago', IL: 'America/Chicago',
-  IA: 'America/Chicago', KS: 'America/Chicago', KY: 'America/New_York',
-  LA: 'America/Chicago', MN: 'America/Chicago', MS: 'America/Chicago',
-  MO: 'America/Chicago', NE: 'America/Chicago', OK: 'America/Chicago',
-  TN: 'America/Chicago', TX: 'America/Chicago', WI: 'America/Chicago',
-  // Mountain
-  AZ: 'America/Phoenix', CO: 'America/Denver', ID: 'America/Boise',
-  MT: 'America/Denver', NM: 'America/Denver', UT: 'America/Denver',
-  // Pacific
-  CA: 'America/Los_Angeles', NV: 'America/Los_Angeles', OR: 'America/Los_Angeles',
-  WA: 'America/Los_Angeles',
-  // Alaska / Hawaii
-  AK: 'America/Anchorage', HI: 'Pacific/Honolulu',
-};
-
-/** Map an event's US state code to an IANA timezone, or null if unknown. */
-function tzForState(state: string | null | undefined): string | null {
-  if (!state) return null;
-  return STATE_TO_TZ[state.trim().toUpperCase()] ?? null;
-}
-
-/**
- * Convert a LOCAL wall-clock time in `tz` to a UTC ISO string (DST-aware).
- * Works by measuring the zone's offset for that instant via Intl: format a
- * provisional UTC instant in the target zone, diff the rendered wall-clock from
- * the intended wall-clock, and correct.
- */
-function localWallTimeToUtcIso(
-  year: number, month: number, day: number, hour: number, minute: number,
-  tz: string,
-): string | null {
-  // Provisional: treat the wall-clock as if it were UTC.
-  const provisional = Date.UTC(year, month - 1, day, hour, minute, 0);
-  // What wall-clock does that instant show in the target zone?
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date(provisional));
-  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? '0', 10);
-  // Reconstruct the zone-rendered instant as if it were UTC, diff = the offset.
-  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') === 24 ? 0 : get('hour'), get('minute'), 0);
-  const offset = asUtc - provisional; // ms the zone is ahead of UTC at this instant
-  const utcMs = provisional - offset;
-  if (isNaN(utcMs)) return null;
-  return new Date(utcMs).toISOString();
-}
-
-/** Date-only fallback: store midnight UTC for the given Y/M/D (no time). */
-function dateOnlyIso(year: number, month: number, day: number): string | null {
-  const ms = Date.UTC(year, month - 1, day, 0, 0, 0);
-  return isNaN(ms) ? null : new Date(ms).toISOString();
-}
+// (DST-aware via Intl — see _shared/tz.ts, shared with ingest-from-ultirzr).
+// When the state/zone is unknown we DROP the time and keep date-only
+// (midnight UTC) rather than store a wrong instant.
 
 /**
  * Parse a bracket `.date` cell ("6/14/2026 9:00 AM" — local venue time) into a
@@ -471,19 +414,26 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
       const $awayA = $game.find(SELECTORS.schedule.bracketAwayTeam).first();
       const homeEventTeamId = extractEventTeamId($homeA.attr('href') ?? '');
       const awayEventTeamId = extractEventTeamId($awayA.attr('href') ?? '');
-      // Both must be present for a real game (TBD slots produce empty hrefs).
-      if (!homeEventTeamId || !awayEventTeamId) return;
+      // TBD slots ("W of Semifinals G2") have no team link. Keep the game
+      // anyway when it has a stable id — dropping it made finals/placement
+      // finals invisible until both feeders finished, and an event that
+      // stopped being re-scraped (outside the live window) lost its final
+      // forever. A TBD side is stored as a null team id; the next scrape
+      // after the feeder finishes fills it in via the same usau_game_id
+      // upsert. Games with NO id and any TBD side are still skipped — we
+      // have no safe dedupe key for those.
+      if ((!homeEventTeamId || !awayEventTeamId) && !usau_game_id) return;
 
       const home = extractTeamNameAndSeed($homeA.text());
       const away = extractTeamNameAndSeed($awayA.text());
-      if (!teamsByEventTeamId.has(homeEventTeamId)) {
+      if (homeEventTeamId && !teamsByEventTeamId.has(homeEventTeamId)) {
         teamsByEventTeamId.set(homeEventTeamId, {
           eventTeamId: homeEventTeamId,
           displayName: home.name,
           seed: home.seed,
         });
       }
-      if (!teamsByEventTeamId.has(awayEventTeamId)) {
+      if (awayEventTeamId && !teamsByEventTeamId.has(awayEventTeamId)) {
         teamsByEventTeamId.set(awayEventTeamId, {
           eventTeamId: awayEventTeamId,
           displayName: away.name,
@@ -700,8 +650,10 @@ async function syncDivision(
       usau_event_game_id: g.usau_event_game_id,
       round: g.round,
       bracket_name: g.bracket_name,
-      team_a_id: teamUUIDByEventTeamId.get(g.home_event_team_id)!,
-      team_b_id: teamUUIDByEventTeamId.get(g.away_event_team_id)!,
+      // TBD bracket slots carry null team ids until the feeder game
+      // finishes; the id-keyed upsert fills them in on a later pass.
+      team_a_id: (g.home_event_team_id && teamUUIDByEventTeamId.get(g.home_event_team_id)) || null,
+      team_b_id: (g.away_event_team_id && teamUUIDByEventTeamId.get(g.away_event_team_id)) || null,
       seed_a: g.home_seed,
       seed_b: g.away_seed,
       score_a: g.score_home,
@@ -727,6 +679,9 @@ async function syncDivision(
   //   2. Fall back to (event_id, round, team_a_id, team_b_id) when no
   //      EventGameId is on the source row.
   for (const g of gamesWithoutIds) {
+    // parseSchedule never emits an id-less game with a TBD side (no safe
+    // dedupe key), so both teams resolve here; the guard is belt-and-braces.
+    if (!g.home_event_team_id || !g.away_event_team_id) continue;
     const teamA = teamUUIDByEventTeamId.get(g.home_event_team_id)!;
     const teamB = teamUUIDByEventTeamId.get(g.away_event_team_id)!;
     let existing: { id: string } | null = null;
