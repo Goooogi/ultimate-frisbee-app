@@ -237,23 +237,64 @@ interface ScheduleParse {
   games: ParsedGame[];
 }
 
+/** Does a tab/section label mark a PLACEMENT view? ("Ninth Place Pool",
+ *  "Placement Brackets", "13th Place", …). USAU reuses generic pool markup
+ *  ("Pool E") inside these tabs for Sunday placement round-robins — the tab
+ *  label is the only thing that says what the pool actually decides. */
+function isPlacementLabel(label: string | null): boolean {
+  if (!label) return false;
+  const t = label.toLowerCase();
+  return (
+    /placement/.test(t) ||
+    /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fifteenth|seventeenth)\s+place\b/.test(t)
+  );
+}
+
 function parseSchedule(html: string, tz: string | null): ScheduleParse {
   const $ = parseHtml(html);
   const teamsByEventTeamId = new Map<string, ParsedTeam>();
   const poolPlacements: ParsedPoolRow[] = [];
   const games: ParsedGame[] = [];
 
+  // ── Tab → section labels ────────────────────────────────────────────────
+  // The page is organized into view tabs ("Saturday Pool Play", "Seeding
+  // Crossover", "… Championship", "Placement Brackets", "Ninth Place Pool").
+  // Each tab <a rel="section_30654_1_20087"> points at a content container
+  // <div id="section_30654_1_20087">. The label matters: a placement tab can
+  // contain a generic "Pool E" round-robin whose real meaning ("Ninth Place
+  // Pool") exists ONLY in the tab text — verified 2026-07-12, PEC West.
+  const sectionLabels = new Map<string, string>();
+  $('ul.tabs li a[rel]').each((_, a) => {
+    const rel = $(a).attr('rel') ?? '';
+    const m = rel.match(/^(section_\d+)/);
+    if (m) sectionLabels.set(m[1], $(a).text().trim());
+  });
+
   // Track the latest h3 (bracket section) and h4 (round) seen as we walk
   // the document in order. Bracket games inherit whichever heading was
-  // most recently emitted before them.
+  // most recently emitted before them. currentSection is the enclosing
+  // tab's label (see above), reset at each section container.
   let currentH3: string | null = null;
   let currentH4: string | null = null;
+  let currentSection: string | null = null;
 
   // The schedule page mixes pool tables and brackets. Walk the document
   // in document order so we associate each piece with its heading.
-  $('h1, h3, h4, table.global_table, div.bracket_game').each((_, el) => {
+  $('h1, h3, h4, table.global_table, div.bracket_game, div[id^="section_"]').each((_, el) => {
     const $el = $(el);
     const tag = el.type === 'tag' ? (el as { name: string }).name : '';
+    const elId = $el.attr('id') ?? '';
+
+    // Section container — a new tab's content begins; headings don't carry
+    // across tabs.
+    if (tag === 'div' && elId.startsWith('section_')) {
+      const m = elId.match(/^(section_\d+)/);
+      currentSection = (m && sectionLabels.get(m[1])) || null;
+      currentH3 = null;
+      currentH4 = null;
+      return;
+    }
 
     if (tag === 'h3') {
       currentH3 = $el.text().trim();
@@ -283,6 +324,10 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
       if (!isScheduleTable) {
         if (!currentH3 || !/^pool\b/i.test(currentH3)) return;
         const poolName = currentH3.trim();
+        // A standings table inside a PLACEMENT tab ("Pool E" under "Ninth
+        // Place Pool") is a Sunday placement round-robin, not the team's
+        // Saturday pool — don't (re)assign pools from it.
+        const placementSection = isPlacementLabel(currentSection);
         // === Standings table (existing logic) ===
         $el.find('tr').each((__, tr) => {
           const $tr = $(tr);
@@ -297,6 +342,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           if (!teamsByEventTeamId.has(eventTeamId)) {
             teamsByEventTeamId.set(eventTeamId, { eventTeamId, displayName: name, seed });
           }
+          if (placementSection) return; // teams collected, pool NOT assigned
 
           // W-L cell formatted "3 - 0"
           const wlText = $cells.eq(1).text().trim();
@@ -322,10 +368,39 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         // Pool name comes from the thead colspan caption, NOT from a
         // preceding <h3> (all schedule tables sit after the last pool
         // standings heading on this page).
+        //
+        // Classification (verified 2026-07-12, PEC West):
+        //   • "Pool A Schedule & Scores" in a normal tab → a real pool.
+        //   • "Pool E Schedule & Scores" inside a PLACEMENT tab ("Ninth
+        //     Place Pool") → a Sunday placement round-robin. USAU reuses
+        //     generic pool markup; the tab label is the truth. Stored as
+        //     round='placement' under the tab's name so the app shows it
+        //     with the placement brackets, not as a phantom Saturday pool.
+        //   • "Seeding Crossover Schedule & Scores" → crossover rows
+        //     (round='other'); previously these were dropped entirely.
         const captionText = $el.find('thead th[colspan]').first().text().trim();
-        const captionMatch = captionText.match(/^(Pool\s+\S+)/i);
-        const poolName = captionMatch ? captionMatch[1].trim() : null;
-        if (!poolName) return; // unrecognized table shape
+        const captionBase = captionText.replace(/\s*Schedule\s*&\s*Scores\s*$/i, '').trim();
+        if (!captionBase) return; // unrecognized table shape
+        const isPoolCaption = /^pool\s+\S+/i.test(captionBase);
+        const isCrossoverCaption = /crossover/i.test(captionBase) || /crossover/i.test(currentSection ?? '');
+        const placementTable = isPlacementLabel(currentSection) || isPlacementLabel(captionBase);
+
+        let tableRound: GameRound;
+        let poolName: string;
+        if (isCrossoverCaption) {
+          tableRound = 'other';
+          poolName = captionBase;
+        } else if (placementTable) {
+          tableRound = 'placement';
+          // Prefer the tab label ("Ninth Place Pool") over a generic caption
+          // ("Pool E"); fall back to the caption when the tab is unnamed.
+          poolName = isPlacementLabel(currentSection) ? (currentSection as string) : captionBase;
+        } else if (isPoolCaption) {
+          tableRound = 'pool';
+          poolName = captionBase;
+        } else {
+          return; // unknown table shape — leave it alone
+        }
 
         $el.find('tbody tr').each((__, tr) => {
           const $tr = $(tr);
@@ -384,7 +459,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           games.push({
             usau_game_id: null,
             usau_event_game_id,
-            round: 'pool',
+            round: tableRound,
             bracket_name: poolName,
             home_event_team_id: homeEventTeamId,
             away_event_team_id: awayEventTeamId,

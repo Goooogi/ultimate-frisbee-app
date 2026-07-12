@@ -387,35 +387,64 @@ export async function getCurrentEvent(opts?: {
   // and event start/end dates are all compared as UTC calendar dates.
   const lookForward = now.getUTCDay() >= 3; // Wed(3) → Sat(6)
 
-  // An event is "upcoming" if it hasn't ended yet (today on or before end_date),
-  // "past" otherwise. Using end_date keeps a Fri–Sun event in the "this
-  // weekend" bucket through Sunday rather than flipping to past mid-tournament.
   const endOf = (e: EventRow) => e.end_date ?? e.start_date ?? '';
-  const isPast = (e: EventRow) => endOf(e) < today;
-  const isUpcomingOrNow = (e: EventRow) => endOf(e) >= today;
 
-  // "Highest-flight MOST RECENT": the nearest WEEKEND to now wins first, and
-  // flight only breaks ties AMONG same-weekend events. So last weekend's Pro
-  // Elite Challenge headlines over a 5-week-old College Championships, while a
-  // marquee event still out-headlines a co-scheduled local tournament.
-  // (Previously flight was the primary key, which wrongly surfaced an old
-  // pinnacle event over a much more recent one.) Events on the same weekend
-  // share a start_date, so start_date as the primary key groups them; flight is
-  // the secondary key within that group.
-  const byDateThenFlight = (recentFirst: boolean) => (a: EventRow, b: EventRow) => {
-    const dateCmp = recentFirst
-      ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
-      : (a.start_date ?? '').localeCompare(b.start_date ?? '');
-    if (dateCmp !== 0) return dateCmp;
-    return flightRankForName(b.name) - flightRankForName(a.name);
+  // Quantize a start date to its tournament WEEKEND (the Saturday of the
+  // Fri–Sun span) so co-scheduled events group together even when their
+  // start days differ (a Fri-start flagship vs a Sat-start local), letting
+  // flight break the tie within the weekend.
+  const weekendKey = (d: string | null): string => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt.getTime())) return d;
+    const dow = dt.getUTCDay();
+    // Sunday belongs to the weekend that began the day before; Thu/Fri (and
+    // rare mid-week starts) roll forward to the coming Saturday.
+    dt.setUTCDate(dt.getUTCDate() + (dow === 0 ? -1 : 6 - dow));
+    return dt.toISOString().slice(0, 10);
   };
 
-  const upcoming = events.filter(isUpcomingOrNow).sort(byDateThenFlight(false));
-  const past = events.filter(isPast).sort(byDateThenFlight(true));
+  // "Highest flight of the nearest WEEKEND": the closest weekend to now wins
+  // first, and flight only breaks ties among that weekend's events. So last
+  // weekend's Pro Elite Challenge headlines over a 5-week-old College
+  // Championships, while a marquee event still out-headlines a co-scheduled
+  // local tournament.
+  const byWeekendThenFlight = (recentFirst: boolean) => (a: EventRow, b: EventRow) => {
+    const wCmp = recentFirst
+      ? weekendKey(b.start_date).localeCompare(weekendKey(a.start_date))
+      : weekendKey(a.start_date).localeCompare(weekendKey(b.start_date));
+    if (wCmp !== 0) return wCmp;
+    const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
+    if (fCmp !== 0) return fCmp;
+    return recentFirst
+      ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
+      : (a.start_date ?? '').localeCompare(b.start_date ?? '');
+  };
+
+  // The preferred bucket differs by direction:
+  //   • Looking BACK (Sun–Tue): events that have STARTED (start_date ≤
+  //     today) — NOT events that have ENDED. "Last weekend's tournament"
+  //     must include one still finishing today: on the Sunday of a Sat–Sun
+  //     flagship, an ended-only bucket ranked a Saturday-only local
+  //     (Pioneer Valley Pool Party, ended 7/11) over the live Pro Elite
+  //     Challenge West (ends 7/12), because flight only breaks ties WITHIN
+  //     a bucket.
+  //   • Looking FORWARD (Wed–Sat): events that haven't finished (end ≥
+  //     today) — keeps a live Saturday tournament ahead of next weekend's
+  //     calendar entries.
+  const preferred = lookForward
+    ? events.filter((e) => endOf(e) >= today).sort(byWeekendThenFlight(false))
+    : events
+        .filter((e) => (e.start_date ?? '') !== '' && (e.start_date ?? '') <= today)
+        .sort(byWeekendThenFlight(true));
+  const preferredIds = new Set(preferred.map((e) => e.id));
+  const rest = events
+    .filter((e) => !preferredIds.has(e.id))
+    .sort(byWeekendThenFlight(!lookForward));
 
   // Preferred side first, then the other side as a graceful fallback (e.g. early
   // in a season there is no "last weekend"; at season's end no "next weekend").
-  const ordered = lookForward ? [...upcoming, ...past] : [...past, ...upcoming];
+  const ordered = [...preferred, ...rest];
 
   // Prefer an in-window event that actually has games. Only if NONE do (e.g. the
   // upcoming weekend's brackets aren't scraped yet) fall through to the best
