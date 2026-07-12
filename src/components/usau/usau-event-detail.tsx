@@ -130,6 +130,42 @@ export function UsauEventDetail({ event }: Props) {
     return { teams: filteredTeams, games: filteredGames };
   }, [event.teams, event.games, levelTeams, gender]);
 
+  // ── Second-phase pools ("Pool E") ─────────────────────────────────────
+  // Teams' pool assignments come from the Saturday standings (A–D). When a
+  // game claims a pool OUTSIDE that set ("Pool E" at PEC West 2026 — really
+  // the Ninth Place Pool; USAU reuses generic pool markup for late-added
+  // placement/power pools), it isn't a Saturday pool and shouldn't render
+  // in the Pools tab or count toward pool records. Route those games to the
+  // Bracket tab as their own filter entry instead.
+  //
+  // GUARDS (verified against the full DB, 2026-07-12):
+  //   • Compare pool TOKENS, not full names — assignments can carry
+  //     qualifiers the game rows drop ("Pool C - Clipped" vs "Pool C" at
+  //     weather-shortened regionals). A token mismatch there would misfile
+  //     real pools.
+  //   • Active only when EVERY team in this (division-filtered) view has a
+  //     pool. ultirzr-only events have no assignments at all, and a real
+  //     pool whose standings failed to scrape shows up as unassigned teams
+  //     — both must disable the heuristic rather than misfile real pools.
+  const poolToken = (name: string): string | null => {
+    const m = name.trim().toLowerCase().match(/^pool\s+(\S+)/);
+    return m ? m[1] : null;
+  };
+  const assignedPoolTokens = new Set<string>();
+  let teamsWithoutPool = 0;
+  for (const t of teams) {
+    const tok = t.pool ? poolToken(t.pool) : null;
+    if (tok) assignedPoolTokens.add(tok);
+    else teamsWithoutPool++;
+  }
+  const poolAssignmentsComplete = assignedPoolTokens.size > 0 && teamsWithoutPool === 0;
+  const isSecondPhasePool = (name: string | null | undefined): boolean => {
+    if (!name || !poolAssignmentsComplete) return false;
+    if (!isPoolBracket(name)) return false;
+    const tok = poolToken(bracketTail(name));
+    return tok != null && !assignedPoolTokens.has(tok);
+  };
+
   // ── Group-prefix awareness ────────────────────────────────────────────
   // A filtered view can still contain MULTIPLE independent bracket groups:
   // GGM teams share the GRAND_MASTERS level tag, so the GM Women view of a
@@ -196,7 +232,9 @@ export function UsauEventDetail({ event }: Props) {
   const bracketKey = (g: Game) => g.bracketName ?? 'Bracket';
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
-    if (isPoolBracket(g.bracketName)) continue;
+    // Real Saturday pools stay out; second-phase pools ("Pool E") fall
+    // through and become a placement-bracket group of their own.
+    if (isPoolBracket(g.bracketName) && !isSecondPhasePool(g.bracketName)) continue;
     if (isCrossoverBracket(g.bracketName)) continue; // crossovers have their own tab
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
@@ -217,9 +255,12 @@ export function UsauEventDetail({ event }: Props) {
     .sort((a, b) => (a.bracketName ?? '').localeCompare(b.bracketName ?? ''));
 
   // ── Pool play games ───────────────────────────────────────────────────
+  // Second-phase pools are excluded — they render under Bracket, and their
+  // results must not pollute the Saturday-pool W-L records tallied below.
   const poolGames = new Map<string, Game[]>();
   for (const g of games) {
     if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
+    if (isSecondPhasePool(g.bracketName)) continue;
     if (!poolGames.has(g.bracketName)) poolGames.set(g.bracketName, []);
     poolGames.get(g.bracketName)!.push(g);
   }
@@ -1178,6 +1219,14 @@ export function canonicalPlacement(name: string | null | undefined): PlacementBu
       : place % 10 === 2 && place % 100 !== 12 ? 'nd'
       : place % 10 === 3 && place % 100 !== 13 ? 'rd' : 'th';
     return { key: `p${place}`, label: `${place}${suffix} Place`, order: place };
+  }
+
+  // Second-phase pools routed into the bracket view ("Pool E" — a placement
+  // or power round-robin whose name carries no ordinal). Each gets its own
+  // filter entry, after the numbered places.
+  const pool = t.match(/^pool\s+(\S+)$/);
+  if (pool) {
+    return { key: `pool-${pool[1]}`, label: (name ?? '').trim(), order: 500 };
   }
 
   // Backdoor / consolation / anything unrecognized → an "Other" bucket last.
