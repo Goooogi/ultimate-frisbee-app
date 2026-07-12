@@ -423,6 +423,37 @@ function EventTabsView(props: {
 
   return (
     <>
+      {/* Row 1 — "View on USAU" link (left) + Level/Division selects (right).
+          One compact header row on mobile. Level/Division each only render
+          when the event fielded 2+ (Level: combined masters championships;
+          Division: multi-gender TCT/Nationals events — both write URL params
+          read via useLevel()/useDivision() above). */}
+      {(event.url || availableLevels.length > 1 || eventDivisions.length > 1) && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          {event.url ? <UsauExternalLink url={event.url} name={event.name} /> : <span />}
+          {(availableLevels.length > 1 || eventDivisions.length > 1) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+              {availableLevels.length > 1 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                    Level
+                  </span>
+                  <UsauLevelSelect restrictTo={availableLevels} />
+                </div>
+              )}
+              {eventDivisions.length > 1 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                    Division
+                  </span>
+                  <UsauDivisionSelect restrictTo={eventDivisions} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Champion banner — leads the page for a finished tournament so the
           title result is the first thing seen (esp. on mobile, where the
           bracket tree scrolls horizontally and hides the final). */}
@@ -447,63 +478,36 @@ function EventTabsView(props: {
         />
       )}
 
-      {/* Level + Division switchers + view tabs — ONE consolidated row so
-          mobile doesn't stack three filter bars. Level/Division each only
-          when the event fielded 2+ (Level: combined masters championships;
-          Division: multi-gender TCT/Nationals events — both write URL params
-          read via useLevel()/useDivision() above). The Pools/Crossovers/
-          Bracket tabs sit on the same line and scroll horizontally when the
-          row runs out of room; wrapping is the fallback on tiny screens. */}
-      {(availableLevels.length > 1 || eventDivisions.length > 1 || visibleTabs.length > 1) && (
-        <div className="mb-6 flex flex-wrap items-center gap-x-4 gap-y-3">
-          {availableLevels.length > 1 && (
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                Level
-              </span>
-              <UsauLevelSelect restrictTo={availableLevels} />
-            </div>
-          )}
-          {eventDivisions.length > 1 && (
-            <div className="flex items-center gap-3">
-              {/* Label hidden on phones — the pill reads as a division picker
-                  on its own, and the space is what lets the tabs share the line. */}
-              <span className="hidden sm:inline text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                Division
-              </span>
-              <UsauDivisionSelect restrictTo={eventDivisions} />
-            </div>
-          )}
-          {visibleTabs.length > 1 && (
-            <div
-              role="tablist"
-              aria-label="Tournament views"
-              className="flex-1 min-w-0 flex gap-2 overflow-x-auto scrollbar-none"
-            >
-              {visibleTabs.map((t) => {
-                const on = t.key === active;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={on}
-                    onClick={() => setTab(t.key)}
-                    className={[
-                      'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
-                      'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
-                      'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                      on
-                        ? 'bg-ink text-bg'
-                        : 'bg-ink/5 text-muted hover:text-ink',
-                    ].join(' ')}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+      {/* Row 2 — Pools / Crossovers / Bracket view tabs on their own row
+          (edge-bleed horizontal scroll on mobile so nothing clips). */}
+      {visibleTabs.length > 1 && (
+        <div
+          role="tablist"
+          aria-label="Tournament views"
+          className="mb-6 -mx-5 px-5 md:mx-0 md:px-0 flex gap-2 overflow-x-auto scrollbar-none"
+        >
+          {visibleTabs.map((t) => {
+            const on = t.key === active;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => setTab(t.key)}
+                className={[
+                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
+                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
+                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  on
+                    ? 'bg-ink text-bg'
+                    : 'bg-ink/5 text-muted hover:text-ink',
+                ].join(' ')}
+              >
+                {t.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -671,6 +675,27 @@ function BracketView({
           </div>
         ))}
     </div>
+  );
+}
+
+/** External link back to the canonical USAU event page. Lives here (not in
+ *  the page header) so it can share a row with the Level/Division selects. */
+function UsauExternalLink({ url, name }: { url: string; name: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`View ${name} on USA Ultimate`}
+      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-ink hover:bg-ink/10 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
+    >
+      View on USAU
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 1.5h5.5V7" />
+        <path d="M8.5 1.5L3.5 6.5" />
+        <path d="M7 8.5H1.5V3" />
+      </svg>
+    </a>
   );
 }
 
