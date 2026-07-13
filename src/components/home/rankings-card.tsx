@@ -16,18 +16,21 @@ import { RankingsDivisionToggle } from '@/components/home/usau-division-toggle';
 const TOP_N = 16;
 
 // The 5 published rank sets + their display labels / logo metadata.
+// tinyLabel is the ultra-compact form used below `sm` so all 5 pills fit one
+// row on a 320px phone; shortLabel is the roomier tablet/desktop form.
 const RANK_DIVISIONS = [
-  { key: 'Club-Men' as const, label: 'Club Men', shortLabel: 'Club M', genderDivision: 'Men', competitionLevel: 'CLUB' },
-  { key: 'Club-Women' as const, label: 'Club Women', shortLabel: 'Club W', genderDivision: 'Women', competitionLevel: 'CLUB' },
-  { key: 'Club-Mixed' as const, label: 'Club Mixed', shortLabel: 'Mixed', genderDivision: 'Mixed', competitionLevel: 'CLUB' },
-  { key: 'College-Men' as const, label: 'College Men', shortLabel: 'College M', genderDivision: 'Men', competitionLevel: 'COLLEGE_D1' },
-  { key: 'College-Women' as const, label: 'College Women', shortLabel: 'College W', genderDivision: 'Women', competitionLevel: 'COLLEGE_D1' },
+  { key: 'Club-Men' as const, label: 'Club Men', shortLabel: 'Club M', tinyLabel: 'Club M', genderDivision: 'Men', competitionLevel: 'CLUB' },
+  { key: 'Club-Women' as const, label: 'Club Women', shortLabel: 'Club W', tinyLabel: 'Club W', genderDivision: 'Women', competitionLevel: 'CLUB' },
+  { key: 'Club-Mixed' as const, label: 'Club Mixed', shortLabel: 'Mixed', tinyLabel: 'Mixed', genderDivision: 'Mixed', competitionLevel: 'CLUB' },
+  { key: 'College-Men' as const, label: 'College Men', shortLabel: 'College M', tinyLabel: 'Coll M', genderDivision: 'Men', competitionLevel: 'COLLEGE_D1' },
+  { key: 'College-Women' as const, label: 'College Women', shortLabel: 'College W', tinyLabel: 'Coll W', genderDivision: 'Women', competitionLevel: 'COLLEGE_D1' },
 ] as const;
 
 export type UsauDivisionData = {
   key: string;
   label: string;
   shortLabel: string;
+  tinyLabel: string;
   genderDivision: string;
   competitionLevel: string;
   season: number;
@@ -52,6 +55,7 @@ export async function RankingsCard() {
         key: div.key,
         label: div.label,
         shortLabel: div.shortLabel,
+        tinyLabel: div.tinyLabel,
         genderDivision: div.genderDivision,
         competitionLevel: div.competitionLevel,
         season: res.value.season,
@@ -64,6 +68,7 @@ export async function RankingsCard() {
       key: div.key,
       label: div.label,
       shortLabel: div.shortLabel,
+      tinyLabel: div.tinyLabel,
       genderDivision: div.genderDivision,
       competitionLevel: div.competitionLevel,
       season: 0,

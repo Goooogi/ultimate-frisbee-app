@@ -26,8 +26,9 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
 
   return (
     <div className="flex flex-col">
-      {/* Tab strip — pill segmented control. Wraps on narrow viewports. */}
-      <div className="flex flex-wrap gap-1.5 mb-3.5" role="tablist" aria-label="USAU divisions">
+      {/* Tab strip — pill segmented control. All 5 pills fit one row on mobile
+          via tighter padding/size below sm, scaling up on larger screens. */}
+      <div className="flex flex-nowrap sm:flex-wrap gap-0.5 sm:gap-1.5 mb-3.5" role="tablist" aria-label="USAU divisions">
         {divisions.map((div) => {
           const isActive = div.key === activeDivKey;
           return (
@@ -38,12 +39,14 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
               aria-controls={`usau-panel-${div.key}`}
               onClick={() => setActiveDivKey(div.key)}
               className={[
-                'px-3.5 py-2 rounded-full font-tight text-[12px] font-bold whitespace-nowrap transition-colors cursor-pointer',
+                'flex-1 sm:flex-none px-1.5 sm:px-3.5 py-1.5 sm:py-2 rounded-full font-tight text-[11px] sm:text-[12px] font-bold whitespace-nowrap transition-colors cursor-pointer text-center',
                 isActive ? 'bg-ink text-bg' : 'bg-[rgb(var(--ink)/0.05)] text-muted hover:text-ink',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
             >
-              {div.shortLabel}
+              {/* Ultra-compact label on phones, roomier on ≥sm. */}
+              <span className="sm:hidden">{div.tinyLabel}</span>
+              <span className="hidden sm:inline">{div.shortLabel}</span>
             </button>
           );
         })}

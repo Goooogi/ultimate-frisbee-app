@@ -10,6 +10,7 @@ import {
   getTeamRoster,
   currentFantasyWeek,
 } from '@/lib/fantasy/data';
+import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import type { FantasyRole } from '@/lib/fantasy/scoring';
 import type { Crumb } from '@/components/breadcrumbs';
 
@@ -86,10 +87,13 @@ export default async function FantasyTeamPage({ params }: Props) {
                 <li
                   key={w.week}
                   className={[
-                    'flex items-center justify-end px-5 py-3',
+                    'flex items-center justify-between gap-3 px-5 py-3',
                     idx > 0 ? 'border-t border-hairline' : '',
                   ].join(' ')}
                 >
+                  <span className="font-tight text-[13px] font-semibold text-muted">
+                    {formatWeekLabel(w.week)}
+                  </span>
                   <span className="font-tight text-[14px] font-bold tabular text-right text-ink">
                     {w.points}
                     <span className="text-[11px] font-medium text-faint ml-1">pts</span>

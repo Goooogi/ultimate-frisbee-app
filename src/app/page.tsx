@@ -29,7 +29,7 @@ import {
 import { gameUiState } from '@/lib/ufa/format';
 import { pickTopGame, pickUpcomingGameOfWeek } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
-import { getCurrentEvent, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
+import { getCurrentEvent, getNextUpcomingEvent, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
 import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
 import { listWulGames, getWulCurrentSeason } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
@@ -63,16 +63,25 @@ export default async function HomePage() {
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, pulRes, wulRes, usauMajorsRes, wfdfRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
       getAllGamesByYears([year]),
       getStandings(),
       getTeamStats({ year }),
-      // USAU: current tournament (any gender) — mirrors scores/page.tsx pattern.
+      // USAU (hero + recent-results): current tournament via weekend cadence —
+      // mirrors scores/page.tsx pattern. Can be LAST weekend's finished event.
       (async () => {
         const pick = await getCurrentEvent();
+        if (!pick) return null;
+        return await getEvent(pick.slug);
+      })(),
+      // USAU ("Up next" card): the NEXT upcoming flagship, always forward-looking
+      // (unlike getCurrentEvent, which looks back Sun–Tue). Keeps the USAU Up-next
+      // card populated all week once last weekend's events end.
+      (async () => {
+        const pick = await getNextUpcomingEvent();
         if (!pick) return null;
         return await getEvent(pick.slug);
       })(),
@@ -105,14 +114,17 @@ export default async function HomePage() {
   // ── Cross-league slide data ──────────────────────────────────────────────
   const usauEvent = usauRes.status === 'fulfilled' ? usauRes.value : null;
 
-  // USAU belongs in "Up next" ONLY when its event is upcoming or in progress
-  // (not yet ended). getCurrentEvent()'s weekend cadence can return LAST
-  // weekend's already-completed event on a weekday — that's a Recent result,
-  // not an "up next", and its scored pool games are finished, not upcoming.
+  // USAU "Up next" card uses its OWN forward-looking pick (getNextUpcomingEvent),
+  // NOT the hero's getCurrentEvent — which looks BACK Sun–Tue and so would leave
+  // the card empty for half the week once last weekend's events finish. The
+  // next-upcoming query already excludes ended events, so no extra date guard is
+  // needed; we just confirm the pick still hasn't ended (belt-and-suspenders
+  // against clock skew between the query time and render).
   const todayIso = new Date().toISOString().slice(0, 10);
+  const usauNextEvent = usauUpNextRes.status === 'fulfilled' ? usauUpNextRes.value : null;
   const usauUpcomingEvent =
-    usauEvent && (usauEvent.endDate ?? usauEvent.startDate ?? '') >= todayIso
-      ? usauEvent
+    usauNextEvent && (usauNextEvent.endDate ?? usauNextEvent.startDate ?? '') >= todayIso
+      ? usauNextEvent
       : null;
 
   // WFDF: current Worlds event (getCurrentWfdfEvent applies the same Wed

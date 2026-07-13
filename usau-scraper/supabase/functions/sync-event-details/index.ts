@@ -560,9 +560,22 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
  * have other reason to merge (e.g. a future sync-team-details that finds
  * the persistent TeamId). That means "Revolver" at 2024 Pro Champs and
  * "Revolver" at 2025 Pro Champs will be two rows for now.
+ *
+ * EXCEPTION — same-event EventTeamId churn. USAU sometimes mints a NEW
+ * EventTeamId for a team mid-event (a late re-registration / re-seed), so a
+ * later scrape of the SAME event sees an id we've never recorded and would
+ * create a duplicate team row (bit DeMo @ Heavyweights 2026: two rows, one
+ * orphaned with 0 games). Before inserting, we therefore look for a team
+ * ALREADY PARTICIPATING IN THIS EVENT with the same name + gender +
+ * competition level; if found, we adopt it and append the new EventTeamId to
+ * its usau_event_team_ids. This is scoped to the event on purpose — a shared
+ * name across DIFFERENT events is left as separate rows per the v1 identity
+ * model above; only a same-event collision (which is unambiguously the same
+ * squad — USAU name+division is unique within one event) is merged.
  */
 async function resolveTeam(
   db: ReturnType<typeof supabase>,
+  eventUUID: string,
   team: ParsedTeam,
   competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3',
   genderDivision: Division,
@@ -575,6 +588,38 @@ async function resolveTeam(
     .maybeSingle();
   if (lookupErr && lookupErr.code !== 'PGRST116') throw lookupErr;
   if (existing) return existing.id;
+
+  // Not seen by id — but is the same squad already in THIS event under a
+  // different (churned) EventTeamId? Match name + gender + level among this
+  // event's existing participants. If so, adopt it and record the new id.
+  const { data: sameEvent, error: sameEventErr } = await db
+    .from('usau_event_teams')
+    .select('team_id, usau_teams!inner(id, name, gender_division, competition_level, usau_event_team_ids)')
+    .eq('event_id', eventUUID)
+    .eq('usau_teams.name', team.displayName)
+    .eq('usau_teams.gender_division', genderDivision)
+    .eq('usau_teams.competition_level', competitionLevel)
+    .limit(1)
+    .maybeSingle();
+  if (sameEventErr && sameEventErr.code !== 'PGRST116') throw sameEventErr;
+  if (sameEvent) {
+    const matched = sameEvent.usau_teams as unknown as {
+      id: string;
+      usau_event_team_ids: string[] | null;
+    };
+    const ids = matched.usau_event_team_ids ?? [];
+    if (!ids.includes(team.eventTeamId)) {
+      const { error: appendErr } = await db
+        .from('usau_teams')
+        .update({
+          usau_event_team_ids: [...ids, team.eventTeamId],
+          last_scraped_at: new Date().toISOString(),
+        })
+        .eq('id', matched.id);
+      if (appendErr) throw appendErr;
+    }
+    return matched.id;
+  }
 
   const { data: created, error: insertErr } = await db
     .from('usau_teams')
@@ -678,7 +723,7 @@ async function syncDivision(
   const teamUUIDByEventTeamId = new Map<string, string>();
   for (const t of teams) {
     try {
-      const id = await resolveTeam(db, t, competitionLevel, division);
+      const id = await resolveTeam(db, eventUUID, t, competitionLevel, division);
       teamUUIDByEventTeamId.set(t.eventTeamId, id);
     } catch (err) {
       throw new Error(`resolveTeam failed for ${t.displayName}: ${stringifyErr(err)}`);

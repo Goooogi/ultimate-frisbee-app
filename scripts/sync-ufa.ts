@@ -266,9 +266,24 @@ async function syncYear(year: number) {
   const statRows: Record<string, unknown>[] = [];
   let withStats = 0;
 
+  let skippedPlayers = 0;
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
-    assertSafeId(p.playerID, 'player');
+    // A single malformed/empty playerID from the upstream feed must NOT abort
+    // the whole season sync (it did — the UFA API started returning a blank
+    // player id mid-2026, which threw here BEFORE any games/stats were upserted,
+    // so weeks 11+ never landed). Skip the bad row and keep going; the games +
+    // every other player's stats still sync.
+    if (
+      typeof p.playerID !== 'string' ||
+      p.playerID.length === 0 ||
+      p.playerID.length > 200 ||
+      !/^[\w\-./]+$/.test(p.playerID)
+    ) {
+      skippedPlayers++;
+      console.warn(`    ! skipping player with bad id: ${JSON.stringify(p.playerID)} (name: ${JSON.stringify(p.name)})`);
+      continue;
+    }
     const { first, last } = splitName(p.name);
 
     let log: ApiPlayerGameRow[] = [];
@@ -365,7 +380,8 @@ async function syncYear(year: number) {
 
   console.log(
     `  ✓ ${year}: ${teamRows.length} teams, ${gameRows.length} games, ` +
-      `${playerRows.length} players (${withStats} w/ stats), ${statRows.length} stat rows`,
+      `${playerRows.length} players (${withStats} w/ stats), ${statRows.length} stat rows` +
+      (skippedPlayers > 0 ? `, ${skippedPlayers} players skipped (bad id)` : ''),
   );
 }
 

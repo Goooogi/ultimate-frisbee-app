@@ -487,6 +487,130 @@ export async function getCurrentEvent(opts?: {
 }
 
 /**
+ * The next UPCOMING flagship event — for the home "Up next" card.
+ *
+ * getCurrentEvent() runs a look-back/look-forward weekend cadence tuned for the
+ * hero + "recent results" slots: Sun–Tue it deliberately returns LAST weekend's
+ * (now-finished) event. That's wrong for "Up next", which must always look
+ * FORWARD — otherwise the USAU "Up next" card vanishes for half of every week
+ * once last weekend's tournaments end.
+ *
+ * Only "flighted"-grade events qualify — the ones worth previewing: a recognized
+ * TCT flight (Pro/Elite/Select/Classic/Triple-Crown), a pinnacle championship,
+ * OR any Masters/College event (championships + regionals, which are the
+ * division equivalent of a flagship). Unclassified local CLUB tournaments (MOB
+ * Invite, Filling the Void, …) are skipped so the card jumps to the next event
+ * that actually matters (e.g. Select Flight Invite over a co-scheduled local).
+ *
+ * Among qualifying events it picks the NEAREST UPCOMING WEEKEND, and within it
+ * the HIGHEST FLIGHT. An event still in progress today counts as "upcoming"
+ * (end_date ≥ today) so a live Sat–Sun event stays in "Up next" through its
+ * final day. Returns the slug + hasGames, mirroring getCurrentEvent(); callers
+ * fetch the full event via getEvent().
+ */
+export async function getNextUpcomingEvent(opts?: {
+  genderDivision?: 'Men' | 'Women' | 'Mixed';
+  competitionLevel?: CompetitionLevel;
+}): Promise<{ slug: string; hasGames: boolean } | null> {
+  const db = await supabase();
+  const today = new Date().toISOString().slice(0, 10);
+  // Look ~120d ahead: far enough to always find the next flagship weekend even
+  // in a sparse stretch, tight enough to stay clear of the 1000-row cap.
+  const windowForward = new Date(Date.now() + 120 * 86400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  const levelFilter = opts?.competitionLevel ? [opts.competitionLevel] : FLAGSHIP_LEVELS;
+
+  // Upcoming = not yet ended (end_date ≥ today), so a live event stays here
+  // through its last day. Order soonest-first.
+  const { data: rows } = await db
+    .from('usau_events')
+    .select('id, usau_slug, name, start_date, end_date, competition_level')
+    .in('competition_level', levelFilter)
+    .gte('end_date', today)
+    .lte('start_date', windowForward)
+    .order('start_date', { ascending: true });
+
+  type Row = {
+    id: string;
+    usau_slug: string;
+    name: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    competition_level: string | null;
+  };
+  let events = (rows ?? []) as Row[];
+
+  // Keep only "flighted"-grade events. A plain CLUB tournament qualifies ONLY if
+  // it maps to a real TCT flight or is a pinnacle championship; Masters, Grand
+  // Masters, and College events always qualify (their championships + regionals
+  // are the division equivalent of a flagship). This drops unclassified local
+  // CLUB tournaments so "Up next" surfaces the next event that matters.
+  const isFlighted = (e: Row): boolean => {
+    if (e.competition_level !== 'CLUB') return true; // Masters/GM/College always
+    return flightForName(e.name) !== null || isPinnacleEventName(e.name);
+  };
+  events = events.filter(isFlighted);
+  if (events.length === 0) return null;
+
+  // Optional division filter: keep only events with a participating team in the
+  // requested gender division.
+  if (opts?.genderDivision) {
+    const ids = events.map((e) => e.id);
+    const withDiv = new Set<string>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_event_teams')
+        .select('event_id, usau_teams!inner(gender_division)')
+        .in('event_id', ids)
+        .eq('usau_teams.gender_division', opts.genderDivision)
+        .range(from, from + PAGE - 1);
+      const pageRows = page ?? [];
+      for (const r of pageRows) withDiv.add((r as { event_id: string }).event_id);
+      if (pageRows.length < PAGE) break;
+    }
+    events = events.filter((e) => withDiv.has(e.id));
+    if (events.length === 0) return null;
+  }
+
+  // Quantize each start to its tournament WEEKEND (the Saturday of the Fri–Sun
+  // span) so a Fri-start flagship and a Sat-start local on the same weekend
+  // group together — otherwise "earliest start_date" would isolate the Friday
+  // events and miss a higher-flight Saturday event on the same weekend.
+  const weekendKey = (d: string | null): string => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt.getTime())) return d;
+    const dow = dt.getUTCDay();
+    dt.setUTCDate(dt.getUTCDate() + (dow === 0 ? -1 : 6 - dow));
+    return dt.toISOString().slice(0, 10);
+  };
+
+  // Nearest upcoming weekend = the earliest weekend present. Restrict to that
+  // weekend's events, then pick the highest flight (Select > local), tie-broken
+  // by soonest start.
+  const nearestWeekendKey = events
+    .map((e) => weekendKey(e.start_date))
+    .filter(Boolean)
+    .sort()[0];
+  const nearestWeekend = events.filter((e) => weekendKey(e.start_date) === nearestWeekendKey);
+  nearestWeekend.sort((a, b) => {
+    const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
+    if (fCmp !== 0) return fCmp;
+    return (a.start_date ?? '').localeCompare(b.start_date ?? '');
+  });
+  const pick = nearestWeekend[0];
+
+  const { count } = await db
+    .from('usau_games')
+    .select('*', { count: 'exact', head: true })
+    .eq('event_id', pick.id);
+  return { slug: pick.usau_slug, hasGames: (count ?? 0) > 0 };
+}
+
+/**
  * @deprecated Kept as a thin wrapper for any callers still asking only
  * for a slug. New code should use getCurrentEvent() which also reports
  * whether games are ingested.

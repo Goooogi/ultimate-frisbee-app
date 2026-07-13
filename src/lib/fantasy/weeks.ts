@@ -45,6 +45,15 @@ export function weekSortKey(week: string | null): number {
   return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER - 1;
 }
 
+/** Human label for a UFA week id: "week-12" → "Week 12". Non-numeric weeks
+ *  ("finals", "semifinals") get title-cased; null/empty → "". */
+export function formatWeekLabel(week: string | null | undefined): string {
+  if (!week) return '';
+  const m = week.match(/^week-(\d+)$/i);
+  if (m) return `Week ${parseInt(m[1], 10)}`;
+  return week.charAt(0).toUpperCase() + week.slice(1);
+}
+
 function ts(iso: string | null): number | null {
   if (!iso) return null;
   const t = new Date(iso).getTime();

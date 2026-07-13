@@ -35,9 +35,22 @@ interface GameDetailProps {
 }
 
 export function GameDetail({ game, today, enrichment }: GameDetailProps) {
+  const away = teamMeta(game.awayTeamID);
+  const home = teamMeta(game.homeTeamID);
+  const matchupLabel = `${away.city ?? away.abbr} vs ${home.city ?? home.abbr}`;
+
   return (
     <AppShell>
       <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
+        <div className="px-1 pb-3">
+          <Breadcrumbs
+            crumbs={[
+              { label: 'Home', href: '/' },
+              { label: 'The Games', href: '/scores' },
+              { label: matchupLabel },
+            ]}
+          />
+        </div>
         <DetailBody game={game} today={today} enrichment={enrichment} />
       </div>
     </AppShell>
@@ -62,28 +75,27 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
   const hasGameStats =
     !!(enrichment?.gameStats?.leaderCategories && enrichment.gameStats.leaderCategories.length > 0);
 
-  const matchupLabel = `${away.city ?? away.abbr} vs ${home.city ?? home.abbr}`;
-
   return (
     <div className="bg-surface rounded-card-lg shadow-card flex flex-col font-tight text-ink overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-5 py-3 md:px-14 md:py-5 flex-shrink-0">
-        <Breadcrumbs
-          crumbs={[
-            { label: 'Home', href: '/' },
-            { label: 'The Games', href: '/scores' },
-            { label: matchupLabel },
-          ]}
-        />
-        <span className="text-[10px] font-bold tracking-[0.18em] text-faint uppercase flex-shrink-0">
-          UFA · Regular Season
-        </span>
-      </div>
+      <ScoreBlock
+        away={away}
+        home={home}
+        awayCity={game.awayTeamCity}
+        awayName={game.awayTeamName}
+        homeCity={game.homeTeamCity}
+        homeName={game.homeTeamName}
+        awayScore={game.awayScore}
+        homeScore={game.homeScore}
+        awayWin={state.awayWin}
+        homeWin={state.homeWin}
+        showScore={state.hasScore || state.isLive || state.isFinal}
+      />
 
-      {/* status strip — one tight row. For Final/Live the score block below is
-          the headline, so we keep just a compact status pill (no redundant
-          giant "FINAL"/"LIVE"). Upcoming has no score, so the start time IS the
-          headline and stays prominent. */}
-      <div className="px-6 py-4 md:px-14 md:py-5 border-b border-hairline flex-shrink-0">
+      {/* status/meta bar — one tight row below the score cards. For Final/Live
+          the score block above is the headline, so this is just a compact
+          status pill (no redundant giant "FINAL"/"LIVE"). Upcoming has no
+          score, so the start time IS the headline and stays prominent. */}
+      <div className="px-6 py-4 md:px-14 md:py-5 border-t border-hairline flex-shrink-0">
         <div className="flex items-baseline justify-between gap-4 flex-wrap">
           <div className="inline-flex items-center gap-2">
             {state.isLive && <LiveDotAccent size={7} />}
@@ -153,20 +165,6 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
           </div>
         )}
       </div>
-
-      <ScoreBlock
-        away={away}
-        home={home}
-        awayCity={game.awayTeamCity}
-        awayName={game.awayTeamName}
-        homeCity={game.homeTeamCity}
-        homeName={game.homeTeamName}
-        awayScore={game.awayScore}
-        homeScore={game.homeScore}
-        awayWin={state.awayWin}
-        homeWin={state.homeWin}
-        showScore={state.hasScore || state.isLive || state.isFinal}
-      />
 
       {hasGameStats && (
         <FieldGameLeaders
