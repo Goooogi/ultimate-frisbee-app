@@ -204,6 +204,10 @@ export interface UnifiedPlayerProfile {
   displayName: string;
   /** Pronouns resolved from PUL data when available; null otherwise. */
   pronouns: string | null;
+  /** UFA player headshot (watchufa profile image). UFA is the only league that
+   *  publishes these. Null for non-UFA-anchored players or the ~10% of UFA
+   *  players without one — the UI falls back to a monogram. */
+  headshotUrl: string | null;
   /** Year-by-year, newest first. */
   years: UnifiedYear[];
   /**
@@ -298,12 +302,14 @@ async function _getUnifiedPlayerProfile(
   let anchorUsau: UsauPlayerSummary | null = null;
   let anchorPulCareer: PulPlayerCareer | null = null;
   let anchorWulCareer: WulPlayerCareer | null = null;
+  let headshotUrl: string | null = null;
 
   if (!looksLikeUsauUuid(anchorId)) {
     // ── UFA slug anchor ────────────────────────────────────────────────
     anchorLeague = 'ufa';
     const info = await getPlayerInfo(anchorId).catch(() => null);
     anchorName = info?.name ?? null;
+    headshotUrl = info?.headshotUrl ?? null;
   } else {
     // ── UUID anchor — try USAU first, then PUL ─────────────────────────
     // Both USAU and PUL use v4 UUIDs. We check USAU first (existing
@@ -643,6 +649,7 @@ async function _getUnifiedPlayerProfile(
     anchorLeague,
     displayName: anchorName,
     pronouns,
+    headshotUrl,
     years,
     career,
     pul: pulCareerBlock,

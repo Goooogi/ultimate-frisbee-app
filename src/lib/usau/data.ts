@@ -2619,8 +2619,10 @@ export function looksLikeUsauUuid(id: string): boolean {
 // on the rankings page), so listOfficialUsauRankings supports exactly them.
 
 export interface OfficialRankedTeam {
-  /** usau_teams.id — links to the team profile / logo. */
-  id: string;
+  /** usau_teams.id — links to the team profile / logo. Null when the ranked
+   *  team couldn't be confidently matched to a usau_teams row (we still show
+   *  the team by name; there's just no profile link/logo). */
+  id: string | null;
   name: string;
   state: string | null;
   region: string | null;
@@ -2680,12 +2682,12 @@ export async function listOfficialUsauRankings(
   const head = (latest ?? [])[0] as { season: number; week: number } | undefined;
   if (!head) return { season: 0, week: 0, scrapedAt: null, teams: [] };
 
+  // Read the ranking's own stored identity (team_name/state), plus the OPTIONAL
+  // team_id link when we matched one. We no longer inner-join usau_teams (that
+  // silently dropped unmatched teams and left holes in the rank sequence).
   const { data, error } = await db
     .from('usau_rankings')
-    .select(
-      'rank, rating, wins, losses, region, scraped_at, ' +
-        'team:usau_teams!team_id(id, name, state)',
-    )
+    .select('rank, rating, wins, losses, region, scraped_at, team_id, team_name, state')
     .eq('division', division)
     .eq('season', head.season)
     .eq('week', head.week)
@@ -2700,21 +2702,21 @@ export async function listOfficialUsauRankings(
     losses: number | null;
     region: string | null;
     scraped_at: string | null;
-    team: { id: string; name: string; state: string | null } | null;
+    team_id: string | null;
+    team_name: string;
+    state: string | null;
   };
   const rows = (data ?? []) as unknown as Row[];
-  const teams: OfficialRankedTeam[] = rows
-    .filter((r) => r.team)
-    .map((r) => ({
-      id: r.team!.id,
-      name: r.team!.name,
-      state: r.team!.state,
-      region: r.region,
-      rank: r.rank,
-      rating: r.rating,
-      wins: r.wins,
-      losses: r.losses,
-    }));
+  const teams: OfficialRankedTeam[] = rows.map((r) => ({
+    id: r.team_id,
+    name: r.team_name,
+    state: r.state,
+    region: r.region,
+    rank: r.rank,
+    rating: r.rating,
+    wins: r.wins,
+    losses: r.losses,
+  }));
 
   return {
     season: head.season,

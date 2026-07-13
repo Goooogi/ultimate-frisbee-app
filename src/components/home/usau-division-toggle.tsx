@@ -67,12 +67,11 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
             const record = team.wins != null && team.losses != null ? `${team.wins}-${team.losses}` : null;
             const rating = team.rating != null ? team.rating.toFixed(0) : null;
 
-            return (
-              <Link
-                key={team.id}
-                href={`/usau/teams/${team.id}`}
-                className="flex flex-col gap-2 rounded-card-sm border border-border bg-surface p-3 hover:border-accent hover:bg-accent/[0.03] transition-colors duration-150"
-              >
+            // Ranked teams we couldn't match to a usau_teams row (team.id null)
+            // still appear — as a static tile (no profile link), since there's
+            // no team page to point at.
+            const inner = (
+              <>
                 <div className="flex items-center gap-2 min-w-0">
                   <span
                     className={[
@@ -100,7 +99,23 @@ export function RankingsDivisionToggle({ divisions }: RankingsDivisionToggleProp
                     {record && <span className="font-mono text-[10.5px] text-muted tabular">{record}</span>}
                   </div>
                 )}
+              </>
+            );
+
+            const tileClass =
+              'flex flex-col gap-2 rounded-card-sm border border-border bg-surface p-3 transition-colors duration-150';
+            return team.id ? (
+              <Link
+                key={team.rank}
+                href={`/usau/teams/${team.id}`}
+                className={`${tileClass} hover:border-accent hover:bg-accent/[0.03]`}
+              >
+                {inner}
               </Link>
+            ) : (
+              <div key={team.rank} className={tileClass}>
+                {inner}
+              </div>
             );
           })
         )}

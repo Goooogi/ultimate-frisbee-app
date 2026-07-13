@@ -99,8 +99,10 @@ type TopUsauTeam = { id: string; name: string; nationalsPlacement: number | null
 type UsauDivision = 'Men' | 'Women' | 'Mixed';
 type UsauTeamsByDivision = Record<UsauDivision, TopUsauTeam[]>;
 // College D-I preview rows (from the official-rankings reader) — same shape
-// as TopUsauTeam but keyed by rank instead of nationals placement.
-type TopCollegeTeam = { id: string; name: string; rank: number };
+// as TopUsauTeam but keyed by rank instead of nationals placement. id is null
+// when the official ranking couldn't be matched to a usau_teams row (still
+// shown by name, just not linkable — see the COLLEGE_D1 branch below).
+type TopCollegeTeam = { id: string | null; name: string; rank: number };
 type UsauCollegeTeamsByDivision = { Men: TopCollegeTeam[]; Women: TopCollegeTeam[] };
 type TopPulTeam = { id: string; name: string; city: string; logoUrl: string | null };
 type WfdfMenuEvent = { slug: string; name: string; year: number };
@@ -639,15 +641,28 @@ function usauTopTeamsExtra(
                   <div key={div}>
                     <p className="text-[9px] font-bold tracking-[0.12em] uppercase text-muted mb-1">{div}</p>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
-                      {teams.map((team) => (
-                        <Link key={team.id} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
-                          <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
-                            {team.rank}
-                          </span>
-                          <UsauTeamLogo name={team.name} genderDivision={div} competitionLevel="COLLEGE_D1" size={20} />
-                          <span className="truncate">{team.name}</span>
-                        </Link>
-                      ))}
+                      {teams.map((team) => {
+                        const inner = (
+                          <>
+                            <span className="text-[10px] font-bold text-faint tabular w-4 text-right flex-shrink-0">
+                              {team.rank}
+                            </span>
+                            <UsauTeamLogo name={team.name} genderDivision={div} competitionLevel="COLLEGE_D1" size={20} />
+                            <span className="truncate">{team.name}</span>
+                          </>
+                        );
+                        // Unmatched teams (no usau_teams row) still preview here by
+                        // name — just not as a link, since there's no profile page.
+                        return team.id ? (
+                          <Link key={team.rank} href={`/usau/teams/${team.id}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                            {inner}
+                          </Link>
+                        ) : (
+                          <div key={team.rank} className={gridLinkClass}>
+                            {inner}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 );

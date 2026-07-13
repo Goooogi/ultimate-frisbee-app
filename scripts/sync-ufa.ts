@@ -176,6 +176,29 @@ async function fetchPlayerGameLog(playerID: string, year: number): Promise<ApiPl
   return data.stats ?? [];
 }
 
+// ─── Headshots ───────────────────────────────────────────────────────────────
+// UFA is the only league that publishes player headshots. They live on the
+// watchufa.com player profile page as
+//   <img ... src=".../profile-images/{playerID}_profile.{ext}">
+// where {ext} varies (png/jpg/jpeg/JPG). We hotlink the public CDN URL. ~90% of
+// players have one; the rest return null (UI falls back to a monogram).
+const WATCHUFA_PLAYER = 'https://www.watchufa.com/league/players';
+const HEADSHOT_RE = /src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i;
+
+async function fetchHeadshotUrl(playerID: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${WATCHUFA_PLAYER}/${encodeURIComponent(playerID)}`, {
+      headers: { 'User-Agent': UA, Accept: 'text/html' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(HEADSHOT_RE);
+    return m ? m[1] : null;
+  } catch {
+    return null; // soft-fail — a missing headshot must never break the sync
+  }
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Fail loud if an API-supplied string PK looks malformed — so a change in the
@@ -306,12 +329,16 @@ async function syncYear(year: number) {
       }
     }
 
+    // Headshot from the watchufa profile page (soft-fail → null).
+    const headshotUrl = await fetchHeadshotUrl(p.playerID);
+
     playerRows.push({
       id: p.playerID,
       first_name: first,
       last_name: last,
       full_name: p.name,
       current_team_id: teamId,
+      headshot_url: headshotUrl,
       updated_at: new Date().toISOString(),
     });
 

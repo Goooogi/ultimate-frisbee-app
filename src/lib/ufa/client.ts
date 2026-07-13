@@ -220,12 +220,17 @@ export async function getPlayerInfo(playerID: string): Promise<UfaPlayerInfo | n
 
   const nameMatch = html.match(/audl-player-display-name"[^>]*>\s*([^<]+?)\s*</);
   const teamMatch = html.match(/audl-player-current-team-position"[^>]*>\s*([^<]+?)\s*</);
+  // Headshot lives on this same page as
+  //   <img ... src=".../profile-images/{id}_profile.{ext}">  (ext varies)
+  // ~90% of players have one; null when absent.
+  const headshotMatch = html.match(/src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i);
 
   if (!nameMatch) return null;
   return {
     playerID,
     name: nameMatch[1].trim(),
     currentTeam: teamMatch ? teamMatch[1].trim() : null,
+    headshotUrl: headshotMatch ? headshotMatch[1] : null,
   };
 }
 

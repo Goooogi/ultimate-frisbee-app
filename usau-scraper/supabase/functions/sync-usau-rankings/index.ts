@@ -272,34 +272,46 @@ async function run(body: RequestBody): Promise<{
     }
     const idx = await loadTeamIndex(gender, level);
 
+    // Store EVERY ranked team, keyed on rank — the ranking's own identity.
+    // team_id is now OPTIONAL: we link it when a confident match exists, else
+    // leave it null (the row still carries the team's name/city/state). This
+    // fixes the old drops — a team with no usau_teams row, or one that collided
+    // with a duplicate usau_teams id, used to be skipped entirely, leaving gaps
+    // in the rank sequence. rank is unique within (season, week, division), so
+    // two ranked rows can NEVER collide on the upsert key anymore.
+    //
+    // We still avoid pointing two DIFFERENT ranks at the same team_id (which
+    // would misrender as one team appearing twice): the FIRST (lowest) rank
+    // keeps the link; a later rank that resolves to an already-linked team_id
+    // is stored with team_id = null (name only). This only happens when
+    // usau_teams duplication makes distinct teams' names normalize alike — rare,
+    // and null-linking is strictly better than dropping the team.
     const upserts: Record<string, unknown>[] = [];
     const unmatched: string[] = [];
-    // Dedupe by team_id within the division. Two distinct ranked rows can
-    // resolve to the SAME usau_teams id when their names normalize identically
-    // (the ambiguous-match fallback picks the first candidate) — common now
-    // that we ingest 200+ teams/division, not just a top-20. Rows arrive in
-    // rank order, so the FIRST time we see a team_id is its best (lowest) rank;
-    // keep that and drop later collisions. Without this the upsert throws
-    // "ON CONFLICT DO UPDATE cannot affect row a second time".
-    const seenTeamIds = new Set<string>();
-    let collisions = 0;
+    const linkedTeamIds = new Set<string>();
+    let matched = 0;
     for (const r of rows) {
-      const teamId = matchTeam(r, idx);
-      if (!teamId) {
+      let teamId: string | null = matchTeam(r, idx);
+      if (teamId && linkedTeamIds.has(teamId)) {
+        // Another rank already owns this team_id — keep the ranking, drop the
+        // (ambiguous) link rather than the team.
+        teamId = null;
+      }
+      if (teamId) {
+        linkedTeamIds.add(teamId);
+        matched++;
+      } else {
         unmatched.push(r.teamName);
-        continue;
       }
-      if (seenTeamIds.has(teamId)) {
-        collisions++;
-        continue;
-      }
-      seenTeamIds.add(teamId);
       upserts.push({
         season,
         week,
         division: rankSet,
-        team_id: teamId,
         rank: r.rank,
+        team_id: teamId,
+        team_name: r.teamName,
+        city: r.city,
+        state: r.state,
         rating: r.rating,
         wins: r.wins,
         losses: r.losses,
@@ -308,17 +320,12 @@ async function run(body: RequestBody): Promise<{
         scraped_at: scrapedAt,
       });
     }
-    if (collisions > 0) {
-      console.log(
-        `[sync-usau-rankings] ${rankSet}: dropped ${collisions} duplicate team_id row(s) (ambiguous name match)`,
-      );
-    }
 
     let written = 0;
     if (!dryRun && upserts.length > 0) {
       const { error } = await db
         .from('usau_rankings')
-        .upsert(upserts, { onConflict: 'season,week,division,team_id' });
+        .upsert(upserts, { onConflict: 'season,week,division,rank' });
       if (error) throw error;
       written = upserts.length;
     }
@@ -326,7 +333,7 @@ async function run(body: RequestBody): Promise<{
     stats.push({
       rankSet,
       parsed: rows.length,
-      matched: upserts.length,
+      matched,
       unmatched,
       written,
     });

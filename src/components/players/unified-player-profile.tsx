@@ -28,6 +28,7 @@ import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PulPlayerGameRow } from '@/lib/pul/data';
 import type { WulPlayerGameRow } from '@/lib/wul/data';
 import { PlayerContentGallery } from '@/components/players/player-content-gallery';
+import { PlayerHeadshot } from '@/components/players/player-headshot';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { usauEventHref } from '@/lib/usau/event-href';
@@ -77,6 +78,13 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
       topNavSlot={topNavSlot}
       breadcrumbs={crumbs}
     >
+      {/* Profile header avatar — UFA headshot when available, else initials
+          monogram. Sits directly under the name (PageShell's <h1>) so the
+          page reads as "this player's" profile at a glance. */}
+      <div className="h-[72px] w-[72px] lg:h-[88px] lg:w-[88px] flex-shrink-0 rounded-full shadow-card overflow-hidden mb-6 -mt-1 lg:-mt-2">
+        <PlayerHeadshot headshotUrl={profile.headshotUrl} displayName={profile.displayName} />
+      </div>
+
       {/* Championship banners — one per league when applicable. */}
       {profile.championYearsUsau.length > 0 && (
         <ChampionBanner years={profile.championYearsUsau} label="USAU National Champion" />

@@ -44,6 +44,29 @@ const FETCH_GAP_MS = 150;   // gentle pacing to the UFA backend
 const DEFAULT_WINDOW_DAYS = 14;
 const DEFAULT_MAX_GAMES = 12;
 const MAX_PLAYER_FETCHES = 120;
+// Headshots (watchufa profile-page scrape) are only fetched for players we don't
+// already have one for, capped per run so a big first-time sweep never blows the
+// wall-clock — subsequent hourly runs finish the rest. Once set, never re-fetched.
+const MAX_HEADSHOT_FETCHES = 40;
+
+const WATCHUFA_PLAYER = 'https://www.watchufa.com/league/players';
+const HEADSHOT_RE = /src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i;
+
+/** UFA player headshot from the watchufa profile page, or null. Soft-fails so a
+ *  missing/blocked page never breaks the sync. */
+async function fetchHeadshotUrl(playerID: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${WATCHUFA_PLAYER}/${encodeURIComponent(playerID)}`, {
+      headers: { 'User-Agent': UA, Accept: 'text/html' },
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    const m = html.match(HEADSHOT_RE);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -215,10 +238,28 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     .filter((g) => normalizeStatus(g.status) === 'InProgress' || !haveStats.has(g.gameID))
     .slice(0, maxGames);
 
+  // Players that already have a headshot → never re-scrape. One paged sweep of
+  // the (small) set of non-null headshots; cheap vs. re-hitting watchufa.
+  const existingHeadshots = new Set<string>();
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await supabase
+        .from('ufa_players')
+        .select('id')
+        .not('headshot_url', 'is', null)
+        .range(from, from + PAGE - 1);
+      const rows = data ?? [];
+      for (const r of rows) existingHeadshots.add((r as { id: string }).id);
+      if (rows.length < PAGE) break;
+    }
+  }
+
   const gameById = new Map(games.map((g) => [g.gameID, g]));
   let statRowCount = 0;
   let skippedPlayers = 0;
   let playerFetches = 0;      // total upstream game-log fetches this run
+  let headshotFetches = 0;    // watchufa profile-page scrapes this run
   let fetchBudgetHit = false; // true once we stop starting new games mid-cap
   const playersSeen = new Set<string>();
   const playerRows: Record<string, unknown>[] = [];
@@ -269,14 +310,26 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
         }
         const full = `${rp.firstName ?? ''} ${rp.lastName ?? ''}`.trim();
         const { first, last } = splitName(full);
-        playerRows.push({
+
+        // Headshot: only scrape (watchufa profile page) when we DON'T already
+        // have one for this player and we're under the per-run headshot budget.
+        // Headshots almost never change, so once set we skip forever. Keeping
+        // the field OUT of the upsert row when we don't scrape avoids clobbering
+        // an existing headshot_url with null.
+        const row: Record<string, unknown> = {
           id: rp.playerID,
           first_name: rp.firstName ?? first,
           last_name: rp.lastName ?? last,
           full_name: full || rp.playerID,
           current_team_id: teamId,
           updated_at: new Date().toISOString(),
-        });
+        };
+        if (headshotFetches < MAX_HEADSHOT_FETCHES && !existingHeadshots.has(rp.playerID)) {
+          const url = await fetchHeadshotUrl(rp.playerID);
+          headshotFetches++;
+          if (url) row.headshot_url = url;
+        }
+        playerRows.push(row);
       }
 
       // the stat line for THIS game
@@ -324,6 +377,7 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     gamesUpserted: gameRows.length,
     recentGamesProcessed: recent.length,
     playerFetches,
+    headshotFetches,
     fetchBudgetHit,
     playersUpserted: playerRows.length,
     statRowsUpserted: statRowCount,
