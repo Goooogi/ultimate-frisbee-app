@@ -2,7 +2,8 @@
 
 // Global persistent top app rail — sits above EVERY screen in the app.
 //
-// Desktop (lg+): logo · SearchBar · [spacer] · Account · hamburger
+// Desktop (lg+): logo · [spacer] · page-switcher pills (absolutely centered) ·
+//                [spacer] · SearchBar · league slot · Account · hamburger
 // Mobile (<lg):  logo · [spacer] · search · Account · hamburger
 //
 // All primary nav (The League / Playbook / 12-0 / Fantasy / Theme) lives in the
@@ -13,8 +14,17 @@
 // and the account controls; the inner shells (AppShell, PlaybookShell) must NOT
 // render duplicate copies of those controls on desktop.
 //
-// gamesSlot / gamesSlotMobile: kept in the props for backward compat but no
-//   longer rendered — league selection now lives inside the MobileMenu overlay.
+// The Games sub-app's desktop page-switcher (Scores/Schedule/Teams/Players
+// pills + league slot) lives here now instead of the old below-rail
+// GamesSubnav bar — see games-subnav.tsx. Two independent pieces:
+//   - GamesPageSwitcherPills: always rendered (self-gates to nothing on
+//     non-Games pages), placed in the absolutely-centered zone so it's truly
+//     centered regardless of the left/right zone widths.
+//   - GamesLeagueSlot: fed by the `gamesSlot` prop (the resolved leagueSlot
+//     node from AppShell), rendered in the normal right-hand flex zone next
+//     to Account — NOT part of the centered block.
+// gamesSlotMobile: kept in the props for backward compat but no longer
+//   rendered — league selection now lives inside the MobileMenu overlay.
 
 import Link from 'next/link';
 import { Suspense, useState, useRef, useEffect } from 'react';
@@ -25,6 +35,7 @@ import { AccountChip } from '@/components/auth/account-chip';
 import { SearchBar } from '@/components/search-bar';
 import { SearchModal, SearchGlyph } from '@/components/search-modal';
 import { MobileMenu } from '@/components/mobile-menu';
+import { GamesPageSwitcherPills, GamesLeagueSlot } from '@/components/games-subnav';
 
 // ─── Sub-app definitions ──────────────────────────────────────────────────────
 
@@ -93,34 +104,45 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
       ].join(' ')}
       aria-label="App navigation"
     >
-      {/* Logo — fixed-width zone on desktop provides a clean left anchor for
-          the GAMES dropdown. On mobile (<lg) width collapses to auto.
-          flex-shrink-0 prevents squeezing at narrow widths. */}
-      <div className="flex-shrink-0 flex items-center lg:w-[180px]">
-        <Link href="/" aria-label="The Layout — home" className="flex-shrink-0">
-          <LogoStrikeInline
-            accentColor="rgb(var(--accent))"
-            theme={theme === 'broadcast' ? 'dark' : 'light'}
-            size={0.9}
-          />
-        </Link>
+      {/* LEFT zone — logo + desktop search. flex-1 (equal weight to the RIGHT
+          zone) so the CENTER zone's midpoint lands on the true viewport center.
+          min-w-0 lets it shrink rather than shove the center off-axis. */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 lg:gap-4">
+        {/* Logo — fixed anchor. flex-shrink-0 prevents squeezing at narrow widths. */}
+        <div className="flex-shrink-0 flex items-center">
+          <Link href="/" aria-label="The Layout — home" className="flex-shrink-0">
+            <LogoStrikeInline
+              accentColor="rgb(var(--accent))"
+              theme={theme === 'broadcast' ? 'dark' : 'light'}
+              size={0.9}
+            />
+          </Link>
+        </div>
+
+        {/* Search bar — desktop only. All primary nav (The League / Playbook /
+            12-0 / Fantasy / Theme) now lives in the slide-in panel behind the
+            hamburger, so search takes the lead slot on the rail. */}
+        <div className="hidden lg:flex flex-shrink-0">
+          <SearchBar />
+        </div>
       </div>
 
-      {/* Search bar — desktop only. All primary nav (The League / Playbook /
-          12-0 / Fantasy / Theme) now lives in the slide-in panel behind the
-          hamburger, so search takes the lead slot on the rail. */}
-      <div className="hidden lg:flex flex-shrink-0">
-        <SearchBar />
+      {/* CENTER zone — desktop page-switcher pills (Scores/Schedule/Teams/
+          Players, or the Fantasy/WFDF equivalents), centered in the rail.
+          flex-shrink-0 justify-center: the pills reserve their own space and sit
+          on the true viewport center because the LEFT and RIGHT zones are equal
+          flex-1 weight. Hidden below lg — the mobile equivalent is
+          MobileBottomNav; on mobile this zone collapses to nothing. Renders
+          nothing outside the Games/Fantasy/WFDF sub-apps. */}
+      <div className="hidden lg:flex flex-shrink-0 justify-center">
+        <GamesPageSwitcherPills />
       </div>
 
-      {/* Spacer — absorbs all available slack. On mobile this pushes the
-          hamburger + account to the far right. */}
-      <div className="flex-1 min-w-0" />
-
-      {/* Right controls — Search (mobile) · Account · Hamburger (all sizes).
-          The League / Playbook / 12-0 / Fantasy / Theme all live in the
-          slide-in panel that the hamburger opens. */}
-      <div className="flex items-center gap-2 lg:gap-3 flex-shrink-0">
+      {/* RIGHT zone — Search (mobile) · League slot (desktop) · Account ·
+          Hamburger. flex-1 justify-end: equal weight to the LEFT zone so the
+          CENTER pills stay viewport-centered. The League / Playbook / 12-0 /
+          Fantasy / Theme all live in the slide-in panel the hamburger opens. */}
+      <div className="flex-1 min-w-0 flex items-center justify-end gap-2 lg:gap-3">
 
         {/* Search — mobile only (<lg). Opens the full-screen SearchModal,
             reusing the same searchAll() logic as the desktop SearchBar. */}
@@ -136,6 +158,13 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
         >
           <SearchGlyph size={17} />
         </button>
+
+        {/* League switcher — desktop only, sits to the right of the centered
+            pills (NOT centered itself). Renders nothing on Fantasy/WFDF/
+            non-league pages, or when the caller passes no leagueSlot. */}
+        <div className="hidden lg:flex">
+          <GamesLeagueSlot leagueSlot={gamesSlot} />
+        </div>
 
         {/* Account chip — sits to the LEFT of the hamburger. */}
         <AccountChip size={30} />
@@ -191,9 +220,13 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
 
 interface AppRailProps {
   /**
-   * Optional node rendered between the spacer and right controls on DESKTOP
-   * (lg+) — visible only when the active sub-app is 'games'.
-   * AppShell passes the resolved desktop LeagueTabs here. Other shells omit it.
+   * Optional league-switcher node rendered on DESKTOP (lg+) in the right-hand
+   * controls zone (next to Account) — NOT centered. AppShell passes the
+   * resolved `tab`/topNavSlot node here (e.g. an empty span to hide the
+   * switcher on /players/[id]). The Scores/Schedule/Teams/Players pills
+   * always render separately in the centered zone regardless of this prop
+   * (see GamesPageSwitcherPills, self-gating). Other shells (Playbook, home)
+   * omit this prop entirely, which also correctly renders no league slot.
    */
   gamesSlot?: React.ReactNode;
   /**

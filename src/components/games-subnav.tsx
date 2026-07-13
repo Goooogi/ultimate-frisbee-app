@@ -1,13 +1,20 @@
 'use client';
 
-// Secondary nav bar for the Games sub-app — desktop only (hidden lg:flex).
-// Sits directly beneath the 52px AppRail and above content.
-// Left: Scores · Schedule · Teams · Players tabs (accent underline + ink on active).
-// Right: leagueSlot — whatever AppShell computed (LeagueTabs, topNavSlot override,
-//   or empty span when the caller hides the switcher on e.g. /players/[uuid]).
+// Desktop (lg+) page-switcher for the Games sub-app — Scores · Schedule ·
+// Teams · Players (and the Fantasy / WFDF variants). Lives INSIDE the top
+// AppRail now, not in a separate bar underneath it. Two independent pieces,
+// both rendered by app-rail.tsx's RailInner in different zones:
+//   - GamesPageSwitcherPills — the pill <nav>, rendered in the rail's
+//     absolutely-centered zone (true center, regardless of side-zone widths).
+//   - GamesLeagueSlot — the league switcher, rendered in the rail's normal
+//     right-hand flex zone, to the left of Account/hamburger (NOT centered).
+// Both independently re-derive the same active-page/gating logic from
+// usePathname (mirrors the existing pattern in mobile-bottom-nav.tsx, which
+// also duplicates this gating rather than sharing state via context).
 //
-// Active detection mirrors SidebarNav exactly: prefix match + aliases.
-// League query string is preserved on every link via buildLeagueQs.
+// Active detection + league query-string logic is UNCHANGED from the old
+// below-rail GamesSubnav — only the rendering location and split into two
+// pieces changed (no more h-56px bar div wrapping both).
 
 import Link from 'next/link';
 import { Suspense } from 'react';
@@ -100,13 +107,9 @@ function isLeaguePage(pathname: string): boolean {
   return LEAGUE_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-// ─── Inner (needs hooks — wrapped in Suspense by parent) ──────────────────────
+// ─── Pill nav (centered zone) — needs hooks, wrapped in Suspense by parent ────
 
-interface GamesSubnavInnerProps {
-  leagueSlot: React.ReactNode;
-}
-
-function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
+function GamesPageSwitcherPillsInner() {
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
 
@@ -115,7 +118,7 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
   // WFDF: event-scoped hub — own secondary nav, no ?league= qs, no switcher.
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
 
-  // The secondary nav belongs ONLY to league pages and the fantasy sub-app.
+  // The page switcher belongs ONLY to league pages and the fantasy sub-app.
   // On everything else (admin, settings, playbook, 12-0, home, …) render
   // nothing — no stray league tabs where they don't apply.
   if (!isFantasy && !isLeaguePage(pathname)) return null;
@@ -129,116 +132,118 @@ function GamesSubnavInner({ leagueSlot }: GamesSubnavInnerProps) {
   const activeLevel = parseLevelParam(searchParams.get('level'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
-  // Sub-app pages (Fantasy, WFDF) carry no league query string and hide the
-  // league switcher; standard league pages get the ?league= qs on every link.
+  // Sub-app pages (Fantasy, WFDF) carry no league query string; standard
+  // league pages get the ?league= qs on every link.
   const noQs = isFantasy || isWfdf;
   const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
 
   return (
-    <div
-      className={[
-        'hidden lg:flex items-center justify-between',
-        'h-[56px] px-6 bg-bg',
-        // flex-shrink-0 keeps the bar from being squeezed by the main scroll column
-        'flex-shrink-0',
-      ].join(' ')}
-      aria-label={
-        isFantasy
-          ? 'Fantasy section navigation'
-          : isWfdf
-            ? 'WFDF section navigation'
-            : 'Games section navigation'
-      }
+    <nav
+      className="flex items-center gap-0.5 bg-ink/5 rounded-full p-0.5"
+      aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages'}
     >
-      {/* Left: sub-page tabs — pill segmented control */}
-      <nav
-        className="flex items-center gap-1 bg-ink/5 rounded-full p-1"
-        aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages'}
-      >
-        {items.map((item) => {
-          // "Coming soon" placeholder — greyed out, non-navigable.
-          if (item.soon) {
-            return (
-              <span
-                key={item.label}
-                aria-disabled="true"
-                className={[
-                  'relative inline-flex items-center gap-1.5 h-8 px-3.5 rounded-full',
-                  'text-[11px] font-bold tracking-[0.14em] uppercase',
-                  'text-faint cursor-not-allowed select-none',
-                ].join(' ')}
-              >
-                {item.label}
-                <span className="text-[8px] tracking-[0.12em] text-faint/80 normal-case font-bold">
-                  Soon
-                </span>
-              </span>
-            );
-          }
-
-          const active = isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item);
-          // Fantasy + WFDF links carry no league query string.
-          const href = noQs ? item.href : `${item.href}${leagueQs}`;
+      {items.map((item) => {
+        // "Coming soon" placeholder — greyed out, non-navigable.
+        if (item.soon) {
           return (
-            <Link
-              key={item.href}
-              href={href}
-              aria-current={active ? 'page' : undefined}
+            <span
+              key={item.label}
+              aria-disabled="true"
               className={[
-                'relative inline-flex items-center h-8 px-3.5 rounded-full',
-                'text-[11px] font-bold tracking-[0.14em] uppercase',
-                'transition-colors duration-150 no-underline',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                active
-                  ? 'bg-ink text-bg'
-                  : 'text-muted hover:text-ink',
+                'relative inline-flex items-center gap-1.5 h-7 px-3 rounded-full',
+                'text-[10.5px] font-bold tracking-[0.08em] uppercase',
+                'text-faint cursor-not-allowed select-none',
               ].join(' ')}
             >
               {item.label}
-            </Link>
+              <span className="text-[8px] tracking-[0.12em] text-faint/80 normal-case font-bold">
+                Soon
+              </span>
+            </span>
           );
-        })}
-      </nav>
+        }
 
-      {/* Right: league switcher slot — hidden on Fantasy + WFDF (not part of
-          the ?league= switching system; WFDF is an event-scoped hub). */}
-      {!isFantasy && !isWfdf && leagueSlot && (
-        <div className="flex items-center">
-          {leagueSlot}
-        </div>
-      )}
-    </div>
+        const active = isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item);
+        // Fantasy + WFDF links carry no league query string.
+        const href = noQs ? item.href : `${item.href}${leagueQs}`;
+        return (
+          <Link
+            key={item.href}
+            href={href}
+            aria-current={active ? 'page' : undefined}
+            className={[
+              'relative inline-flex items-center h-7 px-3 rounded-full',
+              'text-[10.5px] font-bold tracking-[0.08em] uppercase',
+              'transition-colors duration-150 no-underline whitespace-nowrap',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              active
+                ? 'bg-ink text-bg'
+                : 'text-muted hover:text-ink',
+            ].join(' ')}
+          >
+            {item.label}
+          </Link>
+        );
+      })}
+    </nav>
   );
 }
 
-// ─── Public export ────────────────────────────────────────────────────────────
+/**
+ * Desktop page-switcher pills (Scores/Schedule/Teams/Players, or the Fantasy/
+ * WFDF equivalents) — rendered in AppRail's absolutely-centered zone on
+ * Games/Fantasy/WFDF pages. Renders nothing on pages where the switcher
+ * doesn't apply (isLeaguePage gate above). Does NOT include the league
+ * switcher slot — that renders separately via GamesLeagueSlot, in the rail's
+ * right-hand zone (next to Account), per the centered-pills / right-aligned
+ * league-slot layout.
+ */
+export function GamesPageSwitcherPills() {
+  return (
+    <Suspense fallback={null}>
+      <GamesPageSwitcherPillsInner />
+    </Suspense>
+  );
+}
 
-interface GamesSubnavProps {
+// ─── League slot (right zone) — needs hooks, wrapped in Suspense by parent ───
+
+interface GamesLeagueSlotInnerProps {
+  leagueSlot: React.ReactNode;
+}
+
+function GamesLeagueSlotInner({ leagueSlot }: GamesLeagueSlotInnerProps) {
+  const pathname = usePathname() ?? '/';
+
+  const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+  const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+
+  // Same gate as the pills: only league pages (not Fantasy/WFDF, not admin/
+  // settings/playbook/etc.) show a league slot at all.
+  if (!isLeaguePage(pathname) || isFantasy || isWfdf) return null;
+  if (!leagueSlot) return null;
+
+  return <div className="flex items-center">{leagueSlot}</div>;
+}
+
+interface GamesLeagueSlotProps {
   /**
-   * The resolved league control from AppShell — LeagueTabs by default, or the
-   * topNavSlot override (e.g. an empty span to hide the switcher on /players/[id]).
-   * Passed straight through to the right side of the bar.
+   * The resolved league control from AppShell — the topNavSlot override
+   * (e.g. an empty span to hide the switcher on /players/[id]), or null on
+   * standard league pages.
    */
   leagueSlot: React.ReactNode;
 }
 
 /**
- * Secondary navigation bar rendered under AppRail on Games pages (desktop only).
- * AppShell renders this; other shells (PlaybookShell, home) do not.
+ * Right-hand league switcher slot, rendered in AppRail next to Account (NOT
+ * part of the centered pill group) — hidden on Fantasy + WFDF pages (not part
+ * of the ?league= switching system) and on non-league pages.
  */
-export function GamesSubnav({ leagueSlot }: GamesSubnavProps) {
+export function GamesLeagueSlot({ leagueSlot }: GamesLeagueSlotProps) {
   return (
-    <Suspense fallback={<GamesSubnavSkeleton />}>
-      <GamesSubnavInner leagueSlot={leagueSlot} />
+    <Suspense fallback={null}>
+      <GamesLeagueSlotInner leagueSlot={leagueSlot} />
     </Suspense>
-  );
-}
-
-function GamesSubnavSkeleton() {
-  return (
-    <div
-      aria-hidden="true"
-      className="hidden lg:flex h-[56px] bg-bg flex-shrink-0"
-    />
   );
 }

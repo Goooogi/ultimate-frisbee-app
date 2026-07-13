@@ -117,8 +117,13 @@ export function MobileBottomNav() {
         // with margins + a bottom gap, rounded-full, elevated with shadow-lift
         // so it clearly reads as floating above the content rather than a
         // flush edge-to-edge bar.
+        // Background is a translucent, colorless glass fill — bg-bg/40 (down
+        // from /90) lets scrolled content show through behind the icons while
+        // backdrop-blur keeps them legible in both themes; border softened to
+        // border-hairline/60 so the pill still reads as a distinct shape
+        // without a heavy outline.
         'lg:hidden fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] inset-x-3 z-40',
-        'rounded-full border border-border bg-bg/90 backdrop-blur shadow-lift',
+        'rounded-full border border-hairline/60 bg-bg/40 backdrop-blur-md shadow-lift',
         'px-2 py-2.5 flex items-center justify-around',
       ].join(' ')}
     >
@@ -149,10 +154,9 @@ export function MobileBottomNav() {
             className={[
               'flex items-center justify-center w-11 h-11 rounded-full no-underline shrink-0',
               'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              // Faint accent disc behind the active icon — the only "active"
-              // signal now that labels/underlines are gone (Instagram just
-              // brightens the icon; this adds a subtle on-brand disc too).
-              active ? 'bg-accent/10' : '',
+              // No colored fill behind the button — active state is conveyed
+              // by the icon color alone (text-accent vs text-muted, see
+              // Icon()) now that the bar's own background is colorless.
             ].join(' ')}
           >
             <Icon kind={tab.icon} active={active} />

@@ -144,8 +144,11 @@ export function SearchBar() {
           'transition-colors duration-150',
           'focus-within:ring-2 focus-within:ring-accent focus-within:border-accent',
           showDropdown ? 'border-accent' : 'border-border',
-          // Fixed width: roomier so longer tournament names fit; wider at xl.
-          'w-[280px] xl:w-[340px]',
+          // Fixed width: narrowed so the centered page-switcher pills in the
+          // rail stay on the true viewport center (the left logo+search zone and
+          // the right controls zone are equal flex-1 weight; an over-wide search
+          // would push the center off-axis). Still roomy enough for long names.
+          'w-[200px] xl:w-[300px]',
         ].join(' ')}
       >
         {/* Magnifier icon */}
