@@ -11,11 +11,38 @@
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
-import type { UsauEventSummary } from '@/lib/usau/data';
+import type { UpcomingUsauEvent } from '@/lib/usau/data';
 import { teamMeta } from '@/lib/ufa/teams';
 import { gameUiState, formatStartCompact } from '@/lib/ufa/format';
 import { TeamLogo } from '@/components/team-logo';
-import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** Compact date range for a tournament card row: same month → "Jul 25–26";
+ *  cross-month → "Jul 31 – Aug 2"; single day (or matching start/end) →
+ *  "Jul 18"; either date missing → ''. Dates are ISO "YYYY-MM-DD" strings;
+ *  parsed as UTC noon to avoid local-timezone day-shift. */
+function formatDateRange(start: string | null, end: string | null): string {
+  if (!start) return '';
+  const parse = (iso: string) => new Date(`${iso}T12:00:00Z`);
+  const startDate = parse(start);
+  if (Number.isNaN(startDate.getTime())) return '';
+
+  const startMonth = MONTHS[startDate.getUTCMonth()];
+  const startDay = startDate.getUTCDate();
+
+  if (!end || end === start) return `${startMonth} ${startDay}`;
+
+  const endDate = parse(end);
+  if (Number.isNaN(endDate.getTime())) return `${startMonth} ${startDay}`;
+
+  const endMonth = MONTHS[endDate.getUTCMonth()];
+  const endDay = endDate.getUTCDate();
+
+  return startMonth === endMonth
+    ? `${startMonth} ${startDay}–${endDay}`
+    : `${startMonth} ${startDay} – ${endMonth} ${endDay}`;
+}
 
 /** "FRI · 7:00 PM" — drops the date + timezone from formatStartCompact's
  *  "FRI, JUL 10 · 7:00 PM EDT" so the row's right column doesn't force the
@@ -30,15 +57,16 @@ function formatWhenCompact(game: UfaGame): string {
 
 interface UpNextCardsProps {
   ufaGames: UfaGame[];
-  usauEvent: UsauEventSummary | null;
+  /** Next several upcoming flighted USAU tournaments (soonest first). */
+  usauEvents: UpcomingUsauEvent[];
 }
 
 /** Renders the "Up next" card group: UFA card, then USAU card — each shown
  *  only when it has data. Returns null (no wrapper element) when neither has
  *  content, so page.tsx can drop this straight into the flex stack. */
-export function UpNextCards({ ufaGames, usauEvent }: UpNextCardsProps) {
+export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
   const hasUfa = ufaGames.length > 0;
-  const hasUsau = !!usauEvent;
+  const hasUsau = usauEvents.length > 0;
   if (!hasUfa && !hasUsau) return null;
 
   return (
@@ -50,9 +78,11 @@ export function UpNextCards({ ufaGames, usauEvent }: UpNextCardsProps) {
           ))}
         </CardShell>
       )}
-      {hasUsau && usauEvent && (
+      {hasUsau && (
         <CardShell title="Up next" pill="USAU">
-          <UsauUpNextRows event={usauEvent} />
+          {usauEvents.map((e, i) => (
+            <UsauEventRow key={e.slug} event={e} first={i === 0} />
+          ))}
         </CardShell>
       )}
     </>
@@ -126,176 +156,26 @@ function UfaUpNextRow({ game, first }: { game: UfaGame; first: boolean }) {
   );
 }
 
-// ─── USAU rows — up-next event's pool games, one per division, compact ───
+// ─── USAU row — one upcoming flighted tournament ─────────────────────────
 
-const MAX_USAU_ROWS = 4;
-
-type UsauGame = UsauEventSummary['games'][number];
-
-/**
- * Picks the "up next" pool games to show, ensuring every gender division at the
- * event is represented (previously we just took the first 4 scored games, which
- * clustered in whichever division sorted first — usually Women's).
- *
- * Strategy:
- *   1. Keep pool-play games only (detect pools by BRACKET NAME, not round='pool'
- *      — the ultirzr ingest tags most pool games round='other').
- *   2. Group them by division. A game's division is its teams' — mixed events
- *      run separate Men's/Women's/Mixed pools, so both teams share one.
- *   3. Within each division, sort by "best seed involved" (lowest seed number =
- *      highest-ranked team), tie-broken by earliest scheduled time. This surfaces
- *      the marquee matchup for each division.
- *   4. Round-robin across divisions: take each division's top game first, then
- *      its second, and so on — so with 3 divisions and a 4-row budget every
- *      division gets one game and the strongest division gets a second.
- */
-function selectUsauUpNextGames(
-  games: UsauGame[],
-  divByTeamId: Map<string, string | null>,
-  seedByTeamId: Map<string, number | null>,
-): UsauGame[] {
-  const gameDiv = (g: UsauGame): string => {
-    const a = g.teamAId ? divByTeamId.get(g.teamAId) : null;
-    const b = g.teamBId ? divByTeamId.get(g.teamBId) : null;
-    return a ?? b ?? 'Unknown';
-  };
-
-  // Lower seed number = higher-ranked team. Seed the game by its BEST team so a
-  // #1-vs-#8 matchup outranks a #4-vs-#5 one. Missing seeds sort last.
-  const bestSeed = (g: UsauGame): number => {
-    const seeds: number[] = [];
-    const sa = g.teamAId ? seedByTeamId.get(g.teamAId) : null;
-    const sb = g.teamBId ? seedByTeamId.get(g.teamBId) : null;
-    if (sa != null) seeds.push(sa);
-    if (sb != null) seeds.push(sb);
-    return seeds.length ? Math.min(...seeds) : Number.POSITIVE_INFINITY;
-  };
-
-  const scheduledMs = (g: UsauGame): number =>
-    g.scheduledAt ? new Date(g.scheduledAt).getTime() : Number.POSITIVE_INFINITY;
-
-  const poolGames = games.filter((g) =>
-    (g.bracketName ?? '').toLowerCase().startsWith('pool'),
-  );
-
-  // Group by division.
-  const byDiv = new Map<string, UsauGame[]>();
-  for (const g of poolGames) {
-    const d = gameDiv(g);
-    if (!byDiv.has(d)) byDiv.set(d, []);
-    byDiv.get(d)!.push(g);
-  }
-
-  // Sort each division's games: highest-seeded matchup first, then earliest.
-  for (const list of byDiv.values()) {
-    list.sort((a, b) => {
-      const seedDiff = bestSeed(a) - bestSeed(b);
-      if (seedDiff !== 0) return seedDiff;
-      return scheduledMs(a) - scheduledMs(b);
-    });
-  }
-
-  // Order divisions by their single best game, so the strongest division is the
-  // one that gets a second row when the budget allows.
-  const divisions = Array.from(byDiv.keys()).sort((da, db) => {
-    const ga = byDiv.get(da)![0];
-    const gb = byDiv.get(db)![0];
-    const seedDiff = bestSeed(ga) - bestSeed(gb);
-    if (seedDiff !== 0) return seedDiff;
-    return scheduledMs(ga) - scheduledMs(gb);
-  });
-
-  // Round-robin: one game per division per pass until we hit the row budget.
-  const picked: UsauGame[] = [];
-  for (let round = 0; picked.length < MAX_USAU_ROWS; round++) {
-    let addedThisRound = false;
-    for (const d of divisions) {
-      if (picked.length >= MAX_USAU_ROWS) break;
-      const g = byDiv.get(d)![round];
-      if (g) {
-        picked.push(g);
-        addedThisRound = true;
-      }
-    }
-    if (!addedThisRound) break; // every division exhausted
-  }
-
-  return picked;
-}
-
-function UsauUpNextRows({ event }: { event: UsauEventSummary }) {
-  // teamId → gender division, from the event's own teams. Used both to resolve
-  // the correct logo per team AND to group games by division so every
-  // division at the event gets representation (not just the one whose games
-  // happen to sort first).
-  const divByTeamId = new Map<string, string | null>();
-  // teamId → seed, so we can rank games by how high-seeded their teams are.
-  const seedByTeamId = new Map<string, number | null>();
-  for (const t of event.teams) {
-    divByTeamId.set(t.teamId, t.genderDivision);
-    seedByTeamId.set(t.teamId, t.seed);
-  }
-
-  const poolGames = selectUsauUpNextGames(event.games, divByTeamId, seedByTeamId);
-
-  return (
-    <>
-      {/* Event header row → event page */}
-      <Link
-        href={`/usau/events/${event.slug}`}
-        className="flex items-center justify-between gap-3 py-[11px] hover:opacity-80 transition-opacity"
-      >
-        <span className="font-tight font-semibold text-[13.5px] text-ink truncate">{event.name}</span>
-        <span className="font-mono text-[10.5px] text-faint flex-shrink-0">View →</span>
-      </Link>
-
-      {poolGames.map((g) => (
-        <UsauPoolRow
-          key={g.id}
-          game={g}
-          eventSlug={event.slug}
-          divA={g.teamAId ? divByTeamId.get(g.teamAId) ?? null : null}
-          divB={g.teamBId ? divByTeamId.get(g.teamBId) ?? null : null}
-        />
-      ))}
-    </>
-  );
-}
-
-function UsauPoolRow({
-  game,
-  eventSlug,
-  divA,
-  divB,
-}: {
-  game: UsauEventSummary['games'][number];
-  eventSlug: string;
-  divA: string | null;
-  divB: string | null;
-}) {
-  const aName = game.teamAName ?? '?';
-  const bName = game.teamBName ?? '?';
-  const hasScore = game.scoreA !== null && game.scoreB !== null;
+function UsauEventRow({ event, first }: { event: UpcomingUsauEvent; first: boolean }) {
+  const dateRange = formatDateRange(event.startDate, event.endDate);
+  const meta = [dateRange, event.flightLabel].filter(Boolean).join(' · ');
 
   return (
     <Link
-      href={`/usau/events/${eventSlug}`}
-      className="grid grid-cols-[1fr_auto] gap-3 items-center py-[11px] border-t border-hairline hover:opacity-80 transition-opacity"
+      href={`/usau/events/${event.slug}`}
+      className={[
+        'grid grid-cols-[1fr_auto] gap-3 items-center py-[11px]',
+        first ? '' : 'border-t border-hairline',
+        'hover:opacity-80 transition-opacity',
+      ].join(' ')}
     >
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
-          <UsauTeamLogo name={aName} genderDivision={divA} size={22} />
-        </span>
-        <span className="font-tight font-semibold text-[13px] text-ink truncate">{aName}</span>
-        <span className="font-mono text-[11px] text-faint flex-shrink-0">at</span>
-        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
-          <UsauTeamLogo name={bName} genderDivision={divB} size={22} />
-        </span>
-        <span className="font-tight font-semibold text-[13px] text-ink truncate">{bName}</span>
+      <div className="min-w-0">
+        <div className="font-tight font-semibold text-[13.5px] text-ink truncate">{event.name}</div>
+        {meta && <div className="font-mono text-[10.5px] text-muted mt-0.5 truncate">{meta}</div>}
       </div>
-      <span className="font-mono text-[10.5px] text-muted flex-shrink-0 tabular">
-        {hasScore ? `${game.scoreA}–${game.scoreB}` : 'Pool play'}
-      </span>
+      <span className="font-mono text-[10.5px] text-faint flex-shrink-0">View →</span>
     </Link>
   );
 }

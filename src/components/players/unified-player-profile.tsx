@@ -70,6 +70,15 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
     { label: profile.displayName },
   ];
 
+  // Profile header avatar — UFA headshot when available, else initials
+  // monogram. Rendered in PageHeader's right-side `controls` slot so it sits to
+  // the RIGHT of the player's name. Square frame (rounded-xl) per design.
+  const headshot = (
+    <div className="h-[72px] w-[72px] lg:h-[88px] lg:w-[88px] flex-shrink-0 rounded-xl shadow-card overflow-hidden">
+      <PlayerHeadshot headshotUrl={profile.headshotUrl} displayName={profile.displayName} />
+    </div>
+  );
+
   return (
     <PageShell
       title={profile.displayName}
@@ -77,14 +86,8 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
       eyebrow={eyebrow}
       topNavSlot={topNavSlot}
       breadcrumbs={crumbs}
+      controls={headshot}
     >
-      {/* Profile header avatar — UFA headshot when available, else initials
-          monogram. Sits directly under the name (PageShell's <h1>) so the
-          page reads as "this player's" profile at a glance. */}
-      <div className="h-[72px] w-[72px] lg:h-[88px] lg:w-[88px] flex-shrink-0 rounded-full shadow-card overflow-hidden mb-6 -mt-1 lg:-mt-2">
-        <PlayerHeadshot headshotUrl={profile.headshotUrl} displayName={profile.displayName} />
-      </div>
-
       {/* Championship banners — one per league when applicable. */}
       {profile.championYearsUsau.length > 0 && (
         <ChampionBanner years={profile.championYearsUsau} label="USAU National Champion" />

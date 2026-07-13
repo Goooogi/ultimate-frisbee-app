@@ -13,7 +13,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
-import { flightForName, type Flight } from '@/lib/usau/flights';
+import { flightForName, FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 
@@ -608,6 +608,89 @@ export async function getNextUpcomingEvent(opts?: {
     .select('*', { count: 'exact', head: true })
     .eq('event_id', pick.id);
   return { slug: pick.usau_slug, hasGames: (count ?? 0) > 0 };
+}
+
+export interface UpcomingUsauEvent {
+  slug: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  /** TCT flight display label ("Pro Flight", "Select Flight", …) when the event
+   *  maps to one; null for pinnacle/Masters/College events (still listed). */
+  flightLabel: string | null;
+}
+
+/**
+ * The next N UPCOMING flighted USAU events — for the home "Up next" card, which
+ * lists several upcoming tournaments rather than one event's pool games.
+ *
+ * Same "flighted-grade" filter as getNextUpcomingEvent (a plain CLUB event needs
+ * a real TCT flight or pinnacle status; Masters/GM/College always qualify), so
+ * unclassified local tournaments are excluded. Ordered by tournament WEEKEND
+ * ascending (soonest first), and within a weekend by flight DESCENDING (the
+ * marquee event leads its weekend). An in-progress event (end_date ≥ today)
+ * still counts as upcoming so it stays listed through its final day.
+ */
+export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEvent[]> {
+  const db = await supabase();
+  const today = new Date().toISOString().slice(0, 10);
+  const windowForward = new Date(Date.now() + 120 * 86400_000).toISOString().slice(0, 10);
+
+  const { data: rows } = await db
+    .from('usau_events')
+    .select('id, usau_slug, name, start_date, end_date, competition_level')
+    .in('competition_level', FLAGSHIP_LEVELS)
+    .gte('end_date', today)
+    .lte('start_date', windowForward)
+    .order('start_date', { ascending: true });
+
+  type Row = {
+    id: string;
+    usau_slug: string;
+    name: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    competition_level: string | null;
+  };
+  const events = ((rows ?? []) as Row[]).filter((e) =>
+    e.competition_level !== 'CLUB'
+      ? true
+      : flightForName(e.name) !== null || isPinnacleEventName(e.name),
+  );
+
+  // Quantize to the tournament weekend (Saturday of the Fri–Sun span) so a
+  // Fri-start flagship and a Sat-start event on the same weekend group together.
+  const weekendKey = (d: string | null): string => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt.getTime())) return d;
+    const dow = dt.getUTCDay();
+    dt.setUTCDate(dt.getUTCDate() + (dow === 0 ? -1 : 6 - dow));
+    return dt.toISOString().slice(0, 10);
+  };
+
+  // Sort: nearest weekend first; within a weekend, highest flight first, then
+  // soonest start, then name for stability.
+  events.sort((a, b) => {
+    const wk = weekendKey(a.start_date).localeCompare(weekendKey(b.start_date));
+    if (wk !== 0) return wk;
+    const fl = flightRankForName(b.name) - flightRankForName(a.name);
+    if (fl !== 0) return fl;
+    const st = (a.start_date ?? '').localeCompare(b.start_date ?? '');
+    if (st !== 0) return st;
+    return (a.name ?? '').localeCompare(b.name ?? '');
+  });
+
+  return events.slice(0, limit).map((e) => {
+    const flight = flightForName(e.name);
+    return {
+      slug: e.usau_slug,
+      name: e.name ?? e.usau_slug,
+      startDate: e.start_date,
+      endDate: e.end_date,
+      flightLabel: flight ? FLIGHT_LABELS[flight] : null,
+    };
+  });
 }
 
 /**

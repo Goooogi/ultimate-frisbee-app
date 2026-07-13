@@ -9,7 +9,7 @@ import { useState } from 'react';
 interface PlayerHeadshotProps {
   headshotUrl: string | null;
   displayName: string;
-  /** Pixel size of the circular avatar. Defaults to 88 (desktop-friendly, still fits 375px). */
+  /** Font-size basis for the monogram initials. Defaults to 88. */
   size?: number;
 }
 
@@ -24,7 +24,7 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
         src={headshotUrl!}
         alt={`${displayName} headshot`}
         onError={() => setImgFailed(true)}
-        className="h-full w-full rounded-full object-cover"
+        className="h-full w-full rounded-xl object-cover"
       />
     );
   }
@@ -32,7 +32,7 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
   return (
     <span
       aria-hidden="true"
-      className="flex h-full w-full items-center justify-center rounded-full bg-ink/5 text-muted"
+      className="flex h-full w-full items-center justify-center rounded-xl bg-ink/5 text-muted"
     >
       <span
         className="font-display italic font-bold"
