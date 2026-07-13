@@ -234,6 +234,29 @@ export async function getPlayerInfo(playerID: string): Promise<UfaPlayerInfo | n
   };
 }
 
+/**
+ * The player's SELF-HOSTED headshot URL from our ufa_players table (a Supabase
+ * Storage object we serve through the image transform). Preferred over the live
+ * watchufa scrape in getPlayerInfo — it's fast, cached, and won't 404 if
+ * watchufa changes. Returns null when we have no headshot for the player (UI
+ * falls back to a monogram); callers may then fall back to the live scrape.
+ */
+export async function getStoredHeadshotUrl(playerID: string): Promise<string | null> {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const { supabaseUrl, supabaseAnonKey } = await import('@/lib/supabase/env');
+    const db = createClient(supabaseUrl(), supabaseAnonKey(), { auth: { persistSession: false } });
+    const { data } = await db
+      .from('ufa_players')
+      .select('headshot_url')
+      .eq('id', playerID)
+      .maybeSingle();
+    return (data?.headshot_url as string | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Team stats ───────────────────────────────────────────────────────────────
 
 export interface TeamStatsQuery {

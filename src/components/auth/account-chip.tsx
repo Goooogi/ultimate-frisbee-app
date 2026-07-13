@@ -28,7 +28,7 @@ const FeedbackModal = dynamic(() =>
   import('@/components/feedback/feedback-modal').then((m) => m.FeedbackModal),
 );
 import { useTheme } from '@/lib/use-theme';
-import { usePendingContentCount } from '@/lib/player-content/use-pending-count';
+import { useAdminReviewCounts } from '@/lib/player-content/use-pending-count';
 import type { Theme } from '@/lib/theme';
 
 interface AccountChipProps {
@@ -47,8 +47,10 @@ export function AccountChip({
 }: AccountChipProps) {
   const { user, loading, signOut } = useAuth();
   const [theme, setTheme] = useTheme();
-  // Admin-only: number of submissions awaiting review. Drives the red dot.
-  const pendingReviewCount = usePendingContentCount(user?.isAdmin ?? false);
+  // Admin-only: submissions awaiting review — pending content + new feedback.
+  // Drives the red dot + the "Admin" menu badge (combined total).
+  const reviewCounts = useAdminReviewCounts(user?.isAdmin ?? false);
+  const pendingReviewCount = reviewCounts.total;
   const [menuOpen, setMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -222,21 +224,6 @@ export function AccountChip({
               )}
             </Link>
           )}
-          {user.isAdmin && (
-            <Link
-              href="/admin/feedback"
-              role="menuitem"
-              onClick={() => setMenuOpen(false)}
-              className={[
-                'flex items-center gap-2 w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
-                'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
-                'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink',
-              ].join(' ')}
-            >
-              Feedback inbox
-            </Link>
-          )}
-
           {/* Settings link */}
           <Link
             href="/settings"

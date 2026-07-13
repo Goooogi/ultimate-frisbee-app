@@ -51,21 +51,59 @@ const MAX_HEADSHOT_FETCHES = 40;
 
 const WATCHUFA_PLAYER = 'https://www.watchufa.com/league/players';
 const HEADSHOT_RE = /src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i;
+const HEADSHOT_BUCKET = 'ufa-headshots';
+const MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+};
 
-/** UFA player headshot from the watchufa profile page, or null. Soft-fails so a
- *  missing/blocked page never breaks the sync. */
-async function fetchHeadshotUrl(playerID: string): Promise<string | null> {
+/**
+ * Self-host a player's UFA headshot: scrape the watchufa profile page for the
+ * image src, download it, upload to the ufa-headshots bucket as {id}.{ext}, and
+ * return OUR public object URL (the app renders it through the image transform).
+ * We self-host rather than store the watchufa hotlink because those are full-res
+ * multi-MB originals off a third-party CDN — slow, flaky, and they can vanish.
+ * Soft-fails to null at every step so a missing/blocked headshot never breaks
+ * the sync.
+ */
+async function fetchHeadshotUrl(supabase: SupabaseClient, playerID: string): Promise<string | null> {
+  // 1. Scrape the profile page for the source image URL.
+  let srcUrl: string | null = null;
   try {
     const res = await fetch(`${WATCHUFA_PLAYER}/${encodeURIComponent(playerID)}`, {
       headers: { 'User-Agent': UA, Accept: 'text/html' },
     });
     if (!res.ok) return null;
-    const html = await res.text();
-    const m = html.match(HEADSHOT_RE);
-    return m ? m[1] : null;
+    const m = (await res.text()).match(HEADSHOT_RE);
+    srcUrl = m ? m[1] : null;
   } catch {
     return null;
   }
+  if (!srcUrl) return null;
+
+  // 2. Download the original.
+  let bytes: Uint8Array;
+  try {
+    const res = await fetch(srcUrl, { headers: { 'User-Agent': UA } });
+    if (!res.ok) return null;
+    bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length === 0) return null;
+  } catch {
+    return null;
+  }
+
+  // 3. Upload to our bucket as {id}.{ext} (upsert → self-heals on change).
+  let ext = (srcUrl.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (ext === 'jpeg') ext = 'jpg';
+  const objectPath = `${playerID}.${ext}`;
+  const { error } = await supabase.storage
+    .from(HEADSHOT_BUCKET)
+    .upload(objectPath, bytes, {
+      contentType: MIME[ext] ?? 'image/jpeg',
+      upsert: true,
+      cacheControl: '31536000',
+    });
+  if (error) return null;
+  return supabase.storage.from(HEADSHOT_BUCKET).getPublicUrl(objectPath).data.publicUrl;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -238,8 +276,8 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     .filter((g) => normalizeStatus(g.status) === 'InProgress' || !haveStats.has(g.gameID))
     .slice(0, maxGames);
 
-  // Players that already have a headshot → never re-scrape. One paged sweep of
-  // the (small) set of non-null headshots; cheap vs. re-hitting watchufa.
+  // Players that already have a (self-hosted) headshot → never re-fetch. One
+  // paged sweep of the non-null set; cheap vs. re-hitting watchufa + Storage.
   const existingHeadshots = new Set<string>();
   {
     const PAGE = 1000;
@@ -325,7 +363,7 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
           updated_at: new Date().toISOString(),
         };
         if (headshotFetches < MAX_HEADSHOT_FETCHES && !existingHeadshots.has(rp.playerID)) {
-          const url = await fetchHeadshotUrl(rp.playerID);
+          const url = await fetchHeadshotUrl(supabase, rp.playerID);
           headshotFetches++;
           if (url) row.headshot_url = url;
         }

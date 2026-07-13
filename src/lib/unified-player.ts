@@ -20,6 +20,7 @@ import {
   currentSeasonYear,
   getAllPlayerStats,
   getPlayerInfo,
+  getStoredHeadshotUrl,
   getPlayerSeasons,
   getPlayerGameLog,
   getUfaChampionsByYear,
@@ -307,9 +308,16 @@ async function _getUnifiedPlayerProfile(
   if (!looksLikeUsauUuid(anchorId)) {
     // ── UFA slug anchor ────────────────────────────────────────────────
     anchorLeague = 'ufa';
-    const info = await getPlayerInfo(anchorId).catch(() => null);
+    // Prefer our SELF-HOSTED headshot (fast, CDN-cached, served resized via the
+    // image transform) over the live watchufa scrape. getPlayerInfo still
+    // provides the display name; only fall back to ITS headshot if we have none
+    // stored (rare — a brand-new player the sync hasn't self-hosted yet).
+    const [info, stored] = await Promise.all([
+      getPlayerInfo(anchorId).catch(() => null),
+      getStoredHeadshotUrl(anchorId).catch(() => null),
+    ]);
     anchorName = info?.name ?? null;
-    headshotUrl = info?.headshotUrl ?? null;
+    headshotUrl = stored ?? info?.headshotUrl ?? null;
   } else {
     // ── UUID anchor — try USAU first, then PUL ─────────────────────────
     // Both USAU and PUL use v4 UUIDs. We check USAU first (existing

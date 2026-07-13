@@ -177,26 +177,56 @@ async function fetchPlayerGameLog(playerID: string, year: number): Promise<ApiPl
 }
 
 // ─── Headshots ───────────────────────────────────────────────────────────────
-// UFA is the only league that publishes player headshots. They live on the
-// watchufa.com player profile page as
-//   <img ... src=".../profile-images/{playerID}_profile.{ext}">
-// where {ext} varies (png/jpg/jpeg/JPG). We hotlink the public CDN URL. ~90% of
-// players have one; the rest return null (UI falls back to a monogram).
+// UFA is the only league that publishes player headshots — on the watchufa.com
+// profile page as <img src=".../profile-images/{playerID}_profile.{ext}"> (ext
+// varies png/jpg/jpeg/JPG). We SELF-HOST them: download the original and upload
+// a copy to the ufa-headshots Storage bucket, storing OUR public URL (the app
+// serves it through the image transform). Self-hosting fixes the watchufa
+// hotlink problems: multi-MB originals, slow/flaky third-party CDN, dead URLs.
+// ~90% of players have one; the rest return null (UI falls back to a monogram).
 const WATCHUFA_PLAYER = 'https://www.watchufa.com/league/players';
 const HEADSHOT_RE = /src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i;
+const HEADSHOT_BUCKET = 'ufa-headshots';
+const HEADSHOT_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+};
 
+/** Scrape → download → upload to the bucket → return OUR public object URL.
+ *  Soft-fails to null at every step so a missing headshot never breaks the sync. */
 async function fetchHeadshotUrl(playerID: string): Promise<string | null> {
+  let srcUrl: string | null = null;
   try {
     const res = await fetch(`${WATCHUFA_PLAYER}/${encodeURIComponent(playerID)}`, {
       headers: { 'User-Agent': UA, Accept: 'text/html' },
     });
     if (!res.ok) return null;
-    const html = await res.text();
-    const m = html.match(HEADSHOT_RE);
-    return m ? m[1] : null;
+    const m = (await res.text()).match(HEADSHOT_RE);
+    srcUrl = m ? m[1] : null;
   } catch {
-    return null; // soft-fail — a missing headshot must never break the sync
+    return null;
   }
+  if (!srcUrl) return null;
+
+  let bytes: Uint8Array;
+  try {
+    const res = await fetch(srcUrl, { headers: { 'User-Agent': UA } });
+    if (!res.ok) return null;
+    bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length === 0) return null;
+  } catch {
+    return null;
+  }
+
+  let ext = (srcUrl.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (ext === 'jpeg') ext = 'jpg';
+  const objectPath = `${playerID}.${ext}`;
+  const { error } = await db.storage.from(HEADSHOT_BUCKET).upload(objectPath, bytes, {
+    contentType: HEADSHOT_MIME[ext] ?? 'image/jpeg',
+    upsert: true,
+    cacheControl: '31536000',
+  });
+  if (error) return null;
+  return db.storage.from(HEADSHOT_BUCKET).getPublicUrl(objectPath).data.publicUrl;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -282,6 +312,24 @@ async function syncYear(year: number) {
   const players = await fetchPlayers(year);
   console.log(`  players: ${players.length}`);
 
+  // Players who ALREADY have a self-hosted headshot → skip the download+upload.
+  // (The dedicated backfill script migrates existing watchufa URLs; here we only
+  // self-host players with no headshot yet, so a full re-sync stays cheap.)
+  const alreadyHosted = new Set<string>();
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await db
+        .from('ufa_players')
+        .select('id')
+        .like('headshot_url', `%/${HEADSHOT_BUCKET}/%`)
+        .range(from, from + PAGE - 1);
+      const rows = data ?? [];
+      for (const r of rows) alreadyHosted.add((r as { id: string }).id);
+      if (rows.length < PAGE) break;
+    }
+  }
+
   // 4) Per-player game logs → stat rows. We also learn each player's team for
   //    this season from the game row's home/away side + the game's team slugs.
   const gameById = new Map(games.map((g) => [g.gameID, g]));
@@ -329,18 +377,22 @@ async function syncYear(year: number) {
       }
     }
 
-    // Headshot from the watchufa profile page (soft-fail → null).
-    const headshotUrl = await fetchHeadshotUrl(p.playerID);
-
-    playerRows.push({
+    // Self-host the headshot ONLY for players we don't already have one for.
+    // Never write headshot_url when we didn't (re)fetch — otherwise a null would
+    // clobber an existing self-hosted URL for a player who has no page this run.
+    const row: Record<string, unknown> = {
       id: p.playerID,
       first_name: first,
       last_name: last,
       full_name: p.name,
       current_team_id: teamId,
-      headshot_url: headshotUrl,
       updated_at: new Date().toISOString(),
-    });
+    };
+    if (!alreadyHosted.has(p.playerID)) {
+      const headshotUrl = await fetchHeadshotUrl(p.playerID);
+      if (headshotUrl) row.headshot_url = headshotUrl;
+    }
+    playerRows.push(row);
 
     for (const row of log) {
       const g = gameById.get(row.gameID);

@@ -44,8 +44,11 @@ export default async function FantasyTeamPage({ params }: Props) {
   const offenders = roster.filter((s) => s.role === 'offender');
   const defenders = roster.filter((s) => s.role === 'defender');
 
+  // Top nav — the /fantasy page IS the leaderboard, so label it plainly.
+  // (This is the page's only back-nav; the old redundant bottom "Leaderboard"
+  // link was removed.)
   const BREADCRUMBS: Crumb[] = [
-    { label: 'Fantasy', href: '/fantasy' },
+    { label: 'Leaderboard', href: '/fantasy' },
     { label: team.teamName },
   ];
 
@@ -136,22 +139,6 @@ export default async function FantasyTeamPage({ params }: Props) {
         )}
       </section>
 
-      {/* ── Back to leaderboard ───────────────────────────────────────────── */}
-      <div className="mt-10 pt-6 border-t border-hairline">
-        <Link
-          href="/fantasy"
-          className={[
-            'inline-flex items-center gap-2 font-tight text-[13px] font-bold text-muted',
-            'hover:text-ink transition-colors duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-          ].join(' ')}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M11 7H3M6 4L3 7l3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Leaderboard
-        </Link>
-      </div>
     </PageShell>
   );
 }

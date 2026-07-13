@@ -1,6 +1,6 @@
 'use client';
 
-// Player profile header avatar — a UFA headshot (watchufa.com) when available,
+// Player profile header avatar — a self-hosted UFA headshot when available,
 // else a circular initials monogram. Client-only because it needs onError to
 // swap a broken/expired image URL for the monogram at runtime; the parent
 // profile header otherwise stays a Server Component.
@@ -13,6 +13,23 @@ interface PlayerHeadshotProps {
   size?: number;
 }
 
+// Headshots are stored in the `ufa-headshots` Storage bucket as full-size
+// originals. We serve them through Supabase's image transform so the browser
+// downloads a small (~6 KB) resized+recompressed avatar instead of a multi-MB
+// original — fast + CDN-cached. Only rewrite OUR bucket objects; any legacy
+// watchufa hotlink (pre-migration) is used as-is.
+const STORAGE_OBJECT = '/storage/v1/object/public/ufa-headshots/';
+const STORAGE_RENDER = '/storage/v1/render/image/public/ufa-headshots/';
+/** Display size in CSS px (88 desktop) × 2 for retina. */
+const RENDER_PX = 176;
+
+function displaySrc(url: string): string {
+  if (!url.includes(STORAGE_OBJECT)) return url; // legacy/watchufa → as-is
+  const rendered = url.replace(STORAGE_OBJECT, STORAGE_RENDER);
+  const sep = rendered.includes('?') ? '&' : '?';
+  return `${rendered}${sep}width=${RENDER_PX}&height=${RENDER_PX}&resize=cover&quality=80`;
+}
+
 export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHeadshotProps) {
   const [imgFailed, setImgFailed] = useState(false);
   const showImage = Boolean(headshotUrl) && !imgFailed;
@@ -21,8 +38,12 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={headshotUrl!}
+        src={displaySrc(headshotUrl!)}
         alt={`${displayName} headshot`}
+        width={RENDER_PX}
+        height={RENDER_PX}
+        loading="lazy"
+        decoding="async"
         onError={() => setImgFailed(true)}
         className="h-full w-full rounded-xl object-cover"
       />
