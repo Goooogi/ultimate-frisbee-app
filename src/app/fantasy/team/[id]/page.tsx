@@ -238,9 +238,16 @@ function RosterSection({
               {roleTag}
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block font-tight text-[14px] font-semibold text-ink truncate">
+              <Link
+                href={`/players/${slot.playerId}`}
+                className={[
+                  'block font-tight text-[14px] font-semibold text-ink truncate',
+                  'hover:text-accent transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:underline',
+                ].join(' ')}
+              >
                 {slot.fullName}
-              </span>
+              </Link>
               {slot.teamName && (
                 <span className="block font-tight text-[11px] text-muted truncate">
                   {slot.teamName}

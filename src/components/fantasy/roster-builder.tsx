@@ -203,9 +203,16 @@ function PlayerTypeahead({
           {roleLabel}
         </span>
         <span className="flex-1 min-w-0">
-          <span className="block font-tight text-[14px] font-semibold text-ink truncate">
+          <Link
+            href={`/players/${currentPlayer.playerId}`}
+            className={[
+              'block font-tight text-[14px] font-semibold text-ink truncate',
+              'hover:text-accent transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:underline',
+            ].join(' ')}
+          >
             {currentPlayer.fullName}
-          </span>
+          </Link>
           {currentPlayer.teamName && (
             <span className="block font-tight text-[11px] text-muted truncate">
               {currentPlayer.teamName}
@@ -286,15 +293,25 @@ function PlayerTypeahead({
           ].join(' ')}
         >
           {results.map((hit) => (
-            <li key={hit.playerId} role="option" aria-selected="false">
+            <li
+              key={hit.playerId}
+              role="option"
+              aria-selected="false"
+              className={[
+                'flex items-center',
+                'hover:bg-surface-hi transition-colors duration-150',
+                'border-t border-hairline first:border-t-0',
+              ].join(' ')}
+            >
+              {/* Primary action in the builder: tapping the row picks the player
+                  for this slot. */}
               <button
                 type="button"
                 onClick={() => handleSelect(hit)}
                 className={[
-                  'w-full flex items-center gap-3 px-4 py-2.5 text-left',
-                  'hover:bg-surface-hi transition-colors duration-150 cursor-pointer',
+                  'flex-1 min-w-0 flex items-center gap-3 px-4 py-2.5 text-left',
+                  'cursor-pointer',
                   'focus-visible:outline-none focus-visible:bg-surface-hi',
-                  'border-t border-hairline first:border-t-0',
                 ].join(' ')}
               >
                 <span className="flex-1 min-w-0">
@@ -308,6 +325,29 @@ function PlayerTypeahead({
                   )}
                 </span>
               </button>
+              {/* Secondary: jump to the player's profile without selecting. */}
+              <Link
+                href={`/players/${hit.playerId}`}
+                onMouseDown={(e) => e.stopPropagation()}
+                aria-label={`View ${hit.fullName}'s profile`}
+                title="View profile"
+                className={[
+                  'flex-shrink-0 flex items-center justify-center w-9 h-9 mr-1.5 rounded-full',
+                  'text-faint hover:text-accent hover:bg-ink/5',
+                  'transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                ].join(' ')}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                  <path
+                    d="M6 3l5 5-5 5"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </Link>
             </li>
           ))}
         </ul>

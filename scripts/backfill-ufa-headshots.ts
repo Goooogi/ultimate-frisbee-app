@@ -64,18 +64,42 @@ const MIME: Record<string, string> = {
   jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
 };
 
+// Resilient fetch: watchufa is a flaky Drupal site, so a single transient
+// failure (timeout, connection reset, momentary 5xx) must NOT permanently leave
+// a player headshot-less. Retry a few times with backoff and a hard timeout,
+// mirroring the API client's resilience. Returns null only after all tries.
+const FETCH_TIMEOUT_MS = 20_000;
+const FETCH_TRIES = 4;
+async function fetchWithRetry(url: string, init: RequestInit, label: string): Promise<Response | null> {
+  for (let attempt = 1; attempt <= FETCH_TRIES; attempt++) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+      // 404 = the resource genuinely isn't there; don't waste retries on it.
+      if (res.status === 404) return res;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (err) {
+      if (attempt < FETCH_TRIES) {
+        await sleep(500 * attempt);
+        continue;
+      }
+      console.warn(`    ! ${label} failed after ${attempt} tries: ${(err as Error).message}`);
+      return null;
+    }
+  }
+  return null;
+}
+
 /** Scrape a player's watchufa profile page for the headshot src (extension varies). */
 async function scrapeHeadshotUrl(playerID: string): Promise<string | null> {
-  try {
-    const res = await fetch(`https://www.watchufa.com/league/players/${encodeURIComponent(playerID)}`, {
-      headers: { 'User-Agent': UA, Accept: 'text/html' },
-    });
-    if (!res.ok) return null;
-    const m = (await res.text()).match(HEADSHOT_RE);
-    return m ? m[1] : null;
-  } catch {
-    return null;
-  }
+  const res = await fetchWithRetry(
+    `https://www.watchufa.com/league/players/${encodeURIComponent(playerID)}`,
+    { headers: { 'User-Agent': UA, Accept: 'text/html' } },
+    `scrape ${playerID}`,
+  );
+  if (!res || !res.ok) return null;
+  const m = (await res.text()).match(HEADSHOT_RE);
+  return m ? m[1] : null;
 }
 
 /** Download `srcUrl`, upload to the bucket as {playerID}.{ext}, return the
@@ -86,10 +110,10 @@ async function selfHost(playerID: string, srcUrl: string): Promise<string | null
   const contentType = MIME[ext] ?? 'image/jpeg';
   const objectPath = `${playerID}.${ext}`;
 
+  const res = await fetchWithRetry(srcUrl, { headers: { 'User-Agent': UA } }, `download ${playerID}`);
+  if (!res || !res.ok) return null;
   let buf: Buffer;
   try {
-    const res = await fetch(srcUrl, { headers: { 'User-Agent': UA } });
-    if (!res.ok) return null;
     buf = Buffer.from(await res.arrayBuffer());
     if (buf.length === 0) return null;
   } catch {

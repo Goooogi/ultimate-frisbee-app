@@ -6,6 +6,7 @@
 // (RLS scopes it to the caller). Mirrors the create-play-dialog modal shell.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
 import {
   submitFeedback,
@@ -23,7 +24,11 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
   const [message, setMessage] = useState('');
   const [phase, setPhase] = useState<Phase>('editing');
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   const textRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Portal target is only available after mount (SSR-safe).
+  useEffect(() => setMounted(true), []);
 
   // Focus the textarea on open; close on Esc (unless submitting).
   useEffect(() => {
@@ -62,12 +67,18 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
     setPhase('done');
   }, [message, category, pathname, phase]);
 
-  return (
+  if (!mounted) return null;
+
+  // Portaled to <body> so the fixed overlay escapes the sticky, backdrop-blurred
+  // header rail. A `backdrop-filter` ancestor becomes the containing block for
+  // fixed descendants (CSS spec), which otherwise collapses this dialog into the
+  // ~52px header strip instead of covering the viewport.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="feedback-title"
-      className="fixed inset-0 z-50 flex items-center justify-center px-4 py-6 bg-ink/40 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center px-4 py-6 bg-ink/40 backdrop-blur-sm"
       onPointerDown={(e) => {
         if (e.target === e.currentTarget && phase !== 'submitting') onClose();
       }}
@@ -192,6 +203,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
           </>
         )}
       </form>
-    </div>
+    </div>,
+    document.body,
   );
 }
