@@ -36,7 +36,11 @@ export async function getAllFeedback(limit = 200): Promise<FeedbackItem[]> {
   const supabase = createClient();
   const { data, error } = await supabase
     .from('feedback')
-    .select('id, message, category, page_path, status, created_at, profiles:user_id(display_name, username)')
+    // Embed the submitter's profile. user_id has TWO FKs (auth.users AND
+    // profiles), so the embed MUST name the profiles constraint explicitly or
+    // PostgREST errors on the ambiguity (PGRST201). See migration
+    // feedback_user_profiles_fk_for_embed.
+    .select('id, message, category, page_path, status, created_at, profiles:feedback_user_id_profiles_fkey(display_name, username)')
     // Enums sort by their DEFINITION order in Postgres, so status ASC =
     // new → read → resolved: un-triaged feedback floats to the top.
     .order('status', { ascending: true })
