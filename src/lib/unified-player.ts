@@ -657,7 +657,10 @@ async function _getUnifiedPlayerProfile(
     anchorLeague,
     displayName: anchorName,
     pronouns,
-    headshotUrl,
+    // Prefer the anchor-branch headshot (set only for UFA-anchored profiles);
+    // otherwise fall back to the UFA side's headshot so a profile reached by a
+    // USAU/PUL/WUL UUID still shows the player's UFA photo instead of a monogram.
+    headshotUrl: headshotUrl ?? sideUfa?.headshotUrl ?? null,
     years,
     career,
     pul: pulCareerBlock,
@@ -710,11 +713,24 @@ interface UfaSideStint {
 interface UfaSide {
   stints: UfaSideStint[];
   championYears: number[];
+  /** Self-hosted headshot for THIS UFA slug (stored first, live scrape fallback).
+   *  Carried on the side so a non-UFA-anchored profile (e.g. reached by a USAU
+   *  UUID) still recovers the player's UFA headshot instead of falling to a
+   *  monogram. null when the player genuinely has none. */
+  headshotUrl: string | null;
 }
 
 async function buildUfaSide(playerID: string): Promise<UfaSide | null> {
+  // Resolve the headshot for this slug up front so it's available regardless of
+  // how many seasons/stints the player has (even a UFA player with no season
+  // rows can still have a headshot). Stored (self-hosted) first, live scrape
+  // fallback for a brand-new player the sync hasn't hosted yet.
+  const headshotUrl = await getStoredHeadshotUrl(playerID)
+    .then((stored) => stored ?? getPlayerInfo(playerID).then((i) => i?.headshotUrl ?? null))
+    .catch(() => null);
+
   const seasons = await getPlayerSeasons(playerID).catch(() => [] as UfaPlayerSeasonRow[]);
-  if (seasons.length === 0) return { stints: [], championYears: [] };
+  if (seasons.length === 0) return { stints: [], championYears: [], headshotUrl };
 
   // Group rows by (year, teamAbbrev). The UFA API emits a separate row
   // for regSeason vs playoffs and (rarely) for a mid-season trade — we
@@ -776,7 +792,7 @@ async function buildUfaSide(playerID: string): Promise<UfaSide | null> {
     new Set(stints.filter((s) => s.stint.isChampion).map((s) => s.year)),
   ).sort((a, b) => b - a);
 
-  return { stints, championYears };
+  return { stints, championYears, headshotUrl };
 }
 
 function sumUfaRows(rows: UfaPlayerSeasonRow[]): UfaSeasonStint['totals'] {
