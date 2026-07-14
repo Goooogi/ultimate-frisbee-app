@@ -4,7 +4,7 @@
 // else a circular initials monogram. Client-only because it needs onError to
 // swap a broken/expired image URL for the monogram at runtime; the parent
 // profile header otherwise stays a Server Component.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface PlayerHeadshotProps {
   headshotUrl: string | null;
@@ -31,20 +31,55 @@ function displaySrc(url: string): string {
 }
 
 export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHeadshotProps) {
+  // `imgFailed` latches to the monogram only after we've exhausted a retry.
+  // It MUST reset when the player (headshotUrl) changes — otherwise a failure on
+  // one profile carries the monogram into the next player during client-side
+  // navigation, since React reuses this component instance. This was the main
+  // "I saw my photo before, now it never shows" cause.
   const [imgFailed, setImgFailed] = useState(false);
+  // Retry counter also resets per-url. One transient hiccup (rate-limit, a
+  // cancelled fetch, a flaky moment) shouldn't kill the image forever — retry
+  // once with a cache-busting param before falling back to the monogram.
+  const [attempt, setAttempt] = useState(0);
+  const MAX_ATTEMPTS = 2;
+  const prevUrl = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prevUrl.current !== headshotUrl) {
+      prevUrl.current = headshotUrl;
+      setImgFailed(false);
+      setAttempt(0);
+    }
+  }, [headshotUrl]);
+
   const showImage = Boolean(headshotUrl) && !imgFailed;
 
   if (showImage) {
+    const base = displaySrc(headshotUrl!);
+    // On the retry, append a cache-buster so a poisoned/edge-cached transient
+    // error isn't just replayed from cache.
+    const src = attempt > 0 ? `${base}${base.includes('?') ? '&' : '?'}r=${attempt}` : base;
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={displaySrc(headshotUrl!)}
+        // Key by url so a src change across navigations remounts the <img>
+        // cleanly (fresh load, no stale error state on the DOM node).
+        key={headshotUrl!}
+        src={src}
         alt={`${displayName} headshot`}
         width={RENDER_PX}
         height={RENDER_PX}
-        loading="lazy"
+        // Above-the-fold profile avatar — eager + high priority. Lazy-loading
+        // here only added a failure window (and delayed the primary image).
+        fetchPriority="high"
         decoding="async"
-        onError={() => setImgFailed(true)}
+        onError={() => {
+          if (attempt + 1 < MAX_ATTEMPTS) {
+            setAttempt((a) => a + 1);
+          } else {
+            setImgFailed(true);
+          }
+        }}
         className="h-full w-full rounded-xl object-cover"
       />
     );
