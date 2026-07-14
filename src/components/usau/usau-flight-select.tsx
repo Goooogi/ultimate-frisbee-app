@@ -1,9 +1,11 @@
 'use client';
 
 // USAU flight (Triple Crown Tour tier) MULTI-select filter, bound to ?flight=
-// as a comma-separated list (e.g. ?flight=pro,elite). Persists in the URL, so
-// it survives refresh, is shareable, and the server reads it directly (each
-// combo memoizes independently in the cached reader).
+// as a comma-separated list (e.g. ?flight=pro,elite). The URL is the source of
+// truth (shareable, server reads it directly, each combo memoizes in the cached
+// reader). The selection is ALSO mirrored to localStorage, so navigating away
+// (e.g. into a tournament, which has no ?flight) and back to Scores/Schedule
+// auto-restores your last choice instead of resetting to "All flights".
 //
 // Standalone so it sits next to UsauLevelSelect on BOTH the Schedule tab and the
 // Scores (recent results) tab. Flight is a Club-only concept, so callers gate
@@ -12,6 +14,10 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { FLIGHTS, FLIGHT_LABELS, parseFlightsParam, type Flight } from '@/lib/usau/flights';
+
+// localStorage key for the remembered flight selection (comma-joined, canonical
+// order). Empty string = "All flights" was the last explicit choice.
+const FLIGHT_STORAGE_KEY = 'the-layout.usau.flights';
 
 export function UsauFlightSelect() {
   const router = useRouter();
@@ -25,18 +31,59 @@ export function UsauFlightSelect() {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const listId = useId();
 
-  // Write the next flight set to the URL (canonical order, comma-joined).
+  // Write the next flight set to the URL (canonical order, comma-joined) AND
+  // mirror it to localStorage so it survives navigation away and back.
   const commit = useCallback(
     (next: Flight[]) => {
       const ordered = FLIGHTS.filter((f) => next.includes(f));
+      const value = ordered.join(',');
+      try {
+        localStorage.setItem(FLIGHT_STORAGE_KEY, value);
+      } catch {
+        // storage unavailable (private mode) — URL still works
+      }
       const params = new URLSearchParams(searchParams.toString());
       if (ordered.length === 0) params.delete('flight');
-      else params.set('flight', ordered.join(','));
+      else params.set('flight', value);
       const qs = params.toString();
       router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
     },
     [router, pathname, searchParams],
   );
+
+  // Restore on mount: if the URL carries no ?flight but we have a remembered
+  // NON-EMPTY selection, re-apply it to the URL so the (server-filtered) list
+  // comes back the way the user left it. Runs once per mount of this control —
+  // which only mounts on the Scores/Schedule USAU (Club) views, so it never
+  // leaks into other pages. If the URL DOES carry a flight (e.g. a shared link),
+  // that wins and we sync storage to it instead.
+  const hasUrlFlight = searchParams.has('flight');
+  useEffect(() => {
+    if (hasUrlFlight) {
+      // A URL-provided selection is authoritative — remember it.
+      try {
+        localStorage.setItem(FLIGHT_STORAGE_KEY, parseFlightsParam(searchParams.get('flight')).join(','));
+      } catch {
+        // ignore
+      }
+      return;
+    }
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(FLIGHT_STORAGE_KEY);
+    } catch {
+      return;
+    }
+    const remembered = parseFlightsParam(stored);
+    if (remembered.length > 0) {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('flight', remembered.join(','));
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+    }
+    // Restore is a mount-time concern; deps intentionally minimal. hasUrlFlight
+    // guards re-runs when the param appears after restore.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasUrlFlight]);
 
   const toggle = useCallback(
     (f: Flight) => {
