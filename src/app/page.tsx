@@ -80,8 +80,10 @@ export default async function HomePage() {
       // USAU ("Up next" card): the next several UPCOMING flighted tournaments,
       // always forward-looking (unlike getCurrentEvent, which looks back Sun–Tue).
       // A LIST (not one event's pool games) so the card stays full even before
-      // any games are ingested for the nearest event.
-      listNextUpcomingEvents(5),
+      // any games are ingested for the nearest event. Fetch 6 (the card's max
+      // rows) so it can match the UFA card's height; UpNextCards trims to the
+      // shared row count.
+      listNextUpcomingEvents(6),
       // PUL: upcoming-this-week else most-recent final. Season resolved from the
       // data (newest present) so it self-advances and never queries an empty year.
       (async () => listPulGames({ season: await getPulCurrentSeason() }))(),
@@ -162,13 +164,16 @@ export default async function HomePage() {
   const tsOf = (g: UfaGame): number =>
     g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0;
 
+  // Supply up to 6 upcoming UFA games; the UpNextCards component decides how
+  // many to actually SHOW (equal-height match to the USAU card). Was capped at
+  // 4, which left the card short next to USAU's 5 tournaments.
   const upNext = games
     .filter((g) => {
       const s = gameUiState(g);
       return s.isUpcoming || s.isLive;
     })
     .sort((a, b) => tsOf(a) - tsOf(b))
-    .slice(0, 4);
+    .slice(0, 6);
 
   const recent = games
     .filter((g) => gameUiState(g).isFinal)

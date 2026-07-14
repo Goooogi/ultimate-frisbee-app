@@ -9,6 +9,7 @@
 import { useState } from 'react';
 import { PlayerContentUploader } from './player-content-uploader';
 import type { PlayerContentItem, PlayerKind } from '@/lib/player-content/types';
+import { videoThumbnailUrl } from '@/lib/player-content/embed';
 import { useRouter } from 'next/navigation';
 
 interface Props {
@@ -123,18 +124,46 @@ function ContentTile({ item, onClick }: { item: PlayerContentItem; onClick: () =
   }
 
   // Video file or external video link — show a poster with a play badge.
+  // For a YouTube link we can show the video's real thumbnail frame instead of
+  // a black box; other cases (video files, Vimeo) keep the plain black poster.
+  const thumb = item.kind === 'video_link' && item.external_url
+    ? videoThumbnailUrl(item.external_url)
+    : null;
   return (
     <button
       type="button"
       onClick={onClick}
       className="group relative aspect-square overflow-hidden rounded-card shadow-card hover:shadow-lift transition-shadow bg-black flex items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
     >
-      <PlayBadge />
-      <span className="absolute inset-x-0 bottom-0 px-2 py-1 text-[10px] text-bg bg-black/60 truncate font-tight">
+      {thumb && <VideoThumb src={thumb} />}
+      {/* Play badge sits above the thumbnail; a subtle scrim keeps it legible. */}
+      <span className="relative z-10">
+        <PlayBadge />
+      </span>
+      <span className="absolute inset-x-0 bottom-0 z-10 px-2 py-1 text-[10px] text-bg bg-black/60 truncate font-tight">
         {item.kind === 'video_link' ? 'Video link' : 'Video'}
         {item.caption ? ` · ${item.caption}` : ''}
       </span>
     </button>
+  );
+}
+
+// YouTube thumbnail behind a video tile. Self-hides on error (e.g. a deleted
+// video / private upload) so the tile falls back to the black poster instead of
+// a broken-image glyph.
+function VideoThumb({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="absolute inset-0 w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity"
+    />
   );
 }
 

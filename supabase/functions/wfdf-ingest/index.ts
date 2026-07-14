@@ -68,6 +68,15 @@ function fullName(first?: string, last?: string): string {
   return [first, last].filter((x) => x && String(x).trim()).join(' ').trim();
 }
 
+// WFDF Worlds (WUC/WUGC) run the GUTS discipline alongside ultimate. It is a
+// different sport and must never enter our ultimate data. Its series are named
+// "Guts Open" / "Guts Women's". Match on a word boundary so a real division
+// can't false-positive.
+const GUTS_RE = /\bguts\b/i;
+function isGuts(name: unknown): boolean {
+  return typeof name === 'string' && GUTS_RE.test(name);
+}
+
 interface IngestResult {
   season: string;
   event: string;
@@ -157,13 +166,28 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
   if (evErr) throw evErr;
   const eventId = eventRow.id as string;
 
-  // 4. Divisions (series). Upsert, then map series_id → our uuid.
-  const divRows = (ref.series ?? []).map((s: any) => ({
-    event_id: eventId,
-    wfdf_series_id: s.series_id,
-    name: s.name,
-    ordering: s.ordering ?? null,
-  }));
+  // Guts sets — exclude these series/teams from every table below (Guts is not
+  // ultimate; see isGuts). Team is Guts if its own name is Guts OR it belongs to
+  // a Guts series (defensive: some feeds only name the series).
+  const gutsSeriesIds = new Set<number>(
+    (ref.series ?? []).filter((s: any) => isGuts(s.name)).map((s: any) => s.series_id),
+  );
+  const gutsTeamIds = new Set<number>(
+    (ref.teams ?? [])
+      .filter((t: any) => isGuts(t.name) || gutsSeriesIds.has(t.series))
+      .map((t: any) => t.team_id),
+  );
+
+  // 4. Divisions (series). Upsert, then map series_id → our uuid. Guts series
+  //    are dropped entirely.
+  const divRows = (ref.series ?? [])
+    .filter((s: any) => !gutsSeriesIds.has(s.series_id))
+    .map((s: any) => ({
+      event_id: eventId,
+      wfdf_series_id: s.series_id,
+      name: s.name,
+      ordering: s.ordering ?? null,
+    }));
   if (divRows.length) {
     const { error } = await supabase
       .from('wfdf_divisions')
@@ -177,8 +201,8 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
   const divUuidBySeries = new Map<number, string>((divs ?? []).map((d: any) => [d.wfdf_series_id, d.id]));
 
   // 5. Teams (from reference.teams). Basic row now; record/spirit rollups get
-  //    filled from the per-team detail below.
-  const teamRows = (ref.teams ?? []).map((t: any) => {
+  //    filled from the per-team detail below. Guts teams excluded.
+  const teamRows = (ref.teams ?? []).filter((t: any) => !gutsTeamIds.has(t.team_id)).map((t: any) => {
     const country = countriesById.get(t.country);
     return {
       event_id: eventId,
@@ -209,7 +233,7 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
 
   // 6. Per-team rosters + record rollups (teams_{id}.json). Bounded concurrency.
   let rosterPlayers = 0;
-  const teamIds = [...teamsById.keys()];
+  const teamIds = [...teamsById.keys()].filter((id) => !gutsTeamIds.has(id));
   for (let i = 0; i < teamIds.length; i += ROSTER_CONCURRENCY) {
     const batch = teamIds.slice(i, i + ROSTER_CONCURRENCY);
     await Promise.all(
@@ -266,7 +290,11 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
   }
 
   // 7. Games (scores + spirit). Division inferred from the home team's series.
-  const games = (await getJson(dataUrl('games'))).games ?? [];
+  //    Drop any game involving a Guts team (a Guts-vs-Guts matchup, or defensively
+  //    a Guts team appearing on either side).
+  const games = ((await getJson(dataUrl('games'))).games ?? []).filter(
+    (g: any) => !gutsTeamIds.has(g.hometeam) && !gutsTeamIds.has(g.visitorteam),
+  );
   const gameRows = games.map((g: any) => {
     const home = teamsById.get(g.hometeam);
     const pool = poolsById.get(g.pool);

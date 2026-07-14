@@ -64,23 +64,36 @@ interface UpNextCardsProps {
 /** Renders the "Up next" card group: UFA card, then USAU card — each shown
  *  only when it has data. Returns null (no wrapper element) when neither has
  *  content, so page.tsx can drop this straight into the flex stack. */
+/** Upper bound on rows per card — keeps a huge slate from ballooning the card. */
+const MAX_UP_NEXT_ROWS = 6;
+
 export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
   const hasUfa = ufaGames.length > 0;
   const hasUsau = usauEvents.length > 0;
   if (!hasUfa && !hasUsau) return null;
 
+  // Equal-height guarantee: when BOTH cards render side by side, they show the
+  // SAME number of rows — the smaller of the two supplies (capped) — so neither
+  // card is taller than the other. When only one card renders, it uses its own
+  // supply up to the cap. This both fills the UFA card's whitespace (it now
+  // shows as many games as USAU has events) and never leaves one card short.
+  const rowCount =
+    hasUfa && hasUsau
+      ? Math.min(ufaGames.length, usauEvents.length, MAX_UP_NEXT_ROWS)
+      : MAX_UP_NEXT_ROWS;
+
   return (
     <>
       {hasUfa && (
         <CardShell title="Up next" pill="UFA">
-          {ufaGames.slice(0, 4).map((g, i) => (
+          {ufaGames.slice(0, rowCount).map((g, i) => (
             <UfaUpNextRow key={g.gameID} game={g} first={i === 0} />
           ))}
         </CardShell>
       )}
       {hasUsau && (
         <CardShell title="Up next" pill="USAU">
-          {usauEvents.map((e, i) => (
+          {usauEvents.slice(0, rowCount).map((e, i) => (
             <UsauEventRow key={e.slug} event={e} first={i === 0} />
           ))}
         </CardShell>

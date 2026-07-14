@@ -30,13 +30,39 @@ export function WfdfEventDetail({ event }: Props) {
     [event.games, activeDiv],
   );
 
-  const standings = useMemo(
-    () =>
-      [...teams].sort(
-        (a, b) => (a.finalStanding ?? 999) - (b.finalStanding ?? 999) || a.name.localeCompare(b.name),
-      ),
-    [teams],
-  );
+  // Standings order:
+  //  1. final_standing when the source provides it (modern events do; legacy
+  //     Ultiorganizer events — e.g. WUC 2024 — leave it null for every team).
+  //  2. Otherwise fall back to RECORD: win% desc → more wins → fewer losses.
+  //     Without this, null-standing teams sorted alphabetically, which put a
+  //     9-0 USA at the BOTTOM. Record is the meaningful ranking when there's no
+  //     official final placement.
+  //  3. Name as the final tie-break.
+  // Whether the source gave us official final placements (modern events) or we
+  // must rank by record (legacy pool-only events).
+  const hasOfficialStanding = useMemo(() => teams.some((t) => t.finalStanding != null), [teams]);
+
+  const standings = useMemo(() => {
+    const anyStanding = hasOfficialStanding;
+    const winPct = (t: (typeof teams)[number]) => {
+      const w = t.wins ?? 0;
+      const l = t.losses ?? 0;
+      return w + l > 0 ? w / (w + l) : -1; // teams with no games sink below 0-x
+    };
+    return [...teams].sort((a, b) => {
+      if (anyStanding) {
+        const d = (a.finalStanding ?? 999) - (b.finalStanding ?? 999);
+        if (d !== 0) return d;
+      }
+      const pd = winPct(b) - winPct(a);
+      if (pd !== 0) return pd;
+      const wd = (b.wins ?? 0) - (a.wins ?? 0);
+      if (wd !== 0) return wd;
+      const ld = (a.losses ?? 0) - (b.losses ?? 0);
+      if (ld !== 0) return ld;
+      return a.name.localeCompare(b.name);
+    });
+  }, [teams, hasOfficialStanding]);
 
   const poolGames = useMemo(() => games.filter((g) => !g.isBracket), [games]);
   const bracketGames = useMemo(() => games.filter((g) => g.isBracket), [games]);
@@ -135,10 +161,17 @@ export function WfdfEventDetail({ event }: Props) {
         <GameSection heading="Bracket Games" games={bracketGames} />
       )}
 
-      {/* Final Standings — collapsible, collapsed by default (the bracket is
-          the primary view). key forces the <details> back to closed when the
-          division changes, so it doesn't stay open across divisions. */}
-      <details key={`standings-${activeDiv}`} className="group">
+      {/* Final Standings — collapsible. Collapsed by default WHEN a bracket
+          leads (the bracket is then the primary view). But when this division
+          has NO bracket at all (e.g. legacy pool-only events like WUC 2024
+          Open), the standings ARE the primary view, so open them by default.
+          key forces the <details> back to its default state when the division
+          changes, so it doesn't carry an open/closed state across divisions. */}
+      <details
+        key={`standings-${activeDiv}`}
+        className="group"
+        open={!hasBracketTree && bracketGames.length === 0}
+      >
         <summary
           className={[
             'flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden',
@@ -163,7 +196,7 @@ export function WfdfEventDetail({ event }: Props) {
               strokeLinejoin="round"
             />
           </svg>
-          Final Standings
+          {hasOfficialStanding ? 'Final Standings' : 'Standings · By Record'}
           <span className="text-faint tabular ml-1">{standings.length}</span>
         </summary>
 
@@ -186,14 +219,22 @@ export function WfdfEventDetail({ event }: Props) {
                     i > 0 ? 'border-t border-hairline' : '',
                   ].join(' ')}
                 >
-                  <span
-                    className={[
-                      'font-tight text-[13px] font-bold tabular',
-                      (t.finalStanding ?? 99) <= 3 ? 'text-accent' : 'text-faint',
-                    ].join(' ')}
-                  >
-                    {t.finalStanding ?? '—'}
-                  </span>
+                  {/* Rank: the official final standing when present; otherwise
+                      the positional rank by record (i + 1) — never a bare "—"
+                      that would make every legacy-event row look unranked. */}
+                  {(() => {
+                    const rank = t.finalStanding ?? i + 1;
+                    return (
+                      <span
+                        className={[
+                          'font-tight text-[13px] font-bold tabular',
+                          rank <= 3 ? 'text-accent' : 'text-faint',
+                        ].join(' ')}
+                      >
+                        {rank}
+                      </span>
+                    );
+                  })()}
                   <span className="min-w-0 flex items-center gap-2">
                     <WfdfFlag flagFile={t.flagFile} countryCode={t.countryCode} size={16} />
                     <span className="font-tight text-[14px] font-semibold text-ink truncate">

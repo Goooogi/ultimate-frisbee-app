@@ -63,7 +63,11 @@ const UFA_SORT_FIELDS = new Set([
   'gamesPlayed',
 ]);
 
+// 'impact' is OUR derived metric (Goals + Assists + Blocks), NOT an API sort
+// field — it's computed and sorted server-side over the fetched rows. It's the
+// default so the list ranks by overall two-way production out of the box.
 const UFA_SORT_OPTIONS = [
+  { value: 'impact', label: 'Impact' },
   { value: 'scores', label: 'Scores' },
   { value: 'goals', label: 'Goals' },
   { value: 'assists', label: 'Assists' },
@@ -75,6 +79,13 @@ const UFA_SORT_OPTIONS = [
   { value: 'plusMinus', label: '+/−' },
   { value: 'gamesPlayed', label: 'Games' },
 ];
+
+/** Impact = Goals + Assists + Blocks. A player's combined offensive (scores)
+ *  and defensive (blocks) production in one number. Local to this route (Next
+ *  page files may only export its reserved names). */
+function ufaImpact(p: UfaPlayerStat): number {
+  return (p.goals ?? 0) + (p.assists ?? 0) + (p.blocks ?? 0);
+}
 
 export const revalidate = 600;
 
@@ -453,22 +464,40 @@ export default async function PlayersPage({ searchParams }: Props) {
   const year = parseInt(searchParams.year ?? String(currentYear), 10) || currentYear;
 
   // Validate sort/dir against the allowlist — never forward arbitrary user input.
+  // Default is 'impact' (our derived Goals+Assists+Blocks metric). 'impact' is
+  // NOT an API sort field, so we don't forward it upstream — we fetch by the
+  // closest proxy and rank ourselves (see below).
   const rawSort = searchParams.sort ?? '';
-  const sort = UFA_SORT_FIELDS.has(rawSort) ? rawSort : 'scores';
+  const sort = rawSort === 'impact' || UFA_SORT_FIELDS.has(rawSort) ? rawSort : 'impact';
   const rawDir = searchParams.dir ?? '';
   const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
 
+  const sortByImpact = sort === 'impact';
+  // For API-sortable fields we only need the top 200 (7 pages). For Impact we
+  // must rank ALL players ourselves — a high-block defender can have top-tier
+  // Impact yet a middling 'scores' rank — so we fetch the full season pool (via
+  // the 'scores' proxy for a stable order) and sort locally. Cached for 10min.
   const [stats, champions] = await Promise.all([
-    // We only render the top 200; at 30 rows/page that's 7 pages. Cap maxPages
-    // so a cache miss walks 7 upstream pages instead of the default 30 (~900
-    // rows) only to discard 700 of them.
-    getAllPlayerStats({ year, per: 'total', sort, dir }, { maxPages: 7 }).catch(
-      () => [] as UfaPlayerStat[],
-    ),
+    getAllPlayerStats(
+      { year, per: 'total', sort: sortByImpact ? 'scores' : sort, dir },
+      { maxPages: sortByImpact ? 30 : 7 },
+    ).catch(() => [] as UfaPlayerStat[]),
     getUfaChampionsByYear([year]).catch(() => new Map<number, string>()),
   ]);
-  // API returns rows already sorted; just cap at 200.
-  const ranked = stats.slice(0, 200);
+
+  // Impact: compute + sort ourselves; otherwise the API already returned rows
+  // in order. Cap at 200 either way (all we render).
+  const ordered = sortByImpact
+    ? [...stats].sort((a, b) => {
+        const d = ufaImpact(b) - ufaImpact(a);
+        // Tie-break by scores then name for a stable, sensible order.
+        if (d !== 0) return dir === 'asc' ? -d : d;
+        const s = (b.scores ?? 0) - (a.scores ?? 0);
+        if (s !== 0) return dir === 'asc' ? -s : s;
+        return a.name.localeCompare(b.name);
+      })
+    : stats;
+  const ranked = ordered.slice(0, 200);
   // Champion of the year the list is showing. Single-season list scopes
   // the trophy chip to "this year's reigning champ" rather than career
   // history (full career is on the player profile).

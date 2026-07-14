@@ -40,10 +40,12 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   viewportFit: 'cover',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#F4F2EC' },
-    { media: '(prefers-color-scheme: dark)', color: '#0A0A09' },
-  ],
+  // Single stable default = the field (tan) theme's --bg. We DON'T key this on
+  // prefers-color-scheme because our theme is app-controlled (data-theme), not
+  // OS-controlled — an OS-dark phone would otherwise get a dark bar behind the
+  // tan page. ThemeBootstrap + use-theme overwrite this meta at runtime to match
+  // the active theme (see THEME_BAR_COLOR); this value is just the pre-JS paint.
+  themeColor: '#F4F2EC',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

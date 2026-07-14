@@ -316,7 +316,9 @@ function SubAppRow({
         'group flex items-center justify-between gap-3 w-full px-2.5 py-3 rounded-xl',
         'no-underline transition-colors duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        active ? 'bg-[rgb(var(--accent)/0.08)]' : 'hover:bg-surface',
+        // Neutral highlight — a soft surface tint rather than an orange wash, so
+        // the active row reads as "selected" without the loud accent fill.
+        active ? 'bg-surface' : 'hover:bg-surface',
       ].join(' ')}
     >
       <span className="flex items-center gap-2 min-w-0">
@@ -324,12 +326,7 @@ function SubAppRow({
             strings, and italic display glyphs (e.g. the "y" descender) render
             slightly outside their advance-width box; clipping cuts them off
             even when the text technically fits. */}
-        <span
-          className={[
-            'font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em] whitespace-nowrap',
-            active ? 'text-accent' : 'text-ink',
-          ].join(' ')}
-        >
+        <span className="font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em] whitespace-nowrap text-ink">
           {label}
         </span>
         {badge && (
@@ -343,7 +340,7 @@ function SubAppRow({
       <svg
         className={[
           'w-4 h-4 flex-shrink-0 transition-colors duration-150',
-          active ? 'text-accent' : 'text-faint group-hover:text-accent',
+          active ? 'text-ink' : 'text-faint group-hover:text-ink',
         ].join(' ')}
         viewBox="0 0 16 16"
         fill="none"
@@ -1380,9 +1377,18 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           // Mobile: full-screen sheet — always covers the whole viewport
           // regardless of how much content is expanded/collapsed.
           'absolute inset-0 w-full h-dvh max-h-dvh',
-          // Desktop: right side drawer (original geometry).
+          // Desktop: right side drawer (original geometry). Right edge stays
+          // flush to the viewport. The LEFT corners are the OUTER corners of the
+          // whole popout — so they round on THIS panel only when no league
+          // fly-out is open. When a fly-out IS open it sits to our left and owns
+          // the outer rounded-left corners; our left edge must then go square so
+          // the two panes seam flush (otherwise both are rounded and you see a
+          // weird double-curve at the join). See the fly-out's matching radius.
           'md:inset-y-0 md:left-auto md:right-0 md:max-w-[360px] md:h-auto md:max-h-none',
-          'md:rounded-none md:border-l',
+          'md:rounded-r-none md:border-l',
+          // Square our left corners only while the fly-out is actually visible
+          // beside us (it renders under `gamesOpen && flyoutLeague`).
+          gamesOpen && flyoutLeague ? 'md:rounded-l-none' : 'md:rounded-l-2xl',
           // Panel itself does NOT scroll — the <nav> below is the scroll region
           // (flex-1 min-h-0 overflow-y-auto). This keeps the header pinned at
           // the top and the AccountFooter frozen at the bottom, so neither
@@ -1390,21 +1396,23 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           'flex flex-col bg-bg overflow-hidden shadow-2xl',
           // Mobile animates translate-y, desktop translate-x — both compose
           // into one transform, so the md: overrides neutralize the other axis.
-          'transition-transform motion-reduce:transition-none',
+          // Also transition border-radius so the left corners round/square
+          // smoothly as the league fly-out opens/closes beside the panel.
+          'transition-[transform,border-radius] motion-reduce:transition-none',
           open
             ? 'translate-y-0 translate-x-0'
             : '-translate-y-full md:translate-y-0 md:translate-x-full',
         ].join(' ')}
         style={{ transitionDuration: '240ms', transitionTimingFunction: 'ease-out' }}
       >
-        {/* Accent glow bleeding down from the top-right — gives the panel a
-            branded, lit feel instead of a flat white sheet. */}
+        {/* Faint top-right glow — kept very subtle (was a stronger accent wash)
+            so the panel feels lit/smooth without an obvious orange cast. */}
         <div
           aria-hidden="true"
           className="pointer-events-none absolute inset-x-0 top-0 h-40"
           style={{
             background:
-              'radial-gradient(120% 80% at 100% 0%, rgb(var(--accent) / 0.14), transparent 70%)',
+              'radial-gradient(120% 80% at 100% 0%, rgb(var(--accent) / 0.05), transparent 70%)',
           }}
         />
 
@@ -1459,27 +1467,32 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
               No icon tile, no leading number. ─────────────────────────── */}
           <button
             type="button"
-            onClick={() => setGamesOpen((v) => !v)}
+            onClick={() =>
+              setGamesOpen((v) => {
+                const next = !v;
+                // Collapsing "The League" also closes any open league fly-out —
+                // otherwise the desktop sub-panel would linger beside a
+                // collapsed accordion.
+                if (!next) setFlyoutLeague(null);
+                return next;
+              })
+            }
             aria-expanded={gamesOpen}
             className={[
               'group flex items-center justify-between gap-3 w-full px-2.5 py-3 rounded-xl text-left cursor-pointer',
               'transition-colors duration-150',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              activeApp === 'games' || gamesOpen ? 'bg-[rgb(var(--accent)/0.08)]' : 'hover:bg-surface',
+              // Neutral highlight — soft surface tint, no orange wash.
+              activeApp === 'games' || gamesOpen ? 'bg-surface' : 'hover:bg-surface',
             ].join(' ')}
           >
-            <span
-              className={[
-                'font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em]',
-                activeApp === 'games' || gamesOpen ? 'text-accent' : 'text-ink',
-              ].join(' ')}
-            >
+            <span className="font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em] text-ink">
               The League
             </span>
             <ChevronDown
               className={[
                 'w-4 h-4 flex-shrink-0 transition-transform duration-200',
-                gamesOpen ? 'rotate-180 text-accent' : 'text-faint',
+                gamesOpen ? 'rotate-180 text-ink' : 'text-faint',
               ].join(' ')}
             />
           </button>
@@ -1511,10 +1524,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                 }
                 const isOpen = flyoutLeague === league.id;
                 return (
-                  <div
-                    key={league.id}
-                    className={isOpen ? 'border-l-2 border-accent -ml-px pl-px' : ''}
-                  >
+                  <div key={league.id}>
                     <button
                       type="button"
                       aria-haspopup="menu"
@@ -1536,7 +1546,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                     >
                       <LeagueMark label={league.label} img={league.img} />
                       <span className="flex-1 min-w-0 flex items-baseline gap-2">
-                        <span className={['text-[13px] font-bold font-tight', isOpen ? 'text-accent' : 'text-ink'].join(' ')}>
+                        <span className="text-[13px] font-bold font-tight text-ink">
                           {league.label}
                         </span>
                         <span className="text-[11px] text-muted font-tight truncate">{league.fullName}</span>
@@ -1547,7 +1557,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       <svg
                         className={[
                           'hidden md:block w-3 h-3 flex-shrink-0 transition-colors duration-150',
-                          isOpen ? 'text-accent' : 'text-faint',
+                          isOpen ? 'text-ink' : 'text-faint',
                         ].join(' ')}
                         viewBox="0 0 10 10"
                         fill="none"
@@ -1558,7 +1568,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                       <ChevronDown
                         className={[
                           'md:hidden flex-shrink-0 transition-transform duration-200',
-                          isOpen ? 'rotate-180 text-accent' : 'text-faint',
+                          isOpen ? 'rotate-180 text-ink' : 'text-faint',
                         ].join(' ')}
                       />
                     </button>
@@ -1668,7 +1678,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           panel rendering UsauLevelAccordion (same component mobile uses) —
           all divisions collapsed on open; expandedLevel/onToggleLevel below
           are the desktop-specific accordion state. */}
-      {flyoutLeague && (
+      {gamesOpen && flyoutLeague && (
         <div
           role="menu"
           aria-label={`${MEGA_LEAGUES.find((l) => l.id === flyoutLeague)?.label ?? ''} navigation`}
@@ -1677,7 +1687,10 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             'absolute z-[1]',
             // Desktop: full-height column beside the right drawer (original).
             'md:inset-y-0 md:left-auto md:right-[360px] md:w-[340px] md:max-h-none',
-            'md:rounded-none md:border-b-0 md:border-l',
+            // Round the OUTER (left) corners to match the drawer's rounded left
+            // edge — together the two panes read as one soft popout card. Inner
+            // (right) edge stays square so the two panes seam flush.
+            'md:rounded-l-2xl md:rounded-r-none md:border-b-0 md:border-l',
             'motion-reduce:animate-none',
           ].join(' ')}
           style={{ animation: 'gamesDropdownIn 160ms ease-out both' }}

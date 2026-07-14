@@ -204,7 +204,7 @@ function UfaList({
   const playerColCls = 'w-[150px] min-w-[150px] max-w-[150px] sm:w-[200px] sm:min-w-[200px] sm:max-w-[200px]';
   return (
     <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
-      <table className="w-full min-w-[860px] border-collapse table-fixed">
+      <table className="w-full min-w-[920px] border-collapse table-fixed">
         <thead>
           <tr>
             <th className={`${thBase} text-left pl-5 ${playerColCls}`} scope="col">Player</th>
@@ -213,6 +213,7 @@ function UfaList({
             <th className={thBase} scope="col" title="Assists">A</th>
             <th className={thBase} scope="col" title="Hockey Assists">HA</th>
             <th className={thBase} scope="col" title="Scores (Goals + Assists)">Scr</th>
+            <th className={`${thBase} text-accent`} scope="col" title="Impact (Goals + Assists + Blocks)">IMP</th>
             <th className={thBase} scope="col" title="Completions">Cmp</th>
             <th className={thBase} scope="col" title="Completion %">Cmp%</th>
             <th className={thBase} scope="col" title="Throwaways">TA</th>
@@ -260,6 +261,7 @@ function UfaList({
                 <Cell value={p.assists} rowTop={rowTop} />
                 <Cell value={p.hockeyAssists} rowTop={rowTop} />
                 <Cell value={p.scores} bold rowTop={rowTop} />
+                <ImpactCell value={(p.goals ?? 0) + (p.assists ?? 0) + (p.blocks ?? 0)} rowTop={rowTop} />
                 <Cell value={p.completions} rowTop={rowTop} />
                 <Cell value={p.completionPercentage ? `${p.completionPercentage}%` : '—'} rowTop={rowTop} />
                 <Cell value={p.throwaways} rowTop={rowTop} />
@@ -296,6 +298,21 @@ function Cell({
       ].join(' ')}
     >
       {value ?? '—'}
+    </td>
+  );
+}
+
+// Impact (Goals + Assists + Blocks) — the default ranking metric, so it reads
+// in the accent color + bold to stand out from the neutral stat columns.
+function ImpactCell({ value, rowTop }: { value: number; rowTop?: string }) {
+  return (
+    <td
+      className={[
+        'px-3 py-2.5 text-[13px] text-right tabular font-tight font-bold text-accent',
+        rowTop ?? '',
+      ].join(' ')}
+    >
+      {value}
     </td>
   );
 }
