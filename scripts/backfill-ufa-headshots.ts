@@ -137,11 +137,27 @@ async function main() {
 
   // Players to process: those with an existing (watchufa) headshot_url, plus —
   // when --all — those without one (we'll scrape their page first).
-  const { data: players, error } = await db
-    .from('ufa_players')
-    .select('id, headshot_url')
-    .order('id', { ascending: true });
-  if (error) { console.error(error); process.exit(1); }
+  //
+  // MUST paginate: PostgREST caps a single select at 1000 rows, and the table
+  // has ~2000 players. Without this, the back half of the roster (by id) was
+  // INVISIBLE to the backfill and could never be healed — the real reason so
+  // many headshots stayed null no matter how often we re-ran.
+  const players: { id: string; headshot_url: string | null }[] = [];
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await db
+        .from('ufa_players')
+        .select('id, headshot_url')
+        .order('id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) { console.error(error); process.exit(1); }
+      const rows = (data ?? []) as { id: string; headshot_url: string | null }[];
+      players.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
+  console.log(`Loaded ${players.length} players total.`);
 
   const alreadyHosted = (u: string | null) =>
     !!u && u.includes(`/storage/v1/object/public/${BUCKET}/`);
@@ -154,14 +170,26 @@ async function main() {
 
   console.log(`Players to self-host: ${work.length}${scrapeMissing ? ' (incl. scrape-missing)' : ''}`);
 
+  // Pacing: watchufa rate-limits/drops connections when hit rapidly in bulk —
+  // that throttling (not per-request flakiness) is what left ~half of a 500-player
+  // run still missing even WITH per-request retries, since the whole IP was
+  // throttled during the burst. Space requests out and jitter them so we stay
+  // under the limiter. Slower, but it converges in one pass. `--fast` opts back
+  // into the old aggressive cadence when you know the site is healthy.
+  const fast = process.argv.includes('--fast');
+  const GAP_MS = fast ? 80 : 400;   // between players
+  const SCRAPE_GAP_MS = fast ? 120 : 250; // after a page scrape, before the image download
+  // Deterministic jitter (no Math.random dependency): ±25% sawtooth over index.
+  const jitter = (base: number, i: number) => base + ((i * 137) % Math.max(1, Math.floor(base / 2)));
+
   let hosted = 0, done = 0, skipped = 0;
   for (const p of work) {
     let src = p.headshot_url as string | null;
     if (!src || !src.includes('watchufa')) {
       src = await scrapeHeadshotUrl(p.id);
-      await sleep(120);
+      await sleep(jitter(SCRAPE_GAP_MS, done));
     }
-    if (!src) { skipped++; done++; continue; }
+    if (!src) { skipped++; done++; await sleep(jitter(GAP_MS, done)); continue; }
 
     const publicUrl = await selfHost(p.id, src);
     if (publicUrl) {
@@ -172,9 +200,16 @@ async function main() {
     }
     done++;
     if (done % 25 === 0) console.log(`  ${done}/${work.length}  (${hosted} hosted, ${skipped} skipped)`);
-    await sleep(80);
+    await sleep(jitter(GAP_MS, done));
   }
   console.log(`Done: ${hosted} self-hosted, ${skipped} skipped, of ${work.length}.`);
+  if (skipped > 0) {
+    console.log(
+      `Note: ${skipped} skipped = players with genuinely no watchufa image (→ monogram) ` +
+        `OR still-throttled fetches. Re-run this script to pick up any throttled ones; ` +
+        `players with a real image will keep getting hosted until only the image-less remain.`,
+    );
+  }
 }
 
 main().catch((e) => { console.error('FATAL:', e); process.exit(1); });
