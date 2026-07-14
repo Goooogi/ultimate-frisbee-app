@@ -112,29 +112,21 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
   const scheduleHref = `/schedule${buildLeagueQs('usau', null, level)}`;
   return (
     <>
-      <div className="flex items-end justify-between gap-4 mb-5 lg:mb-7">
-        <div className="flex flex-col gap-2">
-          <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans">
-            USAU · {levelLabel(level)} · Recent Results
-          </span>
-          <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.02em] text-ink">
-            Recent Tournaments
-          </h1>
-        </div>
-        <div className="flex-shrink-0 flex items-center gap-3">
+      {/* Stacked header: eyebrow row → title row → filters row. Each on its own
+          line so nothing wraps awkwardly on mobile. (The "All tournaments" link
+          was removed — the mega-menu already offers the full schedule.) */}
+      <div className="flex flex-col gap-3 mb-5 lg:mb-7">
+        <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans whitespace-nowrap">
+          USAU · {levelLabel(level)} · Recent Results
+        </span>
+        <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.02em] text-ink">
+          Recent Tournaments
+        </h1>
+        <div className="flex items-center gap-2 flex-wrap">
           <UsauLevelSelect />
           {/* Flight filter — Triple Crown Tour tier, Club only. Same control the
               /schedule tab uses, so completed games can be filtered by flight too. */}
           {level === 'CLUB' && <UsauFlightSelect />}
-          <Link
-            href={scheduleHref}
-            className="flex-shrink-0 text-[11px] font-bold tracking-[0.12em] uppercase text-muted hover:text-accent transition-colors no-underline inline-flex items-center gap-1.5"
-          >
-            All tournaments
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <path d="M3 8H13M13 8L8.5 3.5M13 8L8.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
-            </svg>
-          </Link>
         </div>
       </div>
 

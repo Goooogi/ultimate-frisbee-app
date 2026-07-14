@@ -1476,14 +1476,18 @@ export async function recentUsauTournamentCards(
     });
   }
 
-  // Order by FLIGHT status first (highest flight at the top), then by recency
-  // (newest weekend first) as the tiebreak. Untagged events (no flight) fall to
-  // the bottom, most-recent-first among themselves.
-  results.sort(
-    (a, b) =>
-      flightRankForName(b.name) - flightRankForName(a.name) ||
-      (b.endDate ?? '').localeCompare(a.endDate ?? ''),
-  );
+  // Ordering:
+  //  - No flight filter → FLIGHT status first (marquee events float to the top),
+  //    then recency. Untagged events fall to the bottom, most-recent-first.
+  //  - Flight filter active → the user already chose the tier(s), so tier
+  //    ordering is noise. Order purely by DATE (newest weekend first).
+  results.sort((a, b) => {
+    if (!hasFlightFilter) {
+      const tier = flightRankForName(b.name) - flightRankForName(a.name);
+      if (tier !== 0) return tier;
+    }
+    return (b.endDate ?? '').localeCompare(a.endDate ?? '');
+  });
   return results.slice(0, limit);
 }
 

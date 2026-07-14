@@ -92,7 +92,10 @@ export function UsauFlightSelect() {
           'whitespace-nowrap',
         ].join(' ')}
       >
-        <span>{label}</span>
+        {/* Fixed-width label so the pill doesn't shift as the text length
+            changes across "All flights" / "Classic Flight" / "2 flights".
+            Sized (+left-aligned) for the widest label ("Classic Flight"). */}
+        <span className="inline-block min-w-[6.75rem] text-left">{label}</span>
         <svg
           className={['w-3 h-3 text-muted transition-transform duration-150', open ? 'rotate-180' : ''].join(' ')}
           viewBox="0 0 12 12"
