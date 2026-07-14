@@ -121,9 +121,11 @@ export async function listEvents(opts?: {
    *  the division lives on the participating teams. We treat an event
    *  as "in the X division" if any of its teams.gender_division = X. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
-  /** Filter to events curated into this Triple Crown Tour flight (see flights.ts).
-   *  Flight is a hand-maintained code map, not a USAU-published tournament field. */
-  flight?: Flight;
+  /** Filter to events curated into these Triple Crown Tour flights (see
+   *  flights.ts). Flight is a hand-maintained code map, not a USAU-published
+   *  tournament field. Empty/undefined ⇒ all flights (no filter). Multiple ⇒
+   *  events matching ANY of them. */
+  flights?: Flight[];
   limit?: number;
 }): Promise<UsauEventCard[]> {
   const db = await supabase();
@@ -162,12 +164,16 @@ export async function listEvents(opts?: {
     }
   }
 
+  const flightSet = opts?.flights && opts.flights.length > 0 ? new Set(opts.flights) : null;
   const filtered = (events ?? []).filter((e) => {
     if (opts?.genderDivision) {
       const set = divisionsByEvent.get(e.id);
       if (!(set && set.has(opts.genderDivision))) return false;
     }
-    if (opts?.flight && flightForName(e.name) !== opts.flight) return false;
+    if (flightSet) {
+      const f = flightForName(e.name);
+      if (!f || !flightSet.has(f)) return false;
+    }
     return true;
   });
 
@@ -1296,6 +1302,10 @@ export async function recentUsauTournamentCards(
   now: Date = new Date(),
   limit = 200,
   competitionLevel: CompetitionLevel = 'CLUB',
+  /** Optional Triple Crown Tour flight filter (Club only) — mirrors /schedule.
+   *  Only events whose name maps to ONE OF these flights are returned. Empty ⇒
+   *  all flights. */
+  flights: Flight[] = [],
 ): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
   const today = now.toISOString().slice(0, 10);
@@ -1308,7 +1318,13 @@ export async function recentUsauTournamentCards(
   // year-round: in-season it reads the same as before, offseason it shows
   // the final tournaments of the season. The games inner-join keeps
   // result-less catalog shells from wasting one of the 10 slots.
+  // Show 10 recent events normally. When filtering to a single flight, fetch a
+  // wider candidate pool first (flight is a name-derived tag, not a column, so
+  // it's filtered in JS below) — otherwise a 10-event window that happens to
+  // contain few of the requested flight would show an almost-empty scores page.
   const RECENT_EVENT_COUNT = 10;
+  const hasFlightFilter = flights.length > 0;
+  const FETCH_COUNT = hasFlightFilter ? 120 : RECENT_EVENT_COUNT;
   const { data: events } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date, usau_games!inner(id)')
@@ -1316,18 +1332,30 @@ export async function recentUsauTournamentCards(
     .lt('end_date', today)
     .order('end_date', { ascending: false, nullsFirst: false })
     .limit(1, { foreignTable: 'usau_games' })
-    .limit(RECENT_EVENT_COUNT);
+    .limit(FETCH_COUNT);
 
   // ALL events at the level (not just ranked-flight flagships), ordered by
   // flight status below. Flight tags exist only on marquee events today, so
   // most sort to the bottom (no flight) — that's expected until more get tagged.
-  const recent = ((events ?? []) as Array<{
+  const allRecent = ((events ?? []) as Array<{
     id: string;
     usau_slug: string;
     name: string;
     start_date: string | null;
     end_date: string | null;
   }>);
+  // Apply the flight filter (name-derived) here, then cap to the display count.
+  // Without a flight, keep the original 10 most-recent. Multiple flights ⇒ match
+  // ANY of them.
+  const flightSet = hasFlightFilter ? new Set(flights) : null;
+  const recent = (
+    flightSet
+      ? allRecent.filter((e) => {
+          const f = flightForName(e.name);
+          return f != null && flightSet.has(f);
+        })
+      : allRecent
+  ).slice(0, RECENT_EVENT_COUNT);
   if (recent.length === 0) return [];
 
   const eventIds = recent.map((e) => e.id);

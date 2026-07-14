@@ -56,6 +56,7 @@ import {
 } from '@/lib/wul/data';
 import { getWfdfPlayerStints, type WfdfPlayerStint } from '@/lib/wfdf/data';
 import { namesMatch } from '@/lib/name-match';
+import type { PlayerKind } from '@/lib/player-content/types';
 
 // ── Output shape ─────────────────────────────────────────────────────────
 
@@ -270,6 +271,13 @@ export interface UnifiedPlayerProfile {
    *  so the "Teams" tab lands on the right division (e.g. a Mixed player → Mixed
    *  club teams). Most-recent chosen because a career can span divisions. */
   mostRecentUsauDivision: string | null;
+  /** Every (league, id) pair this person is known by across the leagues that
+   *  merged into this profile. User-uploaded content (player_content) is keyed
+   *  by (player_kind, player_ref), and a person may have uploaded to ANY of
+   *  their league ids — so the profile must fetch content for ALL of these, not
+   *  just the anchor, or a photo added under (usau, uuid) won't show when the
+   *  profile is reached via the UFA slug. See getApprovedContentForPlayers. */
+  contentRefs: { kind: PlayerKind; ref: string }[];
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────
@@ -354,18 +362,20 @@ async function _getUnifiedPlayerProfile(
 
   if (!anchorName) return null;
 
+  // Resolve the UFA slug up front (anchor slug, else name-matched) so we can
+  // both build the UFA side AND record it as a content ref below.
+  const ufaSlug =
+    anchorLeague === 'ufa'
+      ? anchorId
+      : await findUfaSlugByName(anchorName).catch(() => null);
+
   // ── Fetch all three sides in parallel ──────────────────────────────────
   // Each lookup is independent once we have a display name. Failures are
   // caught per-league so one bad network call doesn't kill the whole profile.
   const [sideUfa, sideUsau, sidePulCareer, teamMap, sideWulCareer, wulTeamMap, wfdfStints] =
     await Promise.all([
     // UFA side
-    (anchorLeague === 'ufa'
-      ? buildUfaSide(anchorId)
-      : findUfaSlugByName(anchorName).then((slug) =>
-          slug ? buildUfaSide(slug) : null,
-        )
-    ).catch(() => null),
+    (ufaSlug ? buildUfaSide(ufaSlug) : Promise.resolve(null)).catch(() => null),
 
     // USAU side
     (anchorLeague === 'usau'
@@ -652,11 +662,29 @@ async function _getUnifiedPlayerProfile(
     sidePulCareer?.pronouns ??
     (anchorPulCareer?.pronouns ?? null);
 
+  // Content refs — every (league, id) this person is known by. User content is
+  // keyed by (player_kind, player_ref); the profile fetches across ALL of these
+  // so a photo uploaded under any of the person's league ids shows regardless of
+  // which url the profile was reached by. Dedupe (kind,ref) pairs.
+  const contentRefs: { kind: PlayerKind; ref: string }[] = [];
+  const pushRef = (kind: PlayerKind, ref: string | null | undefined) => {
+    if (ref && !contentRefs.some((r) => r.kind === kind && r.ref === ref)) {
+      contentRefs.push({ kind, ref });
+    }
+  };
+  pushRef('ufa', ufaSlug);
+  pushRef('usau', sideUsau?.id);
+  pushRef('pul', sidePulCareer?.anchorId ?? anchorPulCareer?.anchorId);
+  pushRef('wul', sideWulCareer?.anchorId ?? anchorWulCareer?.anchorId);
+  // Always include the anchor itself (covers any league not otherwise captured).
+  pushRef(anchorLeague, anchorId);
+
   return {
     anchorId,
     anchorLeague,
     displayName: anchorName,
     pronouns,
+    contentRefs,
     // Prefer the anchor-branch headshot (set only for UFA-anchored profiles);
     // otherwise fall back to the UFA side's headshot so a profile reached by a
     // USAU/PUL/WUL UUID still shows the player's UFA photo instead of a monogram.

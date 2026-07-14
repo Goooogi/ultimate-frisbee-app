@@ -175,6 +175,10 @@ function UsauEventRow({ event, first }: { event: UpcomingUsauEvent; first: boole
   const dateRange = formatDateRange(event.startDate, event.endDate);
   const meta = [dateRange, event.flightLabel].filter(Boolean).join(' · ');
 
+  // Single-line row: tournament name (left, truncates) + date·flight on the
+  // RIGHT — mirroring the UFA row's `[matchup | when]` layout so USAU rows are
+  // the SAME HEIGHT as UFA rows and the two cards align. (Previously the meta
+  // sat on a second line below the name, making each USAU row taller.)
   return (
     <Link
       href={`/usau/events/${event.slug}`}
@@ -184,11 +188,12 @@ function UsauEventRow({ event, first }: { event: UpcomingUsauEvent; first: boole
         'hover:opacity-80 transition-opacity',
       ].join(' ')}
     >
-      <div className="min-w-0">
-        <div className="font-tight font-semibold text-[13.5px] text-ink truncate">{event.name}</div>
-        {meta && <div className="font-mono text-[10.5px] text-muted mt-0.5 truncate">{meta}</div>}
-      </div>
-      <span className="font-mono text-[10.5px] text-faint flex-shrink-0">View →</span>
+      <span className="font-tight font-semibold text-[13.5px] text-ink truncate min-w-0">
+        {event.name}
+      </span>
+      <span className="font-mono text-[10.5px] text-muted flex-shrink-0 whitespace-nowrap uppercase">
+        {meta || 'View →'}
+      </span>
     </Link>
   );
 }

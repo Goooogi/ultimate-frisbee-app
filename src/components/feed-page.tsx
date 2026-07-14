@@ -18,6 +18,7 @@ import type { UsauMajorWithChampions } from '@/lib/usau/data';
 import { useLeague } from '@/lib/use-league';
 import { buildLeagueQs, levelLabel, type UsauLevel } from '@/lib/league';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import { UsauFlightSelect } from '@/components/usau/usau-flight-select';
 
 interface FeedPageProps {
   games: UfaGame[];
@@ -122,6 +123,9 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
         </div>
         <div className="flex-shrink-0 flex items-center gap-3">
           <UsauLevelSelect />
+          {/* Flight filter — Triple Crown Tour tier, Club only. Same control the
+              /schedule tab uses, so completed games can be filtered by flight too. */}
+          {level === 'CLUB' && <UsauFlightSelect />}
           <Link
             href={scheduleHref}
             className="flex-shrink-0 text-[11px] font-bold tracking-[0.12em] uppercase text-muted hover:text-accent transition-colors no-underline inline-flex items-center gap-1.5"

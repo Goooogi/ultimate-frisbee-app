@@ -13,6 +13,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { listEvents, listSeasons, type UsauEventCard, type CompetitionLevel } from '@/lib/usau/data';
 import { FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import type { UsauDivision } from '@/lib/league';
@@ -25,16 +26,29 @@ interface Props {
    *  schedule shows the full calendar for that level, not just events that
    *  happen to have teams scraped. */
   competitionLevel?: CompetitionLevel;
-  /** Optional curated Triple Crown Tour flight filter (Club only). */
-  flight?: Flight;
+  /** Optional curated Triple Crown Tour flight filter (Club only), multi-select.
+   *  Empty ⇒ all flights. */
+  flights?: Flight[];
 }
 
-export function UsauSchedule({ division, competitionLevel, flight }: Props = {}) {
+export function UsauSchedule({ division, competitionLevel, flights = [] }: Props = {}) {
+  // Serialize for a stable useEffect dep (array identity changes each render).
+  const flightsKey = flights.join(',');
+  const searchParams = useSearchParams();
   const [seasons, setSeasons] = useState<number[]>([]);
-  const [season, setSeason] = useState<number | null>(null);
   const [events, setEvents] = useState<UsauEventCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Season is URL-driven (?season=YYYY) so its control can live in the page
+  // header controls row (above the other filters on mobile) and persist/share
+  // via the URL. Falls back to the latest available season when ?season is
+  // absent or not in the list.
+  const seasonParam = Number(searchParams.get('season'));
+  const season =
+    Number.isInteger(seasonParam) && seasons.includes(seasonParam)
+      ? seasonParam
+      : (seasons[0] ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +56,6 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
       .then((s) => {
         if (cancelled) return;
         setSeasons(s);
-        setSeason(s[0] ?? null);
       })
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load seasons.'),
@@ -61,7 +74,7 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
     // scraped yet. genderDivision is optional: when undefined, every event at
     // the level shows; when set, it narrows to events with scraped teams in
     // that division (the only ones we can attribute a gender to).
-    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel, flight })
+    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel, flights })
       .then((e) => !cancelled && setEvents(e))
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
@@ -70,7 +83,9 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
     return () => {
       cancelled = true;
     };
-  }, [season, division, competitionLevel, flight]);
+    // flightsKey (serialized) is the stable dep — `flights` array identity changes each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [season, division, competitionLevel, flightsKey]);
 
   const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
 
@@ -84,48 +99,6 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
 
   return (
     <div className="flex flex-col gap-6">
-      {seasons.length > 0 && season != null && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-            Season
-          </span>
-          <div className="relative inline-flex items-center">
-            <select
-              value={season}
-              onChange={(e) => setSeason(parseInt(e.target.value, 10))}
-              aria-label="Select season"
-              className={[
-                'appearance-none cursor-pointer',
-                'px-3.5 py-2 pr-7 rounded-full min-h-[36px]',
-                'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-                'bg-ink/5 text-ink',
-                'hover:bg-ink/10 transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              ].join(' ')}
-            >
-              {seasons.map((y) => (
-                <option key={y} value={y}>
-                  {y} Season
-                </option>
-              ))}
-            </select>
-            <svg
-              className="pointer-events-none absolute right-2.5 w-3 h-3 text-muted"
-              viewBox="0 0 12 12"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M3 4.5L6 7.5L9 4.5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-        </div>
-      )}
 
       {loading && events.length === 0 ? (
         <div className="text-[12px] text-faint font-tight">Loading events…</div>
