@@ -81,10 +81,6 @@ function UfaFeed({
         <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted font-sans">
           {badgeText(counts)}
         </span>
-        <span className="mx-1.5 text-faint">·</span>
-        <span className="text-[10.5px] font-semibold tracking-[0.1em] text-faint uppercase font-sans">
-          Auto-refresh · 30s
-        </span>
       </div>
 
       {games.length > 0 ? (
@@ -174,6 +170,8 @@ function badgeText(c: GameCounts): string {
 }
 
 function LiveBadge({ counts }: { counts: GameCounts }) {
+  // Live indicator only — the "N upcoming" tag was removed (it read as noise,
+  // e.g. "0 UPCOMING"). The live dot stays because it's a meaningful signal.
   if (counts.live > 0) {
     return (
       <div className="flex items-center gap-2 flex-shrink-0 pb-1">
@@ -182,13 +180,6 @@ function LiveBadge({ counts }: { counts: GameCounts }) {
           {counts.live} live
         </span>
       </div>
-    );
-  }
-  if (counts.total > 0) {
-    return (
-      <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-1">
-        {counts.upcoming} upcoming
-      </span>
     );
   }
   return null;
