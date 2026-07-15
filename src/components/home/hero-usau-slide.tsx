@@ -158,6 +158,7 @@ function formatLevel(level: string): string {
     YC: 'Youth Club',
     MASTERS: 'Masters',
     GRAND_MASTERS: 'Grand Masters',
+    GREAT_GRAND_MASTERS: 'Great Grand Masters',
     BEACH: 'Beach',
     OTHER: 'Open',
   };

@@ -168,10 +168,10 @@ export function UsauEventDetail({ event }: Props) {
 
   // ── Group-prefix awareness ────────────────────────────────────────────
   // A filtered view can still contain MULTIPLE independent bracket groups:
-  // GGM teams share the GRAND_MASTERS level tag, so the GM Women view of a
-  // combined championships holds both "GM Women · …" and "GGM Women · …"
-  // games. When that happens, show FULL bracket names (the prefix is the
-  // only disambiguator); single-group views strip the redundant prefix.
+  // a combined masters championships runs Masters / GM / GGM brackets under
+  // one event, so a single gender view can hold both "GM Women · …" and
+  // "GGM Women · …" games. When that happens, show FULL bracket names (the
+  // group prefix is the disambiguator); single-group views strip it.
   const showGroupPrefixes = useMemo(() => {
     const set = new Set<string>();
     for (const g of games) {

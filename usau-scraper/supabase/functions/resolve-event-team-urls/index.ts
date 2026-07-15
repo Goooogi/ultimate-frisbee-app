@@ -86,7 +86,9 @@ async function resolveOneEvent(
   // by what the slug hints at so single-division regionals usually hit on
   // the first fetch.
   const isMastersEvent =
-    competitionLevel === 'MASTERS' || competitionLevel === 'GRAND_MASTERS';
+    competitionLevel === 'MASTERS' ||
+    competitionLevel === 'GRAND_MASTERS' ||
+    competitionLevel === 'GREAT_GRAND_MASTERS';
   const slugLower = slug.toLowerCase();
   const levelSegments: ScheduleUrlLevel[] = isMastersEvent
     ? slugLower.includes('great-grand')

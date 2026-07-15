@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
-import { search as searchUsau, type SearchResult } from '@/lib/usau/data';
+import { search as searchUsau, compareByNameThenYearDesc, type SearchResult } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
 import { allUfaTeams } from '@/lib/ufa/teams';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
@@ -297,7 +297,8 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     const pa = prom(a);
     const pb = prom(b);
     if (pa !== pb) return pb - pa; // higher prominence first
-    return a.name.localeCompare(b.name);
+    // Same event across years (e.g. Heavyweights 2024/2026) → newest first.
+    return compareByNameThenYearDesc(a.name, b.name);
   });
 
   return merged.slice(0, limit * 2);

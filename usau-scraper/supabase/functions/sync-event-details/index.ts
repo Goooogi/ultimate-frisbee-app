@@ -25,6 +25,7 @@ import {
   extractEventGameId,
   extractEventTeamId,
   extractTeamNameAndSeed,
+  type ScheduleUrlLevel,
 } from '../_shared/parse.ts';
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
 import { tzForState, localWallTimeToUtcIso, dateOnlyIso } from '../_shared/tz.ts';
@@ -577,7 +578,7 @@ async function resolveTeam(
   db: ReturnType<typeof supabase>,
   eventUUID: string,
   team: ParsedTeam,
-  competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3',
+  competitionLevel: CompetitionLevel,
   genderDivision: Division,
 ): Promise<string> {
   // Has any team row already claimed this EventTeamId?
@@ -675,42 +676,142 @@ async function ensureEvent(
 // Per-division sync
 // ────────────────────────────────────────────────────────────
 
+/** Competition levels this scraper handles. Masters-family levels use the
+ *  hyphenated masters URL segments; club/college use their own. */
+type CompetitionLevel =
+  | 'CLUB'
+  | 'COLLEGE_D1'
+  | 'COLLEGE_D3'
+  | 'MASTERS'
+  | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS';
+
+/** One schedule-page family member to try: the URL segment to fetch and the
+ *  competition level to TAG the teams found there with. A single event slug can
+ *  host several (the combined Masters Championships runs Masters + Grand Masters
+ *  + Great Grand Masters under one slug), so each resolving segment tags its own
+ *  teams — this is why a GM team at the combined event gets GRAND_MASTERS, not
+ *  the event's coarse level. Mirrors resolve-event-team-urls' family iteration. */
+interface LevelSegment {
+  segment: ScheduleUrlLevel;
+  teamLevel: CompetitionLevel;
+}
+
+function scheduleLevelSegments(
+  slug: string,
+  competitionLevel: CompetitionLevel,
+): LevelSegment[] {
+  const isMasters =
+    competitionLevel === 'MASTERS' ||
+    competitionLevel === 'GRAND_MASTERS' ||
+    competitionLevel === 'GREAT_GRAND_MASTERS';
+  if (!isMasters) {
+    const segment: ScheduleUrlLevel = competitionLevel.startsWith('COLLEGE')
+      ? 'College'
+      : 'Club';
+    return [{ segment, teamLevel: competitionLevel }];
+  }
+  // Masters family: a combined championships hosts all three, so try the whole
+  // family and tag per-segment. Order by what the slug hints at so a
+  // single-division regional usually hits on the first fetch.
+  const all: LevelSegment[] = [
+    { segment: 'Masters', teamLevel: 'MASTERS' },
+    { segment: 'Grand-Masters', teamLevel: 'GRAND_MASTERS' },
+    { segment: 'Great-Grand-Masters', teamLevel: 'GREAT_GRAND_MASTERS' },
+  ];
+  const s = slug.toLowerCase();
+  const priority = s.includes('great-grand')
+    ? 'GREAT_GRAND_MASTERS'
+    : s.includes('grand')
+      ? 'GRAND_MASTERS'
+      : 'MASTERS';
+  return all.sort((a, b) =>
+    a.teamLevel === priority ? -1 : b.teamLevel === priority ? 1 : 0,
+  );
+}
+
 async function syncDivision(
   db: ReturnType<typeof supabase>,
   eventUUID: string,
   slug: string,
   division: Division,
-  competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3',
+  competitionLevel: CompetitionLevel,
   tz: string | null,
 ): Promise<{
   teams: number;
   games: number;
   skipped: boolean;
 }> {
-  // USAU's URL uses "Club" or "College" in the path, and the College
-  // championship pages use a compact "CollegeMen" form (no hyphen) while
-  // older events use "College-Men". Try both variants.
-  const urlLevel: 'Club' | 'College' = competitionLevel === 'CLUB' ? 'Club' : 'College';
-  let html: string | null = null;
-  let url = '';
-  for (const candidate of eventScheduleUrlVariants(slug, division, urlLevel)) {
-    try {
-      html = await fetchHtml(candidate);
-      url = candidate;
-      break;
-    } catch (err) {
-      const message = formatErr(err);
-      if (/HTTP 404/.test(message) || /404 /.test(message)) {
-        continue;
+  // USAU's URL carries the competition level in the path — "Club", "College",
+  // or one of the masters segments ("Masters"/"Grand-Masters"/…). A masters
+  // event can host MULTIPLE segments under one slug (the combined
+  // championships), so we try the whole level family for this gender and
+  // persist each page that resolves, tagging its teams with THAT segment's
+  // level. Club/college resolve to a single segment.
+  const segments = scheduleLevelSegments(slug, competitionLevel);
+  let totalTeams = 0;
+  let totalGames = 0;
+  let anyResolved = false;
+
+  for (const { segment, teamLevel } of segments) {
+    let html: string | null = null;
+    let url = '';
+    // College championship pages use a compact "CollegeMen" form (no hyphen)
+    // alongside the older "College-Men"; eventScheduleUrlVariants emits both.
+    for (const candidate of eventScheduleUrlVariants(slug, division, segment)) {
+      try {
+        html = await fetchHtml(candidate);
+        url = candidate;
+        break;
+      } catch (err) {
+        const message = formatErr(err);
+        if (/HTTP 404/.test(message) || /404 /.test(message)) {
+          continue;
+        }
+        throw err;
       }
-      throw err;
     }
-  }
-  if (!html) {
-    // Both variants 404'd — this division isn't part of the event.
-    return { teams: 0, games: 0, skipped: true };
+    if (!html) {
+      // This segment isn't part of the event for this gender — try the next
+      // family member (or, for club/college, we're simply done).
+      continue;
+    }
+
+    const res = await persistSchedulePage(
+      db,
+      eventUUID,
+      division,
+      teamLevel,
+      html,
+      url,
+      tz,
+    );
+    if (res.skipped) continue;
+    anyResolved = true;
+    totalTeams += res.teams;
+    totalGames += res.games;
   }
 
+  if (!anyResolved) {
+    // No family segment yielded a populated page for this gender.
+    return { teams: 0, games: 0, skipped: true };
+  }
+  return { teams: totalTeams, games: totalGames, skipped: false };
+}
+
+/** Persist ONE resolved schedule page: parse teams/pools/games, resolve every
+ *  team to a usau_teams uuid (tagging new teams with `teamLevel`), then upsert
+ *  participations + games. Split out of syncDivision so a masters event can run
+ *  it once per resolving level segment. */
+async function persistSchedulePage(
+  db: ReturnType<typeof supabase>,
+  eventUUID: string,
+  division: Division,
+  competitionLevel: CompetitionLevel,
+  html: string,
+  url: string,
+  tz: string | null,
+): Promise<{ teams: number; games: number; skipped: boolean }> {
   const { teams, poolPlacements, games } = parseSchedule(html, tz);
   if (teams.length === 0) {
     // Page exists but has no parseable teams — could mean draft schedule,
@@ -885,12 +986,27 @@ async function run(body: RequestBody) {
   // from the event's US state; null when unknown ("TBD"/missing) → times are
   // stored date-only rather than at a wrong instant.
   const tz = tzForState(eventRow?.state as string | null | undefined);
-  // College events (D-I AND D-III) use the "College" URL path; everything else
-  // uses "Club". Previously only COLLEGE_D1 was recognized, so COLLEGE_D3 events
-  // fell back to CLUB → built Club-Men schedule URLs → 404 → 0 rows scraped.
+  // The event's competition level chooses the schedule URL path family:
+  // College → "College", Masters family → the masters segments, everything
+  // else → "Club". Previously ALL non-college levels (incl. MASTERS/
+  // GRAND_MASTERS/GREAT_GRAND_MASTERS) were coerced to CLUB → built Club-Men
+  // schedule URLs → 404 → 0 rows, so live masters events never captured games.
+  // Now the masters levels pass through and syncDivision iterates their URL
+  // segment family. Unknown/youth/beach/other levels still fall back to CLUB.
   const rawLevel = eventRow?.competition_level;
-  const competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' =
-    rawLevel === 'COLLEGE_D1' || rawLevel === 'COLLEGE_D3' ? rawLevel : 'CLUB';
+  const knownLevels: CompetitionLevel[] = [
+    'CLUB',
+    'COLLEGE_D1',
+    'COLLEGE_D3',
+    'MASTERS',
+    'GRAND_MASTERS',
+    'GREAT_GRAND_MASTERS',
+  ];
+  const competitionLevel: CompetitionLevel = knownLevels.includes(
+    rawLevel as CompetitionLevel,
+  )
+    ? (rawLevel as CompetitionLevel)
+    : 'CLUB';
 
   const perDivision: Record<string, { teams: number; games: number; skipped: boolean }> = {};
   let totalTeams = 0;

@@ -30,11 +30,12 @@ const LEVEL_META: Record<
   COLLEGE_D3: { label: 'College · D-III', tier: 3 },
   MASTERS: { label: 'Masters', tier: 4 },
   GRAND_MASTERS: { label: 'Grand Masters', tier: 5 },
-  HS: { label: 'High School', tier: 6 },
-  MS: { label: 'Middle School', tier: 7 },
-  YC: { label: 'Youth Club', tier: 8 },
-  BEACH: { label: 'Beach', tier: 9 },
-  OTHER: { label: 'Other', tier: 10 },
+  GREAT_GRAND_MASTERS: { label: 'Great Grand Masters', tier: 6 },
+  HS: { label: 'High School', tier: 7 },
+  MS: { label: 'Middle School', tier: 8 },
+  YC: { label: 'Youth Club', tier: 9 },
+  BEACH: { label: 'Beach', tier: 10 },
+  OTHER: { label: 'Other', tier: 11 },
 };
 
 export function UsauEventsGrid() {

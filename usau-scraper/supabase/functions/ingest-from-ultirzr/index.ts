@@ -21,8 +21,8 @@
 //   `query=masters` (name substring) and ingests EVERY masters-family group
 //   per event, classifying each group independently:
 //     - team competition_level: 'Masters - *' → MASTERS; 'Grand Masters - *'
-//       and 'Great Grand Masters - *' → GRAND_MASTERS (GGM folded in — tiny
-//       division, not worth widening the enum).
+//       → GRAND_MASTERS; 'Great Grand Masters - *' → GREAT_GRAND_MASTERS (its
+//       own level as of 2026-07 — was previously folded into GRAND_MASTERS).
 //     - bracket_name is prefixed with a short group label ("GM Women · Pool A")
 //       so the combined championships' divisions stay distinguishable.
 //   Non-masters events surfaced by the name search (clinics, "Masters Minus"
@@ -415,11 +415,20 @@ async function ingestEvent(
   // shells with REAL USAU slugs that a synthesized slug may not hit.
   //
   // Event-level competition_level is single-valued but a combined masters
-  // event hosts Masters AND Grand Masters groups. We classify by the
-  // "youngest" group present (any plain Masters group → MASTERS). The
-  // per-division truth lives on the TEAMS (tagged from their group below).
+  // event hosts Masters + Grand Masters + Great Grand Masters groups. We
+  // classify by the "youngest" group present (Masters > Grand Masters > Great
+  // Grand Masters) so a GGM-only event tags GREAT_GRAND_MASTERS while combined
+  // events keep MASTERS. The per-division truth lives on the TEAMS (tagged from
+  // their group below), so this coarse event tag only steers the URL path.
+  const mastersLevels = new Set(
+    groups.map((g) => mastersGroupMeta(g)?.level).filter(Boolean),
+  );
   const eventLevel = isMasters
-    ? (groups.some((g) => mastersGroupMeta(g)?.level === 'MASTERS') ? 'MASTERS' : 'GRAND_MASTERS')
+    ? mastersLevels.has('MASTERS')
+      ? 'MASTERS'
+      : mastersLevels.has('GRAND_MASTERS')
+        ? 'GRAND_MASTERS'
+        : 'GREAT_GRAND_MASTERS'
     : levelFromGroup(wantedGroupName);
 
   const eventRow = {
@@ -684,8 +693,9 @@ function divisionLabel(div: string): string | null {
 // ─── Masters helpers ────────────────────────────────────────────────────
 
 interface MastersGroupMeta {
-  /** Our enum value. GGM folds into GRAND_MASTERS (see header). */
-  level: 'MASTERS' | 'GRAND_MASTERS';
+  /** Our enum value. Great Grand Masters is its own level (was folded into
+   *  GRAND_MASTERS pre-2026-07; now distinct — see [[USAU Masters Ingestion Plan]]). */
+  level: 'MASTERS' | 'GRAND_MASTERS' | 'GREAT_GRAND_MASTERS';
   gender: 'Men' | 'Women' | 'Mixed';
   /** Short display prefix for bracket names, e.g. "GM Women". */
   label: string;
@@ -722,7 +732,12 @@ function mastersGroupMeta(g: UltirzrGroup): MastersGroupMeta | null {
   const prefix =
     m[1] === 'great grand masters' ? 'GGM' : m[1] === 'grand masters' ? 'GM' : 'Masters';
   return {
-    level: m[1] === 'masters' ? 'MASTERS' : 'GRAND_MASTERS',
+    level:
+      m[1] === 'masters'
+        ? 'MASTERS'
+        : m[1] === 'great grand masters'
+          ? 'GREAT_GRAND_MASTERS'
+          : 'GRAND_MASTERS',
     gender,
     label: `${prefix} ${gender}`,
   };

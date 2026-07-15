@@ -906,6 +906,7 @@ export type Database = {
         | "YC"
         | "MASTERS"
         | "GRAND_MASTERS"
+        | "GREAT_GRAND_MASTERS"
         | "BEACH"
         | "OTHER"
       usau_event_type:

@@ -25,7 +25,14 @@ interface RequestBody {
 }
 
 // Mirror sync-live-events' "what's live" definition exactly.
-const FLAGSHIP_LEVELS = ['CLUB', 'COLLEGE_D1', 'COLLEGE_D3', 'MASTERS', 'GRAND_MASTERS'];
+const FLAGSHIP_LEVELS = [
+  'CLUB',
+  'COLLEGE_D1',
+  'COLLEGE_D3',
+  'MASTERS',
+  'GRAND_MASTERS',
+  'GREAT_GRAND_MASTERS',
+];
 
 function stringifyErr(err: unknown): string {
   if (err instanceof Error) return err.message;

@@ -21,6 +21,11 @@ verify_jwt = false
 # Same rationale as sync-events.
 verify_jwt = false
 
+[functions.sync-event-rosters-dispatch]
+# Cron-invoked (jobid 6) with the service-role key — server-to-server, so no
+# end-user JWT. Must stay false or the Thu–Sun roster cron 401s.
+verify_jwt = false
+
 [functions.discover-events]
 # Same rationale as sync-events.
 verify_jwt = false

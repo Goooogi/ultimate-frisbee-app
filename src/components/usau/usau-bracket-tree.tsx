@@ -52,8 +52,8 @@ const ROW_PITCH_PX = 104;
  *  Place" → "GM Women"); '' when unprefixed. Combined masters championships
  *  run several INDEPENDENT championship brackets in one event (Masters /
  *  GM / GGM per gender) — the prefix is the only reliable way to tell a GM
- *  Women game from a GGM Women game (GGM teams share the GRAND_MASTERS
- *  level tag, so team-level filtering can't separate them). */
+ *  Women game from a GGM Women game within the games already loaded for the
+ *  combined event. */
 export function bracketGroupPrefix(name: string | null | undefined): string {
   if (!name) return '';
   const i = name.lastIndexOf('·');
@@ -173,7 +173,14 @@ function DesktopBracket({
   // (small regionals brackets are just 2 semis + a final — don't reserve
   // four rows of blank space for those). 32 covers the round-label row.
   const baseCount = Math.max(0, ...columns.map((c) => c.games.length));
-  const totalHeight = Math.max(baseCount, 2) * ROW_PITCH_PX + 32;
+  // A de-overlap pass can push a later-round card below the base-column count
+  // (two collided semis get spread to 156/260 while the QF column ends at 312),
+  // so also honor the lowest positioned card + one card-height so nothing clips.
+  const maxTop = Math.max(0, ...Array.from(positions.values()));
+  const totalHeight = Math.max(
+    Math.max(baseCount, 2) * ROW_PITCH_PX,
+    maxTop + ROW_PITCH_PX,
+  ) + 32;
 
   // Column count drives grid template.
   const renderedColumns = columns.filter((c) => c.games.length > 0);
@@ -500,6 +507,22 @@ function assignPositions(columns: RoundColumn[]): Map<string, number> {
     col.games.sort(
       (a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0),
     );
+
+    // De-overlap: two games in the same column can resolve to the SAME
+    // midpoint and paint on top of each other (e.g. Heavyweights' two men's
+    // semis both averaged to the column center because the QF column is
+    // seed-ordered 1,2,3,4 — interleaving the two bracket halves — so each
+    // semi straddled the full column and both midpoints collapsed to 156px).
+    // Walk the now-sorted column top→down and push any card that sits closer
+    // than one row-pitch below its predecessor down to clear it. This keeps
+    // the tree readable regardless of how the base column was ordered.
+    for (let i = 1; i < col.games.length; i++) {
+      const prevTop = positions.get(col.games[i - 1].id) ?? 0;
+      const curTop = positions.get(col.games[i].id) ?? 0;
+      const minTop = prevTop + ROW_PITCH_PX;
+      if (curTop < minTop) positions.set(col.games[i].id, minTop);
+    }
+
     prevCol = col;
   }
 

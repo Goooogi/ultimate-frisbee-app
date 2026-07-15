@@ -109,6 +109,7 @@ export type CompetitionLevel =
   | 'YC'
   | 'MASTERS'
   | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS'
   | 'BEACH'
   | 'OTHER';
 
@@ -229,6 +230,7 @@ const FLAGSHIP_LEVELS: CompetitionLevel[] = [
   'COLLEGE_D3',
   'MASTERS',
   'GRAND_MASTERS',
+  'GREAT_GRAND_MASTERS',
 ];
 
 // Headline importance — higher wins when several events share a weekend. This
@@ -1916,6 +1918,7 @@ export function usauTeamProminence(name: string, level: string | null | undefine
     case 'CLUB':
     case 'MASTERS':
     case 'GRAND_MASTERS':
+    case 'GREAT_GRAND_MASTERS':
       return 3; // adult club — most prominent
     case 'COLLEGE_D1':
     case 'COLLEGE_D3':
@@ -1962,6 +1965,18 @@ function formatEventDateRange(start: string | null, end: string | null): string 
     ? new Date(end + 'T00:00:00Z').toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' })
     : fmt(end);
   return `${s}–${e}`;
+}
+
+/** Sort two result names alphabetically, but when they're the SAME event across
+ *  different years (identical text apart from a trailing 4-digit year), order the
+ *  year descending so the current season surfaces first instead of last. */
+export function compareByNameThenYearDesc(a: string, b: string): number {
+  const ya = a.match(/^(.*?)[\s·-]*(\d{4})\s*$/);
+  const yb = b.match(/^(.*?)[\s·-]*(\d{4})\s*$/);
+  if (ya && yb && ya[1].trim().toLowerCase() === yb[1].trim().toLowerCase()) {
+    return Number(yb[2]) - Number(ya[2]); // newest year first
+  }
+  return a.localeCompare(b);
 }
 
 export async function search(query: string, limit = 8): Promise<SearchResult[]> {
@@ -2048,13 +2063,15 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
     ...tournamentMap.values(),
   ];
 
-  // Prefix matches first, then alphabetical.
+  // Prefix matches first, then alphabetical — except when two results are the
+  // same event across years (e.g. "Heavyweights 2024" vs "Heavyweights 2026"),
+  // where we want newest-first instead of oldest-first alphabetical.
   const lower = q.toLowerCase();
   results.sort((a, b) => {
     const ap = a.name.toLowerCase().startsWith(lower) ? 0 : 1;
     const bp = b.name.toLowerCase().startsWith(lower) ? 0 : 1;
     if (ap !== bp) return ap - bp;
-    return a.name.localeCompare(b.name);
+    return compareByNameThenYearDesc(a.name, b.name);
   });
 
   return results.slice(0, limit * 2);
@@ -2870,7 +2887,13 @@ export interface RankedTeam {
  * @param season the season to rank by. Defaults to the most recent season
  *   that has a Nationals event with placement data.
  */
-type RankableLevel = 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' | 'MASTERS' | 'GRAND_MASTERS';
+type RankableLevel =
+  | 'CLUB'
+  | 'COLLEGE_D1'
+  | 'COLLEGE_D3'
+  | 'MASTERS'
+  | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS';
 
 // Per-level ILIKE patterns identifying a level's Nationals/Championship event,
 // so College's "Championships" doesn't collide with Club's "Nationals".
@@ -2880,6 +2903,11 @@ const CHAMPIONSHIP_NAME_LIKE: Record<RankableLevel, string> = {
   COLLEGE_D3: '%D-III College Championship%',
   MASTERS: '%Masters Championship%',
   GRAND_MASTERS: '%Grand Masters Championship%',
+  // GGM plays inside the SAME combined "USA Ultimate Masters Championships"
+  // event as Masters/GM (there is no separately-named GGM championship), so it
+  // matches on the shared event name; the team-level filter below isolates the
+  // GGM teams within it.
+  GREAT_GRAND_MASTERS: '%Masters Championship%',
 };
 function championshipNameLikeFor(level: RankableLevel): string {
   return CHAMPIONSHIP_NAME_LIKE[level];
@@ -3013,6 +3041,7 @@ export async function listRankedTeams(opts?: {
     COLLEGE_D3: '%D-III College Regional%',
     MASTERS: '%Masters%Regional%',
     GRAND_MASTERS: '%Grand Masters%Regional%',
+    GREAT_GRAND_MASTERS: '%Masters%Regional%',
   };
 
   // Decide which season to rank.
@@ -3082,14 +3111,17 @@ export async function listRankedTeams(opts?: {
     if (!row.usau_teams) continue;
     const t = row.usau_teams;
     if (opts?.genderDivision && t.gender_division !== opts.genderDivision) continue;
-    // Masters and Grand Masters share events (combined regionals/championships
-    // are tagged one event-level but host teams of BOTH levels, each team
-    // tagged per-group). Filtering events alone therefore mixes the levels —
-    // also require the TEAM's own level to match. Scoped to masters/GM only:
-    // club/college teams are sometimes mis-tagged in source data, and their
-    // events never mix levels, so the event filter alone stays correct there.
+    // Masters / Grand Masters / Great Grand Masters share events (the combined
+    // championships are tagged one event-level but host teams of ALL three
+    // levels, each team tagged per-group). Filtering events alone therefore
+    // mixes the levels — also require the TEAM's own level to match. Scoped to
+    // the masters family only: club/college teams are sometimes mis-tagged in
+    // source data, and their events never mix levels, so the event filter alone
+    // stays correct there.
     if (
-      (compLevel === 'MASTERS' || compLevel === 'GRAND_MASTERS') &&
+      (compLevel === 'MASTERS' ||
+        compLevel === 'GRAND_MASTERS' ||
+        compLevel === 'GREAT_GRAND_MASTERS') &&
       t.competition_level !== compLevel
     ) {
       continue;

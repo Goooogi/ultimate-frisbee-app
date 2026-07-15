@@ -264,6 +264,7 @@ function prettyLevel(level: string): string {
     case 'COLLEGE_D3': return 'College · D-III';
     case 'MASTERS': return 'Masters';
     case 'GRAND_MASTERS': return 'Grand Masters';
+    case 'GREAT_GRAND_MASTERS': return 'Great Grand Masters';
     case 'HS': return 'High School';
     case 'MS': return 'Middle School';
     case 'YC': return 'Youth Club';
