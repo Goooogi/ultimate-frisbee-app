@@ -382,7 +382,14 @@ function statusLabel(game: Game): string {
  */
 export function isChampionshipBracket(g: Game): boolean {
   const raw = g.bracketName ?? '';
-  const b = raw.trim().toLowerCase();
+  // Combined masters events prefix every bracket with a group ("Masters Mixed ·
+  // Bracket Play"). Match on the TAIL after the last "·" so the exact-match
+  // rules below ("bracket play", "championship", …) still fire — otherwise a
+  // group-prefixed first-place bracket reads as unrecognized and its winner
+  // never surfaces as champion.
+  const lastDot = raw.lastIndexOf('·');
+  const tail = lastDot >= 0 ? raw.slice(lastDot + 1) : raw;
+  const b = tail.trim().toLowerCase();
 
   if (!b && ['quarter', 'semi', 'final'].includes(g.round)) return true;
   if (!b) return false;

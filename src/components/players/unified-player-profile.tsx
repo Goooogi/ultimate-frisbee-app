@@ -105,14 +105,13 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
           >
             Career totals
           </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-7 bg-surface rounded-card-lg shadow-card overflow-hidden">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 bg-surface rounded-card-lg shadow-card overflow-hidden">
             <CareerStat
               label={career.ufaGamesPlayed > 0 ? 'UFA Games' : 'Events'}
               value={career.ufaGamesPlayed > 0 ? career.ufaGamesPlayed : career.usauEventsPlayed}
             />
             <CareerStat label="Goals" value={career.goals} />
             <CareerStat label="Assists" value={career.assists} />
-            <CareerStat label="Scores" value={career.goals + career.assists} />
             {career.plusMinus !== 0 && <CareerStat label="+/−" value={signed(career.plusMinus)} />}
             {career.throwsAttempted > 0 && (
               <CareerStat

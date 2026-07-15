@@ -64,9 +64,12 @@ export default async function SchedulePage({ searchParams }: Props) {
     // (and events without scraped teams). Only narrow when a div is present.
     const division = searchParams.div ? parseDivisionParam(searchParams.div) : undefined;
     // Flight is OPTIONAL + MULTI: absent ?flight ⇒ all flights; ?flight=pro,elite
-    // ⇒ those tiers. Only Club events carry flight classifications, so the flight
-    // control shows only for Club.
-    const flights = parseFlightsParam(searchParams.flight);
+    // ⇒ those tiers. Flights are a CLUB-ONLY concept (Triple Crown Tour tiers),
+    // so ignore any persisted ?flight off-Club — otherwise switching
+    // Club→Masters carries the flight over and filters out every event (no
+    // masters event has a flight), and the eyebrow shows a stray "N flights".
+    // The flight control itself already only renders for Club.
+    const flights = level === 'CLUB' ? parseFlightsParam(searchParams.flight) : [];
     const eyebrow = [
       'USAU',
       levelLabel(level),

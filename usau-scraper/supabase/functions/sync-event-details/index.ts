@@ -126,10 +126,27 @@ function classifyRound(h4Label: string | null, h3Label: string | null): GameRoun
   if (t.includes('quarter')) return 'quarter';
   if (t.includes('consolation')) return 'consolation';
 
-  // The championship gold-medal game: h4 "1st place" / "final" inside the
-  // Championship bracket (and not a semi/quarter, already handled above).
-  const isChampSection = h3.includes('championship') || h3.includes('1st place') || h3 === '';
-  if (isChampSection && (h4.includes('1st place') || h4.includes('final') || h4 === '1st')) {
+  // The championship gold-medal game. USAU labels it many ways across masters
+  // regionals/qualifiers vs Nationals:
+  //   h4 round: "1st Place", "First Place", "First Place Game", "Final", "1st"
+  //   h3 section: "Championship (Bracket)", "1st/First Place", "Bracket Play"
+  //     (a single-bracket event), or empty (whole event is one bracket).
+  // We match "first place" (spelled out) as well as "1st place" in BOTH the
+  // section and round checks — a game like 2026 Northeast Masters Mixed
+  // Regionals is h3="Bracket Play" / h4="First Place Game", which the old
+  // (1st-place-only) check missed → stored 'other' → no champion surfaced.
+  const isChampSection =
+    h3.includes('championship') ||
+    h3.includes('1st place') ||
+    h3.includes('first place') ||
+    h3.includes('bracket play') ||
+    h3 === '';
+  const isChampRound =
+    h4.includes('1st place') ||
+    h4.includes('first place') ||
+    h4.includes('final') ||
+    h4 === '1st';
+  if (isChampSection && isChampRound) {
     return 'final';
   }
 
@@ -857,79 +874,67 @@ async function persistSchedulePage(
     .upsert(eventTeamRows, { onConflict: 'event_id,team_id', ignoreDuplicates: false });
   if (etErr) throw new Error(`usau_event_teams upsert: ${stringifyErr(etErr)}`);
 
-  // Games. We pick the upsert key based on whether usau_game_id is present.
-  // When present, key on it (idempotent re-runs). When absent (rare for
-  // bracket games, possible for unscheduled placement matches), fall back
-  // to natural-key matching via a manual look-then-insert.
-  const gamesWithIds = games.filter((g) => g.usau_game_id);
-  const gamesWithoutIds = games.filter((g) => !g.usau_game_id);
-
-  if (gamesWithIds.length > 0) {
-    const rows = gamesWithIds.map((g) => ({
-      event_id: eventUUID,
-      usau_game_id: g.usau_game_id,
-      usau_event_game_id: g.usau_event_game_id,
-      round: g.round,
-      bracket_name: g.bracket_name,
-      // TBD bracket slots carry null team ids until the feeder game
-      // finishes; the id-keyed upsert fills them in on a later pass.
-      team_a_id: (g.home_event_team_id && teamUUIDByEventTeamId.get(g.home_event_team_id)) || null,
-      team_b_id: (g.away_event_team_id && teamUUIDByEventTeamId.get(g.away_event_team_id)) || null,
-      seed_a: g.home_seed,
-      seed_b: g.away_seed,
-      score_a: g.score_home,
-      score_b: g.score_away,
-      location: g.location,
-      scheduled_at: g.scheduled_at,
-      status: g.status,
-      source_url: url,
-    }));
-    const { error: gErr } = await db
-      .from('usau_games')
-      .upsert(rows, { onConflict: 'usau_game_id', ignoreDuplicates: false });
-    if (gErr) throw new Error(`usau_games upsert: ${stringifyErr(gErr)}`);
-  }
-
-  // Fallback path: insert one at a time, checking for duplicates first.
-  // Pool games end up here (they don't expose usau_game_id on the
-  // schedule table), as do atypical placement games.
+  // Games. Every game is written through ONE natural-key-aware path so the
+  // same physical game can never be doubled — even across the two ingest
+  // pipelines (this HTML scraper vs ingest-from-ultirzr), which assign the SAME
+  // game DIFFERENT usau_game_id / usau_event_game_id / round labels.
   //
-  // Dedupe preference:
-  //   1. By usau_event_game_id when present — unique per match report.
-  //      Safer than the team-pair match for repeat matchups.
-  //   2. Fall back to (event_id, round, team_a_id, team_b_id) when no
-  //      EventGameId is on the source row.
-  for (const g of gamesWithoutIds) {
-    // parseSchedule never emits an id-less game with a TBD side (no safe
-    // dedupe key), so both teams resolve here; the guard is belt-and-braces.
-    if (!g.home_event_team_id || !g.away_event_team_id) continue;
-    const teamA = teamUUIDByEventTeamId.get(g.home_event_team_id)!;
-    const teamB = teamUUIDByEventTeamId.get(g.away_event_team_id)!;
+  // Match an existing row by, in priority:
+  //   1. usau_game_id (this pipeline's stable USAU id — exact idempotent re-run)
+  //   2. usau_event_game_id (per-match-report id, unique per pipeline)
+  //   3. the NATURAL KEY (event, both teams order-independent, scheduled_at,
+  //      bracket_name) — the DB's `usau_games_natural_key_uidx` guard. This is
+  //      what catches the OTHER pipeline's copy, which shares none of our ids.
+  // Found → UPDATE in place (merging any ids we now have); else INSERT. This
+  // both keeps re-runs idempotent AND respects the unique index (an id-keyed
+  // upsert would try to INSERT the cross-pipeline copy and hit the index).
+  for (const g of games) {
+    const teamA =
+      (g.home_event_team_id && teamUUIDByEventTeamId.get(g.home_event_team_id)) || null;
+    const teamB =
+      (g.away_event_team_id && teamUUIDByEventTeamId.get(g.away_event_team_id)) || null;
+
     let existing: { id: string } | null = null;
-    if (g.usau_event_game_id) {
+
+    if (g.usau_game_id) {
       const { data } = await db
         .from('usau_games')
         .select('id')
-        .eq('event_id', eventUUID)
+        .eq('usau_game_id', g.usau_game_id)
+        .maybeSingle();
+      existing = data ?? null;
+    }
+    if (!existing && g.usau_event_game_id) {
+      const { data } = await db
+        .from('usau_games')
+        .select('id')
         .eq('usau_event_game_id', g.usau_event_game_id)
         .maybeSingle();
       existing = data ?? null;
     }
-    if (!existing) {
+    // Natural-key match — only when the row has the full key (both teams + a
+    // scheduled time). TBD feeder slots (a null team) and undated games can't
+    // be natural-keyed; they rely on an id match above or insert fresh.
+    if (!existing && teamA && teamB && g.scheduled_at) {
+      // Order-independent team match: the game may be stored with a/b swapped
+      // by the other pipeline. Both scores flip WITH their team on update, so
+      // whichever orientation wins stays internally consistent.
+      const [lo, hi] = teamA < teamB ? [teamA, teamB] : [teamB, teamA];
       const { data } = await db
         .from('usau_games')
         .select('id')
         .eq('event_id', eventUUID)
-        .eq('round', g.round)
-        .eq('team_a_id', teamA)
-        .eq('team_b_id', teamB)
+        .eq('scheduled_at', g.scheduled_at)
+        .eq('bracket_name', g.bracket_name ?? '')
+        .or(
+          `and(team_a_id.eq.${lo},team_b_id.eq.${hi}),and(team_a_id.eq.${hi},team_b_id.eq.${lo})`,
+        )
         .maybeSingle();
-      existing = data ?? null;
+      existing = data ? { id: data.id } : null;
     }
-    const row = {
+
+    const row: Record<string, unknown> = {
       event_id: eventUUID,
-      usau_game_id: null,
-      usau_event_game_id: g.usau_event_game_id,
       round: g.round,
       bracket_name: g.bracket_name,
       team_a_id: teamA,
@@ -943,10 +948,17 @@ async function persistSchedulePage(
       status: g.status,
       source_url: url,
     };
+    // Only set an id column when we actually have one, so an UPDATE that
+    // reconciled the OTHER pipeline's row doesn't null out its id.
+    if (g.usau_game_id) row.usau_game_id = g.usau_game_id;
+    if (g.usau_event_game_id) row.usau_event_game_id = g.usau_event_game_id;
+
     if (existing) {
-      await db.from('usau_games').update(row).eq('id', existing.id);
+      const { error } = await db.from('usau_games').update(row).eq('id', existing.id);
+      if (error) throw new Error(`usau_games update: ${stringifyErr(error)}`);
     } else {
-      await db.from('usau_games').insert(row);
+      const { error } = await db.from('usau_games').insert(row);
+      if (error) throw new Error(`usau_games insert: ${stringifyErr(error)}`);
     }
   }
 

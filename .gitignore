@@ -42,3 +42,10 @@ next-env.d.ts
 
 # Supabase CLI transient cache
 supabase/.temp/
+
+# Deno lockfile — only generated as a side-effect of `deno check` when type-
+# checking the usau-scraper edge functions; not part of the project (functions
+# deploy from source via `supabase functions deploy`). Ignore so a stray one
+# never gets committed.
+deno.lock
+**/deno.lock

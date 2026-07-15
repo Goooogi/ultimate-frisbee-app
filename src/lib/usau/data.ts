@@ -98,6 +98,15 @@ export interface UsauEventCard {
   url: string | null;
   /** Curated Triple Crown Tour flight, or null if unclassified. See flights.ts. */
   flight: Flight | null;
+  /**
+   * The event's decided winner for the card, or null if undecided/in-progress.
+   * `champion` = won the championship-bracket final; `pool-leader` = the unique
+   * best pool record when the event is pool-play-only (no bracket final). A
+   * combined masters event can crown several divisions — we surface the single
+   * most-recent championship final so the card stays one line; the detail page
+   * shows every division's banner.
+   */
+  winner: { name: string; kind: 'champion' | 'pool-leader' } | null;
 }
 
 export type CompetitionLevel =
@@ -114,6 +123,154 @@ export type CompetitionLevel =
   | 'OTHER';
 
 /** All scraped USAU events, newest first. */
+/** Bracket-name tail after the group prefix ("Masters Mixed · 1st Place" →
+ *  "1st place"), lowercased. Combined masters events prefix every bracket. */
+function bracketTailLower(name: string | null | undefined): string {
+  if (!name) return '';
+  const i = name.lastIndexOf('·');
+  return (i >= 0 ? name.slice(i + 1) : name).trim().toLowerCase();
+}
+
+/** Is this the CHAMPIONSHIP (gold-medal) bracket — not a placement side bracket?
+ *  Server-side twin of usau-bracket-tree's isChampionshipBracket, kept in sync:
+ *  accepts 1st/first-place/championship/finals/bracket-play, rejects anything
+ *  carrying an ordinal ≥ the bare number (so "3rd Place" / "5th Place Bracket"
+ *  never crown a champion) plus consolation/placement. */
+function isChampionshipBracketName(name: string | null | undefined): boolean {
+  const b = bracketTailLower(name);
+  if (!b) return false;
+  if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
+  // Reject placement side brackets (any ordinal) + consolation.
+  if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
+  if (b.includes('consolation') || b.includes('placement')) return false;
+  if (b === 'finals') return true;
+  if (/(^|\s)championship(\s+(bracket|final|game))?$/.test(b)) return true;
+  if (b === 'bracket' || b === 'bracket play' || b === 'sunday bracket') return true;
+  return false;
+}
+
+/**
+ * Resolve each event's card "winner": the championship-final winner, or (for a
+ * pool-play-only event) the unique best pool record. Batched across all listed
+ * events in two queries — one for `round='final'` games (bracket champions),
+ * then a pool tally ONLY for events left without a champion (bounds the cost).
+ * Returns Map<eventId, { name, kind }>; events with no decided winner are absent.
+ */
+async function resolveEventWinners(
+  db: Awaited<ReturnType<typeof supabase>>,
+  eventIds: string[],
+): Promise<Map<string, { name: string; kind: 'champion' | 'pool-leader' }>> {
+  const out = new Map<string, { name: string; kind: 'champion' | 'pool-leader' }>();
+  if (eventIds.length === 0) return out;
+
+  // ── Bracket champions: latest decided championship final per event ──────
+  const { data: finals } = await db
+    .from('usau_games')
+    .select(
+      'event_id, bracket_name, scheduled_at, score_a, score_b, ' +
+        'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
+        'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
+    )
+    .in('event_id', eventIds)
+    .eq('round', 'final')
+    .eq('status', 'final');
+
+  type FinalRow = {
+    event_id: string;
+    bracket_name: string | null;
+    scheduled_at: string | null;
+    score_a: number | null;
+    score_b: number | null;
+    team_a: { name: string } | null;
+    team_b: { name: string } | null;
+  };
+  const bestFinalAt = new Map<string, string>();
+  for (const r of (finals ?? []) as unknown as FinalRow[]) {
+    if (!isChampionshipBracketName(r.bracket_name)) continue;
+    if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
+    const winnerName = (r.score_a > r.score_b ? r.team_a?.name : r.team_b?.name) ?? null;
+    if (!winnerName) continue;
+    // Keep the LATEST final per event (a combined event has one per division;
+    // one line on the card — detail page shows all).
+    const at = r.scheduled_at ?? '';
+    const prev = bestFinalAt.get(r.event_id);
+    if (prev == null || at > prev) {
+      bestFinalAt.set(r.event_id, at);
+      out.set(r.event_id, { name: winnerName, kind: 'champion' });
+    }
+  }
+
+  // ── Pool leaders: only for events with NO bracket champion ──────────────
+  const poolOnly = eventIds.filter((id) => !out.has(id));
+  if (poolOnly.length > 0) {
+    const { data: poolRows } = await db
+      .from('usau_games')
+      .select(
+        'event_id, bracket_name, score_a, score_b, status, ' +
+          'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
+          'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
+      )
+      .in('event_id', poolOnly)
+      .eq('status', 'final');
+
+    type PoolRow = {
+      event_id: string;
+      bracket_name: string | null;
+      score_a: number | null;
+      score_b: number | null;
+      team_a: { name: string } | null;
+      team_b: { name: string } | null;
+    };
+    // Per event: normalized-name W/L, deduped by matchup+score (dual-pipeline).
+    const perEvent = new Map<
+      string,
+      { rec: Map<string, { name: string; w: number; l: number }>; seen: Set<string> }
+    >();
+    for (const r of (poolRows ?? []) as unknown as PoolRow[]) {
+      const tail = bracketTailLower(r.bracket_name);
+      if (!tail.startsWith('pool') || tail.includes('crossover')) continue;
+      if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
+      const an = r.team_a?.name?.trim();
+      const bn = r.team_b?.name?.trim();
+      if (!an || !bn) continue;
+      let e = perEvent.get(r.event_id);
+      if (!e) {
+        e = { rec: new Map(), seen: new Set() };
+        perEvent.set(r.event_id, e);
+      }
+      const ka = an.toLowerCase();
+      const kb = bn.toLowerCase();
+      const pair = [ka, kb].sort();
+      const sc = [r.score_a, r.score_b].sort((x, y) => x - y);
+      const gkey = `${pair[0]}|${pair[1]}|${sc[0]}|${sc[1]}`;
+      if (e.seen.has(gkey)) continue;
+      e.seen.add(gkey);
+      const aWon = r.score_a > r.score_b;
+      const wk = aWon ? ka : kb;
+      const lk = aWon ? kb : ka;
+      const wn = aWon ? an : bn;
+      const ln = aWon ? bn : an;
+      const rw = e.rec.get(wk) ?? { name: wn, w: 0, l: 0 };
+      rw.w += 1;
+      e.rec.set(wk, rw);
+      const rl = e.rec.get(lk) ?? { name: ln, w: 0, l: 0 };
+      rl.l += 1;
+      e.rec.set(lk, rl);
+    }
+    for (const [eventId, { rec }] of perEvent) {
+      const standings = Array.from(rec.values()).sort((a, b) => b.w - a.w || a.l - b.l);
+      if (standings.length === 0) continue;
+      const top = standings[0];
+      if (top.w === 0 && top.l === 0) continue; // no games played
+      const tied = standings.filter((s) => s.w === top.w && s.l === top.l).length;
+      if (tied > 1) continue; // ambiguous — no leader
+      out.set(eventId, { name: top.name, kind: 'pool-leader' });
+    }
+  }
+
+  return out;
+}
+
 export async function listEvents(opts?: {
   season?: number;
   competitionLevel?: CompetitionLevel;
@@ -178,6 +335,11 @@ export async function listEvents(opts?: {
     return true;
   });
 
+  // Card winner (championship-final winner, or unique pool leader for pool-only
+  // events). Resolved over the FILTERED set so we don't fetch games for events
+  // that won't render.
+  const winners = await resolveEventWinners(db, filtered.map((e) => e.id));
+
   return filtered.map((e) => ({
     id: e.id,
     slug: e.usau_slug,
@@ -191,6 +353,7 @@ export async function listEvents(opts?: {
     teamCount: countByEvent.get(e.id) ?? 0,
     url: e.url ?? null,
     flight: flightForName(e.name),
+    winner: winners.get(e.id) ?? null,
   }));
 }
 

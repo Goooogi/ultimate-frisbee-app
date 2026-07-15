@@ -226,6 +226,18 @@ function EventCard({ event }: { event: UsauEventCard }) {
           <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 group-hover/card:text-accent transition-colors">
             {event.name}
           </div>
+          {event.winner && (
+            <div className="flex items-center gap-1.5 min-w-0 mb-2">
+              <TrophyGlyph />
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
+                {event.winner.kind === 'champion' ? 'Champion' : 'Pool Leader'}
+              </span>
+              <span className="text-faint">·</span>
+              <span className="text-[11px] font-bold text-ink font-tight truncate min-w-0">
+                {event.winner.name}
+              </span>
+            </div>
+          )}
           {/* mt-auto pushes the date/location to the card bottom so short and
               tall cards align their meta rows across the grid. */}
           <div className="mt-auto flex items-center gap-3 text-[11px] font-medium text-muted font-tight">
@@ -272,6 +284,20 @@ function prettyLevel(level: string): string {
     case 'OTHER': return 'Other';
     default: return level;
   }
+}
+
+function TrophyGlyph() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0">
+      <path
+        d="M4 2h8v3a4 4 0 01-8 0V2zM4 3H2v1a2 2 0 002 2M12 3h2v1a2 2 0 01-2 2M6 9.5V11m4-1.5V11M5 14h6M6.5 11h3l.5 3h-4l.5-3z"
+        stroke="rgb(var(--accent))"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function Chevron() {

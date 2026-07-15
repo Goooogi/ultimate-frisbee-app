@@ -30,7 +30,12 @@ export default async function HomePage({ searchParams }: Props) {
   const usauLevel = parseLevelParam(searchParams.level);
   // USAU flight filter (?flight=pro,elite) — Triple Crown Tour tiers, Club only,
   // MULTI-select. Mirrors the /schedule tab so completed games filter by flight.
-  const usauFlights = parseFlightsParam(searchParams.flight);
+  // Flights are a CLUB-ONLY concept, so ignore any persisted ?flight when the
+  // level isn't Club — otherwise switching Club→Masters carries the flight over
+  // and filters out every Masters event (no masters event has a TCT flight),
+  // showing a false "No completed tournaments" empty state. The UI already hides
+  // the flight control off-Club; this makes the server query agree.
+  const usauFlights = usauLevel === 'CLUB' ? parseFlightsParam(searchParams.flight) : [];
 
   // ── PUL branch ────────────────────────────────────────────────────────────
   if (league === 'pul') {
