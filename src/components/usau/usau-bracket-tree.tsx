@@ -380,7 +380,11 @@ export function isChampionshipBracket(g: Game): boolean {
   if (!b && ['quarter', 'semi', 'final'].includes(g.round)) return true;
   if (!b) return false;
 
-  if (b.includes('1st place') || b.includes('first place')) return true;
+  // Word-boundary the "1st place" / "first place" check — a naive substring
+  // match also fires on "2**1st place**" / "3**1st place**", which pulled
+  // Heavyweights' "21st/31st Place" side brackets into the championship tree and
+  // overlapped the real semifinals. The \b before "1" fails inside "21".
+  if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
 
   // Allow "Championship", "Championship Bracket", "Championship Final",
   // "National Championship", "Sectional Championship", "Regional

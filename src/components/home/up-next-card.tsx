@@ -175,15 +175,15 @@ function UsauEventRow({ event, first }: { event: UpcomingUsauEvent; first: boole
   const dateRange = formatDateRange(event.startDate, event.endDate);
   const meta = [dateRange, event.flightLabel].filter(Boolean).join(' · ');
 
-  // Single-line row: tournament name (left, truncates) + date·flight on the
-  // RIGHT — mirroring the UFA row's `[matchup | when]` layout so USAU rows are
-  // the SAME HEIGHT as UFA rows and the two cards align. (Previously the meta
-  // sat on a second line below the name, making each USAU row taller.)
+  // Single-line row: tournament name + its date·flight sitting IMMEDIATELY to
+  // the right of the name (not pinned to the far edge), with the rest of the row
+  // left empty. The name truncates first if the row gets tight so the date stays
+  // visible. Single-line keeps USAU rows the same height as UFA rows.
   return (
     <Link
       href={`/usau/events/${event.slug}`}
       className={[
-        'grid grid-cols-[1fr_auto] gap-3 items-center py-[11px]',
+        'flex items-baseline gap-3 py-[11px]',
         first ? '' : 'border-t border-hairline',
         'hover:opacity-80 transition-opacity',
       ].join(' ')}

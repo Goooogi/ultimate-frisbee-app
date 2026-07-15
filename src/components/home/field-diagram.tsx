@@ -65,7 +65,10 @@ export function HeroFieldLines({ color, accent }: { color: string; accent: strin
     >
       <line x1="60" y1="0" x2="60" y2="480" stroke={color} strokeDasharray="3 6" />
       <line x1="740" y1="0" x2="740" y2="480" stroke={color} strokeDasharray="3 6" />
-      <line x1="400" y1="0" x2="400" y2="480" stroke={color} />
+      {/* Center line — dashed + at half the sideline opacity so it blends into
+          the card instead of reading as a hard seam splitting it down the
+          middle (was a solid full-height stroke). */}
+      <line x1="400" y1="0" x2="400" y2="480" stroke={color} strokeDasharray="3 6" opacity="0.5" />
       <ellipse
         cx="700"
         cy="-30"

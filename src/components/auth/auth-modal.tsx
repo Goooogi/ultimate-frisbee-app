@@ -3,19 +3,18 @@
 // Login / register modal for The Playbook.
 //
 // Sign-in mode: email + password.
-// Sign-up mode: display name (optional), email, phone (optional, E.164),
-//   password, confirm password — with a show/hide toggle for both password
-//   fields so users can verify what they typed without retyping.
+// Sign-up mode: email, handle (@identity, required), password, confirm password
+//   — with a show/hide toggle for both password fields so users can verify what
+//   they typed without retyping. (Display name + phone were removed to keep the
+//   form short — handle doubles as the display identity.)
 //
 // Visual language matches CreatePlayDialog: dark scrim, single bg-bg card,
-// uppercase tracked labels, accent button. The phone field accepts free
-// input (parentheses, dashes, spaces) and we normalize to E.164 on submit
-// before sending to Supabase, so the DB constraint never sees a malformed
-// value coming from the UI.
+// uppercase tracked labels, accent button.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { OAuthButtons } from '@/components/auth/oauth-buttons';
 import { isUsernameAvailable, USERNAME_RE } from '@/lib/fantasy/data';
 import { moderateName } from '@/lib/moderation';
 
@@ -52,8 +51,6 @@ export function AuthModal({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [phone, setPhone] = useState('');
   const [handle, setHandle] = useState('');
   const [handleStatus, setHandleStatus] = useState<'idle' | 'checking' | 'ok' | 'taken' | 'format' | 'profanity'>('idle');
   const handleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -73,8 +70,6 @@ export function AuthModal({
     setEmail(initialEmail ?? '');
     setPassword('');
     setConfirmPassword('');
-    setDisplayName('');
-    setPhone('');
     setHandle('');
     setHandleStatus('idle');
     setShowPassword(false);
@@ -199,24 +194,8 @@ export function AuthModal({
         return;
       }
 
-      // Phone is optional. When provided, normalize to E.164 (+15551234567)
-      // before hitting Supabase so the DB CHECK constraint never sees a
-      // formatted string like "(555) 123-4567".
-      let normalizedPhone: string | undefined;
-      const phoneInput = phone.trim();
-      if (phoneInput) {
-        const e164 = toE164(phoneInput);
-        if (!e164) {
-          setError('Enter a 10-digit US number, or include a country code (e.g. +44…) for international.');
-          return;
-        }
-        normalizedPhone = e164;
-      }
-
       setSubmitting(true);
       const result = await signUp(trimmedEmail, password, {
-        displayName: displayName.trim() || undefined,
-        phone: normalizedPhone,
         username: handle.trim().toLowerCase(),
       });
       setSubmitting(false);
@@ -298,6 +277,10 @@ export function AuthModal({
           </div>
         )}
 
+        {/* OAuth (Google / Apple) — sign-in + sign-up only, not reset. Renders
+            nothing (incl. the "or" divider) unless a provider flag is enabled. */}
+        {!isReset && <OAuthButtons />}
+
         {/* Fields */}
         <div className="px-6 py-4 flex flex-col gap-3.5">
           {/* ── Reset mode: confirmation state (after link sent) ─────────── */}
@@ -325,22 +308,6 @@ export function AuthModal({
             </>
           ) : (
             <>
-              {/* ── Signup-only field ───────────────────────────────────── */}
-              {isSignup && (
-                <Field label="Display name" optional>
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="What should we call you?"
-                    autoComplete="name"
-                    spellCheck={false}
-                    maxLength={60}
-                    className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
-                  />
-                </Field>
-              )}
-
               {/* ── Email (all modes) ───────────────────────────────────── */}
               <Field label="Email">
                 <input
@@ -355,23 +322,6 @@ export function AuthModal({
                   className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
                 />
               </Field>
-
-              {/* ── Signup phone ────────────────────────────────────────── */}
-              {isSignup && (
-                <Field label="Phone" optional hint="US number or +country code">
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+1 555 123 4567"
-                    autoComplete="tel"
-                    inputMode="tel"
-                    spellCheck={false}
-                    maxLength={20}
-                    className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors tabular"
-                  />
-                </Field>
-              )}
 
               {/* ── Handle (signup only) ─────────────────────────────────── */}
               {isSignup && (
@@ -744,30 +694,3 @@ function EyeOffGlyph() {
   );
 }
 
-// Normalize a free-form phone input to E.164 (+ followed by digits only) to
-// satisfy the DB CHECK constraint `^\+[1-9]\d{1,14}$`.
-//
-// The user should NOT have to type a country code or "+". We default to US
-// (+1) for bare US-style numbers and only require an explicit "+" for non-US
-// international numbers:
-//   "630-465-8434"   (10 digits)            → +16304658434
-//   "16304658434"    (11 digits, leading 1) → +16304658434
-//   "+44 20 7946..." (explicit intl)        → respected as typed
-// Returns null only if the input can't be coerced into a valid E.164 number.
-function toE164(raw: string): string | null {
-  const cleaned = raw.replace(/[\s().\-]/g, '');
-
-  // Explicit international: keep the user's country code as-is.
-  if (cleaned.startsWith('+')) {
-    const digits = cleaned.slice(1);
-    return /^[1-9]\d{1,14}$/.test(digits) ? `+${digits}` : null;
-  }
-
-  // Bare digits — assume US/Canada (+1).
-  if (!/^\d+$/.test(cleaned)) return null;
-  if (cleaned.length === 10) return `+1${cleaned}`;            // 6304658434
-  if (cleaned.length === 11 && cleaned.startsWith('1')) {      // 16304658434
-    return `+${cleaned}`;
-  }
-  return null;
-}

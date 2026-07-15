@@ -34,3 +34,14 @@ export function supabaseUrl(): string {
 export function supabaseAnonKey(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || PLACEHOLDER_KEY;
 }
+
+// ── OAuth provider feature flags ──────────────────────────────────────────────
+// Each provider's button renders ONLY when its flag is 'true'. Off by default so
+// the buttons don't ship (and error on click) before the provider is actually
+// configured in the Supabase dashboard. Flip the flag once the provider works.
+//   NEXT_PUBLIC_OAUTH_GOOGLE=true
+//   NEXT_PUBLIC_OAUTH_APPLE=true
+// NEXT_PUBLIC_* are inlined at build time, so these are safe to read in client
+// components and are statically known.
+export const OAUTH_GOOGLE_ENABLED = process.env.NEXT_PUBLIC_OAUTH_GOOGLE === 'true';
+export const OAUTH_APPLE_ENABLED = process.env.NEXT_PUBLIC_OAUTH_APPLE === 'true';
