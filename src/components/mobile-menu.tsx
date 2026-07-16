@@ -52,6 +52,7 @@ import {
 } from '@/lib/league';
 import { useTheme } from '@/lib/use-theme';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { AvatarIconView, iconResolvable } from '@/components/profile/avatar-icon-view';
 import { getMyFavorites } from '@/lib/favorites/data';
 import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
 import { LogoStrikeInline } from '@/components/logo-strike';
@@ -1001,12 +1002,32 @@ function AccountFooter({ onClose }: { onClose: () => void }) {
   // ── Signed in ─────────────────────────────────────────────────────────
   return (
     <div className="flex-shrink-0 flex items-center gap-3 px-5 py-4 border-t border-hairline">
-      <span
-        aria-hidden="true"
-        className="inline-flex items-center justify-center flex-shrink-0 w-10 h-10 rounded-full bg-accent text-accent-ink font-bold text-[13px] font-tight"
-      >
-        {user.initials}
-      </span>
+      {/* Icon precedence: picked team-logo/flag (synchronously resolvable —
+          UFA/USAU/WUL/WFDF; a PUL icon needs a DB fetch so it falls back to
+          initials here) → uploaded photo → initials. */}
+      {user.profile?.avatar_icon && iconResolvable(user.profile.avatar_icon) ? (
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center flex-shrink-0 w-10 h-10 rounded-full overflow-hidden bg-ink/5"
+        >
+          <AvatarIconView icon={user.profile.avatar_icon} size={40} />
+        </span>
+      ) : user.profile?.avatar_url ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          aria-hidden="true"
+          src={user.profile.avatar_url}
+          alt=""
+          className="flex-shrink-0 w-10 h-10 rounded-full object-cover bg-ink/5"
+        />
+      ) : (
+        <span
+          aria-hidden="true"
+          className="inline-flex items-center justify-center flex-shrink-0 w-10 h-10 rounded-full bg-accent text-accent-ink font-bold text-[13px] font-tight"
+        >
+          {user.initials}
+        </span>
+      )}
       <div className="flex-1 min-w-0">
         <div className="text-[13px] font-bold text-ink font-tight truncate">{user.name}</div>
         <div className="text-[11px] text-muted font-tight truncate">Manage account</div>

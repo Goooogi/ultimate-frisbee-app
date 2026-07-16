@@ -16,6 +16,7 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { AvatarIconView } from '@/components/profile/avatar-icon-view';
 import dynamic from 'next/dynamic';
 
 // Avatars are stored in the `avatars` Storage bucket as full-size originals.
@@ -73,6 +74,7 @@ export function AccountChip({
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const avatarUrl = user?.profile?.avatar_url ?? null;
+  const avatarIcon = user?.profile?.avatar_icon ?? null;
   // Latches to the initials fallback if the image fails to load. MUST reset
   // when avatar_url changes — otherwise a failed load sticks around and
   // masks a newly-uploaded photo (same gotcha as PlayerHeadshot).
@@ -80,6 +82,32 @@ export function AccountChip({
   useEffect(() => {
     setImgFailed(false);
   }, [avatarUrl]);
+
+  // A picked team-logo/flag icon resolves synchronously for UFA/USAU/WUL/WFDF.
+  // PUL logos are remote (R2) URLs only known after a DB fetch, so when the
+  // user's icon is a PUL reference we lazily fetch the PUL logo map once and
+  // pass it to AvatarIconView. Other icon kinds never trigger the fetch.
+  const [pulLogos, setPulLogos] = useState<
+    Map<string, { name: string; logoUrl: string | null }> | undefined
+  >(undefined);
+  const isPulIcon = !!avatarIcon && avatarIcon.startsWith('pul:');
+  useEffect(() => {
+    if (!isPulIcon || pulLogos) return;
+    let cancelled = false;
+    (async () => {
+      const { listPulTeams } = await import('@/lib/pul/data');
+      const teams = await listPulTeams();
+      if (cancelled) return;
+      setPulLogos(
+        new Map(teams.map((t) => [t.id, { name: t.name, logoUrl: t.logoUrl }])),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPulIcon, pulLogos]);
+
+  const showIcon = !!avatarIcon && (!isPulIcon || !!pulLogos);
 
   // Close popover on outside click + Esc.
   useEffect(() => {
@@ -199,7 +227,11 @@ export function AccountChip({
         ].join(' ')}
         style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
       >
-        {avatarUrl && !imgFailed ? (
+        {showIcon ? (
+          <span className="w-full h-full rounded-full overflow-hidden inline-flex items-center justify-center">
+            <AvatarIconView icon={avatarIcon} size={size} pulLogos={pulLogos} />
+          </span>
+        ) : avatarUrl && !imgFailed ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={avatarUrl}

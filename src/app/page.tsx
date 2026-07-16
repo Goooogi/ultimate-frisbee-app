@@ -7,10 +7,10 @@
 //   1. Nav (AppRail — untouched)
 //   2. Full-width hero carousel (UFA → USAU → WFDF → PUL → WUL)
 //   3. "Every league, one place." strip
-//   4. LEAGUE STANDINGS group — "Top of the league" (4 UFA division cards),
+//   4. "Up next" — UFA + USAU cards, side by side on desktop
+//   5. LEAGUE STANDINGS group — "Top of the league" (4 UFA division cards),
 //      USAU Rankings (full-width 4×4 grid of the top 16, aligned to the UFA
 //      cards above it), then PUL + WUL standings (two-up row)
-//   5. "Up next" — UFA + USAU cards, side by side on desktop
 //   6. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on desktop
 //   7. Footer
 //
@@ -247,10 +247,16 @@ export default async function HomePage() {
         <LeaguesStrip />
       </div>
 
-      {/* 3. LEAGUE STANDINGS group — every league's current standing, together,
+      {/* 3. "Up next" — UFA + USAU cards, side by side on desktop so they
+             fill the width instead of stacking narrow in a single column. */}
+      <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <UpNextCards ufaGames={upNext} usauEvents={usauUpcomingEvents} />
+      </div>
+
+      {/* 4. LEAGUE STANDINGS group — every league's current standing, together,
              in one vertical stack: UFA divisions → USAU rankings → PUL/WUL. */}
 
-      {/* 3a. "Top of the league" — UFA division cards */}
+      {/* 4a. "Top of the league" — UFA division cards */}
       {standings.length > 0 && (
         <div className="px-5 lg:px-10 pt-9 lg:pt-11">
           <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
@@ -276,23 +282,17 @@ export default async function HomePage() {
         </div>
       )}
 
-      {/* 3b. USAU Rankings — full-width 4×4 grid of the top 16, sitting
+      {/* 4b. USAU Rankings — full-width 4×4 grid of the top 16, sitting
              directly below the UFA cards with matching horizontal padding so
              its outer edges line up with the strip above. */}
       <div className="px-5 lg:px-10 pt-5 lg:pt-6">
         <RankingsCard />
       </div>
 
-      {/* 3c. PUL/WUL standings — two-up row */}
+      {/* 4c. PUL/WUL standings — two-up row */}
       <div className="px-5 lg:px-10 pt-5 lg:pt-6 grid grid-cols-1 lg:grid-cols-2 gap-5">
         <PulStandingsSection />
         <WulStandingsSection />
-      </div>
-
-      {/* 4. "Up next" — UFA + USAU cards, side by side on desktop so they
-             fill the width instead of stacking narrow in a single column. */}
-      <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <UpNextCards ufaGames={upNext} usauEvents={usauUpcomingEvents} />
       </div>
 
       {/* 5. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on wide

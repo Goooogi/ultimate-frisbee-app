@@ -131,7 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const supabase = await loadClient();
     const { data } = await supabase
       .from('profiles')
-      .select('id, email, display_name, username, avatar_url, phone, role')
+      .select('id, email, display_name, username, avatar_url, avatar_icon, phone, role')
       .eq('id', userId)
       .maybeSingle();
     setProfile(data ?? null);
@@ -151,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const supabase = await loadClient();
       const { data } = await supabase
         .from('profiles')
-        .select('id, email, display_name, username, avatar_url, phone, role')
+        .select('id, email, display_name, username, avatar_url, avatar_icon, phone, role')
         .eq('id', userId)
         .maybeSingle();
       if (cancelled) return;

@@ -16,6 +16,7 @@ import {
 import { moderateName } from '@/lib/moderation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AvatarUploadModal } from '@/components/settings/avatar-upload-modal';
+import { AvatarIconView, iconResolvable } from '@/components/profile/avatar-icon-view';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ function ProfileIconField() {
   const [modalOpen, setModalOpen] = useState(false);
 
   const avatarUrl = user?.profile?.avatar_url ?? null;
+  const avatarIcon = user?.profile?.avatar_icon ?? null;
   const displayName = user?.name ?? '';
   const initials = user?.initials ?? '';
 
@@ -133,7 +135,9 @@ function ProfileIconField() {
       <FieldLabel htmlFor="settings-profile-icon" label="Profile icon" />
       <div className="flex items-center gap-3.5">
         <div className="w-14 h-14 rounded-full overflow-hidden bg-ink/5 flex items-center justify-center shrink-0">
-          {avatarUrl ? (
+          {avatarIcon && iconResolvable(avatarIcon) ? (
+            <AvatarIconView icon={avatarIcon} size={56} />
+          ) : avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={avatarUrl}
@@ -156,7 +160,7 @@ function ProfileIconField() {
             'hover:bg-ink/[0.1] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           ].join(' ')}
         >
-          Change photo
+          {avatarIcon || avatarUrl ? 'Change icon' : 'Set icon'}
         </button>
       </div>
 
@@ -164,6 +168,7 @@ function ProfileIconField() {
         open={modalOpen}
         onClose={() => setModalOpen(false)}
         currentAvatarUrl={avatarUrl}
+        currentAvatarIcon={avatarIcon}
         displayName={displayName}
       />
     </div>
