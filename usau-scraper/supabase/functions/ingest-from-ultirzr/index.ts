@@ -21,8 +21,8 @@
 //   `query=masters` (name substring) and ingests EVERY masters-family group
 //   per event, classifying each group independently:
 //     - team competition_level: 'Masters - *' → MASTERS; 'Grand Masters - *'
-//       and 'Great Grand Masters - *' → GRAND_MASTERS (GGM folded in — tiny
-//       division, not worth widening the enum).
+//       → GRAND_MASTERS; 'Great Grand Masters - *' → GREAT_GRAND_MASTERS (its
+//       own level as of 2026-07 — was previously folded into GRAND_MASTERS).
 //     - bracket_name is prefixed with a short group label ("GM Women · Pool A")
 //       so the combined championships' divisions stay distinguishable.
 //   Non-masters events surfaced by the name search (clinics, "Masters Minus"
@@ -45,6 +45,7 @@
 //     from sync-event-rosters (HTML scrape of the team page).
 
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
+import { tzForState, localWallTimeToUtcIso } from '../_shared/tz.ts';
 
 interface RequestBody {
   year?: number;
@@ -52,6 +53,16 @@ interface RequestBody {
   page?: number;
   maxPages?: number;
   dryRun?: boolean;
+  /** Optional name-search override. ultirzr's `division=` search filter is
+   *  broken for some older seasons (2015 mens/womens-club return generic HS
+   *  results), so a name query lets us reach a specific event by title while
+   *  still filtering to the requested division's GROUP. Mirrors the masters
+   *  path, which always searches by `query=masters`. */
+  query?: string;
+  /** Targeted backfill: ingest ONLY this ultirzr EventId from the search
+   *  results, skipping all other hits. Pairs with `query` to load one known
+   *  event without pulling look-alikes the fuzzy search also returns. */
+  onlyEventId?: number;
 }
 
 interface UltirzrEventSearchHit {
@@ -182,23 +193,34 @@ function dateOnly(iso: string | undefined | null): string | null {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : null;
 }
 
-/** Their per-game StartDate is "MM/DD/YYYY" plus a separate StartTime. */
-function combineDateTime(date?: string, time?: string): string | null {
+/** Their per-game StartDate is "MM/DD/YYYY" plus a separate StartTime, both
+ *  in the VENUE'S LOCAL clock (ultirzr mirrors USAU verbatim). Convert to a
+ *  true UTC instant via the event's venue timezone — writing the wall clock
+ *  with a bare `Z` (the old behavior) stored a wrong instant that clashed
+ *  with the HTML pipeline's correct UTC and broke time display + "upcoming"
+ *  comparisons. When the zone is unknown, keep date-only (midnight) rather
+ *  than a wrong instant; with a known zone, date-only means venue midnight. */
+function combineDateTime(date?: string, time?: string, tz?: string | null): string | null {
   if (!date) return null;
   const md = date.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (!md) return null;
   const [, mm, dd, yyyy] = md;
+  const year = parseInt(yyyy, 10);
+  const month = parseInt(mm, 10);
+  const day = parseInt(dd, 10);
   const isoDate = `${yyyy}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
-  if (!time) return `${isoDate}T00:00:00Z`;
   // "9:00 AM" / "12:30 PM"
-  const mt = time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!mt) return `${isoDate}T00:00:00Z`;
+  const mt = time ? time.trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i) : null;
+  if (!tz) return `${isoDate}T00:00:00Z`; // zone unknown → date-only
+  if (!mt) {
+    return localWallTimeToUtcIso(year, month, day, 0, 0, tz) ?? `${isoDate}T00:00:00Z`;
+  }
   let h = parseInt(mt[1], 10);
-  const min = mt[2];
+  const min = parseInt(mt[2], 10);
   const ampm = mt[3].toUpperCase();
   if (ampm === 'PM' && h < 12) h += 12;
   if (ampm === 'AM' && h === 12) h = 0;
-  return `${isoDate}T${String(h).padStart(2, '0')}:${min}:00Z`;
+  return localWallTimeToUtcIso(year, month, day, h, min, tz) ?? `${isoDate}T00:00:00Z`;
 }
 
 /** Pull the lowercase slug out of UsauUrl. ultirzr returns URLs like
@@ -310,7 +332,7 @@ async function ingestEvent(
   // event hosts up to 7 age×gender groups) — see header.
   const isMasters = divisionFilter === 'masters';
   const wantedGroupName = divisionLabel(divisionFilter);
-  const wantedNorm = wantedGroupName?.toLowerCase().replace(/\s+/g, ' ').trim();
+  const wantedNorm = wantedGroupName ? normGroupKey(wantedGroupName) : undefined;
   const groups = (e.EventGroups ?? []).filter((g) => {
     if (isMasters) return mastersGroupMeta(g) !== null;
     if (!wantedNorm) return true;
@@ -366,6 +388,18 @@ async function ingestEvent(
     slug = `${slug}-${season}`;
   }
 
+  // Year-aware NAME, same reasoning as the slug. ultirzr reuses a year-less
+  // event NAME across seasons ("USA Ultimate National Championships" for
+  // 2014-2018). Downstream code keys off the year IN the name — the team-medal
+  // derivation's guard requires `event.name.includes(year)` to trust a game's
+  // season, and the UI shows the name verbatim. Overwriting a year-bearing DB
+  // name with the year-less ultirzr one silently breaks both (this dropped
+  // Revolver's 2015 title). Append the season when the name lacks any 4-digit
+  // year; modern names already carry it and are untouched.
+  const eventName = /\b(19|20)\d{2}\b/.test(e.EventName)
+    ? e.EventName
+    : `${e.EventName.trim()} ${season}`;
+
   if (dryRun) {
     stats.events++;
     return;
@@ -381,17 +415,26 @@ async function ingestEvent(
   // shells with REAL USAU slugs that a synthesized slug may not hit.
   //
   // Event-level competition_level is single-valued but a combined masters
-  // event hosts Masters AND Grand Masters groups. We classify by the
-  // "youngest" group present (any plain Masters group → MASTERS). The
-  // per-division truth lives on the TEAMS (tagged from their group below).
+  // event hosts Masters + Grand Masters + Great Grand Masters groups. We
+  // classify by the "youngest" group present (Masters > Grand Masters > Great
+  // Grand Masters) so a GGM-only event tags GREAT_GRAND_MASTERS while combined
+  // events keep MASTERS. The per-division truth lives on the TEAMS (tagged from
+  // their group below), so this coarse event tag only steers the URL path.
+  const mastersLevels = new Set(
+    groups.map((g) => mastersGroupMeta(g)?.level).filter(Boolean),
+  );
   const eventLevel = isMasters
-    ? (groups.some((g) => mastersGroupMeta(g)?.level === 'MASTERS') ? 'MASTERS' : 'GRAND_MASTERS')
+    ? mastersLevels.has('MASTERS')
+      ? 'MASTERS'
+      : mastersLevels.has('GRAND_MASTERS')
+        ? 'GRAND_MASTERS'
+        : 'GREAT_GRAND_MASTERS'
     : levelFromGroup(wantedGroupName);
 
   const eventRow = {
     usau_slug: slug,
     usau_event_id: hit.EventId,
-    name: e.EventName,
+    name: eventName,
     season,
     start_date: start,
     end_date: dateOnly(e.EndDate),
@@ -563,6 +606,8 @@ async function ingestEvent(
   // schedule stubs) and games with no real score updates pending — we
   // still want to record scheduled-not-played games so the bracket
   // renders, but we skip the ones with no resolved teams.
+  // Venue timezone for converting ultirzr's local schedule clocks → UTC.
+  const venueTz = tzForState(e.State ?? hit.State ?? null);
   for (const { game: gm, bracket, stage } of gameList) {
     if (!gm.EventGameId) continue;
     const homeId = gm.HomeTeamId ?? 0;
@@ -590,7 +635,7 @@ async function ingestEvent(
       score_a: scoreA,
       score_b: scoreB,
       location: gm.FieldName?.trim() || null,
-      scheduled_at: combineDateTime(gm.StartDate, gm.StartTime),
+      scheduled_at: combineDateTime(gm.StartDate, gm.StartTime, venueTz),
       status: classifyStatus(gm.GameStatus),
       source_url: `https://play.usaultimate.org/events/${slug}/`,
     };
@@ -648,17 +693,32 @@ function divisionLabel(div: string): string | null {
 // ─── Masters helpers ────────────────────────────────────────────────────
 
 interface MastersGroupMeta {
-  /** Our enum value. GGM folds into GRAND_MASTERS (see header). */
-  level: 'MASTERS' | 'GRAND_MASTERS';
+  /** Our enum value. Great Grand Masters is its own level (was folded into
+   *  GRAND_MASTERS pre-2026-07; now distinct — see [[USAU Masters Ingestion Plan]]). */
+  level: 'MASTERS' | 'GRAND_MASTERS' | 'GREAT_GRAND_MASTERS';
   gender: 'Men' | 'Women' | 'Mixed';
   /** Short display prefix for bracket names, e.g. "GM Women". */
   label: string;
 }
 
-/** Normalize an EventGroupName for matching (ultirzr has inconsistent
- *  whitespace year to year, incl. trailing spaces). */
+/** Normalize an EventGroupName for matching. ultirzr's group names drift
+ *  year to year: inconsistent whitespace / trailing spaces (all years) AND a
+ *  possessive form in older seasons — 2015 uses "Club - Men's " / "Club - Women's "
+ *  where 2016+ use "Club - Men" / "Club - Women". Strip a trailing possessive
+ *  's so both forms collapse to the same key (this un-broke the 2015 Club
+ *  Nationals men's/women's ingest). "Mixed" has no possessive, so it's safe. */
 function normGroupName(g: UltirzrGroup): string {
-  return (g.EventGroupName ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  return normGroupKey(g.EventGroupName ?? '');
+}
+
+/** Shared normalizer so the wanted label and the group name normalize the
+ *  same way (whitespace collapse + trailing-possessive strip). */
+function normGroupKey(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/'s$/, ''); // "club - men's" → "club - men"
 }
 
 /** 'Great Grand Masters - Men ' → { GRAND_MASTERS, Men, 'GGM Men' };
@@ -672,7 +732,12 @@ function mastersGroupMeta(g: UltirzrGroup): MastersGroupMeta | null {
   const prefix =
     m[1] === 'great grand masters' ? 'GGM' : m[1] === 'grand masters' ? 'GM' : 'Masters';
   return {
-    level: m[1] === 'masters' ? 'MASTERS' : 'GRAND_MASTERS',
+    level:
+      m[1] === 'masters'
+        ? 'MASTERS'
+        : m[1] === 'great grand masters'
+          ? 'GREAT_GRAND_MASTERS'
+          : 'GRAND_MASTERS',
     gender,
     label: `${prefix} ${gender}`,
   };
@@ -715,7 +780,12 @@ async function run(body: RequestBody) {
   for (let page = startPage; page <= endPage; page++) {
     // Masters events aren't reachable via ultirzr's division filter — search
     // by name substring instead (see header). Non-masters keeps division.
-    const searchQs = division === 'masters'
+    // An explicit `query` override wins (used to reach events whose division
+    // search is broken upstream — e.g. 2015 club); masters always searches by
+    // name; otherwise filter by division as usual.
+    const searchQs = body.query
+      ? `year=${body.year}&query=${encodeURIComponent(body.query)}&page=${page}`
+      : division === 'masters'
       ? `year=${body.year}&query=masters&page=${page}`
       : `year=${body.year}&division=${encodeURIComponent(division)}&page=${page}`;
     const resp = await fetchUltirzr<{ success: boolean; hits: UltirzrEventSearchHit[] }>(
@@ -726,6 +796,11 @@ async function run(body: RequestBody) {
     if (hits.length === 0) break;
 
     for (const hit of hits) {
+      // Targeted backfill guard: when `onlyEventId` is set, ingest ONLY that
+      // ultirzr EventId and skip every other search hit. Used to load a single
+      // known event (e.g. 2015 Club Nationals #2094) without also pulling the
+      // other events the fuzzy name search returns (US Open, Pan-Ams).
+      if (body.onlyEventId != null && hit.EventId !== body.onlyEventId) continue;
       try {
         await ingestEvent(db, hit, division, stats, dryRun);
       } catch (err) {

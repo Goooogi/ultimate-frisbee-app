@@ -9,7 +9,11 @@ interface DiscFlightProps {
   tilt?: number;
 }
 
-function DiscFlight({ size, color, ring, tilt = -12 }: DiscFlightProps) {
+// Exported so callers that need the wordmark on a fixed (non-theme-following)
+// background — e.g. the footer's always-dark-in-appearance ink card — can
+// compose their own text color around it instead of relying on LogoStrikeInline's
+// `text-ink` (which assumes the surrounding surface follows the page theme).
+export function DiscFlight({ size, color, ring, tilt = -12 }: DiscFlightProps) {
   return (
     <svg
       width={size}
@@ -56,7 +60,7 @@ function DiscFlight({ size, color, ring, tilt = -12 }: DiscFlightProps) {
 
 interface LogoStrikeInlineProps {
   size?: number;
-  /** Pass the current accent hex color — #FF3D00 in field, #D9FF3A in broadcast */
+  /** Pass the current accent hex color — #FF3D00 (coral) in both themes */
   accentColor: string;
   /** Controls ink + ring colors for disc */
   theme: 'light' | 'dark';

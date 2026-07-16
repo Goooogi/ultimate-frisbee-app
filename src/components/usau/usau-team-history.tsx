@@ -70,16 +70,16 @@ export function UsauTeamHistory({ seasons, genderDivision = null }: Props) {
         )}
 
         {active.roster.length > 0 && (
-          <div>
-            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-2">
+          <div className="bg-surface rounded-card-lg shadow-card p-4 lg:p-5">
+            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-2 px-1">
               Roster
             </div>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border border border-border">
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {active.roster.map((p) => (
-                <li key={p.playerId} className="bg-surface">
+                <li key={p.playerId}>
                   <Link
                     href={`/players/${p.playerId}?from=usau`}
-                    className="flex items-center gap-3 px-3 py-2.5 hover:bg-surface-hi transition-colors no-underline"
+                    className="flex items-center gap-3 px-3 py-2.5 rounded-card-sm hover:bg-ink/[0.04] transition-colors no-underline"
                   >
                     <span
                       aria-hidden="true"
@@ -144,7 +144,7 @@ function EventCard({
     <li>
       <Link
         href={usauEventHref(event.slug, genderDivision)}
-        className="block bg-surface border border-border rounded-md p-3.5 hover:border-ink transition-colors no-underline"
+        className="group block bg-surface rounded-card shadow-card p-3.5 transition-shadow hover:shadow-lift cursor-pointer no-underline"
       >
         <div className="flex items-baseline justify-between gap-2 mb-1">
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
@@ -163,7 +163,7 @@ function EventCard({
             )}
           </div>
         </div>
-        <div className="font-display italic font-bold text-[17px] leading-tight tracking-[-0.02em] text-ink">
+        <div className="font-display italic font-bold text-[17px] leading-tight tracking-[-0.02em] text-ink group-hover:text-accent transition-colors">
           {event.name}
         </div>
         {event.pool && (

@@ -68,12 +68,12 @@ export function FantasyRulesModal({
       ? [
           'inline-flex items-center gap-1.5 text-accent font-tight text-[13px] font-bold tracking-[0.04em]',
           'hover:opacity-80 transition-opacity duration-150 cursor-pointer',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full',
         ].join(' ')
       : [
-          'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-border bg-surface',
+          'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-ink/5',
           'text-ink font-tight text-[12px] font-bold tracking-[0.04em]',
-          'hover:bg-[rgb(var(--surface-hi))] transition-colors duration-150 cursor-pointer',
+          'hover:bg-ink/10 transition-colors duration-150 cursor-pointer',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ');
 
@@ -100,7 +100,7 @@ export function FantasyRulesModal({
               if (e.target === e.currentTarget) close();
             }}
           >
-            <div className="w-full max-w-[520px] max-h-full overflow-y-auto bg-bg border border-border rounded-md shadow-xl">
+            <div className="w-full max-w-[520px] max-h-full overflow-y-auto bg-surface rounded-card-lg shadow-hero">
               {/* Header with close button */}
               <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-1">
                 <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight pt-1">
@@ -111,8 +111,8 @@ export function FantasyRulesModal({
                   onClick={close}
                   aria-label="Close rules"
                   className={[
-                    'flex-shrink-0 -mr-1.5 w-8 h-8 rounded flex items-center justify-center',
-                    'text-faint hover:text-ink hover:bg-[rgb(var(--ink)/0.06)]',
+                    'flex-shrink-0 -mr-1.5 w-8 h-8 rounded-full flex items-center justify-center',
+                    'text-faint hover:text-ink hover:bg-ink/5',
                     'transition-colors duration-150 cursor-pointer',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                   ].join(' ')}

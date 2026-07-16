@@ -3,19 +3,18 @@
 // Login / register modal for The Playbook.
 //
 // Sign-in mode: email + password.
-// Sign-up mode: display name (optional), email, phone (optional, E.164),
-//   password, confirm password — with a show/hide toggle for both password
-//   fields so users can verify what they typed without retyping.
+// Sign-up mode: email, handle (@identity, required), password, confirm password
+//   — with a show/hide toggle for both password fields so users can verify what
+//   they typed without retyping. (Display name + phone were removed to keep the
+//   form short — handle doubles as the display identity.)
 //
 // Visual language matches CreatePlayDialog: dark scrim, single bg-bg card,
-// uppercase tracked labels, accent button. The phone field accepts free
-// input (parentheses, dashes, spaces) and we normalize to E.164 on submit
-// before sending to Supabase, so the DB constraint never sees a malformed
-// value coming from the UI.
+// uppercase tracked labels, accent button.
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { OAuthButtons } from '@/components/auth/oauth-buttons';
 import { isUsernameAvailable, USERNAME_RE } from '@/lib/fantasy/data';
 import { moderateName } from '@/lib/moderation';
 
@@ -52,8 +51,6 @@ export function AuthModal({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [phone, setPhone] = useState('');
   const [handle, setHandle] = useState('');
   const [handleStatus, setHandleStatus] = useState<'idle' | 'checking' | 'ok' | 'taken' | 'format' | 'profanity'>('idle');
   const handleDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -73,8 +70,6 @@ export function AuthModal({
     setEmail(initialEmail ?? '');
     setPassword('');
     setConfirmPassword('');
-    setDisplayName('');
-    setPhone('');
     setHandle('');
     setHandleStatus('idle');
     setShowPassword(false);
@@ -199,24 +194,8 @@ export function AuthModal({
         return;
       }
 
-      // Phone is optional. When provided, normalize to E.164 (+15551234567)
-      // before hitting Supabase so the DB CHECK constraint never sees a
-      // formatted string like "(555) 123-4567".
-      let normalizedPhone: string | undefined;
-      const phoneInput = phone.trim();
-      if (phoneInput) {
-        const e164 = toE164(phoneInput);
-        if (!e164) {
-          setError('Enter a 10-digit US number, or include a country code (e.g. +44…) for international.');
-          return;
-        }
-        normalizedPhone = e164;
-      }
-
       setSubmitting(true);
       const result = await signUp(trimmedEmail, password, {
-        displayName: displayName.trim() || undefined,
-        phone: normalizedPhone,
         username: handle.trim().toLowerCase(),
       });
       setSubmitting(false);
@@ -256,7 +235,7 @@ export function AuthModal({
     >
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-[440px] max-h-full overflow-y-auto bg-bg border border-border rounded-md shadow-xl flex flex-col"
+        className="w-full max-w-[440px] max-h-full overflow-y-auto bg-surface rounded-card-lg shadow-hero flex flex-col"
       >
         {/* Header */}
         <div className="px-6 pt-6 pb-4 flex flex-col gap-2">
@@ -287,7 +266,7 @@ export function AuthModal({
         {/* Mode toggle — hidden during reset flow */}
         {!isReset && (
           <div className="px-6 pb-2">
-            <div className="grid grid-cols-2 gap-0 bg-surface border border-border rounded-md overflow-hidden">
+            <div className="grid grid-cols-2 gap-0 bg-ink/5 rounded-full overflow-hidden p-1">
               <ModeButton active={!isSignup} onClick={() => setMode('signin')}>
                 Sign in
               </ModeButton>
@@ -298,6 +277,10 @@ export function AuthModal({
           </div>
         )}
 
+        {/* OAuth (Google / Apple) — sign-in + sign-up only, not reset. Renders
+            nothing (incl. the "or" divider) unless a provider flag is enabled. */}
+        {!isReset && <OAuthButtons />}
+
         {/* Fields */}
         <div className="px-6 py-4 flex flex-col gap-3.5">
           {/* ── Reset mode: confirmation state (after link sent) ─────────── */}
@@ -305,7 +288,7 @@ export function AuthModal({
             <>
               <div
                 role="status"
-                className="text-[13px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-3 leading-snug"
+                className="text-[13px] font-medium font-tight text-ink bg-ink/5 rounded-card-sm px-3.5 py-3 leading-snug"
               >
                 Check your inbox — if{' '}
                 <span className="font-bold">{email.trim().toLowerCase()}</span>{' '}
@@ -325,22 +308,6 @@ export function AuthModal({
             </>
           ) : (
             <>
-              {/* ── Signup-only field ───────────────────────────────────── */}
-              {isSignup && (
-                <Field label="Display name" optional>
-                  <input
-                    type="text"
-                    value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    placeholder="What should we call you?"
-                    autoComplete="name"
-                    spellCheck={false}
-                    maxLength={60}
-                    className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
-                  />
-                </Field>
-              )}
-
               {/* ── Email (all modes) ───────────────────────────────────── */}
               <Field label="Email">
                 <input
@@ -352,26 +319,9 @@ export function AuthModal({
                   autoComplete="email"
                   required
                   spellCheck={false}
-                  className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors"
+                  className="bg-ink/5 px-3.5 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
                 />
               </Field>
-
-              {/* ── Signup phone ────────────────────────────────────────── */}
-              {isSignup && (
-                <Field label="Phone" optional hint="US number or +country code">
-                  <input
-                    type="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+1 555 123 4567"
-                    autoComplete="tel"
-                    inputMode="tel"
-                    spellCheck={false}
-                    maxLength={20}
-                    className="bg-surface border border-border px-3 py-2.5 text-[14px] font-semibold text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink transition-colors tabular"
-                  />
-                </Field>
-              )}
 
               {/* ── Handle (signup only) ─────────────────────────────────── */}
               {isSignup && (
@@ -402,19 +352,19 @@ export function AuthModal({
                         spellCheck={false}
                         maxLength={30}
                         className={[
-                          'w-full bg-surface pl-7 pr-10 py-2.5 text-[14px] font-semibold text-ink font-tight rounded',
-                          'focus-visible:outline-none transition-colors',
+                          'w-full bg-ink/5 pl-7 pr-10 py-2.5 text-[14px] font-semibold text-ink font-tight rounded-card-sm ring-1 ring-inset',
+                          'focus-visible:outline-none focus-visible:ring-2 transition-colors',
                           handleStatus === 'ok'
-                            ? 'border border-[#22c55e] focus-visible:border-[#22c55e]'
+                            ? 'ring-[#22c55e] focus-visible:ring-[#22c55e]'
                             : handleStatus === 'taken' || handleStatus === 'format' || handleStatus === 'profanity'
-                            ? 'border border-[rgb(var(--live))] focus-visible:border-[rgb(var(--live))]'
-                            : 'border border-border focus-visible:border-ink',
+                            ? 'ring-live focus-visible:ring-live'
+                            : 'ring-transparent focus-visible:ring-accent',
                         ].join(' ')}
                       />
                       {/* Status indicator — right side of input */}
                       <span className="absolute right-3 flex items-center" aria-hidden="true">
                         {handleStatus === 'checking' && (
-                          <span className="w-4 h-4 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin block" />
+                          <span className="w-4 h-4 rounded-full border-2 border-ink/15 border-t-accent animate-spin block" />
                         )}
                         {handleStatus === 'ok' && (
                           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -435,13 +385,13 @@ export function AuthModal({
                       <span className="text-[#22c55e]">@{handle} is available</span>
                     )}
                     {handleStatus === 'taken' && (
-                      <span className="text-[rgb(var(--live))]">That handle is already taken</span>
+                      <span className="text-live">That handle is already taken</span>
                     )}
                     {handleStatus === 'format' && (
-                      <span className="text-[rgb(var(--live))]">3–30 chars · lowercase letters, numbers, underscores only</span>
+                      <span className="text-live">3–30 chars · lowercase letters, numbers, underscores only</span>
                     )}
                     {handleStatus === 'profanity' && (
-                      <span className="text-[rgb(var(--live))]">Handle contains language that isn&apos;t allowed</span>
+                      <span className="text-live">Handle contains language that isn&apos;t allowed</span>
                     )}
                     {(handleStatus === 'idle' || handleStatus === 'checking') && (
                       <span className="text-faint">Shown on the leaderboard as @handle</span>
@@ -505,7 +455,7 @@ export function AuthModal({
               {error && (
                 <div
                   role="alert"
-                  className="text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
+                  className="text-[12px] font-medium font-tight text-live bg-live/[0.08] rounded-card-sm px-3.5 py-2"
                 >
                   {error}
                 </div>
@@ -513,7 +463,7 @@ export function AuthModal({
               {info && !error && (
                 <div
                   role="status"
-                  className="text-[12px] font-medium font-tight text-ink bg-surface border border-border rounded px-3 py-2"
+                  className="text-[12px] font-medium font-tight text-ink bg-ink/5 rounded-card-sm px-3.5 py-2"
                 >
                   {info}
                 </div>
@@ -529,7 +479,7 @@ export function AuthModal({
               type="submit"
               disabled={submitting || (isSignup && handleStatus !== 'idle' && handleStatus !== 'ok' && handleStatus !== 'checking')}
               className={[
-                'inline-flex items-center justify-center gap-2 w-full py-3 rounded-md cursor-pointer',
+                'inline-flex items-center justify-center gap-2 w-full py-3 rounded-full cursor-pointer',
                 'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
                 'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
                 'disabled:opacity-60 disabled:cursor-not-allowed',
@@ -613,7 +563,7 @@ function ModeButton({
       onClick={onClick}
       aria-pressed={active}
       className={[
-        'py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight transition-colors cursor-pointer',
+        'py-2 rounded-full text-[11px] font-bold tracking-[0.16em] uppercase font-tight transition-colors cursor-pointer',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'bg-ink text-bg' : 'text-muted hover:text-ink',
       ].join(' ')}
@@ -683,11 +633,11 @@ function PasswordInput({
         required
         minLength={8}
         className={[
-          'w-full bg-surface border px-3 py-2.5 pr-10 text-[14px] font-semibold text-ink font-tight rounded',
-          'focus-visible:outline-none transition-colors',
+          'w-full bg-ink/5 px-3.5 py-2.5 pr-10 text-[14px] font-semibold text-ink font-tight rounded-card-sm ring-1 ring-inset',
+          'focus-visible:outline-none focus-visible:ring-2 transition-colors',
           mismatch
-            ? 'border-live focus-visible:border-live'
-            : 'border-border focus-visible:border-ink',
+            ? 'ring-live focus-visible:ring-live'
+            : 'ring-transparent focus-visible:ring-accent',
         ].join(' ')}
       />
       <button
@@ -744,30 +694,3 @@ function EyeOffGlyph() {
   );
 }
 
-// Normalize a free-form phone input to E.164 (+ followed by digits only) to
-// satisfy the DB CHECK constraint `^\+[1-9]\d{1,14}$`.
-//
-// The user should NOT have to type a country code or "+". We default to US
-// (+1) for bare US-style numbers and only require an explicit "+" for non-US
-// international numbers:
-//   "630-465-8434"   (10 digits)            → +16304658434
-//   "16304658434"    (11 digits, leading 1) → +16304658434
-//   "+44 20 7946..." (explicit intl)        → respected as typed
-// Returns null only if the input can't be coerced into a valid E.164 number.
-function toE164(raw: string): string | null {
-  const cleaned = raw.replace(/[\s().\-]/g, '');
-
-  // Explicit international: keep the user's country code as-is.
-  if (cleaned.startsWith('+')) {
-    const digits = cleaned.slice(1);
-    return /^[1-9]\d{1,14}$/.test(digits) ? `+${digits}` : null;
-  }
-
-  // Bare digits — assume US/Canada (+1).
-  if (!/^\d+$/.test(cleaned)) return null;
-  if (cleaned.length === 10) return `+1${cleaned}`;            // 6304658434
-  if (cleaned.length === 11 && cleaned.startsWith('1')) {      // 16304658434
-    return `+${cleaned}`;
-  }
-  return null;
-}

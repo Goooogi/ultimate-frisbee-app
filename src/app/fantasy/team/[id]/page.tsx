@@ -10,6 +10,7 @@ import {
   getTeamRoster,
   currentFantasyWeek,
 } from '@/lib/fantasy/data';
+import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import type { FantasyRole } from '@/lib/fantasy/scoring';
 import type { Crumb } from '@/components/breadcrumbs';
 
@@ -43,8 +44,11 @@ export default async function FantasyTeamPage({ params }: Props) {
   const offenders = roster.filter((s) => s.role === 'offender');
   const defenders = roster.filter((s) => s.role === 'defender');
 
+  // Top nav — the /fantasy page IS the leaderboard, so label it plainly.
+  // (This is the page's only back-nav; the old redundant bottom "Leaderboard"
+  // link was removed.)
   const BREADCRUMBS: Crumb[] = [
-    { label: 'Fantasy', href: '/fantasy' },
+    { label: 'Leaderboard', href: '/fantasy' },
     { label: team.teamName },
   ];
 
@@ -80,16 +84,19 @@ export default async function FantasyTeamPage({ params }: Props) {
           <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3">
             Weekly Points
           </div>
-          <div className="rounded-lg border border-border bg-surface overflow-hidden">
+          <div className="bg-surface rounded-card shadow-card overflow-hidden">
             <ol aria-label="Weekly point breakdown">
               {team.weeklyPoints.map((w, idx) => (
                 <li
                   key={w.week}
                   className={[
-                    'flex items-center justify-end px-4 py-3',
+                    'flex items-center justify-between gap-3 px-5 py-3',
                     idx > 0 ? 'border-t border-hairline' : '',
                   ].join(' ')}
                 >
+                  <span className="font-tight text-[13px] font-semibold text-muted">
+                    {formatWeekLabel(w.week)}
+                  </span>
                   <span className="font-tight text-[14px] font-bold tabular text-right text-ink">
                     {w.points}
                     <span className="text-[11px] font-medium text-faint ml-1">pts</span>
@@ -113,7 +120,7 @@ export default async function FantasyTeamPage({ params }: Props) {
         </div>
 
         {roster.length === 0 ? (
-          <div className="rounded-lg border border-border bg-surface px-5 py-8 text-center">
+          <div className="bg-surface rounded-card shadow-card px-5 py-8 text-center">
             <p className="font-tight text-[14px] text-muted">
               {latestWeek
                 ? `No roster set for ${latestWeek}.`
@@ -132,22 +139,6 @@ export default async function FantasyTeamPage({ params }: Props) {
         )}
       </section>
 
-      {/* ── Back to leaderboard ───────────────────────────────────────────── */}
-      <div className="mt-10 pt-6 border-t border-hairline">
-        <Link
-          href="/fantasy"
-          className={[
-            'inline-flex items-center gap-2 font-tight text-[13px] font-bold text-muted',
-            'hover:text-ink transition-colors duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-          ].join(' ')}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-            <path d="M11 7H3M6 4L3 7l3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Leaderboard
-        </Link>
-      </div>
     </PageShell>
   );
 }
@@ -166,7 +157,7 @@ function StatCard({
   highlight?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border bg-surface px-4 py-4">
+    <div className="bg-surface rounded-card shadow-card px-4 py-4">
       <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1">
         {label}
       </div>
@@ -214,8 +205,8 @@ function RosterSection({
       <div className="flex items-center gap-2 mb-2">
         <span
           className={[
-            'inline-flex items-center justify-center w-5 h-5 rounded text-[9px] font-bold font-tight',
-            'bg-[rgb(var(--ink)/0.08)]',
+            'inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold font-tight',
+            'bg-ink/5',
             roleColor,
           ].join(' ')}
           aria-hidden="true"
@@ -227,19 +218,19 @@ function RosterSection({
         </span>
       </div>
 
-      <div className="rounded-lg border border-border bg-surface overflow-hidden">
+      <div className="bg-surface rounded-card shadow-card overflow-hidden">
         {slots.map((slot, idx) => (
           <div
             key={slot.playerId}
             className={[
-              'flex items-center gap-3 px-4 py-3',
+              'flex items-center gap-3 px-5 py-3',
               idx > 0 ? 'border-t border-hairline' : '',
             ].join(' ')}
           >
             <span
               className={[
-                'flex-shrink-0 w-5 h-5 rounded text-[9px] font-bold flex items-center justify-center font-tight',
-                'bg-[rgb(var(--ink)/0.06)]',
+                'flex-shrink-0 w-5 h-5 rounded-full text-[9px] font-bold flex items-center justify-center font-tight',
+                'bg-ink/5',
                 roleColor,
               ].join(' ')}
               aria-label={role}
@@ -247,9 +238,16 @@ function RosterSection({
               {roleTag}
             </span>
             <span className="flex-1 min-w-0">
-              <span className="block font-tight text-[14px] font-semibold text-ink truncate">
+              <Link
+                href={`/players/${slot.playerId}`}
+                className={[
+                  'block font-tight text-[14px] font-semibold text-ink truncate',
+                  'hover:text-accent transition-colors duration-150',
+                  'focus-visible:outline-none focus-visible:underline',
+                ].join(' ')}
+              >
                 {slot.fullName}
-              </span>
+              </Link>
               {slot.teamName && (
                 <span className="block font-tight text-[11px] text-muted truncate">
                   {slot.teamName}

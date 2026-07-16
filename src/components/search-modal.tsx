@@ -107,6 +107,33 @@ export function SearchModal({ open, onClose }: Props) {
   const playerResults = results.filter((r) => r.kind === 'player');
   const tournamentResults = results.filter((r) => r.kind === 'tournament');
 
+  // Order the GROUPS by their best match quality, not a fixed Teams-first rule.
+  // A full-word query like "hunter" makes "Hunter May" (player, whole-word tier
+  // 1) beat "Hunt for Drunk October" (team, weaker match) — so the Players group
+  // renders first here. Teams still win ties (same best rank) via the tiebreak,
+  // preserving the "we prioritize teams" default when match quality is equal.
+  const KIND_TIEBREAK: Record<'team' | 'player' | 'tournament', number> = {
+    team: 0,
+    player: 1,
+    tournament: 2,
+  };
+  const bestRank = (rs: SearchResult[]): number =>
+    rs.reduce((m, r) => Math.min(m, r.matchRank ?? 3), Infinity);
+  const groups = (
+    [
+      { kind: 'team' as const, label: 'Teams', items: teamResults },
+      { kind: 'player' as const, label: 'Players', items: playerResults },
+      { kind: 'tournament' as const, label: 'Tournaments', items: tournamentResults },
+    ] as const
+  )
+    .filter((g) => g.items.length > 0)
+    .sort((a, b) => {
+      const ra = bestRank(a.items);
+      const rb = bestRank(b.items);
+      if (ra !== rb) return ra - rb;
+      return KIND_TIEBREAK[a.kind] - KIND_TIEBREAK[b.kind];
+    });
+
   // Portal to <body> so the overlay escapes the app rail's stacking context
   // (the rail is sticky + backdrop-blur, which traps any z-index set on a
   // descendant). Rendered at the body root, z-[100] reliably covers the rail.
@@ -173,9 +200,9 @@ export function SearchModal({ open, onClose }: Props) {
             <div className="px-4 py-6 text-[12px] text-faint font-tight">No matches.</div>
           ) : (
             <>
-              {teamResults.length > 0 && (
-                <Group label="Teams">
-                  {teamResults.map((r) => {
+              {groups.map((g) => (
+                <Group key={g.kind} label={g.label}>
+                  {g.items.map((r) => {
                     const i = results.indexOf(r);
                     return (
                       <ResultRow
@@ -187,37 +214,7 @@ export function SearchModal({ open, onClose }: Props) {
                     );
                   })}
                 </Group>
-              )}
-              {playerResults.length > 0 && (
-                <Group label="Players">
-                  {playerResults.map((r) => {
-                    const i = results.indexOf(r);
-                    return (
-                      <ResultRow
-                        key={r.id}
-                        result={r}
-                        active={i === highlight}
-                        onClick={() => goTo(r)}
-                      />
-                    );
-                  })}
-                </Group>
-              )}
-              {tournamentResults.length > 0 && (
-                <Group label="Tournaments">
-                  {tournamentResults.map((r) => {
-                    const i = results.indexOf(r);
-                    return (
-                      <ResultRow
-                        key={r.id}
-                        result={r}
-                        active={i === highlight}
-                        onClick={() => goTo(r)}
-                      />
-                    );
-                  })}
-                </Group>
-              )}
+              ))}
             </>
           )}
         </div>

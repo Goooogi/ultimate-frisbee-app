@@ -12,7 +12,8 @@ import { useCallback } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { PillSelect } from '@/components/pill-select';
 import { UsauLevelSelect } from './usau-level-select';
-import { FLIGHTS, FLIGHT_LABELS, parseFlightParam, type Flight } from '@/lib/usau/flights';
+import { UsauFlightSelect } from './usau-flight-select';
+import { UsauSeasonSelect } from './usau-season-select';
 import type { CompetitionLevel } from '@/lib/usau/data';
 
 type DivChoice = 'all' | 'Men' | 'Women' | 'Mixed';
@@ -22,13 +23,6 @@ const DIV_OPTIONS: { value: DivChoice; label: string }[] = [
   { value: 'Men', label: 'Men' },
   { value: 'Women', label: 'Women' },
   { value: 'Mixed', label: 'Mixed' },
-];
-
-type FlightChoice = 'all' | Flight;
-
-const FLIGHT_OPTIONS: { value: FlightChoice; label: string }[] = [
-  { value: 'all', label: 'All flights' },
-  ...FLIGHTS.map((f) => ({ value: f, label: FLIGHT_LABELS[f] })),
 ];
 
 function parseDivChoice(raw: string | null): DivChoice {
@@ -42,7 +36,6 @@ export function UsauScheduleControls({ level }: { level?: CompetitionLevel } = {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const currentDiv = parseDivChoice(searchParams.get('div'));
-  const currentFlight: FlightChoice = parseFlightParam(searchParams.get('flight')) ?? 'all';
 
   const setParam = useCallback(
     (key: string, value: string | null) => {
@@ -59,22 +52,21 @@ export function UsauScheduleControls({ level }: { level?: CompetitionLevel } = {
   const showFlight = level === 'CLUB';
 
   return (
-    <div className="flex items-center gap-2 flex-wrap">
-      <UsauLevelSelect />
-      <PillSelect
-        value={currentDiv}
-        onChange={(next) => setParam('div', next === 'all' ? null : next.toLowerCase())}
-        ariaLabel="Select division"
-        options={DIV_OPTIONS}
-      />
-      {showFlight && (
+    // Season on its OWN row above the other filters (its own line on mobile);
+    // on desktop it flows inline to the left of them. The remaining three
+    // (level/division/flight) share the row below.
+    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+      <UsauSeasonSelect />
+      <div className="flex items-center gap-2 flex-wrap">
+        <UsauLevelSelect />
         <PillSelect
-          value={currentFlight}
-          onChange={(next) => setParam('flight', next === 'all' ? null : next)}
-          ariaLabel="Select flight"
-          options={FLIGHT_OPTIONS}
+          value={currentDiv}
+          onChange={(next) => setParam('div', next === 'all' ? null : next.toLowerCase())}
+          ariaLabel="Select division"
+          options={DIV_OPTIONS}
         />
-      )}
+        {showFlight && <UsauFlightSelect />}
+      </div>
     </div>
   );
 }

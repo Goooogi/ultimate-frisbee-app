@@ -29,6 +29,23 @@ export interface EmbedInfo {
   videoId: string;
 }
 
+/**
+ * Poster/thumbnail image for a video link, so a gallery tile shows a preview
+ * frame instead of a black box. Only YouTube exposes a stable no-API thumbnail
+ * URL (i.ytimg.com/vi/{id}/hqdefault.jpg — always present for a valid video).
+ * Vimeo requires an oEmbed call for its poster, so we return null there and the
+ * caller keeps its generic play-badge fallback.
+ *
+ * hqdefault.jpg (480×360) is the safe universal choice — maxresdefault.jpg only
+ * exists for HD uploads and 404s otherwise. Pass the raw external_url (what we
+ * store); it's re-parsed so callers don't need the videoId on hand.
+ */
+export function videoThumbnailUrl(raw: string): string | null {
+  const info = parseEmbed(raw);
+  if (!info || info.provider !== 'youtube') return null;
+  return `https://i.ytimg.com/vi/${info.videoId}/hqdefault.jpg`;
+}
+
 export function parseEmbed(raw: string): EmbedInfo | null {
   let url: URL;
   try {

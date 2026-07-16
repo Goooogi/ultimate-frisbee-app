@@ -172,7 +172,7 @@ export function SidebarPlayList({
             top: popoverPos.top,
             right: popoverPos.right,
           }}
-          className="min-w-[148px] rounded-md border border-border bg-bg shadow-lg z-[100]"
+          className="min-w-[148px] rounded-card bg-surface shadow-lift z-[100]"
         >
           <div className="px-3 pt-2 pb-1 text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
             Copy to
@@ -188,7 +188,7 @@ export function SidebarPlayList({
                 type="button"
                 role="menuitem"
                 onClick={(e) => handleCopy(e, menuOpenId, target)}
-                className="w-full text-left px-3 py-2 text-[12px] font-tight text-ink hover:bg-surface transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-surface"
+                className="w-full text-left px-3 py-2 text-[12px] font-tight text-ink hover:bg-ink/5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-ink/5"
               >
                 {target.label}
               </button>

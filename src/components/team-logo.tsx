@@ -30,7 +30,7 @@ export function TeamLogo({ team, size = 32, forceAbbr = false, className = '' }:
   return (
     <span
       className={[
-        'inline-flex items-center justify-center flex-shrink-0 relative overflow-hidden',
+        'inline-flex items-center justify-center flex-shrink-0 relative overflow-hidden rounded-full',
         className,
       ].join(' ')}
       style={{
@@ -45,14 +45,14 @@ export function TeamLogo({ team, size = 32, forceAbbr = false, className = '' }:
           src={useLogo}
           alt=""
           className="object-contain"
-          style={{ width: size * 0.84, height: size * 0.84 }}
+          style={{ width: size * 0.72, height: size * 0.72 }}
         />
       ) : (
         <>
           <span className="absolute inset-0" style={{ background: team.accent, opacity: 0.15 }} />
           <span
-            className="relative z-10 font-display font-bold"
-            style={{ color: '#fff', fontSize: Math.max(9, size * 0.33), letterSpacing: '0.04em' }}
+            className="relative z-10 font-display italic font-bold"
+            style={{ color: '#fff', fontSize: Math.max(9, size * 0.33), letterSpacing: '0.02em' }}
           >
             {team.abbr}
           </span>

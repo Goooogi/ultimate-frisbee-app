@@ -47,12 +47,12 @@ const SPIN_CYCLES = 18;         // how many random items to flash through
 // ≥97 All-Time Greatest, ≥93 All-Time Elite, ≥88 Star, ≥85 Solid Pro,
 // ≥80 Contributor, ≥75 League Average, ≥65 Fringe, <65 Deep Bench.
 function badgeClasses(score: number): string {
-  if (score >= 93) return 'bg-accent text-accent-ink';                    // Elite / Greatest
-  if (score >= 88) return 'bg-accent/20 text-accent';                     // Star
-  if (score >= 85) return 'bg-surface text-ink border border-border';     // Solid Pro
-  if (score >= 80) return 'bg-surface text-muted border border-hairline'; // Contributor
-  if (score >= 75) return 'bg-surface text-faint border border-hairline'; // League Average
-  return 'bg-surface text-faint border border-hairline opacity-75';       // Fringe / Deep Bench
+  if (score >= 93) return 'bg-accent text-accent-ink';   // Elite / Greatest
+  if (score >= 88) return 'bg-accent/20 text-accent';     // Star
+  if (score >= 85) return 'bg-ink/10 text-ink';           // Solid Pro
+  if (score >= 80) return 'bg-ink/5 text-muted';          // Contributor
+  if (score >= 75) return 'bg-ink/5 text-faint';          // League Average
+  return 'bg-ink/5 text-faint opacity-75';                // Fringe / Deep Bench
 }
 
 // ─── Helper: format percentage ────────────────────────────────────────────
@@ -124,7 +124,7 @@ function RosterTray({
           return (
             <div
               key={p._key}
-              className="flex flex-col items-center gap-1 p-1.5 rounded-md bg-surface border border-border min-w-0"
+              className="flex flex-col items-center gap-1 p-1.5 rounded-card-sm bg-surface shadow-soft min-w-0"
             >
               {meta && (
                 <span className="flex-shrink-0">
@@ -134,7 +134,7 @@ function RosterTray({
               <span className="text-[9px] font-bold text-ink leading-tight text-center truncate w-full font-tight tracking-tight">
                 {p.name.split(' ').pop()}
               </span>
-              <span className={`text-[8px] font-bold px-1 py-0.5 rounded-sm leading-none ${badgeClasses(p.playerScore)}`}>
+              <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-full leading-none ${badgeClasses(p.playerScore)}`}>
                 {p.playerScore.toFixed(0)}
               </span>
             </div>
@@ -185,15 +185,15 @@ function SpinDisplay({
         ].join(' ')}
       >
         {meta ? (
-          <TeamLogo team={meta} size={96} className="rounded-xl" />
+          <TeamLogo team={meta} size={96} className="rounded-card" />
         ) : (
-          <div className="w-24 h-24 rounded-2xl bg-surface border border-border" />
+          <div className="w-24 h-24 rounded-card bg-surface shadow-card" />
         )}
       </div>
 
       {/* Team label */}
       <div className="text-center">
-        <p className="font-display text-3xl font-bold text-ink tracking-tight leading-none">
+        <p className="font-display italic text-3xl font-bold text-ink tracking-[-0.02em] leading-[0.95]">
           {meta ? `${meta.city} ${meta.name ?? ''}` : (displayed ? displayed.teamAbbr : '——')}
         </p>
         {displayed && (
@@ -327,15 +327,15 @@ function LeagueCard({
       disabled={!hasData}
       aria-label={hasData ? `Play ${info.fullName}` : `${info.fullName} — no data available`}
       className={[
-        'group text-left rounded-xl',
-        'bg-surface border border-border',
-        'motion-safe:transition-all motion-safe:duration-200',
+        'group text-left rounded-card',
+        'bg-surface shadow-card',
+        'motion-safe:transition-shadow motion-safe:duration-200',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
         // Mobile: compact horizontal row. sm+: tall card (unchanged).
         'flex items-center gap-3 p-3',
         'sm:flex-col sm:gap-4 sm:p-5 sm:min-h-[180px]',
         hasData
-          ? 'hover:border-accent/50 hover:shadow-sm cursor-pointer'
+          ? 'hover:shadow-lift cursor-pointer'
           : 'opacity-50 cursor-not-allowed',
       ].join(' ')}
     >
@@ -435,12 +435,12 @@ function PlayerCard({
       disabled={drafted}
       aria-label={ariaLabel}
       className={[
-        'w-full text-left rounded-xl border transition-all duration-150',
+        'w-full text-left rounded-card transition-shadow duration-150',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         'cursor-pointer',
         drafted
-          ? 'border-hairline bg-surface/40 opacity-50 cursor-not-allowed'
-          : 'border-border bg-surface hover:border-accent/60 hover:bg-surface active:scale-[0.99]',
+          ? 'bg-surface/40 opacity-50 cursor-not-allowed'
+          : 'bg-surface shadow-card hover:shadow-lift',
       ].join(' ')}
     >
       {hideStats ? (
@@ -463,7 +463,7 @@ function PlayerCard({
             <span className="font-display text-2xl font-bold text-ink leading-none tabular">
               {player.playerScore.toFixed(0)}
             </span>
-            <span className={`text-[8px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-sm leading-none text-center ${badge}`}>
+            <span className={`text-[8px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none text-center ${badge}`}>
               {label}
             </span>
           </div>
@@ -560,7 +560,7 @@ function ResultScreen({
         </p>
         <p
           className={[
-            'font-display font-bold leading-none relative z-10',
+            'font-display italic font-bold leading-none tabular relative z-10',
             isPerfect ? 'text-7xl sm:text-8xl text-accent' : 'text-6xl sm:text-7xl text-ink',
           ].join(' ')}
         >
@@ -586,7 +586,7 @@ function ResultScreen({
             {mean.toFixed(1)} avg
           </span>
         </div>
-        <div className="h-2 rounded-full bg-surface border border-hairline overflow-hidden">
+        <div className="h-2 rounded-full bg-ink/10 overflow-hidden">
           <div
             className="h-full rounded-full bg-accent transition-all duration-700 ease-out"
             style={{ width: `${Math.min(100, mean)}%` }}
@@ -606,7 +606,7 @@ function ResultScreen({
             return (
               <div
                 key={p._key}
-                className="flex items-center gap-3 p-3 rounded-lg bg-surface border border-border"
+                className="flex items-center gap-3 p-3 rounded-card bg-surface shadow-card"
               >
                 {meta && <TeamLogo team={meta} size={28} />}
                 <div className="flex-1 min-w-0">
@@ -621,7 +621,7 @@ function ResultScreen({
                   <span className="font-display font-bold text-lg text-ink leading-none tabular">
                     {p.playerScore.toFixed(0)}
                   </span>
-                  <span className={`text-[8px] font-bold tracking-[0.08em] uppercase px-1.5 py-0.5 rounded-sm leading-none ${badge}`}>
+                  <span className={`text-[8px] font-bold tracking-[0.08em] uppercase px-1.5 py-0.5 rounded-full leading-none ${badge}`}>
                     {scoreLabel(p.playerScore)}
                   </span>
                 </div>
@@ -636,10 +636,10 @@ function ResultScreen({
         type="button"
         onClick={onPlayAgain}
         className={[
-          'inline-flex items-center justify-center px-8 py-3.5 rounded-xl',
+          'inline-flex items-center justify-center px-8 py-3.5 rounded-full',
           'text-[12px] font-bold tracking-[0.16em] uppercase font-tight',
           'bg-accent text-accent-ink',
-          'hover:opacity-90 active:scale-[0.98] transition-all duration-150',
+          'hover:opacity-90 transition-opacity duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
           'min-h-[52px] cursor-pointer',
         ].join(' ')}
@@ -830,7 +830,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
           <div className="max-w-2xl mx-auto">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h1 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
+                <h1 className="font-display italic text-4xl sm:text-5xl font-bold text-ink leading-[0.95] tracking-[-0.02em]">
                   12-0
                 </h1>
                 <p className="text-[12px] text-muted font-tight mt-1 max-w-[280px]">
@@ -869,7 +869,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                 <p className="text-[11px] font-bold tracking-[0.2em] uppercase text-muted font-tight mb-1.5 sm:mb-3">
                   Pro Ultimate Draft Challenge
                 </p>
-                <h2 className="font-display text-3xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
+                <h2 className="font-display italic text-3xl sm:text-5xl font-bold text-ink leading-[0.95] tracking-[-0.02em]">
                   Can you go{' '}
                   <span className="text-accent">12-0?</span>
                 </h2>
@@ -906,7 +906,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
               {/* Hero */}
               <div className="text-center">
                 <div className="flex items-center justify-center gap-2 mb-3">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-sm bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-[0.12em] font-tight">
+                  <span className="inline-flex items-center px-2.5 py-[5px] rounded-full bg-accent/10 text-accent text-[10px] font-bold uppercase tracking-[0.12em] font-tight">
                     {LEAGUE_INFO[league].abbr}
                   </span>
                   <button
@@ -923,7 +923,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                     Change league
                   </button>
                 </div>
-                <h2 className="font-display text-4xl sm:text-5xl font-bold text-ink leading-none tracking-tight">
+                <h2 className="font-display italic text-4xl sm:text-5xl font-bold text-ink leading-[0.95] tracking-[-0.02em]">
                   Can you go{' '}
                   <span className="text-accent">12-0?</span>
                 </h2>
@@ -942,10 +942,9 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                   type="button"
                   onClick={() => { setMode('classic'); setPhase('spin'); }}
                   className={[
-                    'group flex flex-col gap-4 p-5 rounded-xl text-left',
-                    'bg-surface border border-border',
-                    'hover:border-accent/50 hover:shadow-sm',
-                    'motion-safe:transition-all motion-safe:duration-200',
+                    'group flex flex-col gap-4 p-5 rounded-card text-left',
+                    'bg-surface shadow-card hover:shadow-lift',
+                    'motion-safe:transition-shadow motion-safe:duration-200',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
                     'min-h-[180px] cursor-pointer',
                   ].join(' ')}
@@ -983,7 +982,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
 
                   {/* Text */}
                   <div className="flex flex-col gap-1.5">
-                    <span className="font-display text-xl font-bold text-ink leading-tight tracking-tight">
+                    <span className="font-display italic text-xl font-bold text-ink leading-tight tracking-[-0.02em]">
                       Classic
                     </span>
                     <span className="text-[13px] text-muted font-tight leading-snug">
@@ -994,7 +993,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                   {/* CTA */}
                   <div className="mt-auto pt-2">
                     <span className={[
-                      'inline-flex items-center justify-center w-full px-4 py-2.5 rounded-lg',
+                      'inline-flex items-center justify-center w-full px-4 py-2.5 rounded-full',
                       'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
                       'bg-accent text-accent-ink',
                       'group-hover:opacity-90 motion-safe:transition-opacity motion-safe:duration-150',
@@ -1010,10 +1009,9 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                   type="button"
                   onClick={() => { setMode('ultiq'); setPhase('spin'); }}
                   className={[
-                    'group flex flex-col gap-4 p-5 rounded-xl text-left',
-                    'bg-surface border border-border',
-                    'hover:border-accent/50 hover:shadow-sm',
-                    'motion-safe:transition-all motion-safe:duration-200',
+                    'group flex flex-col gap-4 p-5 rounded-card text-left',
+                    'bg-surface shadow-card hover:shadow-lift',
+                    'motion-safe:transition-shadow motion-safe:duration-200',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
                     'min-h-[180px] cursor-pointer',
                   ].join(' ')}
@@ -1053,7 +1051,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
 
                   {/* Text */}
                   <div className="flex flex-col gap-1.5">
-                    <span className="font-display text-xl font-bold text-ink leading-tight tracking-tight">
+                    <span className="font-display italic text-xl font-bold text-ink leading-tight tracking-[-0.02em]">
                       UltIQ
                     </span>
                     <span className="text-[13px] text-muted font-tight leading-snug">
@@ -1064,7 +1062,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                   {/* CTA */}
                   <div className="mt-auto pt-2">
                     <span className={[
-                      'inline-flex items-center justify-center w-full px-4 py-2.5 rounded-lg',
+                      'inline-flex items-center justify-center w-full px-4 py-2.5 rounded-full',
                       'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
                       'bg-accent text-accent-ink',
                       'group-hover:opacity-90 motion-safe:transition-opacity motion-safe:duration-150',
@@ -1125,7 +1123,7 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
 
               {rosterError && (
                 <p
-                  className="text-[12px] text-center text-muted font-tight rounded-lg bg-surface border border-border px-4 py-3 w-full max-w-xs"
+                  className="text-[12px] text-center text-muted font-tight rounded-card bg-surface shadow-card px-4 py-3 w-full max-w-xs"
                   role="alert"
                 >
                   {rosterError}
@@ -1140,15 +1138,15 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                 aria-label="Spin for a random team and season"
                 aria-busy={spinning}
                 className={[
-                  'inline-flex items-center justify-center gap-2 px-10 py-4 rounded-2xl',
+                  'inline-flex items-center justify-center gap-2 px-10 py-4 rounded-full',
                   'font-display text-2xl font-bold tracking-wide',
                   'min-h-[64px] min-w-[160px]',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
-                  'transition-all duration-150',
+                  'transition-opacity duration-150',
                   'cursor-pointer',
                   spinning
-                    ? 'bg-accent/60 text-accent-ink cursor-wait scale-95'
-                    : 'bg-accent text-accent-ink hover:opacity-90 active:scale-[0.97]',
+                    ? 'bg-accent/60 text-accent-ink cursor-wait'
+                    : 'bg-accent text-accent-ink hover:opacity-90',
                 ].join(' ')}
               >
                 {spinning ? (
@@ -1241,14 +1239,14 @@ export function TwelveOhGame({ teamYearsByLeague, teamDisplay }: TwelveOhGamePro
                       disabled={!canSkip}
                       aria-label={canSkip ? `Skip this team (${skipsLeft} skip left)` : 'No skips left'}
                       className={[
-                        'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg',
+                        'inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full',
                         'text-[11px] font-bold tracking-[0.1em] uppercase font-tight',
-                        'border transition-colors duration-150',
+                        'transition-colors duration-150',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                         'min-h-[44px]',
                         canSkip
-                          ? 'text-muted border-border hover:border-accent/40 hover:text-ink cursor-pointer'
-                          : 'text-faint border-hairline opacity-60 cursor-not-allowed',
+                          ? 'text-muted bg-ink/5 hover:bg-ink/10 hover:text-ink cursor-pointer'
+                          : 'text-faint bg-ink/5 opacity-60 cursor-not-allowed',
                       ].join(' ')}
                     >
                       {/* Re-spin icon */}

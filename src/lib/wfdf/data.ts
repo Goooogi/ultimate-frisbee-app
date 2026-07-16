@@ -179,6 +179,14 @@ export async function listEvents(): Promise<WfdfEventCard[]> {
  *   - From Wednesday on (UTC day ≥ 3): look FORWARD — the next event headlines
  *     (e.g. WJUC, starting Jul 11, takes over Wednesday).
  *
+ * EXCEPTION — an event that is IN PROGRESS today (started on/before today AND
+ * ends on/after today) always wins, regardless of the weekday cadence. WFDF
+ * Worlds run a full week, so a live event routinely straddles the Wed flip; the
+ * discrete-weekend cadence would otherwise show last weekend's FINISHED event
+ * (WMUCC, ended Jul 4) on Sun/Mon/Tue instead of the ONGOING one (WJUC). A
+ * happening-now event is unambiguously "current" — the cadence only decides
+ * between a just-past and a not-yet-started event.
+ *
  * "Ended" is by end_date so a multi-day event stays "now" through its last day.
  * Prefer an event that actually has games ingested; fall back to the nearest by
  * date, then to the most-recent event overall so the slide is never empty.
@@ -194,16 +202,25 @@ export async function getCurrentWfdfEvent(): Promise<WfdfEventCard | null> {
   const endOf = (e: WfdfEventCard) => e.endDate ?? e.startDate ?? '';
   const startOf = (e: WfdfEventCard) => e.startDate ?? '';
 
+  // In progress = started on/before today AND not yet ended. These jump the
+  // queue ahead of the past/upcoming cadence split (see EXCEPTION above).
+  const inProgress = events
+    .filter((e) => startOf(e) <= today && endOf(e) >= today)
+    .sort((a, b) => startOf(b).localeCompare(startOf(a))); // most-recently started first
+  const inProgressIds = new Set(inProgress.map((e) => e.id));
+
   // Upcoming/now = not yet ended; past = ended before today. Within each bucket,
-  // the nearest weekend wins (by start date), matching the USAU sort.
+  // the nearest weekend wins (by start date), matching the USAU sort. Exclude
+  // in-progress events here so they aren't double-counted below.
   const upcoming = events
-    .filter((e) => endOf(e) >= today)
+    .filter((e) => endOf(e) >= today && !inProgressIds.has(e.id))
     .sort((a, b) => startOf(a).localeCompare(startOf(b))); // soonest first
   const past = events
     .filter((e) => endOf(e) < today)
     .sort((a, b) => startOf(b).localeCompare(startOf(a))); // most-recent first
 
-  const ordered = lookForward ? [...upcoming, ...past] : [...past, ...upcoming];
+  const cadence = lookForward ? [...upcoming, ...past] : [...past, ...upcoming];
+  const ordered = [...inProgress, ...cadence];
 
   // Prefer an event with games; else the nearest by date; else newest overall.
   return (

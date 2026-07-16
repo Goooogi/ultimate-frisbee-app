@@ -29,6 +29,50 @@ export async function getApprovedContentForPlayer(
   return (data ?? []).map((row) => hydrate(supabase, row as PlayerContentRow));
 }
 
+/**
+ * Approved content for a person known by SEVERAL (kind, ref) pairs across
+ * leagues (a unified profile). Content is keyed by (player_kind, player_ref),
+ * and a user may have uploaded under any of their league ids — so a profile
+ * must union content across ALL of them, else a photo added under one league
+ * id vanishes when the profile is opened via another league's url.
+ *
+ * One query using OR over the (kind,ref) pairs; de-duped by row id and sorted
+ * newest-first. Empty input → [].
+ */
+export async function getApprovedContentForPlayers(
+  refs: { kind: PlayerKind; ref: string }[],
+): Promise<PlayerContentItem[]> {
+  if (refs.length === 0) return [];
+  const supabase = createClient();
+  // Build an OR of AND(kind,ref) clauses. Values are ids/slugs (no PostgREST
+  // metacharacters), but guard anyway by dropping any ref with a comma/paren
+  // that would break the filter grammar.
+  const safe = refs.filter((r) => r.ref && !/[(),]/.test(r.ref));
+  if (safe.length === 0) return [];
+  const orExpr = safe
+    .map((r) => `and(player_kind.eq.${r.kind},player_ref.eq.${r.ref})`)
+    .join(',');
+  const { data, error } = await supabase
+    .from('player_content')
+    .select('*')
+    .or(orExpr)
+    .eq('status', 'approved')
+    .order('created_at', { ascending: false });
+  if (error) {
+    console.error('[player-content] multi-ref approved fetch failed', error);
+    return [];
+  }
+  // Dedupe by row id (a person shouldn't share a row across refs, but be safe).
+  const seen = new Set<string>();
+  const rows = (data ?? []).filter((r) => {
+    const id = (r as PlayerContentRow).id;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+  return rows.map((row) => hydrate(supabase, row as PlayerContentRow));
+}
+
 // Admin-only readers. Even though RLS would return zero rows for non-admins,
 // we make the intent explicit so future callers can't accidentally call these
 // from an unprotected route. RLS remains the actual enforcement layer.

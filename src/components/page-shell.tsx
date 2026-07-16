@@ -3,14 +3,15 @@
 // Unified page chrome for every non-home route — single layout regardless of
 // theme. The light/dark toggle swaps CSS variables only, not the layout itself.
 //
-// Desktop (lg+): AppRail (52px, top) + GamesSubnav (44px, secondary bar with
-//   sub-page tabs + league switcher) + main column, full-width (no sidebar).
+// Desktop (lg+): AppRail (52px, top — now carries the Scores/Schedule/Teams/
+//   Players page-switcher pills, centered in the rail, plus the league slot
+//   in its right-hand zone) + main column, full-width (no sidebar, no
+//   second bar — the old below-rail GamesSubnav is gone).
 // Mobile (<lg): AppRail (top, carries league switcher via gamesSlotMobile) + content + MobileBottomNav.
 //   The league pill lives IN the AppRail on mobile — no separate below-rail strip.
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { AppRail } from '@/components/app-rail';
-import { GamesSubnav } from '@/components/games-subnav';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 import { SiteFooter } from '@/components/site-footer';
@@ -42,8 +43,9 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
   // The in-page league switcher has been retired — league switching now lives
   // in the "The League" mega-menu in the top AppRail, so showing pills/dropdown
   // here too is redundant. We only render a top-nav slot when a page explicitly
-  // passes one (some pages still use it for their own controls). With no slot,
-  // the GamesSubnav just shows its sub-page tabs (Scores/Schedule/Teams/Players).
+  // passes one (some pages still use it for their own controls, e.g. an empty
+  // span to hide the switcher on /players/[id]). With no slot, AppRail's
+  // GamesLeagueSlot renders nothing and only the page-switcher pills show.
   const tab = topNavSlot ? (
     <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
   ) : null;
@@ -55,23 +57,26 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
   ) : null;
 
   return (
-    // h-screen + flex-col: AppRail (flex-shrink-0) + GamesSubnav (flex-shrink-0)
+    // h-screen + flex-col: AppRail (flex-shrink-0, now the only chrome bar)
     // then the content area gets the remaining height via flex-1.
     <div className="h-screen bg-bg text-ink flex flex-col">
-      {/* Global top app rail — present on every breakpoint.
-          gamesSlotMobile threads the mobile league control into the rail on <lg.
-          gamesSlot is kept in the interface but the rail no longer renders it on
-          desktop — the league switcher moved to GamesSubnav below the rail. */}
-      <AppRail gamesSlotMobile={mobileTab} />
-
-      {/* ── Desktop secondary nav bar (lg+) ── sits directly under the 52px rail.
-          Receives the same `tab` node AppRail previously used for gamesSlot.
-          flex-shrink-0 keeps it from being compressed by the scrolling main. */}
-      <GamesSubnav leagueSlot={tab} />
+      {/* Global top app rail — present on every breakpoint. AppRail always
+          renders the Scores/Schedule/Teams/Players page-switcher pills
+          (centered, self-gating) on lg+; gamesSlot threads this page's
+          resolved league-slot node into the rail's right-hand zone —
+          replaces the old below-rail GamesSubnav bar entirely.
+          gamesSlotMobile threads the mobile league control into the rail on <lg. */}
+      <AppRail
+        gamesSlot={tab}
+        gamesSlotMobile={mobileTab}
+      />
 
       {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
-          sits above the fixed bottom nav's reserved space (pb-[88px]). */}
-      <div className="lg:hidden flex-1 overflow-y-auto pb-[88px]">
+          sits above the floating hub nav's reserved space. The hub floats
+          bottom-3 (12px) off the screen edge and is ~64px tall (44px tap
+          target + py-2.5 padding), so content needs more clearance than the
+          old flush bar (which only reserved its own height). */}
+      <div className="lg:hidden flex-1 overflow-y-auto pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]">
         {children}
         {!hideFooterMobile && <SiteFooter />}
         <Suspense fallback={SUSPENSE_FALLBACK}>
@@ -181,9 +186,9 @@ function StickyName({ name }: { name: string }) {
       aria-hidden={titleVisible}
       className={[
         'lg:hidden sticky top-[52px] z-40 overflow-hidden',
-        'bg-bg/95 backdrop-blur border-hairline',
+        'bg-bg/95 backdrop-blur shadow-soft',
         'transition-[max-height,opacity] duration-150',
-        titleVisible ? 'max-h-0 opacity-0 border-b-0' : 'max-h-11 opacity-100 border-b',
+        titleVisible ? 'max-h-0 opacity-0' : 'max-h-11 opacity-100',
       ].join(' ')}
     >
       <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
@@ -208,11 +213,11 @@ function PageHeader({
     <div className="flex flex-wrap items-end justify-between gap-6 mb-5 lg:mb-7">
       <div>
         {eyebrow && (
-          <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted mb-2 font-tight">
+          <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent mb-2 font-sans">
             {eyebrow}
           </div>
         )}
-        <h1 className="m-0 font-tight text-[36px] lg:text-[56px] font-bold tracking-[-0.04em] leading-none text-ink">
+        <h1 className="m-0 font-display italic text-[36px] lg:text-[56px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
           {title}
         </h1>
         {subtitle && (

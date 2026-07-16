@@ -71,7 +71,7 @@ export function GameTile({ game }: { game: UfaGame }) {
   return (
     <Link
       href={`/g/${game.gameID}`}
-      className="group bg-surface border border-border px-4 py-3.5 flex flex-col gap-2.5 hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="group bg-surface rounded-card shadow-card px-4 py-3.5 flex flex-col gap-2.5 transition-shadow hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       <div className="flex justify-between items-center font-mono text-[10.5px] text-muted tracking-[0.06em]">
         <span>{status}</span>
@@ -126,7 +126,9 @@ function TileRow({
       style={{ opacity: loser ? 0.55 : 1 }}
     >
       <span className="inline-flex items-center gap-2.5">
-        <TeamLogo team={meta} size={20} />
+        <span className="inline-flex rounded-full overflow-hidden">
+          <TeamLogo team={meta} size={20} />
+        </span>
         <span className="font-display italic font-bold text-[18px] text-ink tracking-[-0.02em]">
           {abbr}
         </span>

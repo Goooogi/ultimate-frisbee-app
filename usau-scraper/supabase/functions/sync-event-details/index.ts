@@ -25,8 +25,10 @@ import {
   extractEventGameId,
   extractEventTeamId,
   extractTeamNameAndSeed,
+  type ScheduleUrlLevel,
 } from '../_shared/parse.ts';
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
+import { tzForState, localWallTimeToUtcIso, dateOnlyIso } from '../_shared/tz.ts';
 
 function stringifyErr(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -84,8 +86,11 @@ interface ParsedGame {
   usau_event_game_id: string | null;
   round: GameRound;
   bracket_name: string | null;
-  home_event_team_id: string;
-  away_event_team_id: string;
+  /** null = TBD slot (bracket game whose feeder hasn't finished — "W of
+   *  Semifinals G2"). Only bracket games may carry null sides; pool rows
+   *  always have both teams. */
+  home_event_team_id: string | null;
+  away_event_team_id: string | null;
   home_seed: number | null;
   away_seed: number | null;
   score_home: number | null;
@@ -121,18 +126,37 @@ function classifyRound(h4Label: string | null, h3Label: string | null): GameRoun
   if (t.includes('quarter')) return 'quarter';
   if (t.includes('consolation')) return 'consolation';
 
-  // The championship gold-medal game: h4 "1st place" / "final" inside the
-  // Championship bracket (and not a semi/quarter, already handled above).
-  const isChampSection = h3.includes('championship') || h3.includes('1st place') || h3 === '';
-  if (isChampSection && (h4.includes('1st place') || h4.includes('final') || h4 === '1st')) {
+  // The championship gold-medal game. USAU labels it many ways across masters
+  // regionals/qualifiers vs Nationals:
+  //   h4 round: "1st Place", "First Place", "First Place Game", "Final", "1st"
+  //   h3 section: "Championship (Bracket)", "1st/First Place", "Bracket Play"
+  //     (a single-bracket event), or empty (whole event is one bracket).
+  // We match "first place" (spelled out) as well as "1st place" in BOTH the
+  // section and round checks — a game like 2026 Northeast Masters Mixed
+  // Regionals is h3="Bracket Play" / h4="First Place Game", which the old
+  // (1st-place-only) check missed → stored 'other' → no champion surfaced.
+  const isChampSection =
+    h3.includes('championship') ||
+    h3.includes('1st place') ||
+    h3.includes('first place') ||
+    h3.includes('bracket play') ||
+    h3 === '';
+  const isChampRound =
+    h4.includes('1st place') ||
+    h4.includes('first place') ||
+    h4.includes('final') ||
+    h4 === '1st';
+  if (isChampSection && isChampRound) {
     return 'final';
   }
 
   // Placement finals: any "Nth Place" section, or a bare ordinal h4 round
   // ("3rd", "5th", "7th", "9th", "11th", …). These are the placement bracket's
-  // deciding game.
+  // deciding game. USAU also spells ordinals out ("Third Place", "Seventh
+  // Place" — seen at PEC West 2026), so match word ordinals too.
   if (
     /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||  // "3rd place", "13th place"
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fifteenth|seventeenth)\s+place\b/.test(t) ||
     /placement/.test(t) ||
     /^\d+(st|nd|rd|th)$/.test(h4)              // bare "3rd", "5th", "9th"
   ) {
@@ -166,72 +190,9 @@ function parseScore(s: string | null): number | null {
 // the page. The runtime is UTC, so naively parsing "9:00 AM" yields 09:00Z =
 // 3 AM local — wrong by the offset. We derive the venue zone from the event's
 // US state and convert the local wall-clock time to the correct UTC instant
-// (DST-aware via Intl). When the state/zone is unknown we DROP the time and
-// keep date-only (midnight UTC) rather than store a wrong instant.
-
-const STATE_TO_TZ: Record<string, string> = {
-  // Eastern
-  CT: 'America/New_York', DE: 'America/New_York', DC: 'America/New_York',
-  FL: 'America/New_York', GA: 'America/New_York', IN: 'America/Indiana/Indianapolis',
-  ME: 'America/New_York', MD: 'America/New_York', MA: 'America/New_York',
-  MI: 'America/Detroit', NH: 'America/New_York', NJ: 'America/New_York',
-  NY: 'America/New_York', NC: 'America/New_York', OH: 'America/New_York',
-  PA: 'America/New_York', RI: 'America/New_York', SC: 'America/New_York',
-  VT: 'America/New_York', VA: 'America/New_York', WV: 'America/New_York',
-  // Central
-  AL: 'America/Chicago', AR: 'America/Chicago', IL: 'America/Chicago',
-  IA: 'America/Chicago', KS: 'America/Chicago', KY: 'America/New_York',
-  LA: 'America/Chicago', MN: 'America/Chicago', MS: 'America/Chicago',
-  MO: 'America/Chicago', NE: 'America/Chicago', OK: 'America/Chicago',
-  TN: 'America/Chicago', TX: 'America/Chicago', WI: 'America/Chicago',
-  // Mountain
-  AZ: 'America/Phoenix', CO: 'America/Denver', ID: 'America/Boise',
-  MT: 'America/Denver', NM: 'America/Denver', UT: 'America/Denver',
-  // Pacific
-  CA: 'America/Los_Angeles', NV: 'America/Los_Angeles', OR: 'America/Los_Angeles',
-  WA: 'America/Los_Angeles',
-  // Alaska / Hawaii
-  AK: 'America/Anchorage', HI: 'Pacific/Honolulu',
-};
-
-/** Map an event's US state code to an IANA timezone, or null if unknown. */
-function tzForState(state: string | null | undefined): string | null {
-  if (!state) return null;
-  return STATE_TO_TZ[state.trim().toUpperCase()] ?? null;
-}
-
-/**
- * Convert a LOCAL wall-clock time in `tz` to a UTC ISO string (DST-aware).
- * Works by measuring the zone's offset for that instant via Intl: format a
- * provisional UTC instant in the target zone, diff the rendered wall-clock from
- * the intended wall-clock, and correct.
- */
-function localWallTimeToUtcIso(
-  year: number, month: number, day: number, hour: number, minute: number,
-  tz: string,
-): string | null {
-  // Provisional: treat the wall-clock as if it were UTC.
-  const provisional = Date.UTC(year, month - 1, day, hour, minute, 0);
-  // What wall-clock does that instant show in the target zone?
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  });
-  const parts = fmt.formatToParts(new Date(provisional));
-  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value ?? '0', 10);
-  // Reconstruct the zone-rendered instant as if it were UTC, diff = the offset.
-  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') === 24 ? 0 : get('hour'), get('minute'), 0);
-  const offset = asUtc - provisional; // ms the zone is ahead of UTC at this instant
-  const utcMs = provisional - offset;
-  if (isNaN(utcMs)) return null;
-  return new Date(utcMs).toISOString();
-}
-
-/** Date-only fallback: store midnight UTC for the given Y/M/D (no time). */
-function dateOnlyIso(year: number, month: number, day: number): string | null {
-  const ms = Date.UTC(year, month - 1, day, 0, 0, 0);
-  return isNaN(ms) ? null : new Date(ms).toISOString();
-}
+// (DST-aware via Intl — see _shared/tz.ts, shared with ingest-from-ultirzr).
+// When the state/zone is unknown we DROP the time and keep date-only
+// (midnight UTC) rather than store a wrong instant.
 
 /**
  * Parse a bracket `.date` cell ("6/14/2026 9:00 AM" — local venue time) into a
@@ -294,23 +255,64 @@ interface ScheduleParse {
   games: ParsedGame[];
 }
 
+/** Does a tab/section label mark a PLACEMENT view? ("Ninth Place Pool",
+ *  "Placement Brackets", "13th Place", …). USAU reuses generic pool markup
+ *  ("Pool E") inside these tabs for Sunday placement round-robins — the tab
+ *  label is the only thing that says what the pool actually decides. */
+function isPlacementLabel(label: string | null): boolean {
+  if (!label) return false;
+  const t = label.toLowerCase();
+  return (
+    /placement/.test(t) ||
+    /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fifteenth|seventeenth)\s+place\b/.test(t)
+  );
+}
+
 function parseSchedule(html: string, tz: string | null): ScheduleParse {
   const $ = parseHtml(html);
   const teamsByEventTeamId = new Map<string, ParsedTeam>();
   const poolPlacements: ParsedPoolRow[] = [];
   const games: ParsedGame[] = [];
 
+  // ── Tab → section labels ────────────────────────────────────────────────
+  // The page is organized into view tabs ("Saturday Pool Play", "Seeding
+  // Crossover", "… Championship", "Placement Brackets", "Ninth Place Pool").
+  // Each tab <a rel="section_30654_1_20087"> points at a content container
+  // <div id="section_30654_1_20087">. The label matters: a placement tab can
+  // contain a generic "Pool E" round-robin whose real meaning ("Ninth Place
+  // Pool") exists ONLY in the tab text — verified 2026-07-12, PEC West.
+  const sectionLabels = new Map<string, string>();
+  $('ul.tabs li a[rel]').each((_, a) => {
+    const rel = $(a).attr('rel') ?? '';
+    const m = rel.match(/^(section_\d+)/);
+    if (m) sectionLabels.set(m[1], $(a).text().trim());
+  });
+
   // Track the latest h3 (bracket section) and h4 (round) seen as we walk
   // the document in order. Bracket games inherit whichever heading was
-  // most recently emitted before them.
+  // most recently emitted before them. currentSection is the enclosing
+  // tab's label (see above), reset at each section container.
   let currentH3: string | null = null;
   let currentH4: string | null = null;
+  let currentSection: string | null = null;
 
   // The schedule page mixes pool tables and brackets. Walk the document
   // in document order so we associate each piece with its heading.
-  $('h1, h3, h4, table.global_table, div.bracket_game').each((_, el) => {
+  $('h1, h3, h4, table.global_table, div.bracket_game, div[id^="section_"]').each((_, el) => {
     const $el = $(el);
     const tag = el.type === 'tag' ? (el as { name: string }).name : '';
+    const elId = $el.attr('id') ?? '';
+
+    // Section container — a new tab's content begins; headings don't carry
+    // across tabs.
+    if (tag === 'div' && elId.startsWith('section_')) {
+      const m = elId.match(/^(section_\d+)/);
+      currentSection = (m && sectionLabels.get(m[1])) || null;
+      currentH3 = null;
+      currentH4 = null;
+      return;
+    }
 
     if (tag === 'h3') {
       currentH3 = $el.text().trim();
@@ -340,6 +342,10 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
       if (!isScheduleTable) {
         if (!currentH3 || !/^pool\b/i.test(currentH3)) return;
         const poolName = currentH3.trim();
+        // A standings table inside a PLACEMENT tab ("Pool E" under "Ninth
+        // Place Pool") is a Sunday placement round-robin, not the team's
+        // Saturday pool — don't (re)assign pools from it.
+        const placementSection = isPlacementLabel(currentSection);
         // === Standings table (existing logic) ===
         $el.find('tr').each((__, tr) => {
           const $tr = $(tr);
@@ -354,6 +360,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           if (!teamsByEventTeamId.has(eventTeamId)) {
             teamsByEventTeamId.set(eventTeamId, { eventTeamId, displayName: name, seed });
           }
+          if (placementSection) return; // teams collected, pool NOT assigned
 
           // W-L cell formatted "3 - 0"
           const wlText = $cells.eq(1).text().trim();
@@ -379,10 +386,39 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         // Pool name comes from the thead colspan caption, NOT from a
         // preceding <h3> (all schedule tables sit after the last pool
         // standings heading on this page).
+        //
+        // Classification (verified 2026-07-12, PEC West):
+        //   • "Pool A Schedule & Scores" in a normal tab → a real pool.
+        //   • "Pool E Schedule & Scores" inside a PLACEMENT tab ("Ninth
+        //     Place Pool") → a Sunday placement round-robin. USAU reuses
+        //     generic pool markup; the tab label is the truth. Stored as
+        //     round='placement' under the tab's name so the app shows it
+        //     with the placement brackets, not as a phantom Saturday pool.
+        //   • "Seeding Crossover Schedule & Scores" → crossover rows
+        //     (round='other'); previously these were dropped entirely.
         const captionText = $el.find('thead th[colspan]').first().text().trim();
-        const captionMatch = captionText.match(/^(Pool\s+\S+)/i);
-        const poolName = captionMatch ? captionMatch[1].trim() : null;
-        if (!poolName) return; // unrecognized table shape
+        const captionBase = captionText.replace(/\s*Schedule\s*&\s*Scores\s*$/i, '').trim();
+        if (!captionBase) return; // unrecognized table shape
+        const isPoolCaption = /^pool\s+\S+/i.test(captionBase);
+        const isCrossoverCaption = /crossover/i.test(captionBase) || /crossover/i.test(currentSection ?? '');
+        const placementTable = isPlacementLabel(currentSection) || isPlacementLabel(captionBase);
+
+        let tableRound: GameRound;
+        let poolName: string;
+        if (isCrossoverCaption) {
+          tableRound = 'other';
+          poolName = captionBase;
+        } else if (placementTable) {
+          tableRound = 'placement';
+          // Prefer the tab label ("Ninth Place Pool") over a generic caption
+          // ("Pool E"); fall back to the caption when the tab is unnamed.
+          poolName = isPlacementLabel(currentSection) ? (currentSection as string) : captionBase;
+        } else if (isPoolCaption) {
+          tableRound = 'pool';
+          poolName = captionBase;
+        } else {
+          return; // unknown table shape — leave it alone
+        }
 
         $el.find('tbody tr').each((__, tr) => {
           const $tr = $(tr);
@@ -441,7 +477,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           games.push({
             usau_game_id: null,
             usau_event_game_id,
-            round: 'pool',
+            round: tableRound,
             bracket_name: poolName,
             home_event_team_id: homeEventTeamId,
             away_event_team_id: awayEventTeamId,
@@ -471,19 +507,26 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
       const $awayA = $game.find(SELECTORS.schedule.bracketAwayTeam).first();
       const homeEventTeamId = extractEventTeamId($homeA.attr('href') ?? '');
       const awayEventTeamId = extractEventTeamId($awayA.attr('href') ?? '');
-      // Both must be present for a real game (TBD slots produce empty hrefs).
-      if (!homeEventTeamId || !awayEventTeamId) return;
+      // TBD slots ("W of Semifinals G2") have no team link. Keep the game
+      // anyway when it has a stable id — dropping it made finals/placement
+      // finals invisible until both feeders finished, and an event that
+      // stopped being re-scraped (outside the live window) lost its final
+      // forever. A TBD side is stored as a null team id; the next scrape
+      // after the feeder finishes fills it in via the same usau_game_id
+      // upsert. Games with NO id and any TBD side are still skipped — we
+      // have no safe dedupe key for those.
+      if ((!homeEventTeamId || !awayEventTeamId) && !usau_game_id) return;
 
       const home = extractTeamNameAndSeed($homeA.text());
       const away = extractTeamNameAndSeed($awayA.text());
-      if (!teamsByEventTeamId.has(homeEventTeamId)) {
+      if (homeEventTeamId && !teamsByEventTeamId.has(homeEventTeamId)) {
         teamsByEventTeamId.set(homeEventTeamId, {
           eventTeamId: homeEventTeamId,
           displayName: home.name,
           seed: home.seed,
         });
       }
-      if (!teamsByEventTeamId.has(awayEventTeamId)) {
+      if (awayEventTeamId && !teamsByEventTeamId.has(awayEventTeamId)) {
         teamsByEventTeamId.set(awayEventTeamId, {
           eventTeamId: awayEventTeamId,
           displayName: away.name,
@@ -535,11 +578,24 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
  * have other reason to merge (e.g. a future sync-team-details that finds
  * the persistent TeamId). That means "Revolver" at 2024 Pro Champs and
  * "Revolver" at 2025 Pro Champs will be two rows for now.
+ *
+ * EXCEPTION — same-event EventTeamId churn. USAU sometimes mints a NEW
+ * EventTeamId for a team mid-event (a late re-registration / re-seed), so a
+ * later scrape of the SAME event sees an id we've never recorded and would
+ * create a duplicate team row (bit DeMo @ Heavyweights 2026: two rows, one
+ * orphaned with 0 games). Before inserting, we therefore look for a team
+ * ALREADY PARTICIPATING IN THIS EVENT with the same name + gender +
+ * competition level; if found, we adopt it and append the new EventTeamId to
+ * its usau_event_team_ids. This is scoped to the event on purpose — a shared
+ * name across DIFFERENT events is left as separate rows per the v1 identity
+ * model above; only a same-event collision (which is unambiguously the same
+ * squad — USAU name+division is unique within one event) is merged.
  */
 async function resolveTeam(
   db: ReturnType<typeof supabase>,
+  eventUUID: string,
   team: ParsedTeam,
-  competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3',
+  competitionLevel: CompetitionLevel,
   genderDivision: Division,
 ): Promise<string> {
   // Has any team row already claimed this EventTeamId?
@@ -550,6 +606,38 @@ async function resolveTeam(
     .maybeSingle();
   if (lookupErr && lookupErr.code !== 'PGRST116') throw lookupErr;
   if (existing) return existing.id;
+
+  // Not seen by id — but is the same squad already in THIS event under a
+  // different (churned) EventTeamId? Match name + gender + level among this
+  // event's existing participants. If so, adopt it and record the new id.
+  const { data: sameEvent, error: sameEventErr } = await db
+    .from('usau_event_teams')
+    .select('team_id, usau_teams!inner(id, name, gender_division, competition_level, usau_event_team_ids)')
+    .eq('event_id', eventUUID)
+    .eq('usau_teams.name', team.displayName)
+    .eq('usau_teams.gender_division', genderDivision)
+    .eq('usau_teams.competition_level', competitionLevel)
+    .limit(1)
+    .maybeSingle();
+  if (sameEventErr && sameEventErr.code !== 'PGRST116') throw sameEventErr;
+  if (sameEvent) {
+    const matched = sameEvent.usau_teams as unknown as {
+      id: string;
+      usau_event_team_ids: string[] | null;
+    };
+    const ids = matched.usau_event_team_ids ?? [];
+    if (!ids.includes(team.eventTeamId)) {
+      const { error: appendErr } = await db
+        .from('usau_teams')
+        .update({
+          usau_event_team_ids: [...ids, team.eventTeamId],
+          last_scraped_at: new Date().toISOString(),
+        })
+        .eq('id', matched.id);
+      if (appendErr) throw appendErr;
+    }
+    return matched.id;
+  }
 
   const { data: created, error: insertErr } = await db
     .from('usau_teams')
@@ -605,42 +693,142 @@ async function ensureEvent(
 // Per-division sync
 // ────────────────────────────────────────────────────────────
 
+/** Competition levels this scraper handles. Masters-family levels use the
+ *  hyphenated masters URL segments; club/college use their own. */
+type CompetitionLevel =
+  | 'CLUB'
+  | 'COLLEGE_D1'
+  | 'COLLEGE_D3'
+  | 'MASTERS'
+  | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS';
+
+/** One schedule-page family member to try: the URL segment to fetch and the
+ *  competition level to TAG the teams found there with. A single event slug can
+ *  host several (the combined Masters Championships runs Masters + Grand Masters
+ *  + Great Grand Masters under one slug), so each resolving segment tags its own
+ *  teams — this is why a GM team at the combined event gets GRAND_MASTERS, not
+ *  the event's coarse level. Mirrors resolve-event-team-urls' family iteration. */
+interface LevelSegment {
+  segment: ScheduleUrlLevel;
+  teamLevel: CompetitionLevel;
+}
+
+function scheduleLevelSegments(
+  slug: string,
+  competitionLevel: CompetitionLevel,
+): LevelSegment[] {
+  const isMasters =
+    competitionLevel === 'MASTERS' ||
+    competitionLevel === 'GRAND_MASTERS' ||
+    competitionLevel === 'GREAT_GRAND_MASTERS';
+  if (!isMasters) {
+    const segment: ScheduleUrlLevel = competitionLevel.startsWith('COLLEGE')
+      ? 'College'
+      : 'Club';
+    return [{ segment, teamLevel: competitionLevel }];
+  }
+  // Masters family: a combined championships hosts all three, so try the whole
+  // family and tag per-segment. Order by what the slug hints at so a
+  // single-division regional usually hits on the first fetch.
+  const all: LevelSegment[] = [
+    { segment: 'Masters', teamLevel: 'MASTERS' },
+    { segment: 'Grand-Masters', teamLevel: 'GRAND_MASTERS' },
+    { segment: 'Great-Grand-Masters', teamLevel: 'GREAT_GRAND_MASTERS' },
+  ];
+  const s = slug.toLowerCase();
+  const priority = s.includes('great-grand')
+    ? 'GREAT_GRAND_MASTERS'
+    : s.includes('grand')
+      ? 'GRAND_MASTERS'
+      : 'MASTERS';
+  return all.sort((a, b) =>
+    a.teamLevel === priority ? -1 : b.teamLevel === priority ? 1 : 0,
+  );
+}
+
 async function syncDivision(
   db: ReturnType<typeof supabase>,
   eventUUID: string,
   slug: string,
   division: Division,
-  competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3',
+  competitionLevel: CompetitionLevel,
   tz: string | null,
 ): Promise<{
   teams: number;
   games: number;
   skipped: boolean;
 }> {
-  // USAU's URL uses "Club" or "College" in the path, and the College
-  // championship pages use a compact "CollegeMen" form (no hyphen) while
-  // older events use "College-Men". Try both variants.
-  const urlLevel: 'Club' | 'College' = competitionLevel === 'CLUB' ? 'Club' : 'College';
-  let html: string | null = null;
-  let url = '';
-  for (const candidate of eventScheduleUrlVariants(slug, division, urlLevel)) {
-    try {
-      html = await fetchHtml(candidate);
-      url = candidate;
-      break;
-    } catch (err) {
-      const message = formatErr(err);
-      if (/HTTP 404/.test(message) || /404 /.test(message)) {
-        continue;
+  // USAU's URL carries the competition level in the path — "Club", "College",
+  // or one of the masters segments ("Masters"/"Grand-Masters"/…). A masters
+  // event can host MULTIPLE segments under one slug (the combined
+  // championships), so we try the whole level family for this gender and
+  // persist each page that resolves, tagging its teams with THAT segment's
+  // level. Club/college resolve to a single segment.
+  const segments = scheduleLevelSegments(slug, competitionLevel);
+  let totalTeams = 0;
+  let totalGames = 0;
+  let anyResolved = false;
+
+  for (const { segment, teamLevel } of segments) {
+    let html: string | null = null;
+    let url = '';
+    // College championship pages use a compact "CollegeMen" form (no hyphen)
+    // alongside the older "College-Men"; eventScheduleUrlVariants emits both.
+    for (const candidate of eventScheduleUrlVariants(slug, division, segment)) {
+      try {
+        html = await fetchHtml(candidate);
+        url = candidate;
+        break;
+      } catch (err) {
+        const message = formatErr(err);
+        if (/HTTP 404/.test(message) || /404 /.test(message)) {
+          continue;
+        }
+        throw err;
       }
-      throw err;
     }
-  }
-  if (!html) {
-    // Both variants 404'd — this division isn't part of the event.
-    return { teams: 0, games: 0, skipped: true };
+    if (!html) {
+      // This segment isn't part of the event for this gender — try the next
+      // family member (or, for club/college, we're simply done).
+      continue;
+    }
+
+    const res = await persistSchedulePage(
+      db,
+      eventUUID,
+      division,
+      teamLevel,
+      html,
+      url,
+      tz,
+    );
+    if (res.skipped) continue;
+    anyResolved = true;
+    totalTeams += res.teams;
+    totalGames += res.games;
   }
 
+  if (!anyResolved) {
+    // No family segment yielded a populated page for this gender.
+    return { teams: 0, games: 0, skipped: true };
+  }
+  return { teams: totalTeams, games: totalGames, skipped: false };
+}
+
+/** Persist ONE resolved schedule page: parse teams/pools/games, resolve every
+ *  team to a usau_teams uuid (tagging new teams with `teamLevel`), then upsert
+ *  participations + games. Split out of syncDivision so a masters event can run
+ *  it once per resolving level segment. */
+async function persistSchedulePage(
+  db: ReturnType<typeof supabase>,
+  eventUUID: string,
+  division: Division,
+  competitionLevel: CompetitionLevel,
+  html: string,
+  url: string,
+  tz: string | null,
+): Promise<{ teams: number; games: number; skipped: boolean }> {
   const { teams, poolPlacements, games } = parseSchedule(html, tz);
   if (teams.length === 0) {
     // Page exists but has no parseable teams — could mean draft schedule,
@@ -653,7 +841,7 @@ async function syncDivision(
   const teamUUIDByEventTeamId = new Map<string, string>();
   for (const t of teams) {
     try {
-      const id = await resolveTeam(db, t, competitionLevel, division);
+      const id = await resolveTeam(db, eventUUID, t, competitionLevel, division);
       teamUUIDByEventTeamId.set(t.eventTeamId, id);
     } catch (err) {
       throw new Error(`resolveTeam failed for ${t.displayName}: ${stringifyErr(err)}`);
@@ -686,74 +874,67 @@ async function syncDivision(
     .upsert(eventTeamRows, { onConflict: 'event_id,team_id', ignoreDuplicates: false });
   if (etErr) throw new Error(`usau_event_teams upsert: ${stringifyErr(etErr)}`);
 
-  // Games. We pick the upsert key based on whether usau_game_id is present.
-  // When present, key on it (idempotent re-runs). When absent (rare for
-  // bracket games, possible for unscheduled placement matches), fall back
-  // to natural-key matching via a manual look-then-insert.
-  const gamesWithIds = games.filter((g) => g.usau_game_id);
-  const gamesWithoutIds = games.filter((g) => !g.usau_game_id);
-
-  if (gamesWithIds.length > 0) {
-    const rows = gamesWithIds.map((g) => ({
-      event_id: eventUUID,
-      usau_game_id: g.usau_game_id,
-      usau_event_game_id: g.usau_event_game_id,
-      round: g.round,
-      bracket_name: g.bracket_name,
-      team_a_id: teamUUIDByEventTeamId.get(g.home_event_team_id)!,
-      team_b_id: teamUUIDByEventTeamId.get(g.away_event_team_id)!,
-      seed_a: g.home_seed,
-      seed_b: g.away_seed,
-      score_a: g.score_home,
-      score_b: g.score_away,
-      location: g.location,
-      scheduled_at: g.scheduled_at,
-      status: g.status,
-      source_url: url,
-    }));
-    const { error: gErr } = await db
-      .from('usau_games')
-      .upsert(rows, { onConflict: 'usau_game_id', ignoreDuplicates: false });
-    if (gErr) throw new Error(`usau_games upsert: ${stringifyErr(gErr)}`);
-  }
-
-  // Fallback path: insert one at a time, checking for duplicates first.
-  // Pool games end up here (they don't expose usau_game_id on the
-  // schedule table), as do atypical placement games.
+  // Games. Every game is written through ONE natural-key-aware path so the
+  // same physical game can never be doubled — even across the two ingest
+  // pipelines (this HTML scraper vs ingest-from-ultirzr), which assign the SAME
+  // game DIFFERENT usau_game_id / usau_event_game_id / round labels.
   //
-  // Dedupe preference:
-  //   1. By usau_event_game_id when present — unique per match report.
-  //      Safer than the team-pair match for repeat matchups.
-  //   2. Fall back to (event_id, round, team_a_id, team_b_id) when no
-  //      EventGameId is on the source row.
-  for (const g of gamesWithoutIds) {
-    const teamA = teamUUIDByEventTeamId.get(g.home_event_team_id)!;
-    const teamB = teamUUIDByEventTeamId.get(g.away_event_team_id)!;
+  // Match an existing row by, in priority:
+  //   1. usau_game_id (this pipeline's stable USAU id — exact idempotent re-run)
+  //   2. usau_event_game_id (per-match-report id, unique per pipeline)
+  //   3. the NATURAL KEY (event, both teams order-independent, scheduled_at,
+  //      bracket_name) — the DB's `usau_games_natural_key_uidx` guard. This is
+  //      what catches the OTHER pipeline's copy, which shares none of our ids.
+  // Found → UPDATE in place (merging any ids we now have); else INSERT. This
+  // both keeps re-runs idempotent AND respects the unique index (an id-keyed
+  // upsert would try to INSERT the cross-pipeline copy and hit the index).
+  for (const g of games) {
+    const teamA =
+      (g.home_event_team_id && teamUUIDByEventTeamId.get(g.home_event_team_id)) || null;
+    const teamB =
+      (g.away_event_team_id && teamUUIDByEventTeamId.get(g.away_event_team_id)) || null;
+
     let existing: { id: string } | null = null;
-    if (g.usau_event_game_id) {
+
+    if (g.usau_game_id) {
       const { data } = await db
         .from('usau_games')
         .select('id')
-        .eq('event_id', eventUUID)
+        .eq('usau_game_id', g.usau_game_id)
+        .maybeSingle();
+      existing = data ?? null;
+    }
+    if (!existing && g.usau_event_game_id) {
+      const { data } = await db
+        .from('usau_games')
+        .select('id')
         .eq('usau_event_game_id', g.usau_event_game_id)
         .maybeSingle();
       existing = data ?? null;
     }
-    if (!existing) {
+    // Natural-key match — only when the row has the full key (both teams + a
+    // scheduled time). TBD feeder slots (a null team) and undated games can't
+    // be natural-keyed; they rely on an id match above or insert fresh.
+    if (!existing && teamA && teamB && g.scheduled_at) {
+      // Order-independent team match: the game may be stored with a/b swapped
+      // by the other pipeline. Both scores flip WITH their team on update, so
+      // whichever orientation wins stays internally consistent.
+      const [lo, hi] = teamA < teamB ? [teamA, teamB] : [teamB, teamA];
       const { data } = await db
         .from('usau_games')
         .select('id')
         .eq('event_id', eventUUID)
-        .eq('round', g.round)
-        .eq('team_a_id', teamA)
-        .eq('team_b_id', teamB)
+        .eq('scheduled_at', g.scheduled_at)
+        .eq('bracket_name', g.bracket_name ?? '')
+        .or(
+          `and(team_a_id.eq.${lo},team_b_id.eq.${hi}),and(team_a_id.eq.${hi},team_b_id.eq.${lo})`,
+        )
         .maybeSingle();
-      existing = data ?? null;
+      existing = data ? { id: data.id } : null;
     }
-    const row = {
+
+    const row: Record<string, unknown> = {
       event_id: eventUUID,
-      usau_game_id: null,
-      usau_event_game_id: g.usau_event_game_id,
       round: g.round,
       bracket_name: g.bracket_name,
       team_a_id: teamA,
@@ -767,10 +948,17 @@ async function syncDivision(
       status: g.status,
       source_url: url,
     };
+    // Only set an id column when we actually have one, so an UPDATE that
+    // reconciled the OTHER pipeline's row doesn't null out its id.
+    if (g.usau_game_id) row.usau_game_id = g.usau_game_id;
+    if (g.usau_event_game_id) row.usau_event_game_id = g.usau_event_game_id;
+
     if (existing) {
-      await db.from('usau_games').update(row).eq('id', existing.id);
+      const { error } = await db.from('usau_games').update(row).eq('id', existing.id);
+      if (error) throw new Error(`usau_games update: ${stringifyErr(error)}`);
     } else {
-      await db.from('usau_games').insert(row);
+      const { error } = await db.from('usau_games').insert(row);
+      if (error) throw new Error(`usau_games insert: ${stringifyErr(error)}`);
     }
   }
 
@@ -810,12 +998,27 @@ async function run(body: RequestBody) {
   // from the event's US state; null when unknown ("TBD"/missing) → times are
   // stored date-only rather than at a wrong instant.
   const tz = tzForState(eventRow?.state as string | null | undefined);
-  // College events (D-I AND D-III) use the "College" URL path; everything else
-  // uses "Club". Previously only COLLEGE_D1 was recognized, so COLLEGE_D3 events
-  // fell back to CLUB → built Club-Men schedule URLs → 404 → 0 rows scraped.
+  // The event's competition level chooses the schedule URL path family:
+  // College → "College", Masters family → the masters segments, everything
+  // else → "Club". Previously ALL non-college levels (incl. MASTERS/
+  // GRAND_MASTERS/GREAT_GRAND_MASTERS) were coerced to CLUB → built Club-Men
+  // schedule URLs → 404 → 0 rows, so live masters events never captured games.
+  // Now the masters levels pass through and syncDivision iterates their URL
+  // segment family. Unknown/youth/beach/other levels still fall back to CLUB.
   const rawLevel = eventRow?.competition_level;
-  const competitionLevel: 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' =
-    rawLevel === 'COLLEGE_D1' || rawLevel === 'COLLEGE_D3' ? rawLevel : 'CLUB';
+  const knownLevels: CompetitionLevel[] = [
+    'CLUB',
+    'COLLEGE_D1',
+    'COLLEGE_D3',
+    'MASTERS',
+    'GRAND_MASTERS',
+    'GREAT_GRAND_MASTERS',
+  ];
+  const competitionLevel: CompetitionLevel = knownLevels.includes(
+    rawLevel as CompetitionLevel,
+  )
+    ? (rawLevel as CompetitionLevel)
+    : 'CLUB';
 
   const perDivision: Record<string, { teams: number; games: number; skipped: boolean }> = {};
   let totalTeams = 0;

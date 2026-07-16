@@ -37,10 +37,10 @@ export function TeamFilter({ currentTeam = '' }: TeamFilterProps) {
         aria-label="Filter by team"
         className={[
           'appearance-none cursor-pointer',
-          'px-3 py-[6px] pr-7 rounded-full',
+          'px-3.5 py-[7px] pr-7 rounded-full min-h-[36px]',
           'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-          'bg-surface border border-border text-ink',
-          'hover:border-ink transition-colors duration-150',
+          'bg-ink/5 text-ink',
+          'hover:bg-ink/10 transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >

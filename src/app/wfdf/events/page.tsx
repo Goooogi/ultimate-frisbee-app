@@ -40,7 +40,7 @@ export default async function WfdfEventsPage() {
       ]}
     >
       {events.length === 0 ? (
-        <div className="rounded-lg border border-border bg-surface p-10 text-center">
+        <div className="rounded-card-lg bg-surface shadow-card p-10 text-center">
           <p className="text-muted font-tight text-[14px]">No WFDF events available yet.</p>
         </div>
       ) : (
@@ -50,24 +50,24 @@ export default async function WfdfEventsPage() {
               key={e.id}
               href={`/wfdf/events/${e.slug}`}
               className={[
-                'group flex flex-col gap-3 rounded-lg border border-border bg-surface p-4',
-                'hover:border-ink transition-colors duration-150 no-underline',
+                'group flex flex-col gap-3 bg-surface rounded-card shadow-card p-4',
+                'transition-shadow hover:shadow-lift cursor-pointer no-underline',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
             >
               <div className="flex items-start gap-3">
                 {e.logoUrl ? (
-                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-md bg-white border border-[rgb(var(--ink)/0.10)] overflow-hidden flex-shrink-0">
+                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-white overflow-hidden flex-shrink-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img src={e.logoUrl} alt="" className="w-full h-full object-contain p-1" />
                   </span>
                 ) : (
-                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-md bg-[rgb(var(--ink)/0.08)] border border-[rgb(var(--ink)/0.12)] text-[10px] font-bold text-ink font-tight flex-shrink-0">
+                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-ink/[0.06] text-[10px] font-bold text-ink font-tight flex-shrink-0">
                     {e.year}
                   </span>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
+                  <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
                     {KIND_LABEL[e.kind] ?? 'Championship'}
                   </div>
                   <div className="text-[15px] font-bold text-ink font-tight tracking-[-0.02em] leading-tight mt-0.5 truncate">
@@ -75,7 +75,7 @@ export default async function WfdfEventsPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex items-center justify-between text-[11px] font-tight text-muted mt-auto pt-2 border-t border-hairline">
+              <div className="flex items-center justify-between text-[11px] font-tight text-muted mt-auto pt-2.5 border-t border-hairline">
                 <span className="truncate">{e.location ?? '—'}</span>
                 <span className="tabular flex-shrink-0 ml-2 text-faint">
                   {e.teamCount} {e.teamCount === 1 ? 'team' : 'teams'}

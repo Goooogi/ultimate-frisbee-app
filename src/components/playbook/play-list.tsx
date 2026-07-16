@@ -90,10 +90,8 @@ export function PlayList({ plays, currentID, onSelect, onCreate, onDelete, copyT
               <li key={p.id}>
                 <div
                   className={[
-                    'flex items-center gap-3 p-2 rounded-md transition-colors',
-                    active
-                      ? 'bg-surface border border-accent'
-                      : 'bg-surface border border-border hover:border-ink',
+                    'flex items-center gap-3 p-2 rounded-card bg-surface shadow-card transition-shadow',
+                    active ? 'ring-1 ring-accent shadow-lift' : 'hover:shadow-lift',
                   ].join(' ')}
                 >
                   <button
@@ -148,7 +146,7 @@ export function PlayList({ plays, currentID, onSelect, onCreate, onDelete, copyT
                         <div
                           ref={menuRef}
                           role="menu"
-                          className="absolute right-0 top-full mt-1 min-w-[148px] rounded-md border border-border bg-bg shadow-lg z-20"
+                          className="absolute right-0 top-full mt-1 min-w-[148px] rounded-card bg-surface shadow-lift z-20"
                         >
                           <div className="px-3 pt-2 pb-1 text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
                             Copy to
@@ -164,7 +162,7 @@ export function PlayList({ plays, currentID, onSelect, onCreate, onDelete, copyT
                                 type="button"
                                 role="menuitem"
                                 onClick={(e) => handleCopy(e, p.id, target)}
-                                className="w-full text-left px-3 py-2 text-[12px] font-tight text-ink hover:bg-surface transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-surface"
+                                className="w-full text-left px-3 py-2 text-[12px] font-tight text-ink hover:bg-ink/5 transition-colors cursor-pointer focus-visible:outline-none focus-visible:bg-ink/5"
                               >
                                 {target.label}
                               </button>

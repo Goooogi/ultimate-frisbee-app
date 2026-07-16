@@ -176,7 +176,7 @@ export function ResetPasswordClient() {
               </p>
               <Link
                 href="/playbook"
-                className="inline-flex items-center justify-center gap-2 mt-2 px-5 py-3 rounded-md bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase no-underline hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent min-h-[44px]"
+                className="inline-flex items-center justify-center gap-2 mt-2 px-5 py-3 rounded-full bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase no-underline hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent min-h-[44px]"
               >
                 Back to playbook
               </Link>
@@ -199,7 +199,7 @@ export function ResetPasswordClient() {
           {pageState === 'ready' && (
             <form
               onSubmit={handleSubmit}
-              className="w-full bg-bg border border-border rounded-md shadow-xl flex flex-col text-left"
+              className="w-full bg-surface rounded-card-lg shadow-hero flex flex-col text-left"
               aria-label="Set new password"
               noValidate
             >
@@ -242,7 +242,7 @@ export function ResetPasswordClient() {
                 {error && (
                   <div
                     role="alert"
-                    className="text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
+                    className="text-[12px] font-medium font-tight text-live bg-live/[0.08] rounded-card-sm px-3 py-2"
                   >
                     {error}
                   </div>
@@ -254,7 +254,7 @@ export function ResetPasswordClient() {
                   type="submit"
                   disabled={submitting}
                   className={[
-                    'inline-flex items-center justify-center gap-2 w-full py-3 rounded-md cursor-pointer min-h-[44px]',
+                    'inline-flex items-center justify-center gap-2 w-full py-3 rounded-full cursor-pointer min-h-[44px]',
                     'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
                     'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
                     'disabled:opacity-60 disabled:cursor-not-allowed',
@@ -331,11 +331,11 @@ function PasswordInput({
         minLength={8}
         aria-label={placeholder}
         className={[
-          'w-full bg-surface border px-3 py-2.5 pr-10 text-[14px] font-semibold text-ink font-tight rounded',
-          'focus-visible:outline-none transition-colors',
+          'w-full bg-ink/5 px-3.5 py-2.5 pr-10 text-[14px] font-semibold text-ink font-tight rounded-card-sm ring-1 ring-inset',
+          'focus-visible:outline-none focus-visible:ring-2',
           mismatch
-            ? 'border-live focus-visible:border-live'
-            : 'border-border focus-visible:border-ink',
+            ? 'ring-live focus-visible:ring-live'
+            : 'ring-transparent focus-visible:ring-accent',
         ].join(' ')}
       />
       <button

@@ -32,7 +32,7 @@ export function FavoritesSettings() {
   }, []);
 
   return (
-    <div className="rounded-lg border border-border bg-surface overflow-hidden">
+    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
       {/* Section header */}
       <div className="px-5 py-4 border-b border-hairline">
         <h2 className="m-0 font-tight text-[11px] font-bold tracking-[0.18em] uppercase text-muted">
@@ -55,7 +55,7 @@ export function FavoritesSettings() {
         {!loading && (loadError || !initial) && (
           <div
             role="alert"
-            className="px-4 py-3 rounded-md bg-[rgb(var(--live)/0.08)] border border-[rgb(var(--live)/0.20)]"
+            className="px-4 py-3 rounded-card-sm bg-live/[0.08]"
           >
             <span className="font-tight text-[13px] text-ink">
               Couldn&apos;t load your favorites. Please refresh and try again.

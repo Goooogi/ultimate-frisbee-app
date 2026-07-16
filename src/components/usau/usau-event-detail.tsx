@@ -22,6 +22,7 @@ import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { USAU_LEVELS } from '@/lib/league';
 import { UsauBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
+import { formatGameTime } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
@@ -129,12 +130,48 @@ export function UsauEventDetail({ event }: Props) {
     return { teams: filteredTeams, games: filteredGames };
   }, [event.teams, event.games, levelTeams, gender]);
 
+  // ── Second-phase pools ("Pool E") ─────────────────────────────────────
+  // Teams' pool assignments come from the Saturday standings (A–D). When a
+  // game claims a pool OUTSIDE that set ("Pool E" at PEC West 2026 — really
+  // the Ninth Place Pool; USAU reuses generic pool markup for late-added
+  // placement/power pools), it isn't a Saturday pool and shouldn't render
+  // in the Pools tab or count toward pool records. Route those games to the
+  // Bracket tab as their own filter entry instead.
+  //
+  // GUARDS (verified against the full DB, 2026-07-12):
+  //   • Compare pool TOKENS, not full names — assignments can carry
+  //     qualifiers the game rows drop ("Pool C - Clipped" vs "Pool C" at
+  //     weather-shortened regionals). A token mismatch there would misfile
+  //     real pools.
+  //   • Active only when EVERY team in this (division-filtered) view has a
+  //     pool. ultirzr-only events have no assignments at all, and a real
+  //     pool whose standings failed to scrape shows up as unassigned teams
+  //     — both must disable the heuristic rather than misfile real pools.
+  const poolToken = (name: string): string | null => {
+    const m = name.trim().toLowerCase().match(/^pool\s+(\S+)/);
+    return m ? m[1] : null;
+  };
+  const assignedPoolTokens = new Set<string>();
+  let teamsWithoutPool = 0;
+  for (const t of teams) {
+    const tok = t.pool ? poolToken(t.pool) : null;
+    if (tok) assignedPoolTokens.add(tok);
+    else teamsWithoutPool++;
+  }
+  const poolAssignmentsComplete = assignedPoolTokens.size > 0 && teamsWithoutPool === 0;
+  const isSecondPhasePool = (name: string | null | undefined): boolean => {
+    if (!name || !poolAssignmentsComplete) return false;
+    if (!isPoolBracket(name)) return false;
+    const tok = poolToken(bracketTail(name));
+    return tok != null && !assignedPoolTokens.has(tok);
+  };
+
   // ── Group-prefix awareness ────────────────────────────────────────────
   // A filtered view can still contain MULTIPLE independent bracket groups:
-  // GGM teams share the GRAND_MASTERS level tag, so the GM Women view of a
-  // combined championships holds both "GM Women · …" and "GGM Women · …"
-  // games. When that happens, show FULL bracket names (the prefix is the
-  // only disambiguator); single-group views strip the redundant prefix.
+  // a combined masters championships runs Masters / GM / GGM brackets under
+  // one event, so a single gender view can hold both "GM Women · …" and
+  // "GGM Women · …" games. When that happens, show FULL bracket names (the
+  // group prefix is the disambiguator); single-group views strip it.
   const showGroupPrefixes = useMemo(() => {
     const set = new Set<string>();
     for (const g of games) {
@@ -195,7 +232,9 @@ export function UsauEventDetail({ event }: Props) {
   const bracketKey = (g: Game) => g.bracketName ?? 'Bracket';
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
-    if (isPoolBracket(g.bracketName)) continue;
+    // Real Saturday pools stay out; second-phase pools ("Pool E") fall
+    // through and become a placement-bracket group of their own.
+    if (isPoolBracket(g.bracketName) && !isSecondPhasePool(g.bracketName)) continue;
     if (isCrossoverBracket(g.bracketName)) continue; // crossovers have their own tab
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
@@ -216,9 +255,12 @@ export function UsauEventDetail({ event }: Props) {
     .sort((a, b) => (a.bracketName ?? '').localeCompare(b.bracketName ?? ''));
 
   // ── Pool play games ───────────────────────────────────────────────────
+  // Second-phase pools are excluded — they render under Bracket, and their
+  // results must not pollute the Saturday-pool W-L records tallied below.
   const poolGames = new Map<string, Game[]>();
   for (const g of games) {
     if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
+    if (isSecondPhasePool(g.bracketName)) continue;
     if (!poolGames.has(g.bracketName)) poolGames.set(g.bracketName, []);
     poolGames.get(g.bracketName)!.push(g);
   }
@@ -422,6 +464,40 @@ function EventTabsView(props: {
 
   return (
     <>
+      {/* Row 1 — "View on USAU" link (left) + Level/Division selects (right).
+          One compact header row on mobile. Level/Division each only render
+          when the event fielded 2+ (Level: combined masters championships;
+          Division: multi-gender TCT/Nationals events — both write URL params
+          read via useLevel()/useDivision() above). */}
+      {(event.url || availableLevels.length > 1 || eventDivisions.length > 1) && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          {event.url ? <UsauExternalLink url={event.url} name={event.name} /> : <span />}
+          {(availableLevels.length > 1 || eventDivisions.length > 1) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
+              {availableLevels.length > 1 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                    Level
+                  </span>
+                  <UsauLevelSelect
+                    restrictTo={availableLevels}
+                    value={level || undefined}
+                  />
+                </div>
+              )}
+              {eventDivisions.length > 1 && (
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                    Division
+                  </span>
+                  <UsauDivisionSelect restrictTo={eventDivisions} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Champion banner — leads the page for a finished tournament so the
           title result is the first thing seen (esp. on mobile, where the
           bracket tree scrolls horizontally and hides the final). */}
@@ -446,33 +522,8 @@ function EventTabsView(props: {
         />
       )}
 
-      {/* Level + Division switchers — each only when the event fielded 2+.
-          Level: combined masters championships host Masters AND Grand Masters
-          groups in one event (writes ?level=, read via useLevel() above).
-          Division: most TCT/Nationals events field 2-3 genders (writes ?div=,
-          read via useDivision()). Both scoped to what this event actually has. */}
-      {(availableLevels.length > 1 || eventDivisions.length > 1) && (
-        <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-3">
-          {availableLevels.length > 1 && (
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                Level
-              </span>
-              <UsauLevelSelect restrictTo={availableLevels} />
-            </div>
-          )}
-          {eventDivisions.length > 1 && (
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                Division
-              </span>
-              <UsauDivisionSelect restrictTo={eventDivisions} />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── View tabs (#6) — Pools / Pool Games / Crossovers / Bracket ──── */}
+      {/* Row 2 — Pools / Crossovers / Bracket view tabs on their own row
+          (edge-bleed horizontal scroll on mobile so nothing clips). */}
       {visibleTabs.length > 1 && (
         <div
           role="tablist"
@@ -489,12 +540,12 @@ function EventTabsView(props: {
                 aria-selected={on}
                 onClick={() => setTab(t.key)}
                 className={[
-                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-md',
+                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
                   'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
-                  'border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                   on
-                    ? 'bg-accent text-accent-ink border-accent'
-                    : 'bg-surface text-muted border-border hover:border-ink hover:text-ink',
+                    ? 'bg-ink text-bg'
+                    : 'bg-ink/5 text-muted hover:text-ink',
                 ].join(' ')}
               >
                 {t.label}
@@ -535,7 +586,7 @@ function EventTabsView(props: {
                     </div>
                     <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
                       {gs.map((g) => (
-                        <GameRow key={g.id} game={g} />
+                        <GameRow key={g.id} game={g} venueState={event.state} />
                       ))}
                     </ul>
                   </div>
@@ -553,7 +604,13 @@ function EventTabsView(props: {
           <h2 id="crossovers-heading" className="sr-only">Crossovers</h2>
           <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {crossoverGames.map((g) => (
-              <GameRow key={g.id} game={g} showBracket bracketLabel={bracketLabel} />
+              <GameRow
+                key={g.id}
+                game={g}
+                showBracket
+                bracketLabel={bracketLabel}
+                venueState={event.state}
+              />
             ))}
           </ul>
         </section>
@@ -566,6 +623,7 @@ function EventTabsView(props: {
           teams={teams}
           placementBrackets={placementBrackets}
           bracketLabel={bracketLabel}
+          venueState={event.state}
         />
       )}
 
@@ -588,11 +646,13 @@ function BracketView({
   teams,
   placementBrackets,
   bracketLabel,
+  venueState,
 }: {
   games: Game[];
   teams: Team[];
   placementBrackets: Array<{ name: string; games: Game[] }>;
   bracketLabel: (name: string) => string;
+  venueState: string | null;
 }) {
   const hasTree = games.some((g) => isChampionshipBracket(g));
 
@@ -641,7 +701,7 @@ function BracketView({
 
       {/* Championship tree */}
       {activeFilter === 'championship' && hasTree && (
-        <UsauBracketTree games={games} teams={teams} />
+        <UsauBracketTree games={games} teams={teams} venueState={venueState} />
       )}
 
       {/* Placement bucket blocks for the active filter */}
@@ -653,6 +713,7 @@ function BracketView({
               <BracketBlock
                 key={bracket.name}
                 bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
+                venueState={venueState}
               />
             ))}
           </div>
@@ -661,9 +722,30 @@ function BracketView({
   );
 }
 
+/** External link back to the canonical USAU event page. Lives here (not in
+ *  the page header) so it can share a row with the Level/Division selects. */
+function UsauExternalLink({ url, name }: { url: string; name: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`View ${name} on USA Ultimate`}
+      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-ink hover:bg-ink/10 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
+    >
+      View on USAU
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 1.5h5.5V7" />
+        <path d="M8.5 1.5L3.5 6.5" />
+        <path d="M7 8.5H1.5V3" />
+      </svg>
+    </a>
+  );
+}
+
 function PoolGamesEmpty({ slug }: { slug: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-md border border-dashed border-border bg-surface">
+    <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-card-sm bg-ink/[0.03]">
       <span className="text-[11px] font-tight text-muted">
         Pool play games not available in our data — likely scored before our
         scraper picked up this event.
@@ -707,7 +789,7 @@ function ChampionBanner({
     <span className="flex items-center gap-3 min-w-0">
       <UsauTeamLogo name={winnerName ?? ''} genderDivision={genderDivision} competitionLevel={competitionLevel} size={40} />
       <span className="flex flex-col min-w-0">
-        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate">
+        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate pr-[0.1em] pb-[0.12em] -mb-[0.12em]">
           {winnerName ?? '—'}
         </span>
         {loserName && (
@@ -722,10 +804,10 @@ function ChampionBanner({
   return (
     <section
       aria-label="Champion"
-      className="mb-6 rounded-lg border border-border bg-surface overflow-hidden"
+      className="mb-6 rounded-card-lg shadow-card bg-surface overflow-hidden"
     >
-      {/* accent ring / trophy row */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
+      {/* accent tint / trophy row */}
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-accent/[0.06]">
         <TrophyIcon />
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
           Champion{label ? ` · ${label}` : ''}
@@ -767,7 +849,7 @@ function PoolLeaderBanner({
         size={40}
       />
       <span className="flex flex-col min-w-0">
-        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate">
+        <span className="font-display italic font-bold text-[20px] lg:text-[24px] leading-none tracking-[-0.02em] text-ink truncate pr-[0.1em] pb-[0.12em] -mb-[0.12em]">
           {team.teamName}
         </span>
         <span className="text-[11px] text-muted font-tight truncate mt-1">
@@ -780,9 +862,9 @@ function PoolLeaderBanner({
   return (
     <section
       aria-label="Pool leader"
-      className="mb-6 rounded-lg border border-border bg-surface overflow-hidden"
+      className="mb-6 rounded-card-lg shadow-card bg-surface overflow-hidden"
     >
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-[rgb(var(--accent)/0.06)]">
+      <div className="flex items-center gap-2 px-4 py-2 border-b border-hairline bg-accent/[0.06]">
         <TrophyIcon />
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
           Pool leader
@@ -839,8 +921,8 @@ function PoolCard({
     : pool.teams;
 
   return (
-    <div className="bg-surface border border-border rounded-md overflow-hidden">
-      <div className="px-3 py-2 border-b border-hairline">
+    <div className="bg-surface rounded-card shadow-card overflow-hidden">
+      <div className="px-4 py-3">
         <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
           {pool.name}
         </span>
@@ -849,10 +931,10 @@ function PoolCard({
         {ranked.map((t) => {
           const rec = t.teamId ? records.get(t.teamId) : undefined;
           return (
-            <li key={t.teamId} className="border-b border-hairline last:border-b-0">
+            <li key={t.teamId} className="border-t border-hairline">
               <Link
                 href={`/usau/teams/${t.teamId}`}
-                className="flex items-center gap-3 px-3 py-2 hover:bg-surface-hi transition-colors no-underline"
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-ink/[0.03] transition-colors no-underline"
               >
                 <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
                   {t.seed ?? '—'}
@@ -878,7 +960,13 @@ function PoolCard({
   );
 }
 
-function BracketBlock({ bracket }: { bracket: { name: string; games: Game[] } }) {
+function BracketBlock({
+  bracket,
+  venueState,
+}: {
+  bracket: { name: string; games: Game[] };
+  venueState?: string | null;
+}) {
   // The ingest classifier tags a placement bracket's DECIDING game round='other'
   // (its classifyRound has no placement-final case), so it renders as "OTHER"
   // and — since roundOrder('other')=1 — sorts ABOVE the semis. Reclassify: when
@@ -921,7 +1009,7 @@ function BracketBlock({ bracket }: { bracket: { name: string; games: Game[] } })
             </div>
             <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
               {games.map((g) => (
-                <GameRow key={g.id} game={g} />
+                <GameRow key={g.id} game={g} venueState={venueState} />
               ))}
             </ul>
           </div>
@@ -935,25 +1023,30 @@ function GameRow({
   game,
   showBracket,
   bracketLabel,
+  venueState,
 }: {
   game: Game;
   /** Crossovers span several bracket_names in one list — show which one. */
   showBracket?: boolean;
   bracketLabel?: (name: string) => string;
+  /** Event's US state — times render as the venue's wall clock. */
+  venueState?: string | null;
 }) {
   const aWon =
     game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
 
-  const meta = showBracket && game.bracketName
+  const label = showBracket && game.bracketName
     ? (bracketLabel ? bracketLabel(game.bracketName) : game.bracketName)
     : game.location
       ? `Field ${game.location}`
       : null;
+  const time = formatGameTime(game.scheduledAt, venueState ?? null);
+  const meta = [label, time || null].filter(Boolean).join(' · ') || null;
 
   return (
-    <li className="bg-surface border border-border rounded-md p-3">
+    <li className="bg-surface rounded-card-sm shadow-soft p-3">
       <div className="flex items-center justify-between mb-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight">
         {meta ? (
           <span className="text-muted truncate">{meta}</span>
@@ -1129,6 +1222,14 @@ export function canonicalPlacement(name: string | null | undefined): PlacementBu
       : place % 10 === 2 && place % 100 !== 12 ? 'nd'
       : place % 10 === 3 && place % 100 !== 13 ? 'rd' : 'th';
     return { key: `p${place}`, label: `${place}${suffix} Place`, order: place };
+  }
+
+  // Second-phase pools routed into the bracket view ("Pool E" — a placement
+  // or power round-robin whose name carries no ordinal). Each gets its own
+  // filter entry, after the numbered places.
+  const pool = t.match(/^pool\s+(\S+)$/);
+  if (pool) {
+    return { key: `pool-${pool[1]}`, label: (name ?? '').trim(), order: 500 };
   }
 
   // Backdoor / consolation / anything unrecognized → an "Other" bucket last.

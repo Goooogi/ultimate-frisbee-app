@@ -22,14 +22,14 @@ export default async function FantasyLandingPage() {
     >
       {/* ── Global Leaderboard ────────────────────────────────────────────── */}
       <section aria-labelledby="leaderboard-heading">
-        <div className="flex items-end justify-between gap-4 mb-4">
+        <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
           <div>
-            <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-1">
+            <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
               Global
             </div>
             <h2
               id="leaderboard-heading"
-              className="font-tight text-[20px] lg:text-[24px] font-bold tracking-[-0.03em] text-ink leading-none"
+              className="font-display italic text-[26px] lg:text-[34px] font-bold tracking-[-0.02em] leading-[0.95] text-ink"
             >
               Standings
             </h2>
@@ -45,7 +45,7 @@ export default async function FantasyLandingPage() {
         </div>
 
         {leaderboard.length === 0 ? (
-          <div className="rounded-lg border border-border bg-surface p-10 text-center">
+          <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
             <p className="text-muted font-tight text-[14px]">
               No teams yet — be the first to build one.
             </p>
@@ -71,9 +71,9 @@ export default async function FantasyLandingPage() {
             </Link>
           </div>
         ) : (
-          <div className="rounded-lg border border-border bg-surface overflow-hidden">
+          <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
             {/* Column headers — hidden on small screens (info is self-evident) */}
-            <div className="hidden sm:grid grid-cols-[2.5rem_1fr_auto] items-center px-4 py-2.5 border-b border-hairline">
+            <div className="hidden sm:grid grid-cols-[2.5rem_1fr_auto] items-center px-5 py-3">
               <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
                 #
               </span>
@@ -94,11 +94,11 @@ export default async function FantasyLandingPage() {
                     <Link
                       href={`/fantasy/team/${row.teamId}`}
                       className={[
-                        'grid grid-cols-[2.5rem_1fr_auto] items-center px-4 py-3.5',
+                        'grid grid-cols-[2.5rem_1fr_auto] items-center px-5 py-3.5',
                         'no-underline transition-colors duration-150',
-                        'hover:bg-[rgb(var(--surface-hi))]',
+                        'hover:bg-surface-hi',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-                        idx > 0 ? 'border-t border-hairline' : '',
+                        'border-t border-hairline sm:first:border-t-0',
                       ].join(' ')}
                     >
                       {/* Rank */}
@@ -136,7 +136,7 @@ export default async function FantasyLandingPage() {
             </ol>
 
             {leaderboard.length >= 200 && (
-              <div className="px-4 py-3 border-t border-hairline text-center">
+              <div className="px-5 py-3 border-t border-hairline text-center">
                 <span className="text-[11px] text-faint font-tight">Showing top 200 teams</span>
               </div>
             )}

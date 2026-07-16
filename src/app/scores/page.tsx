@@ -11,6 +11,7 @@ import type { UfaGame } from '@/lib/ufa/types';
 import { type UsauMajorWithChampions } from '@/lib/usau/data';
 import { recentUsauTournamentCardsCached } from '@/lib/cached-readers';
 import { parseLeagueParam, parseLevelParam } from '@/lib/league';
+import { parseFlightsParam } from '@/lib/usau/flights';
 import { PageShell } from '@/components/page-shell';
 import { PulScores } from '@/components/pul/pul-scores';
 import { getPulCurrentSeason } from '@/lib/pul/data';
@@ -20,13 +21,21 @@ import { getWulCurrentSeason } from '@/lib/wul/data';
 export const revalidate = 30;
 
 interface Props {
-  searchParams: { league?: string; div?: string; level?: string; season?: string };
+  searchParams: { league?: string; div?: string; level?: string; season?: string; flight?: string };
 }
 
 export default async function HomePage({ searchParams }: Props) {
   const league = parseLeagueParam(searchParams.league);
   // USAU competition level (?level=club|college-d1|…). Only read on the USAU view.
   const usauLevel = parseLevelParam(searchParams.level);
+  // USAU flight filter (?flight=pro,elite) — Triple Crown Tour tiers, Club only,
+  // MULTI-select. Mirrors the /schedule tab so completed games filter by flight.
+  // Flights are a CLUB-ONLY concept, so ignore any persisted ?flight when the
+  // level isn't Club — otherwise switching Club→Masters carries the flight over
+  // and filters out every Masters event (no masters event has a TCT flight),
+  // showing a false "No completed tournaments" empty state. The UI already hides
+  // the flight control off-Club; this makes the server query agree.
+  const usauFlights = usauLevel === 'CLUB' ? parseFlightsParam(searchParams.flight) : [];
 
   // ── PUL branch ────────────────────────────────────────────────────────────
   if (league === 'pul') {
@@ -63,7 +72,7 @@ export default async function HomePage({ searchParams }: Props) {
       return [] as UfaGame[];
     }),
     league === 'usau'
-      ? recentUsauTournamentCardsCached(usauLevel).catch((err) => {
+      ? recentUsauTournamentCardsCached(usauLevel, usauFlights).catch((err) => {
           console.error('Failed to load recent USAU tournaments:', err);
           return [] as UsauMajorWithChampions[];
         })

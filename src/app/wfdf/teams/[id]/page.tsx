@@ -39,11 +39,11 @@ export default async function WfdfTeamPage({ params }: Props) {
       ]}
     >
       {/* Hero panel — mirrors the USAU team hero shape. */}
-      <div className="mb-8 rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="mb-8 bg-surface rounded-card-lg shadow-card overflow-hidden">
         <div className="flex items-center gap-4 p-4 lg:p-5">
           <WfdfFlag flagFile={team.flagFile} countryCode={team.countryCode} size={40} />
           <div className="min-w-0 flex-1">
-            <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
+            <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
               <Link href={`/wfdf/events/${team.eventSlug}`} className="hover:text-ink transition-colors">
                 {team.eventName}
               </Link>
@@ -82,7 +82,7 @@ export default async function WfdfTeamPage({ params }: Props) {
             <span>Roster</span>
             <span className="text-faint tabular">{team.roster.length}</span>
           </h2>
-          <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
+          <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
             <table className="w-full min-w-[480px] border-collapse">
               <thead>
                 <tr>
@@ -90,8 +90,10 @@ export default async function WfdfTeamPage({ params }: Props) {
                     <th
                       key={h}
                       className={[
-                        'pb-2 text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight',
+                        'px-3 py-3 text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight whitespace-nowrap',
                         i < 2 ? 'text-left' : 'text-right',
+                        i === 0 ? 'pl-5' : '',
+                        i === 4 ? 'pr-5' : '',
                       ].join(' ')}
                     >
                       {h}
@@ -100,9 +102,9 @@ export default async function WfdfTeamPage({ params }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {team.roster.map((p) => (
-                  <tr key={p.wfdfPlayerId}>
-                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-left tabular text-faint font-tight w-10">
+                {team.roster.map((p, i) => (
+                  <tr key={p.wfdfPlayerId} className="hover:bg-surface-hi transition-colors duration-100">
+                    <td className={`px-3 py-2.5 text-[13px] text-left tabular text-faint font-tight w-10 pl-5 ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       {p.jerseyNumber ?? '—'}
                     </td>
                     {/* Roster names link to a name-resolver route. WFDF isn't
@@ -111,21 +113,21 @@ export default async function WfdfTeamPage({ params }: Props) {
                         redirects to the person's unified profile if they exist
                         in an anchor league (USAU/UFA), else shows a WFDF-only
                         career view. Never a dead end. */}
-                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight">
+                    <td className={`px-3 py-2.5 text-[13px] text-left font-medium font-tight ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       <Link
                         href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
-                        className="text-ink hover:text-accent transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                        className="text-ink hover:text-accent transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
                       >
                         {p.fullName}
                       </Link>
                     </td>
-                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                    <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       {p.goals ?? '—'}
                     </td>
-                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                    <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       {p.assists ?? '—'}
                     </td>
-                    <td className="px-1 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                    <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight pr-5 ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       {p.games ?? '—'}
                     </td>
                   </tr>
@@ -160,7 +162,7 @@ export default async function WfdfTeamPage({ params }: Props) {
               return (
                 <div
                   key={g.id}
-                  className="rounded-md border border-hairline bg-surface px-3 py-2.5"
+                  className="bg-surface rounded-card shadow-card px-3 py-2.5"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="min-w-0 flex items-center gap-2">

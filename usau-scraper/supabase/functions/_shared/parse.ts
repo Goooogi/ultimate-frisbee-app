@@ -225,6 +225,7 @@ export function classifyCompetitionGroup(label: string): {
     | 'YC'
     | 'MASTERS'
     | 'GRAND_MASTERS'
+    | 'GREAT_GRAND_MASTERS'
     | 'BEACH'
     | 'OTHER';
   gender_division: 'Men' | 'Women' | 'Mixed' | 'Open' | null;
@@ -243,6 +244,7 @@ export function classifyCompetitionGroup(label: string): {
   else if (t.includes('high school')) level = 'HS';
   else if (t.includes('middle school')) level = 'MS';
   else if (t.includes('youth club')) level = 'YC';
+  else if (t.includes('great grand master')) level = 'GREAT_GRAND_MASTERS';
   else if (t.includes('grand master')) level = 'GRAND_MASTERS';
   else if (t.includes('master')) level = 'MASTERS';
   else if (t.includes('college') || /\bd-i\b/.test(t) || /\bd-iii\b/.test(t)) {

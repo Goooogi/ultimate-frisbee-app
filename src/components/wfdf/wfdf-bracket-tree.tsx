@@ -217,7 +217,7 @@ function MatchCard({ game, compact = false }: { game: BracketGame; compact?: boo
   const awayWon = done && (game.awayScore ?? 0) > (game.homeScore ?? 0);
 
   return (
-    <article className="bg-surface border border-border rounded-md overflow-hidden">
+    <article className="bg-surface rounded-card shadow-card overflow-hidden">
       <TeamLine
         teamId={game.homeId}
         name={game.homeName}

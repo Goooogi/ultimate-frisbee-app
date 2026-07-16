@@ -1,22 +1,18 @@
-// PUL hero slide — two-team matchup card.
-// Stadium feel matching HeroGameCard, but with a PUL-specific accent (teal/gold).
-// CTA links to /pul/g/{encoded id}.
-// Server component — no 'use client' needed.
+// PUL hero slide — GameSlide layout (per Home v2 design spec), matching
+// HeroGameCard/HeroWulSlide: dark #0E1622 base, two team-color radial glows,
+// chalk field lines, top row eyebrow+status, center grid team columns, bottom
+// row meta blocks + CTA.
+// CTA links to /pul/g/{encoded id}. Server component — no 'use client' needed.
 
 import Link from 'next/link';
 import type { PulGame } from '@/lib/pul/data';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { HeroFieldLines } from './field-diagram';
 
-const STADIUM = {
-  bg: '#0D1A17',
-  line: 'rgba(200,240,220,0.06)',
-  text: '#E8F5EE',
-  textMuted: 'rgba(200,240,220,0.55)',
-};
-// PUL accent: emerald green
+const BASE = '#0E1622';
+const TEXT = '#FFFFFF';
+const TEXT_MUTED = 'rgba(255,255,255,0.65)';
 const PUL_ACCENT = '#1EC98B';
-const PUL_ACCENT_STR = 'rgba(30,201,139,1)';
 
 interface HeroPulSlideProps {
   game: PulGame;
@@ -27,32 +23,18 @@ export function HeroPulSlide({ game }: HeroPulSlideProps) {
   const href = `/pul/g/${pulGameHref(game.id)}`;
   const dateStr = game.gameDate ? formatDate(game.gameDate) : null;
 
-  // Build two-tone team gradient, mirroring HeroGameCard's pool pattern.
-  const awayColor = game.away.accentColor ?? '#1A3A2E';
-  const homeColor = game.home.accentColor ?? '#0D2820';
+  const awayGlow = game.away.accentColor ?? PUL_ACCENT;
+  const homeGlow = game.home.accentColor ?? PUL_ACCENT;
 
-  const background = [
-    'linear-gradient(180deg, rgba(0,0,0,0.52) 0%, rgba(0,0,0,0.06) 42%, rgba(0,0,0,0.44) 100%)',
-    `radial-gradient(120% 130% at 0% 50%, ${hexOrFallback(awayColor, 0.7)} 0%, transparent 55%)`,
-    `radial-gradient(120% 130% at 100% 50%, ${hexOrFallback(homeColor, 0.7)} 0%, transparent 55%)`,
-    STADIUM.bg,
-  ].join(', ');
+  const awayWins =
+    isFinal && game.away.score !== null && game.home.score !== null && game.away.score > game.home.score;
+  const homeWins =
+    isFinal && game.away.score !== null && game.home.score !== null && game.home.score > game.away.score;
 
-  const awayWins = isFinal &&
-    game.away.score !== null &&
-    game.home.score !== null &&
-    game.away.score > game.home.score;
-  const homeWins = isFinal &&
-    game.away.score !== null &&
-    game.home.score !== null &&
-    game.home.score > game.away.score;
+  const eyebrowLabel = isFinal ? 'Final' : 'Up next';
+  const whenLabel = !isFinal && dateStr ? dateStr.toUpperCase() : null;
+  const statusLine = isFinal ? 'FINAL' : 'UPCOMING';
 
-  const eyebrowStatus = isFinal ? 'FINAL' : dateStr ? dateStr.toUpperCase() : 'UPCOMING';
-  const eyebrowLabel = isFinal
-    ? `PUL · ${game.weekLabel}`
-    : `PUL · ${game.weekLabel} · ${dateStr ?? 'TBD'}`;
-
-  // Adapt team shape to PulTeamLogo expected prop (needs 'name' = city+mascot)
   const awayTeamForLogo = {
     id: game.away.teamId,
     name: [game.away.city, game.away.mascot].filter(Boolean).join(' ') || game.away.abbrev,
@@ -72,64 +54,66 @@ export function HeroPulSlide({ game }: HeroPulSlideProps) {
 
   return (
     <article
-      className="relative overflow-hidden p-5 sm:p-9 h-full flex flex-col justify-between"
-      style={{ background, color: STADIUM.text }}
+      className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border flex flex-col justify-between"
+      style={{ background: BASE, color: TEXT }}
     >
       <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background:
-            'radial-gradient(70% 55% at 50% 100%, rgba(30,201,139,0.10), transparent 60%)',
-        }}
+        className="absolute -top-[30%] -left-[8%] w-[55%] h-[150%] pointer-events-none"
+        style={{ background: `radial-gradient(circle at 40% 50%, ${awayGlow}88, transparent 62%)` }}
         aria-hidden="true"
       />
-      <HeroFieldLines color={STADIUM.line} accent={PUL_ACCENT} />
+      <div
+        className="absolute -top-[30%] -right-[8%] w-[55%] h-[150%] pointer-events-none"
+        style={{ background: `radial-gradient(circle at 60% 50%, ${homeGlow}88, transparent 62%)` }}
+        aria-hidden="true"
+      />
+      <HeroFieldLines color="rgba(255,255,255,0.05)" accent={PUL_ACCENT} />
 
-      <div className="relative flex-1 flex flex-col justify-between gap-5">
-        {/* Eyebrow */}
-        <div>
-          <div className="inline-flex items-center gap-2.5 mb-2">
+      <div className="relative flex-1 flex flex-col justify-between gap-4">
+        {/* Top row */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             <span
-              className="w-[7px] h-[7px] rounded-full"
-              style={{ background: PUL_ACCENT_STR, boxShadow: `0 0 0 3px rgba(30,201,139,0.20)` }}
-            />
-            <span
-              className="font-mono text-[11px] font-bold tracking-[0.14em]"
-              style={{ color: PUL_ACCENT }}
+              className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.12em] uppercase px-2.5 py-[5px] rounded-full flex-shrink-0"
+              style={{ color: '#fff', background: PUL_ACCENT }}
             >
-              {eyebrowStatus}
+              ◆ PUL · {eyebrowLabel}
             </span>
+            {whenLabel && (
+              <span className="font-mono text-[12px] truncate" style={{ color: TEXT_MUTED }}>
+                {whenLabel}
+              </span>
+            )}
           </div>
-          <div
-            className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase"
-            style={{ color: STADIUM.textMuted }}
+          <span
+            className="font-sans text-[10.5px] font-bold tracking-[0.14em] uppercase px-2.5 py-[5px] rounded-full flex-shrink-0"
+            style={{ color: TEXT_MUTED, background: 'rgba(255,255,255,0.1)' }}
           >
-            {eyebrowLabel}
-          </div>
+            {statusLine}
+          </span>
         </div>
 
-        {/* Matchup */}
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-4 sm:gap-7 items-center my-3">
-          <PulTeamColumn
+        {/* Center grid — extra horizontal padding beyond the card's own edge
+            padding so team names never sit under the carousel's side-centered
+            42px arrow buttons. */}
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-5 px-0 sm:px-8 lg:px-12">
+          <PulGameTeam
             team={awayTeamForLogo}
             abbrev={game.away.abbrev}
             score={game.away.score}
             winner={awayWins}
             loser={homeWins}
             isFinal={isFinal}
-            align="left"
           />
-          {!isFinal ? (
-            <div
-              className="font-display italic font-semibold text-[22px]"
-              style={{ color: STADIUM.textMuted }}
-            >
-              vs
-            </div>
-          ) : (
-            <div aria-hidden="true" />
-          )}
-          <PulTeamColumn
+          <div className="flex flex-col items-center gap-1.5 sm:gap-2">
+            <span className="font-display italic font-bold text-[26px] sm:text-[38px] leading-none" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              VS
+            </span>
+            <span className="font-mono text-[10px] sm:text-[11px] font-bold tracking-[0.14em]" style={{ color: PUL_ACCENT }}>
+              {game.weekLabel}
+            </span>
+          </div>
+          <PulGameTeam
             team={homeTeamForLogo}
             abbrev={game.home.abbrev}
             score={game.home.score}
@@ -140,43 +124,30 @@ export function HeroPulSlide({ game }: HeroPulSlideProps) {
           />
         </div>
 
-        {/* Footer */}
-        <div className="flex flex-wrap justify-between items-end gap-4">
-          <div className="flex flex-wrap gap-7">
-            <StatMini label="League" value="PUL" />
-            <StatMini label="Status" value={isFinal ? 'Final' : 'Upcoming'} />
-            {game.location && (
-              <StatMini label="Venue" value={truncate(game.location, 22)} />
-            )}
+        {/* Bottom row */}
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="flex flex-wrap gap-6 sm:gap-8">
+            <DarkMeta label="League" value="PUL" />
+            <DarkMeta label="Status" value={isFinal ? 'Final' : 'Upcoming'} />
+            {game.location && <DarkMeta label="Venue" value={truncate(game.location, 22)} />}
           </div>
-          <Link
-            href={href}
-            className={[
-              'inline-flex items-center gap-2 px-4 py-2.5',
-              'font-sans text-[11px] font-bold tracking-[0.12em] uppercase',
-              'cursor-pointer transition-opacity hover:opacity-90',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(30,201,139,0.5)]',
-              'bg-[rgba(200,240,220,0.10)] text-[#E8F5EE] border border-[rgba(200,240,220,0.18)]',
-            ].join(' ')}
-          >
-            {isFinal ? 'Box score' : 'Preview'} →
-          </Link>
+          <div className="flex gap-2.5">
+            <CTA href={href}>{isFinal ? 'Box score' : 'Preview'} →</CTA>
+          </div>
         </div>
       </div>
     </article>
   );
 }
 
-// ─── Sub-components ────────────────────────────────────────────────────────────
-
-function PulTeamColumn({
+function PulGameTeam({
   team,
   abbrev,
   score,
   winner,
   loser,
   isFinal,
-  align,
+  align = 'left',
 }: {
   team: { id: string; name: string; city: string; mascot: string; logoUrl: string | null; accentColor: string | null };
   abbrev: string;
@@ -184,58 +155,68 @@ function PulTeamColumn({
   winner: boolean;
   loser: boolean;
   isFinal: boolean;
-  align: 'left' | 'right';
+  align?: 'left' | 'right';
 }) {
-  const ACCENT = PUL_ACCENT;
-  const isRight = align === 'right';
+  const right = align === 'right';
   const label = [team.city, team.mascot].filter(Boolean).join(' ') || abbrev;
-
   return (
     <div
-      className={`flex flex-col gap-2 ${isRight ? 'items-end text-right' : 'items-start text-left'} transition-opacity`}
+      className={`flex items-center gap-2.5 sm:gap-5 min-w-0 ${right ? 'flex-row-reverse text-right' : 'text-left'}`}
       style={{ opacity: loser ? 0.55 : 1 }}
     >
-      <div className={`flex items-center gap-2.5 ${isRight ? 'flex-row-reverse' : ''}`}>
-        <PulTeamLogo team={team} size={36} />
-        <div>
-          <div className="font-display italic font-bold text-[18px] tracking-[-0.02em]">{abbrev}</div>
+      <span className="inline-flex rounded-full overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.25)] flex-shrink-0 sm:hidden">
+        <PulTeamLogo team={team} size={56} />
+      </span>
+      <span className="hidden sm:inline-flex rounded-full overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.25)] flex-shrink-0">
+        <PulTeamLogo team={team} size={88} />
+      </span>
+      <div className="min-w-0">
+        <div className="font-sans text-[11px] sm:text-[12px] font-bold tracking-[0.14em] uppercase truncate" style={{ color: TEXT_MUTED }}>
+          {abbrev}
         </div>
-      </div>
-      {isFinal && score !== null && (
-        <div
-          className="font-display italic font-bold text-[52px] sm:text-[72px] lg:text-[96px] leading-[0.95] tracking-[-0.04em] tabular"
-          style={{ color: winner ? ACCENT : STADIUM.text }}
-        >
-          {score}
-        </div>
-      )}
-      <div
-        className={`font-sans text-[11px] font-medium${!isFinal ? ' hidden sm:block' : ''}`}
-        style={{ color: STADIUM.textMuted }}
-      >
-        {label}
+        {isFinal && score !== null ? (
+          <div
+            className="font-display italic font-bold text-[32px] sm:text-[56px] leading-[0.9] tracking-[-0.03em] my-1 tabular"
+            style={{ color: winner ? PUL_ACCENT : TEXT }}
+          >
+            {score}
+          </div>
+        ) : (
+          <div className="font-display italic font-bold text-[24px] sm:text-[50px] leading-[0.9] tracking-[-0.03em] my-1 truncate pr-[0.14em] pb-[0.14em] -mb-[0.14em]">
+            {label}
+          </div>
+        )}
+        <span className="font-mono text-[11px] sm:text-[13px] font-medium truncate block" style={{ color: TEXT_MUTED }}>
+          {isFinal ? label : ''}
+        </span>
       </div>
     </div>
   );
 }
 
-function StatMini({ label, value }: { label: string; value: string }) {
+function DarkMeta({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="font-mono text-[10px] tracking-[0.1em] uppercase" style={{ color: STADIUM.textMuted }}>
+    <div className="min-w-0">
+      <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-[0.1em]" style={{ color: TEXT_MUTED }}>
         {label}
       </div>
-      <div
-        className="font-display italic font-bold text-[20px] lg:text-[22px] mt-0.5"
-        style={{ color: STADIUM.text }}
-      >
+      <div className="font-sans text-[12.5px] sm:text-[14px] font-semibold mt-[3px] truncate" style={{ color: TEXT }}>
         {value}
       </div>
     </div>
   );
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+function CTA({ children, href }: { children: React.ReactNode; href: string }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full font-sans text-[12px] sm:text-[13px] font-bold tracking-[0.01em] cursor-pointer whitespace-nowrap transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(30,201,139,0.5)] bg-white/[0.12] text-white border border-white/[0.28]"
+    >
+      {children}
+    </Link>
+  );
+}
 
 function truncate(s: string, n: number) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
@@ -243,31 +224,7 @@ function truncate(s: string, n: number) {
 
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  });
-}
-
-/** Convert a hex or rgb(a) string to rgba with the given alpha for a gradient stop.
- *  If it's already rgb/rgba just wraps; if hex, converts. Fallback: a dark neutral. */
-function hexOrFallback(color: string, alpha: number): string {
-  if (!color) return `rgba(30,42,36,${alpha})`;
-  // Already a CSS function → wrap with alpha
-  if (color.startsWith('rgb')) return color.replace(/rgba?\([^)]+\)/, (m) => {
-    const nums = m.replace(/rgba?\(/, '').replace(')', '').split(',').map((n) => n.trim());
-    return `rgba(${nums[0]}, ${nums[1]}, ${nums[2]}, ${alpha})`;
-  });
-  // Hex → rgb
-  const hex = color.replace('#', '');
-  const full = hex.length === 3
-    ? hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2]
-    : hex;
-  if (full.length !== 6) return `rgba(30,42,36,${alpha})`;
-  const r = parseInt(full.slice(0, 2), 16);
-  const g = parseInt(full.slice(2, 4), 16);
-  const b = parseInt(full.slice(4, 6), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 /** Build the href segments for a PUL game id like "2026/finals/PHL-vs-DC".

@@ -148,7 +148,7 @@ export function UsauUpNextCard({ event }: { event: UsauEventSummary }) {
       {/* Event header card */}
       <Link
         href={`/usau/events/${event.slug}`}
-        className="group bg-surface border border-border px-4 py-3.5 flex flex-col gap-1.5 hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="group bg-surface rounded-card shadow-card px-4 py-3.5 flex flex-col gap-1.5 transition-shadow hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         <div className="flex items-start justify-between gap-3">
           <span className="font-tight font-semibold text-[14px] text-ink leading-snug">
@@ -208,12 +208,14 @@ function UsauPoolGameMini({
   return (
     <Link
       href={`/usau/events/${eventSlug}`}
-      className="bg-surface border border-hairline px-3 py-2 flex flex-col gap-1 hover:border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="bg-surface rounded-card-sm shadow-soft px-3 py-2 flex flex-col gap-1 transition-shadow hover:shadow-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
       {/* Team A */}
       <div className={['flex items-center justify-between', bWin ? 'opacity-55' : ''].join(' ')}>
         <div className="flex items-center gap-1.5 min-w-0">
-          <UsauTeamLogo name={aName} genderDivision={divA} size={16} />
+          <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+            <UsauTeamLogo name={aName} genderDivision={divA} size={16} />
+          </span>
           <span className="font-tight text-[13px] text-ink truncate">{aName}</span>
         </div>
         <span className="font-mono font-bold text-[13px] text-ink tabular ml-2 flex-shrink-0">
@@ -223,7 +225,9 @@ function UsauPoolGameMini({
       {/* Team B */}
       <div className={['flex items-center justify-between', aWin ? 'opacity-55' : ''].join(' ')}>
         <div className="flex items-center gap-1.5 min-w-0">
-          <UsauTeamLogo name={bName} genderDivision={divB} size={16} />
+          <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+            <UsauTeamLogo name={bName} genderDivision={divB} size={16} />
+          </span>
           <span className="font-tight text-[13px] text-ink truncate">{bName}</span>
         </div>
         <span className="font-mono font-bold text-[13px] text-ink tabular ml-2 flex-shrink-0">
@@ -256,7 +260,7 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
   // Card is a container (not a single anchor) so each division row can be its
   // own link into that division's bracket — nested anchors are invalid HTML.
   return (
-    <div className="group h-full bg-surface border border-border px-4 py-3.5 flex flex-col gap-2.5 hover:border-ink transition-colors">
+    <div className="group h-full bg-surface rounded-card shadow-card px-4 py-3.5 flex flex-col gap-2.5 transition-shadow hover:shadow-lift">
       {/* Event header → event overview (all divisions) */}
       <Link
         href={`/usau/events/${major.slug}`}
@@ -267,7 +271,7 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
             {major.name}
           </span>
           {major.flight && (
-            <span className="shrink-0 mt-0.5 text-[8.5px] font-bold tracking-[0.12em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
+            <span className="shrink-0 mt-0.5 text-[8.5px] font-bold tracking-[0.12em] uppercase font-tight text-accent bg-accent/10 rounded-full px-2 py-0.5">
               {FLIGHT_LABELS[major.flight]}
             </span>
           )}
@@ -288,12 +292,14 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
             <Link
               key={c.division}
               href={`/usau/events/${major.slug}?div=${c.division.toLowerCase()}`}
-              className="flex items-center gap-2 no-underline rounded-sm -mx-1 px-1 py-0.5 hover:bg-hairline/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="flex items-center gap-2 no-underline rounded-card-sm -mx-1 px-1 py-0.5 hover:bg-[rgb(var(--ink)/0.04)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="text-accent flex-shrink-0">
                 <TrophyIcon />
               </span>
-              <UsauTeamLogo name={c.teamName} genderDivision={c.division} size={22} />
+              <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+                <UsauTeamLogo name={c.teamName} genderDivision={c.division} size={22} />
+              </span>
               <div className="min-w-0 flex-1">
                 <div className="font-tight text-[13px] text-ink font-semibold truncate">{c.teamName}</div>
                 <div className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
@@ -397,8 +403,8 @@ export function PulRecentCard({ game, round }: { game: PulGame; round: RecentRou
   const isChampion = round === 'final';
 
   const cardClass = [
-    'group h-full bg-surface border rounded-md px-4 py-3.5 flex flex-col gap-2.5 transition-colors duration-150',
-    isChampion ? 'border-accent ring-1 ring-accent/40 hover:border-accent' : 'border-border hover:border-ink',
+    'group h-full bg-surface rounded-card px-4 py-3.5 flex flex-col gap-2.5 transition-shadow duration-150',
+    isChampion ? 'shadow-card ring-1 ring-accent/40 hover:shadow-lift' : 'shadow-card hover:shadow-lift',
     'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
   ].join(' ');
 
@@ -450,7 +456,9 @@ function PulScoreRow({
   return (
     <div className={['flex items-center justify-between py-1', lose ? 'opacity-60' : ''].join(' ')}>
       <div className="flex items-center gap-2 min-w-0">
-        <PulTeamLogo team={teamForLogo} size={22} />
+        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+          <PulTeamLogo team={teamForLogo} size={22} />
+        </span>
         <span className={['font-tight tracking-[-0.01em] text-[13.5px] text-ink truncate', win ? 'font-bold' : 'font-medium'].join(' ')}>
           {label}
         </span>
@@ -487,8 +495,8 @@ export function WulRecentCard({ game, round }: { game: WulGame; round: RecentRou
   const isChampion = round === 'final';
 
   const cardClass = [
-    'group h-full bg-surface border rounded-md px-4 py-3.5 flex flex-col gap-2.5 transition-colors duration-150',
-    isChampion ? 'border-accent ring-1 ring-accent/40 hover:border-accent' : 'border-border hover:border-ink',
+    'group h-full bg-surface rounded-card px-4 py-3.5 flex flex-col gap-2.5 transition-shadow duration-150',
+    isChampion ? 'shadow-card ring-1 ring-accent/40 hover:shadow-lift' : 'shadow-card hover:shadow-lift',
     'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
   ].join(' ');
 
@@ -538,7 +546,9 @@ function WulScoreRow({
   return (
     <div className={['flex items-center justify-between py-1', lose ? 'opacity-60' : ''].join(' ')}>
       <div className="flex items-center gap-2 min-w-0">
-        <WulTeamLogo team={teamForLogo} size={22} />
+        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
+          <WulTeamLogo team={teamForLogo} size={22} />
+        </span>
         <span className={['font-tight tracking-[-0.01em] text-[13.5px] text-ink truncate', win ? 'font-bold' : 'font-medium'].join(' ')}>
           {label}
         </span>

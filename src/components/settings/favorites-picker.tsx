@@ -68,7 +68,7 @@ function SaveIndicator({ status }: { status: SaveStatus }) {
   }
   if (status === 'error') {
     return (
-      <span className="text-[9px] font-medium text-[rgb(var(--live))] font-tight normal-case tracking-normal">
+      <span className="text-[9px] font-medium text-live font-tight normal-case tracking-normal">
         Save failed
       </span>
     );
@@ -199,26 +199,26 @@ function LeagueTeamSearch({
           aria-label={`Search ${LEAGUE_DISPLAY[league]} teams to favorite`}
           spellCheck={false}
           className={[
-            'w-full bg-bg border border-border px-3 pl-8 py-2 text-[13px] font-semibold text-ink font-tight rounded',
-            'focus-visible:outline-none focus-visible:border-ink transition-colors min-h-[40px]',
+            'w-full bg-surface px-3 pl-8 py-2 text-[13px] font-semibold text-ink font-tight rounded-full',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors min-h-[40px]',
           ].join(' ')}
         />
         {loading && (
           <span
-            className="absolute right-3 w-3.5 h-3.5 rounded-full border-2 border-[rgb(var(--ink)/0.15)] border-t-accent animate-spin"
+            className="absolute right-3 w-3.5 h-3.5 rounded-full border-2 border-ink/15 border-t-accent animate-spin"
             aria-hidden="true"
           />
         )}
       </div>
 
       {addError && (
-        <p role="alert" className="text-[11px] font-tight text-[rgb(var(--live))] mt-1.5">
+        <p role="alert" className="text-[11px] font-tight text-live mt-1.5">
           {addError}
         </p>
       )}
 
       {open && query.trim().length >= 2 && (
-        <div className="absolute z-20 left-0 right-0 mt-1.5 bg-bg border border-border rounded-md shadow-lg overflow-hidden">
+        <div className="absolute z-20 left-0 right-0 mt-1.5 bg-surface rounded-card shadow-lift overflow-hidden">
           <div className="max-h-[240px] overflow-y-auto">
             {results.length === 0 ? (
               <div className="px-4 py-4 text-[12px] text-faint font-tight">
@@ -236,7 +236,7 @@ function LeagueTeamSearch({
                     className={[
                       'flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors',
                       'focus-visible:outline-none',
-                      already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface cursor-pointer',
+                      already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-surface-hi cursor-pointer',
                     ].join(' ')}
                   >
                     <SearchResultIcon result={r} />
@@ -278,7 +278,7 @@ function NestedTeamRow({ team, onRemove }: { team: FavoriteTeam; onRemove: () =>
   }
 
   return (
-    <div className="flex items-center gap-3 pl-3 pr-2 py-2 rounded-md border border-hairline bg-bg">
+    <div className="flex items-center gap-3 pl-3 pr-2 py-2 rounded-full bg-surface">
       <SearchResultIcon
         result={{
           kind: 'team',
@@ -300,8 +300,8 @@ function NestedTeamRow({ team, onRemove }: { team: FavoriteTeam; onRemove: () =>
         disabled={removing}
         aria-label={`Remove ${team.name} from favorites`}
         className={[
-          'inline-flex items-center justify-center min-w-[36px] min-h-[36px] -my-2 -mr-1 rounded-md flex-shrink-0',
-          'text-faint hover:text-ink hover:bg-[rgb(var(--ink)/0.06)] transition-colors',
+          'inline-flex items-center justify-center min-w-[36px] min-h-[36px] -my-2 -mr-1 rounded-full flex-shrink-0',
+          'text-faint hover:text-ink hover:bg-ink/[0.06] transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           removing ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
         ].join(' ')}
@@ -334,8 +334,8 @@ function LeagueRow({
   return (
     <div
       className={[
-        'rounded-md border transition-colors',
-        isSelected ? 'border-border bg-bg' : 'border-hairline bg-transparent',
+        'rounded-card-sm transition-colors',
+        isSelected ? 'bg-bg' : 'bg-transparent',
       ].join(' ')}
     >
       <button
@@ -346,7 +346,7 @@ function LeagueRow({
           isSelected ? `Remove ${LEAGUE_DISPLAY[league]} from favorites` : `Add ${LEAGUE_DISPLAY[league]} to favorites`
         }
         className={[
-          'flex w-full items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-md',
+          'flex w-full items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-card-sm',
           'font-tight text-left transition-colors cursor-pointer',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
@@ -355,8 +355,8 @@ function LeagueRow({
         <span
           aria-hidden="true"
           className={[
-            'inline-flex items-center justify-center w-5 h-5 rounded flex-shrink-0 border transition-colors',
-            isSelected ? 'bg-accent border-accent text-accent-ink' : 'bg-surface border-border',
+            'inline-flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0 transition-colors',
+            isSelected ? 'bg-accent text-accent-ink' : 'bg-ink/10',
           ].join(' ')}
         >
           {isSelected && (
@@ -509,7 +509,7 @@ export function FavoritesPicker({ initialLeagues, initialTeams, onChange }: Favo
       </div>
 
       {globalError && (
-        <p role="alert" className="text-[11px] font-tight text-[rgb(var(--live))]">
+        <p role="alert" className="text-[11px] font-tight text-live">
           {globalError}
         </p>
       )}

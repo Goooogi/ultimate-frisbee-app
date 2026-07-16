@@ -47,6 +47,22 @@ interface AuthState {
    * actionable messages like "Password should be at least 8 characters").
    */
   updatePassword: (newPassword: string) => Promise<{ error?: string }>;
+  /**
+   * Starts an OAuth sign-in with Google or Apple. Redirects the browser to the
+   * provider, which returns to /auth/callback (PKCE) to establish the session.
+   * `next` is the same-origin path to land on after auth (default / — home).
+   * Returns { error } only if the redirect itself couldn't be initiated.
+   */
+  signInWithOAuth: (
+    provider: 'google' | 'apple',
+    next?: string,
+  ) => Promise<{ error?: string }>;
+  /**
+   * Re-fetch the signed-in user's profile row. Call after mutating the profile
+   * (e.g. setting an avatar) so consumers like the nav account chip reflect the
+   * change immediately without a page reload. No-op when signed out.
+   */
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -103,21 +119,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [loadClient]);
 
-  // Whenever the session user changes, fetch their profile row. We refetch
-  // any time the user id flips so a fresh sign-up picks up the trigger-
-  // created profile without a hard reload.
-  useEffect(() => {
+  // Fetch the signed-in user's profile row. Shared by the mount/user-change
+  // effect below and the exported refreshProfile() so a profile mutation (e.g.
+  // avatar) reflects immediately.
+  const fetchProfile = useCallback(async (): Promise<void> => {
     const userId = session?.user.id;
     if (!userId) {
       setProfile(null);
       return;
     }
+    const supabase = await loadClient();
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, email, display_name, username, avatar_url, avatar_icon, phone, role')
+      .eq('id', userId)
+      .maybeSingle();
+    setProfile(data ?? null);
+  }, [session?.user.id, loadClient]);
+
+  // Whenever the session user changes, fetch their profile row. We refetch
+  // any time the user id flips so a fresh sign-up picks up the trigger-
+  // created profile without a hard reload.
+  useEffect(() => {
     let cancelled = false;
     (async () => {
+      const userId = session?.user.id;
+      if (!userId) {
+        setProfile(null);
+        return;
+      }
       const supabase = await loadClient();
       const { data } = await supabase
         .from('profiles')
-        .select('id, email, display_name, username, avatar_url, phone, role')
+        .select('id, email, display_name, username, avatar_url, avatar_icon, phone, role')
         .eq('id', userId)
         .maybeSingle();
       if (cancelled) return;
@@ -149,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
       options: {
         data: Object.keys(meta).length > 0 ? meta : undefined,
-        emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/playbook` : undefined,
+        emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/` : undefined,
       },
     });
     if (error) return { error: error.message };
@@ -203,6 +237,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return {};
   }, [loadClient]);
 
+  const signInWithOAuth = useCallback<AuthState['signInWithOAuth']>(
+    async (provider, next = '/') => {
+      const supabase = await loadClient();
+      // redirectTo must EXACTLY match a Supabase dashboard Redirect-URLs entry.
+      // We send a BARE callback URL (no query string) so a plain allowlist entry
+      // matches — a `?next=` on redirectTo would only match a wildcard entry, and
+      // on a miss Supabase silently falls back to the Site URL (which sent users
+      // to prod instead of localhost). Instead `next` rides in a short-lived
+      // same-site cookie that the /auth/callback route reads.
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      if (typeof document !== 'undefined') {
+        // 5-minute, lax, path-scoped cookie. Not sensitive (a local path), but
+        // scoped tight so it doesn't linger. The callback validates it anyway.
+        document.cookie = `oauth_next=${encodeURIComponent(next)}; Max-Age=300; Path=/; SameSite=Lax`;
+      }
+      const redirectTo = `${origin}/auth/callback`;
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: { redirectTo },
+      });
+      // On success supabase-js navigates away, so we usually don't return here.
+      if (error) return { error: error.message };
+      return {};
+    },
+    [loadClient],
+  );
+
   const value = useMemo<AuthState>(() => {
     const user: SessionUser | null = session?.user
       ? {
@@ -214,8 +275,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           profile,
         }
       : null;
-    return { user, loading, signIn, signUp, signOut, resetPassword, updatePassword };
-  }, [session, profile, loading, signIn, signUp, signOut]);
+    return { user, loading, signIn, signUp, signOut, resetPassword, updatePassword, signInWithOAuth, refreshProfile: fetchProfile };
+  }, [session, profile, loading, signIn, signUp, signOut, resetPassword, updatePassword, signInWithOAuth, fetchProfile]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -384,6 +384,107 @@ export async function setDisplayName(name: string): Promise<void> {
 }
 
 /**
+ * Set (or clear) the signed-in user's profile-icon URL — the avatar shown in
+ * the nav account chip in place of the initials monogram. Pass null to clear it
+ * back to initials. The value is a public storage URL in the `avatars` bucket
+ * (upload keyed to the user's own {user_id}/… folder via storage RLS). Writes
+ * the user's own profiles row (profiles_update_own RLS).
+ */
+export async function setAvatarUrl(url: string | null): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  // Only accept a same-project Supabase storage URL (or null). Prevents a
+  // caller from pointing the avatar at an arbitrary external/attacker URL.
+  if (url !== null) {
+    const ok = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//.test(url);
+    if (!ok) throw new Error('Invalid avatar URL.');
+  }
+
+  // Read the current avatar first so we can delete its storage object after a
+  // successful swap — a public-bucket URL never expires, so a replaced/removed
+  // photo would otherwise stay publicly reachable forever (privacy).
+  const { data: prev } = await supabase
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', user.id)
+    .maybeSingle();
+  const prevUrl = prev?.avatar_url ?? null;
+
+  // Setting an uploaded photo clears any picked team-logo icon — the two are
+  // mutually exclusive (avatar_icon takes render precedence, so a stale icon
+  // would mask the new photo). Clearing the photo (url=null) leaves icon as-is.
+  const patch: Record<string, string | null> = { avatar_url: url };
+  if (url !== null) patch.avatar_icon = null;
+  const { error } = await supabase.from('profiles').update(patch).eq('id', user.id);
+  if (error) throw error;
+
+  // Best-effort cleanup of the OLD object (only when it actually changed and
+  // was one of ours). Storage RLS still scopes deletion to the user's folder,
+  // and a failure here must not fail the avatar change — the column is the
+  // source of truth. Path = everything after `/public/avatars/`.
+  if (prevUrl && prevUrl !== url) {
+    const m = prevUrl.match(/\/storage\/v1\/object\/public\/avatars\/(.+)$/);
+    const oldPath = m ? decodeURIComponent(m[1]) : null;
+    // Only remove objects under THIS user's folder (defense in depth on top of RLS).
+    if (oldPath && oldPath.startsWith(`${user.id}/`)) {
+      await supabase.storage.from('avatars').remove([oldPath]).catch(() => {});
+    }
+  }
+}
+
+/**
+ * Set (or clear) the signed-in user's profile ICON — a picked team logo /
+ * country flag, stored as a compact "<league>:<teamId>" reference (e.g.
+ * 'ufa:empire', 'wfdf:USA'), NOT an image URL. Pass null to clear it. Mutually
+ * exclusive with the uploaded photo (avatar_url): setting an icon clears the
+ * photo, and if that photo was an uploaded storage object it's cleaned up so it
+ * doesn't stay publicly reachable. Writes the user's own profiles row
+ * (profiles_update_own RLS).
+ *
+ * `ref` must match "<league>:<id>" where league ∈ {ufa,usau,pul,wul,wfdf} and id
+ * is a short slug/code — the same shape enforced by the profiles_avatar_icon_format
+ * DB CHECK. Rejects anything else so a caller can't stash arbitrary text here.
+ */
+export async function setAvatarIcon(ref: string | null): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  if (ref !== null) {
+    const ok = /^(ufa|usau|pul|wul|wfdf):[A-Za-z0-9][A-Za-z0-9/_-]{0,79}$/.test(ref);
+    if (!ok) throw new Error('Invalid avatar icon.');
+  }
+
+  // Read the current photo so we can clean up an uploaded storage object when
+  // switching to an icon (the URL column is being cleared out from under it).
+  const { data: prev } = await supabase
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', user.id)
+    .maybeSingle();
+  const prevUrl = prev?.avatar_url ?? null;
+
+  // Setting an icon clears the photo; clearing the icon (ref=null) leaves the
+  // photo untouched so a user can fall back to a previously-uploaded photo.
+  const patch: Record<string, string | null> =
+    ref !== null ? { avatar_icon: ref, avatar_url: null } : { avatar_icon: null };
+  const { error } = await supabase.from('profiles').update(patch).eq('id', user.id);
+  if (error) throw error;
+
+  if (ref !== null && prevUrl) {
+    const m = prevUrl.match(/\/storage\/v1\/object\/public\/avatars\/(.+)$/);
+    const oldPath = m ? decodeURIComponent(m[1]) : null;
+    if (oldPath && oldPath.startsWith(`${user.id}/`)) {
+      await supabase.storage.from('avatars').remove([oldPath]).catch(() => {});
+    }
+  }
+}
+
+/**
  * Create (or return existing) the signed-in user's beta team. owner_id comes
  * from the session; owner_username is force-set by a DB trigger from the
  * profile, so a client value can't stick (defense in depth: we don't send one).

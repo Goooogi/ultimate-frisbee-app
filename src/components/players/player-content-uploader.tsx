@@ -55,13 +55,13 @@ export function PlayerContentUploader({
   const [expanded, setExpanded] = useState(false);
 
   if (loading) {
-    return <div className="h-[44px] rounded-md border border-hairline bg-surface" aria-hidden />;
+    return <div className="h-[44px] rounded-card bg-surface shadow-soft" aria-hidden />;
   }
 
   if (!user) {
     return (
       <>
-        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-md border border-hairline bg-surface">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-card bg-surface shadow-soft">
           <p className="text-[12px] text-muted font-tight">
             Sign in to upload photos or video.
           </p>
@@ -88,7 +88,7 @@ export function PlayerContentUploader({
       <button
         type="button"
         onClick={() => setExpanded(true)}
-        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-md border border-dashed border-border text-muted hover:text-ink hover:border-ink hover:bg-surface transition-colors cursor-pointer font-tight text-[12px] font-semibold"
+        className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-card bg-surface shadow-soft hover:shadow-card transition-shadow text-muted hover:text-ink cursor-pointer font-tight text-[12px] font-semibold"
       >
         <PlusGlyph />
         Add photo or video
@@ -97,7 +97,7 @@ export function PlayerContentUploader({
   }
 
   return (
-    <div className="rounded-md border border-border bg-surface overflow-hidden">
+    <div className="rounded-card bg-surface shadow-card overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-hairline">
         <div className="flex items-center gap-1">
           <TabButton active={tab === 'file'} onClick={() => setTab('file')}>
@@ -461,7 +461,7 @@ function LinkForm({
           value={url}
           onChange={(e) => { setUrl(e.target.value); setError(null); }}
           placeholder="https://… (video, article, highlight, etc.)"
-          className="w-full px-3 py-2 rounded-md bg-bg border border-border text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent"
+          className="w-full px-3 py-2 rounded-card-sm bg-bg text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent"
         />
         {trimmed && !validUrl && (
           <span className="text-[11px] text-live font-tight">
@@ -517,7 +517,7 @@ function CaptionField({ value, onChange }: { value: string; onChange: (s: string
         onChange={(e) => onChange(e.target.value.slice(0, MAX_CAPTION_LENGTH))}
         rows={2}
         placeholder="Add a short caption…"
-        className="w-full px-3 py-2 rounded-md bg-bg border border-border text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+        className="w-full px-3 py-2 rounded-card-sm bg-bg text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent resize-none"
       />
       <span className="text-[10px] text-faint font-tight self-end">
         {value.length}/{MAX_CAPTION_LENGTH}

@@ -25,7 +25,7 @@ export function AdminContentQueue({ pending, recent }: Props) {
           Pending review
         </h2>
         {pending.length === 0 ? (
-          <p className="text-[13px] text-faint font-tight px-4 py-6 border border-dashed border-border rounded-md bg-surface">
+          <p className="text-[13px] text-faint font-tight px-5 py-6 rounded-card bg-surface shadow-card">
             Nothing pending. Inbox zero.
           </p>
         ) : (
@@ -45,7 +45,7 @@ export function AdminContentQueue({ pending, recent }: Props) {
           Recently reviewed
         </h2>
         {recent.length === 0 ? (
-          <p className="text-[13px] text-faint font-tight px-4 py-6 border border-dashed border-border rounded-md bg-surface">
+          <p className="text-[13px] text-faint font-tight px-5 py-6 rounded-card bg-surface shadow-card">
             No review history yet.
           </p>
         ) : (
@@ -65,12 +65,17 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
-  function run(action: () => Promise<void>) {
+  function run(action: () => Promise<void | { storageWarning: string | null }>) {
     setError(null);
+    setWarning(null);
     startTransition(async () => {
       try {
-        await action();
+        const result = await action();
+        // Non-fatal issues (e.g. an orphaned storage object left behind after
+        // a row delete) come back as a storageWarning rather than a throw.
+        if (result && result.storageWarning) setWarning(result.storageWarning);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Action failed.');
       }
@@ -80,7 +85,7 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
   const playerHref = `/players/${item.player_ref}`;
 
   return (
-    <article className="flex flex-col md:flex-row gap-4 p-4 rounded-md border border-border bg-surface">
+    <article className="flex flex-col md:flex-row gap-4 p-4 rounded-card bg-surface shadow-card">
       <div className="w-full md:w-[220px] flex-shrink-0">
         <Preview item={item} />
       </div>
@@ -128,6 +133,12 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
           </p>
         )}
 
+        {warning && (
+          <p role="alert" className="text-[12px] text-amber-600 font-tight">
+            {warning}
+          </p>
+        )}
+
         {mode === 'pending' && !showRejectForm && (
           <div className="flex flex-wrap gap-2 pt-1">
             <ActionButton
@@ -166,7 +177,7 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
               onChange={(e) => setReason(e.target.value.slice(0, 1000))}
               maxLength={1000}
               placeholder="Reason (visible to uploader if you ever surface it)"
-              className="w-full px-3 py-2 rounded-md bg-bg border border-border text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full px-3.5 py-2 rounded-card-sm bg-ink/5 text-ink font-tight text-[13px] focus:outline-none focus:ring-2 focus:ring-accent"
             />
             <div className="flex gap-2">
               <ActionButton
@@ -235,7 +246,7 @@ function Preview({ item }: { item: PlayerContentItem }) {
       <img
         src={item.publicUrl}
         alt={item.caption ?? ''}
-        className="w-full h-[160px] object-cover rounded-sm bg-black"
+        className="w-full h-[160px] object-cover rounded-card-sm bg-black"
       />
     );
   }
@@ -245,13 +256,13 @@ function Preview({ item }: { item: PlayerContentItem }) {
         src={item.publicUrl}
         controls
         playsInline
-        className="w-full h-[160px] object-cover rounded-sm bg-black"
+        className="w-full h-[160px] object-cover rounded-card-sm bg-black"
       />
     );
   }
   if (item.kind === 'video_link' && item.embedUrl) {
     return (
-      <div className="w-full h-[160px] rounded-sm overflow-hidden bg-black">
+      <div className="w-full h-[160px] rounded-card-sm overflow-hidden bg-black">
         <iframe
           src={item.embedUrl}
           title={item.caption ?? 'Video'}
@@ -264,7 +275,7 @@ function Preview({ item }: { item: PlayerContentItem }) {
     );
   }
   return (
-    <div className="w-full h-[160px] rounded-sm bg-surface-hi flex items-center justify-center text-faint text-[11px] font-tight">
+    <div className="w-full h-[160px] rounded-card-sm bg-surface-hi flex items-center justify-center text-faint text-[11px] font-tight">
       No preview
     </div>
   );
@@ -273,7 +284,7 @@ function Preview({ item }: { item: PlayerContentItem }) {
 function KindChip({ kind }: { kind: PlayerContentItem['kind'] }) {
   const label = kind === 'video_link' ? 'Link' : kind === 'video' ? 'Video' : 'Image';
   return (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-bg border border-border text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted">
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-ink/5 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted">
       {label}
     </span>
   );
@@ -311,7 +322,7 @@ function ActionButton({
       ? 'bg-ink text-bg hover:opacity-90'
       : variant === 'danger'
       ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
-      : 'border border-border text-muted hover:text-ink hover:bg-surface';
+      : 'bg-ink/5 text-muted hover:text-ink hover:bg-ink/10';
   return (
     <button
       type="button"

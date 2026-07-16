@@ -54,8 +54,13 @@ function currentSeasonYear(now = new Date()): number {
   return now.getUTCMonth() >= 3 ? y : y - 1; // month 3 = April
 }
 
-// ── Fri→Mon lock window (mirrors src/lib/fantasy/weeks.ts) ────────────────────
-const DAY_MS = 86400_000;
+// ── Lock moment (mirrors src/lib/fantasy/weeks.ts lockWindowFor) ─────────────
+// A week LOCKS — and thus becomes scorable — at its FIRST game's kickoff (the
+// earliest Fri/Sat/Sun game; fall back to the earliest game overall). This is
+// the same rule the app UI and the DB roster-lock trigger use. Previously this
+// function stepped back to Friday 00:00, which considered a week scorable BEFORE
+// its roster actually locked — harmless (stats are 0 until games play) but out
+// of step with the rest of the system. Now all three agree on "first game".
 function lockAtFor(startMsList: number[]): number | null {
   if (startMsList.length === 0) return null;
   const isWeekend = (ms: number) => {
@@ -63,12 +68,7 @@ function lockAtFor(startMsList: number[]): number | null {
     return d === 5 || d === 6 || d === 0; // Fri/Sat/Sun (UTC — deploy runs UTC)
   };
   const sorted = [...startMsList].sort((a, b) => a - b);
-  const anchor = sorted.find(isWeekend) ?? sorted[0];
-  const d = new Date(anchor);
-  const dayStart = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const dow = new Date(dayStart).getUTCDay();
-  const backToFriday = (dow - 5 + 7) % 7;
-  return dayStart - backToFriday * DAY_MS;
+  return sorted.find(isWeekend) ?? sorted[0];
 }
 
 function db(): SupabaseClient {

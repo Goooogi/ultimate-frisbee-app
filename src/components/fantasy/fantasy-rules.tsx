@@ -28,13 +28,13 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
       {/* Beta pill + explanation */}
       <div className="mb-5">
         <div className="flex items-center gap-2 mb-3">
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-[9px] font-bold tracking-[0.14em] uppercase bg-accent text-[rgb(var(--accent-ink))]">
+          <span className="inline-flex items-center px-2.5 py-[3px] rounded-full text-[9px] font-bold tracking-[0.14em] uppercase bg-accent text-accent-ink">
             Beta
           </span>
         </div>
         <h2
           id={headingId}
-          className="font-tight text-[22px] lg:text-[28px] font-bold tracking-[-0.03em] text-ink leading-tight mb-2"
+          className="font-display italic text-[22px] lg:text-[28px] font-bold tracking-[-0.02em] text-ink leading-[0.95] mb-2"
         >
           Build a seven-player roster.
           <br className="hidden sm:block" /> Compete on one global leaderboard.
@@ -76,7 +76,7 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
                   <td
                     className={[
                       'py-2.5 pr-6 font-tight text-[13px] font-bold tabular text-right',
-                      row.neg ? 'text-[rgb(var(--live))]' : 'text-ink',
+                      row.neg ? 'text-live' : 'text-ink',
                     ].join(' ')}
                   >
                     {row.off}
@@ -84,7 +84,7 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
                   <td
                     className={[
                       'py-2.5 font-tight text-[13px] font-bold tabular text-right',
-                      row.neg ? 'text-[rgb(var(--live))]' : 'text-accent',
+                      row.neg ? 'text-live' : 'text-accent',
                     ].join(' ')}
                   >
                     {row.def}
@@ -115,7 +115,7 @@ interface FantasyRulesProps {
 export function FantasyRules({ showCta = false }: FantasyRulesProps) {
   return (
     <section aria-labelledby="fantasy-rules-heading" className="mb-8">
-      <div className="rounded-lg border border-border bg-surface p-6 lg:p-8">
+      <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8">
         <FantasyRulesContent headingId="fantasy-rules-heading" />
 
         {showCta && (
@@ -123,8 +123,8 @@ export function FantasyRules({ showCta = false }: FantasyRulesProps) {
             <Link
               href="/fantasy/team"
               className={[
-                'inline-flex items-center justify-center gap-2 px-6 py-3 rounded-md',
-                'bg-accent text-[rgb(var(--accent-ink))]',
+                'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full',
+                'bg-accent text-accent-ink',
                 'font-tight text-[13px] font-bold tracking-[0.06em] uppercase',
                 'transition-opacity duration-150 hover:opacity-90 cursor-pointer',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',

@@ -14,7 +14,7 @@ import { YearSelector } from '@/components/year-selector';
 import { parseDivisionParam, parseLeagueParam, parseLevelParam, levelLabel } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
 import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
-import { parseFlightParam, FLIGHT_LABELS } from '@/lib/usau/flights';
+import { parseFlightsParam, FLIGHT_LABELS } from '@/lib/usau/flights';
 import { PulSchedule } from '@/components/pul/pul-schedule';
 import { getPulCurrentSeason } from '@/lib/pul/data';
 import { WulSchedule } from '@/components/wul/wul-schedule';
@@ -63,14 +63,18 @@ export default async function SchedulePage({ searchParams }: Props) {
     // Division is OPTIONAL on the schedule: absent ?div ⇒ show all divisions
     // (and events without scraped teams). Only narrow when a div is present.
     const division = searchParams.div ? parseDivisionParam(searchParams.div) : undefined;
-    // Flight is OPTIONAL too: absent ?flight ⇒ all flights. Only Club events
-    // carry flight classifications, so the flight control shows only for Club.
-    const flight = parseFlightParam(searchParams.flight) ?? undefined;
+    // Flight is OPTIONAL + MULTI: absent ?flight ⇒ all flights; ?flight=pro,elite
+    // ⇒ those tiers. Flights are a CLUB-ONLY concept (Triple Crown Tour tiers),
+    // so ignore any persisted ?flight off-Club — otherwise switching
+    // Club→Masters carries the flight over and filters out every event (no
+    // masters event has a flight), and the eyebrow shows a stray "N flights".
+    // The flight control itself already only renders for Club.
+    const flights = level === 'CLUB' ? parseFlightsParam(searchParams.flight) : [];
     const eyebrow = [
       'USAU',
       levelLabel(level),
       division,
-      flight ? FLIGHT_LABELS[flight] : null,
+      flights.length === 1 ? FLIGHT_LABELS[flights[0]] : flights.length > 1 ? `${flights.length} flights` : null,
     ].filter(Boolean).join(' · ');
     return (
       <PageShell
@@ -78,7 +82,7 @@ export default async function SchedulePage({ searchParams }: Props) {
         eyebrow={eyebrow}
         controls={<UsauScheduleControls level={level} />}
       >
-        <UsauSchedule competitionLevel={level} division={division} flight={flight} />
+        <UsauSchedule competitionLevel={level} division={division} flights={flights} />
       </PageShell>
     );
   }
@@ -194,7 +198,7 @@ function CollapsibleWeeks({
       <summary
         className={[
           'list-none cursor-pointer flex items-center justify-between gap-3',
-          'py-3 px-4 border border-border bg-surface hover:border-ink transition-colors duration-150',
+          'py-3 px-4 rounded-card bg-surface shadow-card hover:shadow-lift transition-shadow duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >
@@ -355,7 +359,7 @@ function formatWeekLabel(label: string): string {
 
 function EmptyState({ year }: { year: number }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
       <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
         No games scheduled
       </div>

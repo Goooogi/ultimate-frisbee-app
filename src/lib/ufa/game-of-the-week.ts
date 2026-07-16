@@ -74,6 +74,50 @@ export function pickGameOfTheWeek(
   return upcoming[0];
 }
 
+/**
+ * "Top" hero game — the LIVE game only. Returns the best in-progress game (by
+ * the quality × closeness metric) when one exists, else undefined so the caller
+ * DROPS the slide entirely. Deliberately no recent-final / upcoming fallback:
+ * the "Top game" slide is strictly for a game happening right now, so it never
+ * shows a different future/past game than the "Game of the week" highlight.
+ *
+ * Pairs with pickUpcomingGameOfWeek() — together the carousel shows a live
+ * "Top game" slide (only while a game is on) AND the upcoming "Game of the
+ * week" slide.
+ */
+export function pickTopGame(
+  games: UfaGame[],
+  standings: UfaStanding[],
+): UfaGame | undefined {
+  const live = games.filter((g) => gameUiState(g).isLive);
+  if (live.length === 0) return undefined;
+  return pickBest(live.map((g) => scoreGame(g, standings))).game;
+}
+
+/**
+ * Best UPCOMING marquee matchup — the "Game of the week" proper, WITHOUT the
+ * live-game override that pickGameOfTheWeek applies. Scoped to the soonest week
+ * that has upcoming games. Returns undefined when nothing is upcoming (so the
+ * caller can drop the slide). Use this alongside pickTopGame() so the live game
+ * lives on the "Top" slide and this stays the forward-looking headline.
+ */
+export function pickUpcomingGameOfWeek(
+  games: UfaGame[],
+  standings: UfaStanding[],
+): UfaGame | undefined {
+  const upcoming = games.filter((g) => gameUiState(g).isUpcoming);
+  if (upcoming.length === 0) return undefined;
+
+  const byWeek = groupByWeek(upcoming);
+  const orderedWeeks = Array.from(byWeek.keys()).sort((a, b) => weekNum(a) - weekNum(b));
+  for (const week of orderedWeeks) {
+    const slate = byWeek.get(week)!;
+    if (slate.length === 0) continue;
+    return pickBest(slate.map((g) => scoreGame(g, standings))).game;
+  }
+  return upcoming[0];
+}
+
 // ── scoring ────────────────────────────────────────────────────────────
 
 function scoreGame(game: UfaGame, standings: UfaStanding[]): ScoredGame {

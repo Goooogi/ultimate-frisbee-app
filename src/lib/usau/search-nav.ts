@@ -31,6 +31,10 @@ export interface SearchResult {
    *  a query like "Colorado" floats real clubs above U-20/Academy noise. The
    *  search comparator sorts by match-quality first, then this. */
   prominence?: number;
+  /** Match-quality tier vs. the query, stamped by searchAll: 0 exact, 1 whole-
+   *  word, 2 prefix, 3 contains/fuzzy. Lets the modal ORDER GROUPS by best
+   *  match so a strong player hit can outrank weak team hits. Lower = better. */
+  matchRank?: number;
 }
 
 /**

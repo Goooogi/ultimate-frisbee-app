@@ -85,7 +85,7 @@ export function GameBoxscore({ gameID, away, home, awayName, homeName }: GameBox
         className={[
           'pb-2 mb-5 border-b flex items-baseline justify-between',
           isBcast
-            ? 'font-sans text-[10px] font-bold tracking-[0.22em] uppercase text-muted border-border'
+            ? 'font-sans text-[10px] font-bold tracking-[0.22em] uppercase text-muted border-hairline'
             : 'text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight border-hairline',
         ].join(' ')}
       >
@@ -179,11 +179,11 @@ function Boxscore({
             onClick={onToggleShowAll}
             aria-expanded={showAll}
             className={[
-              'group inline-flex items-center gap-2 px-4 py-2.5 cursor-pointer border transition-colors duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              'group inline-flex items-center gap-2 px-4 py-2.5 cursor-pointer rounded-full bg-ink/5 transition-colors duration-150',
+              'hover:bg-ink/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               isBcast
-                ? 'font-sans text-[10px] font-bold tracking-[0.22em] uppercase border-border bg-surface hover:bg-surface-hi text-muted hover:text-ink'
-                : 'font-tight text-[10px] font-bold tracking-[0.18em] uppercase border-border bg-surface hover:border-ink text-muted hover:text-ink',
+                ? 'font-sans text-[10px] font-bold tracking-[0.22em] uppercase text-muted hover:text-ink'
+                : 'font-tight text-[10px] font-bold tracking-[0.18em] uppercase text-muted hover:text-ink',
             ].join(' ')}
           >
             {showAll ? `Show top ${TOP_N} only` : `Show all ${totalHidden} more`}

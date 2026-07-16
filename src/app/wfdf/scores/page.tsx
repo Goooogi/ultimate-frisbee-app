@@ -40,7 +40,7 @@ export default async function WfdfScoresPage() {
       ]}
     >
       {events.length === 0 ? (
-        <div className="rounded-lg border border-border bg-surface p-10 text-center">
+        <div className="rounded-card-lg bg-surface shadow-card p-10 text-center">
           <p className="text-muted font-tight text-[14px]">No results available yet.</p>
         </div>
       ) : (
@@ -53,8 +53,8 @@ export default async function WfdfScoresPage() {
                 key={e.eventSlug}
                 href={`/wfdf/events/${e.eventSlug}`}
                 className={[
-                  'group flex flex-col gap-3 rounded-lg border border-border bg-surface p-4',
-                  'no-underline hover:border-ink transition-colors duration-150',
+                  'group flex flex-col gap-3 bg-surface rounded-card shadow-card p-4',
+                  'no-underline transition-shadow hover:shadow-lift cursor-pointer',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 ].join(' ')}
               >
@@ -69,10 +69,8 @@ export default async function WfdfScoresPage() {
                   </div>
                   <span
                     className={[
-                      'text-[9px] font-bold tracking-[0.14em] uppercase font-tight px-2 py-1 rounded flex-shrink-0',
-                      upcoming
-                        ? 'text-accent bg-[rgb(var(--accent)/0.12)]'
-                        : 'text-faint bg-[rgb(var(--ink)/0.05)]',
+                      'text-[9px] font-bold tracking-[0.14em] uppercase font-tight px-2.5 py-1 rounded-full flex-shrink-0',
+                      upcoming ? 'text-accent bg-accent/10' : 'text-faint bg-ink/5',
                     ].join(' ')}
                   >
                     {upcoming ? 'Upcoming' : 'Final'}
@@ -80,11 +78,11 @@ export default async function WfdfScoresPage() {
                 </div>
 
                 {e.divisions.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex flex-wrap gap-1.5">
                     {e.divisions.map((d) => (
                       <span
                         key={d}
-                        className="text-[10px] font-tight text-muted px-2 py-0.5 rounded bg-[rgb(var(--ink)/0.04)] border border-hairline"
+                        className="text-[10px] font-tight text-muted px-2.5 py-0.5 rounded-full bg-ink/5"
                       >
                         {d}
                       </span>
@@ -92,13 +90,18 @@ export default async function WfdfScoresPage() {
                   </div>
                 )}
 
-                <div className="flex items-center justify-between text-[11px] font-tight text-faint mt-auto pt-2 border-t border-hairline">
+                <div className="flex items-center justify-between text-[11px] font-tight text-faint mt-auto pt-2.5 border-t border-hairline">
                   <span className="tabular">
                     {upcoming
                       ? `${e.gameCount} games scheduled`
                       : `${e.completedCount} of ${e.gameCount} games played`}
                   </span>
-                  <span className="text-ink group-hover:text-accent transition-colors">View →</span>
+                  <span className="inline-flex items-center gap-1 text-ink group-hover:text-accent transition-colors">
+                    View
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                      <path d="M3 8H13M13 8L8.5 3.5M13 8L8.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
+                    </svg>
+                  </span>
                 </div>
               </Link>
             );

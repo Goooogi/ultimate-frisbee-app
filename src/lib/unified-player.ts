@@ -20,6 +20,7 @@ import {
   currentSeasonYear,
   getAllPlayerStats,
   getPlayerInfo,
+  getStoredHeadshotUrl,
   getPlayerSeasons,
   getPlayerGameLog,
   getUfaChampionsByYear,
@@ -55,6 +56,7 @@ import {
 } from '@/lib/wul/data';
 import { getWfdfPlayerStints, type WfdfPlayerStint } from '@/lib/wfdf/data';
 import { namesMatch } from '@/lib/name-match';
+import type { PlayerKind } from '@/lib/player-content/types';
 
 // ── Output shape ─────────────────────────────────────────────────────────
 
@@ -204,6 +206,10 @@ export interface UnifiedPlayerProfile {
   displayName: string;
   /** Pronouns resolved from PUL data when available; null otherwise. */
   pronouns: string | null;
+  /** UFA player headshot (watchufa profile image). UFA is the only league that
+   *  publishes these. Null for non-UFA-anchored players or the ~10% of UFA
+   *  players without one — the UI falls back to a monogram. */
+  headshotUrl: string | null;
   /** Year-by-year, newest first. */
   years: UnifiedYear[];
   /**
@@ -265,6 +271,13 @@ export interface UnifiedPlayerProfile {
    *  so the "Teams" tab lands on the right division (e.g. a Mixed player → Mixed
    *  club teams). Most-recent chosen because a career can span divisions. */
   mostRecentUsauDivision: string | null;
+  /** Every (league, id) pair this person is known by across the leagues that
+   *  merged into this profile. User-uploaded content (player_content) is keyed
+   *  by (player_kind, player_ref), and a person may have uploaded to ANY of
+   *  their league ids — so the profile must fetch content for ALL of these, not
+   *  just the anchor, or a photo added under (usau, uuid) won't show when the
+   *  profile is reached via the UFA slug. See getApprovedContentForPlayers. */
+  contentRefs: { kind: PlayerKind; ref: string }[];
 }
 
 // ── Builder ──────────────────────────────────────────────────────────────
@@ -298,12 +311,21 @@ async function _getUnifiedPlayerProfile(
   let anchorUsau: UsauPlayerSummary | null = null;
   let anchorPulCareer: PulPlayerCareer | null = null;
   let anchorWulCareer: WulPlayerCareer | null = null;
+  let headshotUrl: string | null = null;
 
   if (!looksLikeUsauUuid(anchorId)) {
     // ── UFA slug anchor ────────────────────────────────────────────────
     anchorLeague = 'ufa';
-    const info = await getPlayerInfo(anchorId).catch(() => null);
+    // Prefer our SELF-HOSTED headshot (fast, CDN-cached, served resized via the
+    // image transform) over the live watchufa scrape. getPlayerInfo still
+    // provides the display name; only fall back to ITS headshot if we have none
+    // stored (rare — a brand-new player the sync hasn't self-hosted yet).
+    const [info, stored] = await Promise.all([
+      getPlayerInfo(anchorId).catch(() => null),
+      getStoredHeadshotUrl(anchorId).catch(() => null),
+    ]);
     anchorName = info?.name ?? null;
+    headshotUrl = stored ?? info?.headshotUrl ?? null;
   } else {
     // ── UUID anchor — try USAU first, then PUL ─────────────────────────
     // Both USAU and PUL use v4 UUIDs. We check USAU first (existing
@@ -340,18 +362,20 @@ async function _getUnifiedPlayerProfile(
 
   if (!anchorName) return null;
 
+  // Resolve the UFA slug up front (anchor slug, else name-matched) so we can
+  // both build the UFA side AND record it as a content ref below.
+  const ufaSlug =
+    anchorLeague === 'ufa'
+      ? anchorId
+      : await findUfaSlugByName(anchorName).catch(() => null);
+
   // ── Fetch all three sides in parallel ──────────────────────────────────
   // Each lookup is independent once we have a display name. Failures are
   // caught per-league so one bad network call doesn't kill the whole profile.
   const [sideUfa, sideUsau, sidePulCareer, teamMap, sideWulCareer, wulTeamMap, wfdfStints] =
     await Promise.all([
     // UFA side
-    (anchorLeague === 'ufa'
-      ? buildUfaSide(anchorId)
-      : findUfaSlugByName(anchorName).then((slug) =>
-          slug ? buildUfaSide(slug) : null,
-        )
-    ).catch(() => null),
+    (ufaSlug ? buildUfaSide(ufaSlug) : Promise.resolve(null)).catch(() => null),
 
     // USAU side
     (anchorLeague === 'usau'
@@ -638,11 +662,33 @@ async function _getUnifiedPlayerProfile(
     sidePulCareer?.pronouns ??
     (anchorPulCareer?.pronouns ?? null);
 
+  // Content refs — every (league, id) this person is known by. User content is
+  // keyed by (player_kind, player_ref); the profile fetches across ALL of these
+  // so a photo uploaded under any of the person's league ids shows regardless of
+  // which url the profile was reached by. Dedupe (kind,ref) pairs.
+  const contentRefs: { kind: PlayerKind; ref: string }[] = [];
+  const pushRef = (kind: PlayerKind, ref: string | null | undefined) => {
+    if (ref && !contentRefs.some((r) => r.kind === kind && r.ref === ref)) {
+      contentRefs.push({ kind, ref });
+    }
+  };
+  pushRef('ufa', ufaSlug);
+  pushRef('usau', sideUsau?.id);
+  pushRef('pul', sidePulCareer?.anchorId ?? anchorPulCareer?.anchorId);
+  pushRef('wul', sideWulCareer?.anchorId ?? anchorWulCareer?.anchorId);
+  // Always include the anchor itself (covers any league not otherwise captured).
+  pushRef(anchorLeague, anchorId);
+
   return {
     anchorId,
     anchorLeague,
     displayName: anchorName,
     pronouns,
+    contentRefs,
+    // Prefer the anchor-branch headshot (set only for UFA-anchored profiles);
+    // otherwise fall back to the UFA side's headshot so a profile reached by a
+    // USAU/PUL/WUL UUID still shows the player's UFA photo instead of a monogram.
+    headshotUrl: headshotUrl ?? sideUfa?.headshotUrl ?? null,
     years,
     career,
     pul: pulCareerBlock,
@@ -695,11 +741,24 @@ interface UfaSideStint {
 interface UfaSide {
   stints: UfaSideStint[];
   championYears: number[];
+  /** Self-hosted headshot for THIS UFA slug (stored first, live scrape fallback).
+   *  Carried on the side so a non-UFA-anchored profile (e.g. reached by a USAU
+   *  UUID) still recovers the player's UFA headshot instead of falling to a
+   *  monogram. null when the player genuinely has none. */
+  headshotUrl: string | null;
 }
 
 async function buildUfaSide(playerID: string): Promise<UfaSide | null> {
+  // Resolve the headshot for this slug up front so it's available regardless of
+  // how many seasons/stints the player has (even a UFA player with no season
+  // rows can still have a headshot). Stored (self-hosted) first, live scrape
+  // fallback for a brand-new player the sync hasn't hosted yet.
+  const headshotUrl = await getStoredHeadshotUrl(playerID)
+    .then((stored) => stored ?? getPlayerInfo(playerID).then((i) => i?.headshotUrl ?? null))
+    .catch(() => null);
+
   const seasons = await getPlayerSeasons(playerID).catch(() => [] as UfaPlayerSeasonRow[]);
-  if (seasons.length === 0) return { stints: [], championYears: [] };
+  if (seasons.length === 0) return { stints: [], championYears: [], headshotUrl };
 
   // Group rows by (year, teamAbbrev). The UFA API emits a separate row
   // for regSeason vs playoffs and (rarely) for a mid-season trade — we
@@ -761,7 +820,7 @@ async function buildUfaSide(playerID: string): Promise<UfaSide | null> {
     new Set(stints.filter((s) => s.stint.isChampion).map((s) => s.year)),
   ).sort((a, b) => b - a);
 
-  return { stints, championYears };
+  return { stints, championYears, headshotUrl };
 }
 
 function sumUfaRows(rows: UfaPlayerSeasonRow[]): UfaSeasonStint['totals'] {

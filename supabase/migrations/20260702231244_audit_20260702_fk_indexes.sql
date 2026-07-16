@@ -1,0 +1,9 @@
+create index if not exists usau_games_team_a_idx        on public.usau_games (team_a_id);
+create index if not exists usau_games_team_b_idx        on public.usau_games (team_b_id);
+create index if not exists usau_rosters_player_idx      on public.usau_rosters (player_id);
+create index if not exists usau_rankings_team_idx       on public.usau_rankings (team_id);
+create index if not exists ufa_games_away_team_idx      on public.ufa_games (away_team_id);
+create index if not exists ufa_games_home_team_idx      on public.ufa_games (home_team_id);
+create index if not exists fantasy_leagues_owner_idx    on public.fantasy_leagues (owner_id);
+create index if not exists pb_team_invites_invited_by_idx on public.pb_team_invites (invited_by);
+create index if not exists player_content_reviewed_by_idx on public.player_content (reviewed_by);

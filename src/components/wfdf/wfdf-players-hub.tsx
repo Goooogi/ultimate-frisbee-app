@@ -74,8 +74,8 @@ export function WfdfPlayersHub({ eventTotals, totalPlayers }: Props) {
                 key={e.slug}
                 href={`/wfdf/events/${e.slug}`}
                 className={[
-                  'flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3',
-                  'no-underline hover:border-ink transition-colors duration-150',
+                  'flex items-center justify-between gap-3 bg-surface rounded-card px-4 py-3',
+                  'shadow-card no-underline transition-shadow hover:shadow-lift cursor-pointer',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 ].join(' ')}
               >
@@ -95,24 +95,24 @@ export function WfdfPlayersHub({ eventTotals, totalPlayers }: Props) {
           </div>
         </div>
       ) : loading ? (
-        <div className="flex flex-col divide-y divide-hairline rounded-lg border border-border bg-surface overflow-hidden">
+        <div className="flex flex-col divide-y divide-hairline bg-surface rounded-card-lg shadow-card overflow-hidden">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-[52px] px-4 flex items-center">
-              <div className="h-4 w-40 rounded bg-[rgb(var(--ink)/0.06)] animate-pulse" />
+              <div className="h-4 w-40 rounded-full bg-ink/[0.06] animate-pulse" />
             </div>
           ))}
         </div>
       ) : results.length === 0 ? (
         <EmptyState query={query} />
       ) : (
-        <ul className="flex flex-col divide-y divide-hairline rounded-lg border border-border bg-surface overflow-hidden">
+        <ul className="flex flex-col divide-y divide-hairline bg-surface rounded-card-lg shadow-card overflow-hidden">
           {results.map((p, i) => (
             <li key={`${p.teamId}-${p.fullName}-${i}`}>
               <Link
                 href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
                 className={[
                   'flex items-center gap-3 px-4 py-2.5 no-underline',
-                  'hover:bg-[rgb(var(--surface-hi))] transition-colors duration-150',
+                  'hover:bg-surface-hi transition-colors duration-150',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
                 ].join(' ')}
               >

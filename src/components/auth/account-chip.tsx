@@ -16,14 +16,36 @@
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { AvatarIconView } from '@/components/profile/avatar-icon-view';
 import dynamic from 'next/dynamic';
+
+// Avatars are stored in the `avatars` Storage bucket as full-size originals.
+// Serve them through Supabase's image transform so the nav chip downloads a
+// small resized+recompressed image instead of a multi-MB original — same
+// pattern as PlayerHeadshot's displaySrc. Only rewrite our bucket objects.
+const AVATAR_STORAGE_OBJECT = '/storage/v1/object/public/avatars/';
+const AVATAR_STORAGE_RENDER = '/storage/v1/render/image/public/avatars/';
+/** Chip is 32px default × 2 for retina. */
+const AVATAR_RENDER_PX = 64;
+
+function avatarDisplaySrc(url: string): string {
+  if (!url.includes(AVATAR_STORAGE_OBJECT)) return url; // non-Supabase URL → as-is
+  const rendered = url.replace(AVATAR_STORAGE_OBJECT, AVATAR_STORAGE_RENDER);
+  const sep = rendered.includes('?') ? '&' : '?';
+  return `${rendered}${sep}width=${AVATAR_RENDER_PX}&height=${AVATAR_RENDER_PX}&resize=cover&quality=80`;
+}
 
 // The auth modal (and its ~44 kB obscenity profanity dataset) is only needed
 // once a signed-out visitor opens sign-in/up. Load it on demand so it stays
 // out of the global-nav bundle that ships on every page.
 const AuthModal = dynamic(() => import('./auth-modal').then((m) => m.AuthModal));
+// Feedback modal is only pulled in when a signed-in user opens it — keep it out
+// of the global-nav bundle.
+const FeedbackModal = dynamic(() =>
+  import('@/components/feedback/feedback-modal').then((m) => m.FeedbackModal),
+);
 import { useTheme } from '@/lib/use-theme';
-import { usePendingContentCount } from '@/lib/player-content/use-pending-count';
+import { useAdminReviewCounts } from '@/lib/player-content/use-pending-count';
 import type { Theme } from '@/lib/theme';
 
 interface AccountChipProps {
@@ -42,12 +64,50 @@ export function AccountChip({
 }: AccountChipProps) {
   const { user, loading, signOut } = useAuth();
   const [theme, setTheme] = useTheme();
-  // Admin-only: number of submissions awaiting review. Drives the red dot.
-  const pendingReviewCount = usePendingContentCount(user?.isAdmin ?? false);
+  // Admin-only: submissions awaiting review — pending content + new feedback.
+  // Drives the red dot + the "Admin" menu badge (combined total).
+  const reviewCounts = useAdminReviewCounts(user?.isAdmin ?? false);
+  const pendingReviewCount = reviewCounts.total;
   const [menuOpen, setMenuOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const avatarUrl = user?.profile?.avatar_url ?? null;
+  const avatarIcon = user?.profile?.avatar_icon ?? null;
+  // Latches to the initials fallback if the image fails to load. MUST reset
+  // when avatar_url changes — otherwise a failed load sticks around and
+  // masks a newly-uploaded photo (same gotcha as PlayerHeadshot).
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => {
+    setImgFailed(false);
+  }, [avatarUrl]);
+
+  // A picked team-logo/flag icon resolves synchronously for UFA/USAU/WUL/WFDF.
+  // PUL logos are remote (R2) URLs only known after a DB fetch, so when the
+  // user's icon is a PUL reference we lazily fetch the PUL logo map once and
+  // pass it to AvatarIconView. Other icon kinds never trigger the fetch.
+  const [pulLogos, setPulLogos] = useState<
+    Map<string, { name: string; logoUrl: string | null }> | undefined
+  >(undefined);
+  const isPulIcon = !!avatarIcon && avatarIcon.startsWith('pul:');
+  useEffect(() => {
+    if (!isPulIcon || pulLogos) return;
+    let cancelled = false;
+    (async () => {
+      const { listPulTeams } = await import('@/lib/pul/data');
+      const teams = await listPulTeams();
+      if (cancelled) return;
+      setPulLogos(
+        new Map(teams.map((t) => [t.id, { name: t.name, logoUrl: t.logoUrl }])),
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isPulIcon, pulLogos]);
+
+  const showIcon = !!avatarIcon && (!isPulIcon || !!pulLogos);
 
   // Close popover on outside click + Esc.
   useEffect(() => {
@@ -167,7 +227,22 @@ export function AccountChip({
         ].join(' ')}
         style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
       >
-        {user.initials}
+        {showIcon ? (
+          <span className="w-full h-full rounded-full overflow-hidden inline-flex items-center justify-center">
+            <AvatarIconView icon={avatarIcon} size={size} pulLogos={pulLogos} />
+          </span>
+        ) : avatarUrl && !imgFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={avatarUrl}
+            src={avatarDisplaySrc(avatarUrl)}
+            alt={user.name}
+            className="w-full h-full rounded-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          user.initials
+        )}
       </button>
 
       {/* Red notification dot — admins only, when content is awaiting review.
@@ -216,7 +291,6 @@ export function AccountChip({
               )}
             </Link>
           )}
-
           {/* Settings link */}
           <Link
             href="/settings"
@@ -230,6 +304,24 @@ export function AccountChip({
           >
             Settings
           </Link>
+
+          {/* Feedback — opens the submit modal. Available to every signed-in
+              user; submissions land in the admin feedback inbox. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setMenuOpen(false);
+              setFeedbackOpen(true);
+            }}
+            className={[
+              'flex items-center gap-2 w-full text-left px-3 py-2.5 text-[11px] font-bold tracking-[0.16em] uppercase font-tight',
+              'text-muted hover:text-ink hover:bg-surface cursor-pointer transition-colors border-b border-hairline',
+              'focus-visible:outline-none focus-visible:bg-surface focus-visible:text-ink',
+            ].join(' ')}
+          >
+            Feedback
+          </button>
 
           {/* Appearance / theme toggle row */}
           <div className="px-3 py-2.5 flex items-center justify-between border-b border-hairline">
@@ -256,6 +348,8 @@ export function AccountChip({
           </button>
         </div>
       )}
+
+      {feedbackOpen && <FeedbackModal onClose={() => setFeedbackOpen(false)} />}
     </div>
   );
 }

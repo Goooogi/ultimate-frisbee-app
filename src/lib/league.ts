@@ -35,7 +35,13 @@ export function parseDivisionParam(value: string | null | undefined): UsauDivisi
 //
 // 'club' is the default so existing links continue to land on Club teams.
 
-export type UsauLevel = 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' | 'MASTERS' | 'GRAND_MASTERS';
+export type UsauLevel =
+  | 'CLUB'
+  | 'COLLEGE_D1'
+  | 'COLLEGE_D3'
+  | 'MASTERS'
+  | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS';
 export const DEFAULT_LEVEL: UsauLevel = 'CLUB';
 const LEVEL_FROM_PARAM: Record<string, UsauLevel> = {
   club: 'CLUB',
@@ -43,6 +49,7 @@ const LEVEL_FROM_PARAM: Record<string, UsauLevel> = {
   'college-d3': 'COLLEGE_D3',
   masters: 'MASTERS',
   'grand-masters': 'GRAND_MASTERS',
+  'great-grand-masters': 'GREAT_GRAND_MASTERS',
 };
 const PARAM_FROM_LEVEL: Record<UsauLevel, string> = {
   CLUB: 'club',
@@ -50,6 +57,7 @@ const PARAM_FROM_LEVEL: Record<UsauLevel, string> = {
   COLLEGE_D3: 'college-d3',
   MASTERS: 'masters',
   GRAND_MASTERS: 'grand-masters',
+  GREAT_GRAND_MASTERS: 'great-grand-masters',
 };
 const LEVEL_LABELS: Record<UsauLevel, string> = {
   CLUB: 'Club',
@@ -57,6 +65,7 @@ const LEVEL_LABELS: Record<UsauLevel, string> = {
   COLLEGE_D3: 'College D-III',
   MASTERS: 'Masters',
   GRAND_MASTERS: 'Grand Masters',
+  GREAT_GRAND_MASTERS: 'Great Grand Masters',
 };
 
 export function parseLevelParam(value: string | null | undefined): UsauLevel {
@@ -72,7 +81,14 @@ export function levelLabel(level: UsauLevel): string {
   return LEVEL_LABELS[level];
 }
 
-export const USAU_LEVELS: UsauLevel[] = ['CLUB', 'COLLEGE_D1', 'COLLEGE_D3', 'MASTERS', 'GRAND_MASTERS'];
+export const USAU_LEVELS: UsauLevel[] = [
+  'CLUB',
+  'COLLEGE_D1',
+  'COLLEGE_D3',
+  'MASTERS',
+  'GRAND_MASTERS',
+  'GREAT_GRAND_MASTERS',
+];
 
 /**
  * Build the league + division (+ competition level) query string, omitting

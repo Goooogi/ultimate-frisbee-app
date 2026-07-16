@@ -55,7 +55,7 @@ export function UsauPlayerProfile({ profile, topNavSlot }: Props) {
           >
             Career totals
           </h2>
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-px bg-border border border-border">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
             <CareerStat label="Events scored" value={career.eventsWithStats} />
             <CareerStat label="Goals" value={career.goals} />
             <CareerStat label="Assists" value={career.assists} />
@@ -69,7 +69,7 @@ export function UsauPlayerProfile({ profile, topNavSlot }: Props) {
               }
             />
           </div>
-          <p className="mt-2 text-[10px] font-medium text-faint font-tight">
+          <p className="mt-3 text-[10px] font-medium text-faint font-tight">
             USAU only collects goals + assists at flagship events (Pro Champs,
             Nationals). Regional + sectional stats are not recorded.
           </p>
@@ -108,11 +108,11 @@ function TeamStintCard({ stint }: { stint: UsauPlayerSummary['teamHistory'][numb
   const hasStats = stint.events.some((e) => e.goals != null || e.assists != null);
 
   return (
-    <details className="group bg-surface border border-border [&[open]]:border-ink transition-colors rounded-sm">
+    <details className="group bg-surface rounded-card shadow-card overflow-hidden transition-shadow [&[open]]:shadow-lift">
       <summary
         className={[
           'list-none cursor-pointer select-none px-4 py-3.5 flex items-center gap-3',
-          'hover:bg-surface-hi transition-colors',
+          'hover:bg-ink/[0.02] transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
         ].join(' ')}
       >
@@ -234,8 +234,8 @@ function SummaryChip({
   return (
     <div
       className={[
-        'inline-flex items-baseline gap-2 px-3 py-2 rounded-md',
-        accent ? 'bg-accent text-accent-ink' : 'bg-surface border border-border',
+        'inline-flex items-baseline gap-2 px-3.5 py-2 rounded-full',
+        accent ? 'bg-accent text-accent-ink' : 'bg-ink/5 text-ink',
       ].join(' ')}
     >
       <span className="tabular text-[18px] font-bold font-tight leading-none tracking-[-0.02em]">
@@ -250,7 +250,7 @@ function SummaryChip({
 
 function CareerStat({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="bg-surface flex flex-col items-center justify-center px-3 py-5 gap-1">
+    <div className="bg-surface rounded-card shadow-card flex flex-col items-center justify-center px-3 py-5 gap-1">
       <div className="tabular text-[24px] md:text-[28px] font-bold font-tight leading-none text-ink tracking-[-0.03em]">
         {value ?? '—'}
       </div>
@@ -285,8 +285,8 @@ export function ChampionBanner({ years, label }: { years: number[]; label: strin
     <div
       role="note"
       className={[
-        'flex items-center gap-3 mb-6 px-4 py-3 rounded-md',
-        'bg-accent/10 border border-accent/40 text-ink',
+        'flex items-center gap-3 mb-6 px-4 py-3 rounded-card',
+        'bg-accent/10 text-ink',
       ].join(' ')}
     >
       <span className="flex-shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-full bg-accent text-accent-ink">

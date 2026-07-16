@@ -13,7 +13,7 @@ import type { Metadata } from 'next';
 import { getUnifiedPlayerProfile } from '@/lib/unified-player';
 import { UnifiedProfile } from '@/components/players/unified-player-profile';
 import { DivisionSync } from '@/components/players/division-sync';
-import { getApprovedContentForPlayer } from '@/lib/player-content/server';
+import { getApprovedContentForPlayers } from '@/lib/player-content/server';
 
 // Content rows are user-uploaded and approved on demand — they can change
 // any time without an underlying data refresh. Drop the page-level revalidate
@@ -39,7 +39,14 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
   const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
   if (!profile) notFound();
 
-  const content = await getApprovedContentForPlayer(profile.anchorLeague, profile.anchorId);
+  // Fetch content across ALL of the person's league ids (contentRefs), not just
+  // the anchor — so a photo uploaded under any league id shows no matter which
+  // url reached the profile. Falls back to the anchor pair when refs is empty.
+  const content = await getApprovedContentForPlayers(
+    profile.contentRefs.length > 0
+      ? profile.contentRefs
+      : [{ kind: profile.anchorLeague, ref: profile.anchorId }],
+  );
 
   return (
     <>

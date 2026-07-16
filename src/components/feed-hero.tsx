@@ -19,10 +19,10 @@ export function FeedHero({ counts, today, desktop = false }: FeedHeroProps) {
   if (desktop) {
     return (
       <div>
-        <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted mb-2 font-tight tabular">
+        <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent mb-2 font-sans tabular">
           {today.weekday} · {today.month} {today.day} · {today.year}
         </div>
-        <h1 className="text-[56px] font-bold tracking-[-0.04em] text-ink leading-none font-tight m-0">
+        <h1 className="font-display italic text-[56px] font-bold tracking-[-0.02em] text-ink leading-[0.95] m-0">
           Upcoming.
         </h1>
         <p className="text-[15px] text-muted font-medium mt-2.5 font-tight">
@@ -34,7 +34,7 @@ export function FeedHero({ counts, today, desktop = false }: FeedHeroProps) {
 
   return (
     <div className="px-5 pt-3.5 pb-2">
-      <div className="text-[40px] font-bold tracking-[-0.04em] text-ink leading-none font-tight">
+      <div className="font-display italic text-[40px] font-bold tracking-[-0.02em] text-ink leading-[0.95]">
         Upcoming.
       </div>
       <div className="text-[14px] text-muted font-medium mt-1.5 font-tight">

@@ -18,6 +18,7 @@ import type { UsauMajorWithChampions } from '@/lib/usau/data';
 import { useLeague } from '@/lib/use-league';
 import { buildLeagueQs, levelLabel, type UsauLevel } from '@/lib/league';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import { UsauFlightSelect } from '@/components/usau/usau-flight-select';
 
 interface FeedPageProps {
   games: UfaGame[];
@@ -77,12 +78,8 @@ function UfaFeed({
       </div>
 
       <div className="flex items-center gap-2 mb-5 lg:mb-7">
-        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+        <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted font-sans">
           {badgeText(counts)}
-        </span>
-        <span className="mx-1.5 text-faint">·</span>
-        <span className="text-[10px] font-semibold tracking-[0.1em] text-faint uppercase font-tight">
-          Auto-refresh · 30s
         </span>
       </div>
 
@@ -111,30 +108,28 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
   const scheduleHref = `/schedule${buildLeagueQs('usau', null, level)}`;
   return (
     <>
-      <div className="flex items-end justify-between gap-4 mb-5 lg:mb-7">
-        <div className="flex flex-col gap-1">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
-            USAU · {levelLabel(level)} · Recent Results
-          </span>
-          <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.04em] text-ink">
-            Recent Tournaments
-          </h1>
-        </div>
-        <div className="flex-shrink-0 flex items-center gap-3">
+      {/* Stacked header: eyebrow row → title row → filters row. Each on its own
+          line so nothing wraps awkwardly on mobile. (The "All tournaments" link
+          was removed — the mega-menu already offers the full schedule.) */}
+      <div className="flex flex-col gap-3 mb-5 lg:mb-7">
+        <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans whitespace-nowrap">
+          USAU · {levelLabel(level)} · Recent Results
+        </span>
+        <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.02em] text-ink">
+          Recent Tournaments
+        </h1>
+        <div className="flex items-center gap-2 flex-wrap">
           <UsauLevelSelect />
-          <Link
-            href={scheduleHref}
-            className="flex-shrink-0 text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight hover:text-ink transition-colors no-underline"
-          >
-            All tournaments →
-          </Link>
+          {/* Flight filter — Triple Crown Tour tier, Club only. Same control the
+              /schedule tab uses, so completed games can be filtered by flight too. */}
+          {level === 'CLUB' && <UsauFlightSelect />}
         </div>
       </div>
 
       {cards.length > 0 ? (
         <UsauMajorGrid majors={cards} fill />
       ) : (
-        <div className="rounded-lg border border-border bg-surface p-10 text-center">
+        <div className="rounded-card-lg bg-surface shadow-card p-10 text-center">
           <p className="text-[14px] text-muted font-tight">
             No completed {levelLabel(level)} tournaments in the last couple of weekends yet.
           </p>
@@ -175,6 +170,8 @@ function badgeText(c: GameCounts): string {
 }
 
 function LiveBadge({ counts }: { counts: GameCounts }) {
+  // Live indicator only — the "N upcoming" tag was removed (it read as noise,
+  // e.g. "0 UPCOMING"). The live dot stays because it's a meaningful signal.
   if (counts.live > 0) {
     return (
       <div className="flex items-center gap-2 flex-shrink-0 pb-1">
@@ -185,19 +182,12 @@ function LiveBadge({ counts }: { counts: GameCounts }) {
       </div>
     );
   }
-  if (counts.total > 0) {
-    return (
-      <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-1">
-        {counts.upcoming} upcoming
-      </span>
-    );
-  }
   return null;
 }
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+    <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
       <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2">
         No games today
       </div>
@@ -213,7 +203,7 @@ function PulComingSoon({ page }: { page: 'scores' | 'schedule' }) {
   const label = page === 'scores' ? 'game scores' : 'schedule';
   return (
     <div className="flex flex-col items-center justify-center py-20 px-6 text-center">
-      <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight mb-3">
+      <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-3">
         PUL · Premier Ultimate League
       </div>
       <div className="text-[18px] font-bold font-tight text-ink mb-2 leading-tight">

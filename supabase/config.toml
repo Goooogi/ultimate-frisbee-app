@@ -1,0 +1,11 @@
+# Supabase local config for The Layout.
+# project_id links the CLI to the remote project (efjipdmylkqwmupvoxab).
+# Migrations live in supabase/migrations/ and are the version-controlled
+# source of truth — reconstructed from the remote history 2026-07-15.
+# NEVER commit secret literals in a migration; seed Vault secrets out-of-band
+# and reference them via vault.decrypted_secrets. See the migrations README.
+project_id = "efjipdmylkqwmupvoxab"
+
+[db]
+# Match the remote Postgres major version.
+major_version = 17

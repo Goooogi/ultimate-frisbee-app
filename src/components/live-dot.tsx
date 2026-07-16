@@ -1,6 +1,6 @@
 // LiveDot — pulsing live indicator.
 // Field theme: uses the `live` token (crimson red).
-// Broadcast theme: uses the `accent` token (volt green).
+// Broadcast theme: uses the `live`/`accent` token (coral orange).
 // The outer ring expands + fades via animate-pulse-out keyframe defined in tailwind.config.ts.
 
 interface LiveDotProps {

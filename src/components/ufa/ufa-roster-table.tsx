@@ -105,11 +105,11 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
   }
 
   return (
-    <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
+    <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
       <table className="w-full min-w-[600px] border-collapse">
         <thead>
           <tr>
-            {COLUMNS.map((h) => {
+            {COLUMNS.map((h, hi) => {
               const active = sortKey === h.key;
               return (
                 <th
@@ -118,11 +118,13 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
                   title={`${h.title} — click to sort`}
                   aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                   className={[
-                    'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight',
-                    'border-b border-border whitespace-nowrap select-none cursor-pointer',
+                    'px-3 py-3 text-[10px] font-bold tracking-wide uppercase',
+                    'whitespace-nowrap select-none cursor-pointer',
                     'transition-colors hover:text-ink focus-visible:outline-none focus-visible:text-ink',
-                    active ? 'text-ink' : 'text-muted',
+                    active ? 'text-ink' : 'text-faint',
                     h.left ? 'text-left' : 'text-right',
+                    hi === 0 ? 'pl-5' : '',
+                    hi === COLUMNS.length - 1 ? 'pr-5' : '',
                   ].join(' ')}
                 >
                   <button
@@ -152,23 +154,24 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
             // Jersey fallback tracks the ORIGINAL order, not the sorted index,
             // so a player's "#" doesn't change as the table is re-sorted.
             const fallbackNum = players.indexOf(p) + 1;
+            const rowTop = i === 0 ? '' : 'border-t border-hairline';
             return (
               <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-faint tabular font-tight">{jersey ?? fallbackNum}</td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight">
+                <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight pl-5 ${rowTop}`}>{jersey ?? fallbackNum}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-left text-ink font-medium font-tight ${rowTop}`}>
                   <Link href={`/players/${p.playerID}?from=ufa`} className="hover:text-accent transition-colors duration-150">
                     {p.name}
                   </Link>
                 </td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.goals ?? '—'}</td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.assists ?? '—'}</td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.blocks ?? '—'}</td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{p.drops ?? '—'}</td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{cmpStr}</td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{p.goals ?? '—'}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{p.assists ?? '—'}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{p.blocks ?? '—'}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{p.drops ?? '—'}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>{cmpStr}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight ${rowTop}`}>
                   {cmp > 0 ? `${cmp.toFixed(1)}%` : '—'}
                 </td>
-                <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">{formatPlusMinus(p.plusMinus)}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-right tabular text-muted font-tight pr-5 ${rowTop}`}>{formatPlusMinus(p.plusMinus)}</td>
               </tr>
             );
           })}

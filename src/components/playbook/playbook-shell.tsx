@@ -16,7 +16,6 @@ import Link from 'next/link';
 import { useRef } from 'react';
 import { usePathname } from 'next/navigation';
 import { AppRail } from '@/components/app-rail';
-import { ThemeToggle } from '@/components/theme-toggle';
 import { TeamSwitcher } from './team-switcher';
 import { PlayList } from './play-list';
 import type { Team } from '@/lib/playbook/teams';
@@ -83,20 +82,20 @@ export function PlaybookShell({
         <header className="sticky top-0 z-20 flex items-center justify-between gap-2 px-3 py-2.5 border-b border-hairline bg-bg">
           {/* Left: scope + plays pickers on one row */}
           <div className="flex items-center gap-2 min-w-0">
-            {/* Scope chip — a rounded-md tile (not a full pill) so the square
-                team/ME badge sits flush inside it. Opens the full switcher. */}
+            {/* Scope chip — pill treatment with a circular team/ME badge
+                inset flush at the left. Opens the full switcher. */}
             <details ref={scopeDetailsRef} className="relative">
               <summary
                 aria-label={`Current scope: ${currentTeam?.name ?? 'Personal'}`}
                 className={[
-                  'list-none cursor-pointer inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-md border border-border bg-surface',
-                  'h-10 max-w-[46vw] hover:border-ink transition-colors',
+                  'list-none cursor-pointer inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-full bg-ink/5',
+                  'h-10 max-w-[46vw] hover:bg-ink/10 transition-colors',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 ].join(' ')}
               >
                 <span
                   aria-hidden="true"
-                  className="inline-flex items-center justify-center w-6 h-6 rounded text-[9px] font-bold tracking-[0.04em] text-white flex-shrink-0"
+                  className="inline-flex items-center justify-center w-6 h-6 rounded-full text-[9px] font-bold tracking-[0.04em] text-white flex-shrink-0"
                   style={{ background: currentTeam?.color ?? 'rgb(var(--ink))' }}
                 >
                   {currentTeam?.shortName ?? 'ME'}
@@ -111,7 +110,7 @@ export function PlaybookShell({
                 </span>
                 <ChevronGlyph />
               </summary>
-              <div className="absolute left-0 top-full mt-1 z-30 w-64 border border-border bg-bg rounded-md p-2 shadow-lg">
+              <div className="absolute left-0 top-full mt-1 z-30 w-64 bg-surface rounded-card shadow-lift p-2">
                 <TeamSwitcher
                   teams={teams}
                   currentID={currentTeamID}
@@ -146,14 +145,14 @@ export function PlaybookShell({
             <summary
               aria-label="Playbook sections"
               className={[
-                'list-none cursor-pointer flex items-center gap-1 px-2.5 py-2 rounded-md border border-border bg-surface',
-                'text-ink hover:border-ink transition-colors',
+                'list-none cursor-pointer flex items-center gap-1 px-2.5 py-2 rounded-full bg-ink/5',
+                'text-ink hover:bg-ink/10 transition-colors',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               ].join(' ')}
             >
               <PlaybookGlyph size={12} />
             </summary>
-            <div className="absolute right-0 top-full mt-1 z-30 w-44 border border-border bg-bg rounded-md p-1.5 shadow-lg">
+            <div className="absolute right-0 top-full mt-1 z-30 w-44 bg-surface rounded-card shadow-lift p-1.5">
               <PlaybookSubnav pathname={pathname} />
             </div>
           </details>
@@ -187,9 +186,8 @@ export function PlaybookShell({
 
           <div className="flex-1" />
 
-          {/* Bottom: theme toggle + version */}
+          {/* Bottom: version */}
           <div className="flex flex-col gap-2.5 pt-3 border-t border-hairline">
-            <ThemeToggle />
             <span className="text-[10px] font-bold tracking-[0.16em] text-faint uppercase font-tight">
               v0.1 · 2026 season
             </span>
@@ -246,11 +244,14 @@ function PlaybookSubnav({
         const cls = [
           'flex items-center gap-2 w-full text-left px-3 py-[9px] rounded-md text-[13px] font-tight',
           'border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors duration-150',
+          // Active state matches the site's sidebar-nav convention — a quiet
+          // surface card with a hairline border, NOT the old bulky full-pill
+          // solid-black treatment.
           active
             ? 'font-bold text-ink bg-surface border-border'
             : disabled
               ? 'font-medium text-faint border-transparent cursor-not-allowed opacity-60'
-              : 'font-medium text-muted border-transparent hover:text-ink hover:bg-surface',
+              : 'font-medium text-muted border-transparent hover:text-ink hover:bg-ink/5',
         ].join(' ');
 
         // After the Plays item (idx 0), inject the optional extras slot.
@@ -314,8 +315,8 @@ function PlaysDropdown({
       <summary
         aria-label="Switch play"
         className={[
-          'list-none cursor-pointer inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-md border border-border bg-surface',
-          'h-10 max-w-[38vw] hover:border-ink transition-colors',
+          'list-none cursor-pointer inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full bg-ink/5',
+          'h-10 max-w-[38vw] hover:bg-ink/10 transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}
       >
@@ -333,8 +334,10 @@ function PlaysDropdown({
       {/* Full-width sheet pinned just under the sticky header. A dropdown
           anchored to the trigger (which sits mid-header) would push the
           PlayList's Del/copy actions off the right edge on a phone; spanning
-          the viewport with small side margins keeps every row fully visible. */}
-      <div className="fixed left-2 right-2 top-[104px] z-30 border border-border bg-bg rounded-md p-3 shadow-lg max-h-[70vh] overflow-y-auto">
+          the viewport with small side margins keeps every row fully visible.
+          Positioning strategy (fixed, top-[104px], left-2/right-2) is
+          unchanged — only the surface/shadow chrome was restyled. */}
+      <div className="fixed left-2 right-2 top-[104px] z-30 bg-surface rounded-card shadow-lift p-3 max-h-[70vh] overflow-y-auto">
         <PlayList
           plays={plays}
           currentID={currentPlayID}

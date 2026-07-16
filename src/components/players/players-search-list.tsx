@@ -138,7 +138,7 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
       <div className="relative">
         <span
           aria-hidden="true"
-          className="absolute left-4 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
+          className="absolute left-5 top-1/2 -translate-y-1/2 text-muted pointer-events-none"
         >
           <SearchGlyph size={18} />
         </span>
@@ -153,16 +153,16 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
           }
           aria-label="Search players"
           className={[
-            'w-full bg-surface border border-border rounded-md',
-            'pl-12 pr-4 py-3.5 text-[15px] text-ink font-tight placeholder:text-faint',
-            'focus-visible:outline-none focus-visible:border-accent transition-colors',
+            'w-full bg-surface rounded-full shadow-card',
+            'pl-12 pr-5 py-3.5 text-[15px] text-ink font-tight placeholder:text-faint',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-shadow',
           ].join(' ')}
         />
       </div>
 
       {/* Count line */}
-      <div className="flex items-baseline justify-between gap-3 pb-2 border-b border-hairline">
-        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans">
           {scopeLabel}
         </span>
         <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
@@ -198,27 +198,28 @@ function UfaList({
 }) {
   const champSet = new Set(championTeamIds.map((id) => id.toLowerCase()));
   const thBase =
-    'px-3 py-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted border-b border-border whitespace-nowrap text-right';
+    'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint whitespace-nowrap text-right';
   // Cap the Player column so one long name can't balloon it to 2/3 of the row.
   // The name itself scrolls horizontally inside this fixed box (see the <td>).
   const playerColCls = 'w-[150px] min-w-[150px] max-w-[150px] sm:w-[200px] sm:min-w-[200px] sm:max-w-[200px]';
   return (
-    <div className="overflow-x-auto -mx-5 px-5 md:mx-0 md:px-0">
-      <table className="w-full min-w-[860px] border-collapse table-fixed">
+    <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
+      <table className="w-full min-w-[920px] border-collapse table-fixed">
         <thead>
           <tr>
-            <th className={`${thBase} text-left ${playerColCls}`} scope="col">Player</th>
+            <th className={`${thBase} text-left pl-5 ${playerColCls}`} scope="col">Player</th>
             <th className={thBase} scope="col" title="Games Played">GP</th>
             <th className={thBase} scope="col" title="Goals">G</th>
             <th className={thBase} scope="col" title="Assists">A</th>
             <th className={thBase} scope="col" title="Hockey Assists">HA</th>
             <th className={thBase} scope="col" title="Scores (Goals + Assists)">Scr</th>
+            <th className={`${thBase} text-accent`} scope="col" title="Impact (Goals + Assists + Blocks)">IMP</th>
             <th className={thBase} scope="col" title="Completions">Cmp</th>
             <th className={thBase} scope="col" title="Completion %">Cmp%</th>
             <th className={thBase} scope="col" title="Throwaways">TA</th>
             <th className={thBase} scope="col" title="Drops">D</th>
             <th className={thBase} scope="col" title="Blocks">Blk</th>
-            <th className={thBase} scope="col" title="Plus / Minus">+/−</th>
+            <th className={`${thBase} pr-5`} scope="col" title="Plus / Minus">+/−</th>
           </tr>
         </thead>
         <tbody>
@@ -231,9 +232,10 @@ function UfaList({
                   : null;
             const team = teamAbbr ? teamMetaByAbbr(teamAbbr) : null;
             const isChamp = teamAbbr ? champSet.has(teamAbbr.toLowerCase()) : false;
+            const rowTop = i === 0 ? '' : 'border-t border-hairline';
             return (
               <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
-                <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left ${playerColCls}`}>
+                <td className={`px-3 py-2.5 text-[13px] text-left pl-5 ${rowTop} ${playerColCls}`}>
                   <Link
                     href={`/players/${p.playerID}?from=ufa`}
                     className="flex items-center gap-2 hover:opacity-80 transition-opacity no-underline"
@@ -242,7 +244,7 @@ function UfaList({
                       {i + 1}
                     </span>
                     {team && (
-                      <span className="flex-shrink-0 inline-flex">
+                      <span className="flex-shrink-0 inline-flex rounded-full overflow-hidden">
                         <TeamLogo team={team} size={22} />
                       </span>
                     )}
@@ -254,17 +256,18 @@ function UfaList({
                     {isChamp && <TrophyChip title="Reigning UFA Champion" />}
                   </Link>
                 </td>
-                <Cell value={p.gamesPlayed} />
-                <Cell value={p.goals} />
-                <Cell value={p.assists} />
-                <Cell value={p.hockeyAssists} />
-                <Cell value={p.scores} bold />
-                <Cell value={p.completions} />
-                <Cell value={p.completionPercentage ? `${p.completionPercentage}%` : '—'} />
-                <Cell value={p.throwaways} />
-                <Cell value={p.drops} />
-                <Cell value={p.blocks} />
-                <Cell value={signed(p.plusMinus)} />
+                <Cell value={p.gamesPlayed} rowTop={rowTop} />
+                <Cell value={p.goals} rowTop={rowTop} />
+                <Cell value={p.assists} rowTop={rowTop} />
+                <Cell value={p.hockeyAssists} rowTop={rowTop} />
+                <Cell value={p.scores} bold rowTop={rowTop} />
+                <ImpactCell value={(p.goals ?? 0) + (p.assists ?? 0) + (p.blocks ?? 0)} rowTop={rowTop} />
+                <Cell value={p.completions} rowTop={rowTop} />
+                <Cell value={p.completionPercentage ? `${p.completionPercentage}%` : '—'} rowTop={rowTop} />
+                <Cell value={p.throwaways} rowTop={rowTop} />
+                <Cell value={p.drops} rowTop={rowTop} />
+                <Cell value={p.blocks} rowTop={rowTop} />
+                <Cell value={signed(p.plusMinus)} rowTop={rowTop} pr />
               </tr>
             );
           })}
@@ -274,15 +277,42 @@ function UfaList({
   );
 }
 
-function Cell({ value, bold }: { value: string | number | undefined; bold?: boolean }) {
+function Cell({
+  value,
+  bold,
+  rowTop,
+  pr,
+}: {
+  value: string | number | undefined;
+  bold?: boolean;
+  rowTop?: string;
+  pr?: boolean;
+}) {
   return (
     <td
       className={[
-        'px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular font-tight',
+        'px-3 py-2.5 text-[13px] text-right tabular font-tight',
+        rowTop ?? '',
+        pr ? 'pr-5' : '',
         bold ? 'text-ink font-semibold' : 'text-muted',
       ].join(' ')}
     >
       {value ?? '—'}
+    </td>
+  );
+}
+
+// Impact (Goals + Assists + Blocks) — the default ranking metric, so it reads
+// in the accent color + bold to stand out from the neutral stat columns.
+function ImpactCell({ value, rowTop }: { value: number; rowTop?: string }) {
+  return (
+    <td
+      className={[
+        'px-3 py-2.5 text-[13px] text-right tabular font-tight font-bold text-accent',
+        rowTop ?? '',
+      ].join(' ')}
+    >
+      {value}
     </td>
   );
 }
@@ -295,45 +325,44 @@ function signed(n: number | undefined | null): string {
 
 function UsauList({ players }: { players: UsauPlayerListRow[] }) {
   return (
-    <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-px bg-border border border-border">
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
       {players.map((p, i) => (
-        <li key={p.id} className="bg-surface">
-          <Link
-            href={`/players/${p.id}?from=usau`}
-            className="flex items-center gap-3 px-4 py-3 hover:bg-surface-hi transition-colors no-underline"
-          >
-            <span className="tabular text-[11px] font-bold text-faint font-tight w-6 text-right">
-              {i + 1}
-            </span>
-            <div className="flex flex-col min-w-0 flex-1">
-              <span className="flex items-center gap-1.5 min-w-0">
-                <span className="text-[14px] font-semibold text-ink font-tight truncate">
-                  {p.displayName}
-                </span>
-                {p.championYears.length > 0 && (
-                  <TrophyChip
-                    title={
-                      p.championYears.length === 1
-                        ? `USAU National Champion · ${p.championYears[0]}`
-                        : `${p.championYears.length}× USAU National Champion`
-                    }
-                  />
-                )}
+        <Link
+          key={p.id}
+          href={`/players/${p.id}?from=usau`}
+          className="flex items-center gap-3 px-4 py-3 bg-surface rounded-card shadow-card hover:shadow-lift transition-shadow cursor-pointer no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        >
+          <span className="tabular font-mono text-[11px] font-bold text-faint w-6 text-right flex-shrink-0">
+            {i + 1}
+          </span>
+          <div className="flex flex-col min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="text-[14px] font-semibold text-ink font-tight truncate">
+                {p.displayName}
               </span>
-              {p.latestTeam && (
-                <span className="text-[11px] text-muted font-tight truncate">
-                  {p.latestTeam}
-                  {p.latestSeason && ` · ${p.latestSeason}`}
-                </span>
+              {p.championYears.length > 0 && (
+                <TrophyChip
+                  title={
+                    p.championYears.length === 1
+                      ? `USAU National Champion · ${p.championYears[0]}`
+                      : `${p.championYears.length}× USAU National Champion`
+                  }
+                />
               )}
-            </div>
-            <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight whitespace-nowrap">
-              {p.appearances} {p.appearances === 1 ? 'stint' : 'stints'}
             </span>
-          </Link>
-        </li>
+            {p.latestTeam && (
+              <span className="text-[11px] text-muted font-tight truncate">
+                {p.latestTeam}
+                {p.latestSeason && ` · ${p.latestSeason}`}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight whitespace-nowrap">
+            {p.appearances} {p.appearances === 1 ? 'stint' : 'stints'}
+          </span>
+        </Link>
       ))}
-    </ul>
+    </div>
   );
 }
 
@@ -355,7 +384,7 @@ function TrophyChip({ title }: { title: string }) {
 
 function EmptyState({ query }: { query: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-6 text-center bg-surface border border-border rounded-md">
+    <div className="flex flex-col items-center justify-center py-12 px-6 text-center bg-surface rounded-card-lg shadow-card">
       <div className="text-[13px] font-semibold uppercase tracking-[0.18em] text-muted mb-1 font-tight">
         No matches
       </div>

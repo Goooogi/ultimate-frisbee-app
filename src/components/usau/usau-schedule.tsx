@@ -13,6 +13,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { listEvents, listSeasons, type UsauEventCard, type CompetitionLevel } from '@/lib/usau/data';
 import { FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import type { UsauDivision } from '@/lib/league';
@@ -25,16 +26,29 @@ interface Props {
    *  schedule shows the full calendar for that level, not just events that
    *  happen to have teams scraped. */
   competitionLevel?: CompetitionLevel;
-  /** Optional curated Triple Crown Tour flight filter (Club only). */
-  flight?: Flight;
+  /** Optional curated Triple Crown Tour flight filter (Club only), multi-select.
+   *  Empty ⇒ all flights. */
+  flights?: Flight[];
 }
 
-export function UsauSchedule({ division, competitionLevel, flight }: Props = {}) {
+export function UsauSchedule({ division, competitionLevel, flights = [] }: Props = {}) {
+  // Serialize for a stable useEffect dep (array identity changes each render).
+  const flightsKey = flights.join(',');
+  const searchParams = useSearchParams();
   const [seasons, setSeasons] = useState<number[]>([]);
-  const [season, setSeason] = useState<number | null>(null);
   const [events, setEvents] = useState<UsauEventCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Season is URL-driven (?season=YYYY) so its control can live in the page
+  // header controls row (above the other filters on mobile) and persist/share
+  // via the URL. Falls back to the latest available season when ?season is
+  // absent or not in the list.
+  const seasonParam = Number(searchParams.get('season'));
+  const season =
+    Number.isInteger(seasonParam) && seasons.includes(seasonParam)
+      ? seasonParam
+      : (seasons[0] ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -42,7 +56,6 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
       .then((s) => {
         if (cancelled) return;
         setSeasons(s);
-        setSeason(s[0] ?? null);
       })
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load seasons.'),
@@ -61,7 +74,7 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
     // scraped yet. genderDivision is optional: when undefined, every event at
     // the level shows; when set, it narrows to events with scraped teams in
     // that division (the only ones we can attribute a gender to).
-    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel, flight })
+    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel, flights })
       .then((e) => !cancelled && setEvents(e))
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
@@ -70,7 +83,9 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
     return () => {
       cancelled = true;
     };
-  }, [season, division, competitionLevel, flight]);
+    // flightsKey (serialized) is the stable dep — `flights` array identity changes each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [season, division, competitionLevel, flightsKey]);
 
   const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
 
@@ -84,48 +99,6 @@ export function UsauSchedule({ division, competitionLevel, flight }: Props = {})
 
   return (
     <div className="flex flex-col gap-6">
-      {seasons.length > 0 && season != null && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-            Season
-          </span>
-          <div className="relative inline-flex items-center">
-            <select
-              value={season}
-              onChange={(e) => setSeason(parseInt(e.target.value, 10))}
-              aria-label="Select season"
-              className={[
-                'appearance-none cursor-pointer',
-                'px-3 py-[6px] pr-7 rounded-full',
-                'text-[11px] font-bold tracking-[0.14em] uppercase font-tight',
-                'bg-surface border border-border text-ink',
-                'hover:border-ink transition-colors duration-150',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              ].join(' ')}
-            >
-              {seasons.map((y) => (
-                <option key={y} value={y}>
-                  {y} Season
-                </option>
-              ))}
-            </select>
-            <svg
-              className="pointer-events-none absolute right-2 w-3 h-3 text-muted"
-              viewBox="0 0 12 12"
-              fill="none"
-              aria-hidden="true"
-            >
-              <path
-                d="M3 4.5L6 7.5L9 4.5"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </div>
-        </div>
-      )}
 
       {loading && events.length === 0 ? (
         <div className="text-[12px] text-faint font-tight">Loading events…</div>
@@ -180,9 +153,8 @@ function Section({
       <summary
         className={[
           'list-none cursor-pointer select-none',
-          'flex items-baseline justify-between gap-3 mb-3 pb-2 border-b',
+          'flex items-baseline justify-between gap-3 mb-4 pb-2 border-b border-hairline',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          emphasized ? 'border-ink' : 'border-hairline',
         ].join(' ')}
       >
         <span className="flex items-center gap-2">
@@ -218,58 +190,81 @@ function EventCard({ event }: { event: UsauEventCard }) {
   const level = prettyLevel(event.competitionLevel);
 
   // The card itself navigates to our event detail. The "USAU" pill is a
-  // separate external link, so it sits OUTSIDE the Next <Link> (no nested <a>).
+  // separate external link, so it sits OUTSIDE the Next <Link> (no nested <a>)
+  // — as a footer row in normal flow (NOT absolutely positioned) so it can
+  // never overlap a 2-line title/location, and every card fills its grid
+  // cell's full height so rows stay even.
   return (
-    <li className="relative">
-      <Link
-        href={`/usau/events/${event.slug}`}
+    <li className="h-full">
+      <div
         className={[
-          'block bg-surface border border-border rounded-md p-4 hover:border-ink transition-colors no-underline',
+          'group/card relative flex h-full flex-col bg-surface rounded-card p-4 transition-shadow shadow-card hover:shadow-lift',
           past ? 'opacity-75' : '',
         ].join(' ')}
       >
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <span className="flex items-center gap-2 min-w-0">
-            <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
-              {level}
+        <Link
+          href={`/usau/events/${event.slug}`}
+          className="flex flex-col flex-1 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface rounded-card-sm"
+        >
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+                {level}
+              </span>
+              {event.flight && (
+                <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent bg-accent/10 rounded-full px-2 py-0.5">
+                  {FLIGHT_LABELS[event.flight]}
+                </span>
+              )}
             </span>
-            {event.flight && (
-              <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent border border-accent/40 rounded px-1.5 py-0.5">
-                {FLIGHT_LABELS[event.flight]}
+            {event.teamCount > 0 && (
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
+                {event.teamCount} teams
               </span>
             )}
-          </span>
-          {event.teamCount > 0 && (
-            <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
-              {event.teamCount} teams
-            </span>
+          </div>
+          <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 group-hover/card:text-accent transition-colors">
+            {event.name}
+          </div>
+          {event.winner && (
+            <div className="flex items-center gap-1.5 min-w-0 mb-2">
+              <TrophyGlyph />
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
+                {event.winner.kind === 'champion' ? 'Champion' : 'Pool Leader'}
+              </span>
+              <span className="text-faint">·</span>
+              <span className="text-[11px] font-bold text-ink font-tight truncate min-w-0">
+                {event.winner.name}
+              </span>
+            </div>
           )}
-        </div>
-        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 pr-14">
-          {event.name}
-        </div>
-        <div className="flex items-center gap-3 text-[11px] font-medium text-muted font-tight pr-14">
-          {dateRange && <span className="tabular">{dateRange}</span>}
-          {dateRange && location && <span className="text-faint">·</span>}
-          {location && <span className="truncate">{location}</span>}
-        </div>
-      </Link>
-      {event.url && (
-        <a
-          href={event.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label={`View ${event.name} on USA Ultimate`}
-          className="absolute bottom-3 right-3 inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded px-2.5 py-1 border border-border hover:border-ink bg-surface"
-        >
-          USAU
-          <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M3 1.5h5.5V7" />
-            <path d="M8.5 1.5L3.5 6.5" />
-            <path d="M7 8.5H1.5V3" />
-          </svg>
-        </a>
-      )}
+          {/* mt-auto pushes the date/location to the card bottom so short and
+              tall cards align their meta rows across the grid. */}
+          <div className="mt-auto flex items-center gap-3 text-[11px] font-medium text-muted font-tight">
+            {dateRange && <span className="tabular">{dateRange}</span>}
+            {dateRange && location && <span className="text-faint">·</span>}
+            {location && <span className="truncate">{location}</span>}
+          </div>
+        </Link>
+        {event.url && (
+          <div className="mt-3 flex justify-end">
+            <a
+              href={event.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`View ${event.name} on USA Ultimate`}
+              className="inline-flex items-center gap-1 text-[10px] font-bold tracking-[0.14em] uppercase font-tight text-muted hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full px-2.5 py-1 bg-ink/5"
+            >
+              USAU
+              <svg width="9" height="9" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M3 1.5h5.5V7" />
+                <path d="M8.5 1.5L3.5 6.5" />
+                <path d="M7 8.5H1.5V3" />
+              </svg>
+            </a>
+          </div>
+        )}
+      </div>
     </li>
   );
 }
@@ -281,6 +276,7 @@ function prettyLevel(level: string): string {
     case 'COLLEGE_D3': return 'College · D-III';
     case 'MASTERS': return 'Masters';
     case 'GRAND_MASTERS': return 'Grand Masters';
+    case 'GREAT_GRAND_MASTERS': return 'Great Grand Masters';
     case 'HS': return 'High School';
     case 'MS': return 'Middle School';
     case 'YC': return 'Youth Club';
@@ -288,6 +284,20 @@ function prettyLevel(level: string): string {
     case 'OTHER': return 'Other';
     default: return level;
   }
+}
+
+function TrophyGlyph() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0">
+      <path
+        d="M4 2h8v3a4 4 0 01-8 0V2zM4 3H2v1a2 2 0 002 2M12 3h2v1a2 2 0 01-2 2M6 9.5V11m4-1.5V11M5 14h6M6.5 11h3l.5 3h-4l.5-3z"
+        stroke="rgb(var(--accent))"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
 }
 
 function Chevron() {

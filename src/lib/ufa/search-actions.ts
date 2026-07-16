@@ -14,7 +14,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
-import { search as searchUsau, type SearchResult } from '@/lib/usau/data';
+import { search as searchUsau, compareByNameThenYearDesc, type SearchResult } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
 import { allUfaTeams } from '@/lib/ufa/teams';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
@@ -275,27 +275,56 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ...wfdfEventResults,
   ];
 
-  // Rank by: (1) match quality — exact (0) > starts-with (1) > contains (2);
-  // then (2) prominence DESC — adult club + pro-league teams above college,
-  // above youth/HS, so "Colorado" floats real clubs over U-20/Academy noise;
-  // then (3) alphabetical. Missing prominence defaults to 2 (neutral — between
-  // youth=1 and prominent=3), which is where bare players/tournaments land.
-  const tier = (name: string): number => {
-    const n = name.toLowerCase();
-    if (n === needle) return 0;
-    if (n.startsWith(needle)) return 1;
-    return 2;
-  };
+  // Rank by: (1) match quality via `matchTier` — exact (0) > whole-word (1) >
+  // starts-with (2) > contains (3); then (2) prominence DESC — adult club +
+  // pro-league teams above college, above youth/HS, so "Colorado" floats real
+  // clubs over U-20/Academy noise; then (3) alphabetical. Missing prominence
+  // defaults to 2 (neutral), which is where bare players/tournaments land.
+  //
+  // The whole-word tier is what makes "bravo" surface "Johnny Bravo" and makes
+  // a full-word query like "hunter" treat "Hunter May" as a strong hit (not a
+  // generic substring) — a word boundary match is nearly as good as a prefix.
   const prom = (r: SearchResult): number => r.prominence ?? 2;
+  // Stamp each result with its match tier so the client can also ORDER THE
+  // GROUPS by best match (a strong player hit can outrank weak team hits,
+  // instead of Teams always rendering first).
+  for (const r of merged) r.matchRank = matchTier(r.name, needle);
+
   merged.sort((a, b) => {
-    const ta = tier(a.name);
-    const tb = tier(b.name);
-    if (ta !== tb) return ta - tb;
+    const ra = a.matchRank ?? 3;
+    const rb = b.matchRank ?? 3;
+    if (ra !== rb) return ra - rb;
     const pa = prom(a);
     const pb = prom(b);
     if (pa !== pb) return pb - pa; // higher prominence first
-    return a.name.localeCompare(b.name);
+    // Same event across years (e.g. Heavyweights 2024/2026) → newest first.
+    return compareByNameThenYearDesc(a.name, b.name);
   });
 
   return merged.slice(0, limit * 2);
+}
+
+/**
+ * Match-quality tier for ranking a result name against the query.
+ *   0 = exact (name === query)
+ *   1 = whole-word match (query appears as a standalone word — "bravo" in
+ *       "Johnny Bravo", "hunter" in "Hunter May")
+ *   2 = prefix (name starts with query — "hunt" in "Hunt for Drunk October")
+ *   3 = contains / fuzzy-only (substring anywhere, or a trigram match the RPC
+ *       surfaced that isn't even a substring)
+ * `needle` must already be lowercased + trimmed.
+ *
+ * NOT exported: this file is a `'use server'` module, where Next.js requires
+ * every EXPORT to be an async server action. A plain sync helper must stay
+ * module-private (it's only used by searchAll above).
+ */
+function matchTier(name: string, needle: string): number {
+  const n = name.toLowerCase();
+  if (n === needle) return 0;
+  // Whole-word: query bounded by non-alphanumerics (or string edges). Escape
+  // regex metacharacters in the needle so a name with punctuation is safe.
+  const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:[^a-z0-9]|$)`, 'i').test(n)) return 1;
+  if (n.startsWith(needle)) return 2;
+  return 3;
 }

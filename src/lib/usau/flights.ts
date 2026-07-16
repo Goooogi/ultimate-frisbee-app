@@ -109,3 +109,21 @@ export function parseFlightParam(raw: string | null | undefined): Flight | null 
   const norm = raw.toLowerCase();
   return (FLIGHTS as readonly string[]).includes(norm) ? (norm as Flight) : null;
 }
+
+/**
+ * Parse a multi-flight filter: comma-separated values in ?flight= (e.g.
+ * "pro,elite"). Returns the valid, de-duped flights in canonical FLIGHTS order
+ * so a URL like "elite,pro,pro,bogus" → ['pro','elite'] (stable, no dupes).
+ * Empty/absent → []. Single-value URLs (the old shape) still parse to one entry.
+ */
+export function parseFlightsParam(raw: string | null | undefined): Flight[] {
+  if (!raw) return [];
+  const chosen = new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter((s): s is Flight => (FLIGHTS as readonly string[]).includes(s)),
+  );
+  // Return in canonical order (not URL order) for a stable cache key + UI.
+  return FLIGHTS.filter((f) => chosen.has(f));
+}

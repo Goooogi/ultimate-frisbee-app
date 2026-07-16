@@ -134,9 +134,9 @@ export default async function TeamPage({ params }: Props) {
         { label: `${meta.city} ${meta.name}` },
       ]}
     >
-      {/* Hero band with team color */}
+      {/* Hero band with team color — floats on shadow, softened corners */}
       <div
-        className="relative overflow-hidden mb-8 px-6 py-8 md:px-8 md:py-10"
+        className="relative overflow-hidden mb-6 px-6 py-8 md:px-8 md:py-10 rounded-card-xl shadow-hero"
         style={{ background: meta.primary }}
         aria-hidden="false"
       >
@@ -149,20 +149,20 @@ export default async function TeamPage({ params }: Props) {
 
         <div className="relative z-10 flex flex-wrap items-end justify-between gap-6">
           <div className="flex items-center gap-5">
-            {/* Logo (or abbr fallback) */}
+            {/* Logo (or abbr fallback) — circular white disc per v2 chip treatment */}
             <div
-              className="flex items-center justify-center w-[72px] h-[72px] md:w-[96px] md:h-[96px] relative overflow-hidden flex-shrink-0 rounded-[2px] bg-white/10"
+              className="flex items-center justify-center w-[72px] h-[72px] md:w-[96px] md:h-[96px] relative overflow-hidden flex-shrink-0 rounded-full bg-white"
             >
               {meta.logo ? (
                 <img
                   src={meta.logo}
                   alt={`${meta.city} ${meta.name} logo`}
-                  className="max-w-[80%] max-h-[80%] object-contain"
+                  className="w-[72%] h-[72%] object-contain"
                 />
               ) : (
                 <span
-                  className="font-display text-[28px] md:text-[36px] font-bold tracking-[0.04em] uppercase"
-                  style={{ color: '#fff' }}
+                  className="font-display italic text-[28px] md:text-[36px] font-bold tracking-[0.02em] uppercase"
+                  style={{ color: meta.primary }}
                 >
                   {meta.abbr}
                 </span>
@@ -173,7 +173,7 @@ export default async function TeamPage({ params }: Props) {
               <div className="text-[11px] font-bold tracking-[0.2em] uppercase font-sans mb-1" style={{ color: 'rgba(255,255,255,0.6)' }}>
                 {meta.division ? `${meta.division} Division` : 'UFA'}
               </div>
-              <div className="font-display text-[32px] md:text-[42px] font-bold uppercase leading-none tracking-[0.01em]" style={{ color: '#fff' }}>
+              <div className="font-display italic text-[32px] md:text-[42px] font-bold uppercase leading-[0.95] tracking-[-0.01em]" style={{ color: '#fff' }}>
                 {meta.name}
               </div>
               <div className="text-[13px] font-medium font-sans mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
@@ -185,7 +185,7 @@ export default async function TeamPage({ params }: Props) {
           {/* Record + point diff */}
           {standing && (
             <div className="flex flex-col items-end gap-1">
-              <div className="tabular font-display text-[36px] md:text-[44px] font-bold leading-none" style={{ color: '#fff' }}>
+              <div className="tabular font-display italic text-[36px] md:text-[44px] font-bold leading-[0.95]" style={{ color: '#fff' }}>
                 {recordStr}
               </div>
               {standing.pointDiff !== 0 && (
@@ -200,14 +200,14 @@ export default async function TeamPage({ params }: Props) {
 
       {/* Championship medals (podium finishes) */}
       {podiums.length > 0 && (
-        <div className="px-6 md:px-8 -mt-4 mb-6">
+        <div className="mb-6">
           <TeamMedals medals={podiums} />
         </div>
       )}
 
       {/* Team stats strip */}
       {teamStatRow && (
-        <div className="grid grid-cols-4 md:grid-cols-8 gap-px bg-border border border-border mb-8">
+        <div className="grid grid-cols-4 md:grid-cols-8 bg-surface rounded-card-lg shadow-card mb-8 overflow-hidden">
           {[
             { label: 'PF', value: teamStatRow.scoresFor },
             { label: 'PA', value: teamStatRow.scoresAgainst },
@@ -219,8 +219,11 @@ export default async function TeamPage({ params }: Props) {
           ]
             .filter(({ value }) => value != null)
             .map(({ label, value }) => (
-              <div key={label} className="bg-surface flex flex-col items-center justify-center px-2 py-4 gap-0.5">
-                <div className="tabular text-[22px] font-bold font-tight leading-none text-ink">{value}</div>
+              <div
+                key={label}
+                className="flex flex-col items-center justify-center px-2 py-4 gap-0.5"
+              >
+                <div className="tabular font-display italic text-[22px] font-bold leading-none text-ink">{value}</div>
                 <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight">{label}</div>
               </div>
             ))}
@@ -231,13 +234,15 @@ export default async function TeamPage({ params }: Props) {
         {/* Roster */}
         {players.length > 0 && (
           <section aria-labelledby="roster-heading">
-            <h2
-              id="roster-heading"
-              className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
-            >
-              <span>Roster · {year}</span>
-              <span className="text-faint tabular">{players.length}</span>
-            </h2>
+            <div className="flex items-end justify-between gap-4 mb-4">
+              <h2
+                id="roster-heading"
+                className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans m-0"
+              >
+                Roster · {year}
+              </h2>
+              <span className="font-mono text-[11px] text-faint tabular">{players.length}</span>
+            </div>
             <UfaRosterTable players={players} jerseyByPlayer={jerseyByPlayer} year={year} />
           </section>
         )}
@@ -247,7 +252,7 @@ export default async function TeamPage({ params }: Props) {
           <section aria-labelledby="upcoming-heading">
             <h2
               id="upcoming-heading"
-              className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
+              className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-4"
             >
               Upcoming Games
             </h2>
@@ -262,13 +267,15 @@ export default async function TeamPage({ params }: Props) {
         {/* Season results — every completed game this season */}
         {seasonFinals.length > 0 && (
           <section aria-labelledby="results-heading">
-            <h2
-              id="results-heading"
-              className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
-            >
-              <span>Season Results · {year}</span>
-              <span className="text-faint tabular">{seasonFinals.length}</span>
-            </h2>
+            <div className="flex items-end justify-between gap-4 mb-4">
+              <h2
+                id="results-heading"
+                className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans m-0"
+              >
+                Season Results · {year}
+              </h2>
+              <span className="font-mono text-[11px] text-faint tabular">{seasonFinals.length}</span>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 md:gap-3">
               {seasonFinals.map((g) => (
                 <GameCard key={g.gameID} game={g} />
@@ -278,7 +285,7 @@ export default async function TeamPage({ params }: Props) {
         )}
 
         {upcomingAndLive.length === 0 && seasonFinals.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface border border-border">
+          <div className="flex flex-col items-center justify-center py-16 px-6 text-center bg-surface rounded-card-lg shadow-card">
             <div className="text-[14px] font-semibold uppercase tracking-[0.18em] text-muted mb-2 font-tight">
               No games found
             </div>

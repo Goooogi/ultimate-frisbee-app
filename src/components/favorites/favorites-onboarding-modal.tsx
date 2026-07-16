@@ -89,7 +89,7 @@ export function FavoritesOnboardingModal() {
         if (e.target === e.currentTarget) close();
       }}
     >
-      <div className="w-full max-w-[480px] max-h-full overflow-y-auto bg-bg border border-border rounded-md shadow-xl flex flex-col">
+      <div className="w-full max-w-[480px] max-h-full overflow-y-auto bg-surface rounded-card-lg shadow-hero flex flex-col">
         {/* Header */}
         <div className="px-6 pt-6 pb-4 flex flex-col gap-2 border-b border-hairline">
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
@@ -97,7 +97,7 @@ export function FavoritesOnboardingModal() {
           </span>
           <h2
             id="fav-onboarding-title"
-            className="m-0 font-tight text-[24px] font-bold tracking-[-0.03em] leading-tight text-ink"
+            className="m-0 font-display italic text-[24px] font-bold tracking-[-0.02em] leading-[0.95] text-ink"
           >
             Make it yours.
           </h2>
@@ -118,7 +118,7 @@ export function FavoritesOnboardingModal() {
             type="button"
             onClick={close}
             className={[
-              'inline-flex items-center justify-center px-3 min-h-[44px] rounded-md cursor-pointer',
+              'inline-flex items-center justify-center px-3 min-h-[44px] rounded-full cursor-pointer',
               'text-[11px] font-bold tracking-[0.14em] uppercase font-tight text-muted',
               'hover:text-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             ].join(' ')}
@@ -129,7 +129,7 @@ export function FavoritesOnboardingModal() {
             type="button"
             onClick={close}
             className={[
-              'inline-flex items-center justify-center px-6 min-h-[44px] rounded-md cursor-pointer',
+              'inline-flex items-center justify-center px-6 min-h-[44px] rounded-full cursor-pointer',
               'bg-accent text-accent-ink font-tight text-[11px] font-bold tracking-[0.14em] uppercase',
               'hover:opacity-90 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             ].join(' ')}

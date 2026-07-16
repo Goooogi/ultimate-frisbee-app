@@ -176,6 +176,83 @@ async function fetchPlayerGameLog(playerID: string, year: number): Promise<ApiPl
   return data.stats ?? [];
 }
 
+// ─── Headshots ───────────────────────────────────────────────────────────────
+// UFA is the only league that publishes player headshots — on the watchufa.com
+// profile page as <img src=".../profile-images/{playerID}_profile.{ext}"> (ext
+// varies png/jpg/jpeg/JPG). We SELF-HOST them: download the original and upload
+// a copy to the ufa-headshots Storage bucket, storing OUR public URL (the app
+// serves it through the image transform). Self-hosting fixes the watchufa
+// hotlink problems: multi-MB originals, slow/flaky third-party CDN, dead URLs.
+// ~90% of players have one; the rest return null (UI falls back to a monogram).
+const WATCHUFA_PLAYER = 'https://www.watchufa.com/league/players';
+const HEADSHOT_RE = /src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i;
+const HEADSHOT_BUCKET = 'ufa-headshots';
+const HEADSHOT_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif',
+};
+
+// Resilient fetch for the watchufa scrape + image download. watchufa is a flaky
+// Drupal site; without retries a single transient failure (timeout, reset,
+// momentary 5xx) permanently leaves a player with headshot_url=null — the player
+// then renders a monogram forever even though their image exists. Retry with
+// backoff + a hard timeout, mirroring ufaGet. A 404 short-circuits (genuinely
+// absent). Returns null only after exhausting tries.
+const HEADSHOT_FETCH_TIMEOUT_MS = 20_000;
+const HEADSHOT_FETCH_TRIES = 4;
+async function headshotFetch(url: string, init: RequestInit, label: string): Promise<Response | null> {
+  for (let attempt = 1; attempt <= HEADSHOT_FETCH_TRIES; attempt++) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(HEADSHOT_FETCH_TIMEOUT_MS) });
+      if (res.status === 404) return res;
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res;
+    } catch (err) {
+      if (attempt < HEADSHOT_FETCH_TRIES) {
+        await sleep(500 * attempt);
+        continue;
+      }
+      console.warn(`    ! headshot ${label} failed after ${attempt} tries: ${(err as Error).message}`);
+      return null;
+    }
+  }
+  return null;
+}
+
+/** Scrape → download → upload to the bucket → return OUR public object URL.
+ *  Soft-fails to null at every step so a missing headshot never breaks the sync. */
+async function fetchHeadshotUrl(playerID: string): Promise<string | null> {
+  const pageRes = await headshotFetch(
+    `${WATCHUFA_PLAYER}/${encodeURIComponent(playerID)}`,
+    { headers: { 'User-Agent': UA, Accept: 'text/html' } },
+    `page ${playerID}`,
+  );
+  if (!pageRes || !pageRes.ok) return null;
+  const m = (await pageRes.text()).match(HEADSHOT_RE);
+  const srcUrl = m ? m[1] : null;
+  if (!srcUrl) return null;
+
+  const imgRes = await headshotFetch(srcUrl, { headers: { 'User-Agent': UA } }, `image ${playerID}`);
+  if (!imgRes || !imgRes.ok) return null;
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await imgRes.arrayBuffer());
+    if (bytes.length === 0) return null;
+  } catch {
+    return null;
+  }
+
+  let ext = (srcUrl.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (ext === 'jpeg') ext = 'jpg';
+  const objectPath = `${playerID}.${ext}`;
+  const { error } = await db.storage.from(HEADSHOT_BUCKET).upload(objectPath, bytes, {
+    contentType: HEADSHOT_MIME[ext] ?? 'image/jpeg',
+    upsert: true,
+    cacheControl: '31536000',
+  });
+  if (error) return null;
+  return db.storage.from(HEADSHOT_BUCKET).getPublicUrl(objectPath).data.publicUrl;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Fail loud if an API-supplied string PK looks malformed — so a change in the
@@ -259,6 +336,24 @@ async function syncYear(year: number) {
   const players = await fetchPlayers(year);
   console.log(`  players: ${players.length}`);
 
+  // Players who ALREADY have a self-hosted headshot → skip the download+upload.
+  // (The dedicated backfill script migrates existing watchufa URLs; here we only
+  // self-host players with no headshot yet, so a full re-sync stays cheap.)
+  const alreadyHosted = new Set<string>();
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data } = await db
+        .from('ufa_players')
+        .select('id')
+        .like('headshot_url', `%/${HEADSHOT_BUCKET}/%`)
+        .range(from, from + PAGE - 1);
+      const rows = data ?? [];
+      for (const r of rows) alreadyHosted.add((r as { id: string }).id);
+      if (rows.length < PAGE) break;
+    }
+  }
+
   // 4) Per-player game logs → stat rows. We also learn each player's team for
   //    this season from the game row's home/away side + the game's team slugs.
   const gameById = new Map(games.map((g) => [g.gameID, g]));
@@ -266,9 +361,24 @@ async function syncYear(year: number) {
   const statRows: Record<string, unknown>[] = [];
   let withStats = 0;
 
+  let skippedPlayers = 0;
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
-    assertSafeId(p.playerID, 'player');
+    // A single malformed/empty playerID from the upstream feed must NOT abort
+    // the whole season sync (it did — the UFA API started returning a blank
+    // player id mid-2026, which threw here BEFORE any games/stats were upserted,
+    // so weeks 11+ never landed). Skip the bad row and keep going; the games +
+    // every other player's stats still sync.
+    if (
+      typeof p.playerID !== 'string' ||
+      p.playerID.length === 0 ||
+      p.playerID.length > 200 ||
+      !/^[\w\-./]+$/.test(p.playerID)
+    ) {
+      skippedPlayers++;
+      console.warn(`    ! skipping player with bad id: ${JSON.stringify(p.playerID)} (name: ${JSON.stringify(p.name)})`);
+      continue;
+    }
     const { first, last } = splitName(p.name);
 
     let log: ApiPlayerGameRow[] = [];
@@ -278,27 +388,43 @@ async function syncYear(year: number) {
       console.warn(`    ! game log failed for ${p.playerID}: ${(err as Error).message}`);
     }
 
-    // Infer this player's primary team from their game logs (the team on the
-    // side they played). Falls back to null if no games logged.
+    // Infer this player's team for THIS season from their game logs — the team
+    // on the side of their most-recent game (players can be traded mid-season,
+    // so the latest game wins, not the first). This seeds current_team_id for
+    // brand-new players; the authoritative cross-year value is reconciled after
+    // all years sync (see reconcileCurrentTeams) so run order can't leave a
+    // player stuck on an old team. Falls back to null if no games logged.
     let teamId: string | null = null;
-    for (const row of log) {
-      const g = gameById.get(row.gameID);
+    let latestTs = '';
+    for (const r of log) {
+      const g = gameById.get(r.gameID);
       if (!g) continue;
-      const side = row.isHome ? g.homeTeamID : g.awayTeamID;
-      if (side) {
+      const side = r.isHome ? g.homeTeamID : g.awayTeamID;
+      if (!side) continue;
+      // g.start_timestamp is ISO 8601 — lexicographic compare == chronological.
+      const ts = (g.startTimestamp ?? '');
+      if (ts >= latestTs) {
+        latestTs = ts;
         teamId = side;
-        break;
       }
     }
 
-    playerRows.push({
+    // Self-host the headshot ONLY for players we don't already have one for.
+    // Never write headshot_url when we didn't (re)fetch — otherwise a null would
+    // clobber an existing self-hosted URL for a player who has no page this run.
+    const row: Record<string, unknown> = {
       id: p.playerID,
       first_name: first,
       last_name: last,
       full_name: p.name,
       current_team_id: teamId,
       updated_at: new Date().toISOString(),
-    });
+    };
+    if (!alreadyHosted.has(p.playerID)) {
+      const headshotUrl = await fetchHeadshotUrl(p.playerID);
+      if (headshotUrl) row.headshot_url = headshotUrl;
+    }
+    playerRows.push(row);
 
     for (const row of log) {
       const g = gameById.get(row.gameID);
@@ -365,8 +491,79 @@ async function syncYear(year: number) {
 
   console.log(
     `  ✓ ${year}: ${teamRows.length} teams, ${gameRows.length} games, ` +
-      `${playerRows.length} players (${withStats} w/ stats), ${statRows.length} stat rows`,
+      `${playerRows.length} players (${withStats} w/ stats), ${statRows.length} stat rows` +
+      (skippedPlayers > 0 ? `, ${skippedPlayers} players skipped (bad id)` : ''),
   );
+}
+
+// ─── Reconcile each player's *current* team ──────────────────────────────────
+//
+// current_team_id is a single mutable column, but a player's stats span every
+// synced season and they may have changed teams (e.g. Elliot Hawkins: Alleycats
+// 2024 → Apex 2025 → Alleycats 2026). Inferring the team inside a per-year run
+// makes the final value depend on which year synced LAST — so a historical
+// backfill would clobber a player onto an old team.
+//
+// This pass is the source of truth: for every player, set current_team_id to the
+// team they played on in their single most-recent game across ALL years. It's
+// order-independent and self-healing, so it must run once after every year is in.
+async function reconcileCurrentTeams() {
+  console.log('\n━━━ Reconciling current teams (latest game per player) ━━━');
+
+  // Pull every stat line joined to its game's timestamp. Chunked by range to
+  // stay under PostgREST's default row cap.
+  type Row = { player_id: string; team_id: string | null; start_timestamp: string | null };
+  const rows: Row[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from('ufa_game_player_stats')
+      .select('player_id, team_id, ufa_games!inner(start_timestamp)')
+      .order('player_id')
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`reconcile read [${from}]: ${error.message}`);
+    const batch = (data ?? []) as unknown as {
+      player_id: string;
+      team_id: string | null;
+      ufa_games: { start_timestamp: string | null } | null;
+    }[];
+    for (const b of batch) {
+      rows.push({
+        player_id: b.player_id,
+        team_id: b.team_id,
+        start_timestamp: b.ufa_games?.start_timestamp ?? null,
+      });
+    }
+    if (batch.length < PAGE) break;
+  }
+
+  // For each player, keep the team from their latest-timestamp game (ISO strings
+  // sort chronologically). Ignore stat lines with no team or no timestamp.
+  const latest = new Map<string, { ts: string; teamId: string }>();
+  for (const r of rows) {
+    if (!r.team_id || !r.start_timestamp) continue;
+    const cur = latest.get(r.player_id);
+    if (!cur || r.start_timestamp >= cur.ts) {
+      latest.set(r.player_id, { ts: r.start_timestamp, teamId: r.team_id });
+    }
+  }
+
+  const updates = Array.from(latest.entries()).map(([player_id, v]) => ({
+    id: player_id,
+    current_team_id: v.teamId,
+  }));
+
+  // Upsert only touches current_team_id (+ pk); other columns are preserved by
+  // the ON CONFLICT merge.
+  let changed = 0;
+  const CHUNK = 500;
+  for (let i = 0; i < updates.length; i += CHUNK) {
+    const slice = updates.slice(i, i + CHUNK);
+    const { error } = await db.from('ufa_players').upsert(slice, { onConflict: 'id' });
+    if (error) throw new Error(`reconcile upsert [${i}]: ${error.message}`);
+    changed += slice.length;
+  }
+  console.log(`  ✓ reconciled current_team_id for ${changed} players`);
 }
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
@@ -380,6 +577,9 @@ async function main() {
   for (const y of years) {
     await syncYear(y);
   }
+  // Authoritative pass: fix every player's current team from their latest game
+  // across all synced years, independent of the run order above.
+  await reconcileCurrentTeams();
   console.log('\nDone.');
 }
 

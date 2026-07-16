@@ -264,6 +264,23 @@ Recommended selectors (the `data-type` attributes are semantic and stable):
 Round is inferred from the enclosing `<h4>` element. Bracket section
 (Championship vs Fifth Place) is the enclosing `<h3>`.
 
+**TBD slots** (verified 2026-07-12, Pro Elite Challenge West): before a
+feeder game finishes, a bracket slot renders the placeholder as PLAIN TEXT
+inside `[data-type="game-team-*"]` with **no `<a>`** — e.g.
+`<span data-type="game-team-away">W of Semifinals G2</span>`. The parser
+keeps these games (they have a stable `game{id}` div id) with a NULL team
+id for the TBD side; the next scrape after the feeder resolves fills the
+team in via the same `usau_game_id` upsert. Only id-less TBD divs are
+skipped (no safe dedupe key).
+
+**Placement labels**: USAU mixes numeric and word ordinals for placement
+sections — "3rd Place" but also "Third Place" / "Seventh Place" (PEC West
+2026). `classifyRound` matches both.
+
+**Times**: `.date` / schedule-table times are the venue's LOCAL wall clock
+with no zone. All writers convert to true UTC via the event state
+(`_shared/tz.ts`); a 2026-07-12 backfill normalized legacy rows.
+
 ---
 
 ## Team page — `/teams/events/Eventteam/?EventTeamId={id}`

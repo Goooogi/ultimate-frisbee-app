@@ -12,6 +12,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      feedback: {
+        Row: {
+          category: string | null
+          created_at: string
+          id: string
+          message: string
+          page_path: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["feedback_status"]
+          user_id: string
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          id?: string
+          message: string
+          page_path?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["feedback_status"]
+          user_id: string
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          id?: string
+          message?: string
+          page_path?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["feedback_status"]
+          user_id?: string
+        }
+        Relationships: []
+      }
       pb_play_steps: {
         Row: {
           created_at: string
@@ -319,6 +355,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_icon: string | null
           avatar_url: string | null
           created_at: string
           display_name: string | null
@@ -330,6 +367,7 @@ export type Database = {
           username: string | null
         }
         Insert: {
+          avatar_icon?: string | null
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
@@ -341,6 +379,7 @@ export type Database = {
           username?: string | null
         }
         Update: {
+          avatar_icon?: string | null
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
@@ -857,6 +896,7 @@ export type Database = {
       is_team_member: { Args: { p_team_id: string }; Returns: boolean }
     }
     Enums: {
+      feedback_status: "new" | "read" | "resolved"
       pb_team_role: "owner" | "coach" | "member"
       player_content_kind: "image" | "video" | "video_link" | "link"
       player_content_status: "pending" | "approved" | "rejected"
@@ -869,6 +909,7 @@ export type Database = {
         | "YC"
         | "MASTERS"
         | "GRAND_MASTERS"
+        | "GREAT_GRAND_MASTERS"
         | "BEACH"
         | "OTHER"
       usau_event_type:

@@ -104,7 +104,7 @@ function ErrorState() {
   return (
     <div
       role="alert"
-      className="px-4 py-3 rounded-md bg-[rgb(var(--live)/0.08)] border border-[rgb(var(--live)/0.20)]"
+      className="px-4 py-3 rounded-card-sm bg-live/[0.08]"
     >
       <span className="font-tight text-[13px] text-ink">
         Couldn&apos;t load your favorites. Please refresh and try again.
@@ -115,8 +115,8 @@ function ErrorState() {
 
 function EmptyState() {
   return (
-    <div className="flex flex-col items-center text-center gap-3 py-16 px-5 rounded-lg border border-hairline bg-surface">
-      <h2 className="m-0 font-tight text-[22px] font-bold tracking-[-0.02em] text-ink">
+    <div className="flex flex-col items-center text-center gap-3 py-16 px-5 rounded-card-lg bg-surface shadow-card">
+      <h2 className="m-0 font-display italic text-[22px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
         Nothing here yet.
       </h2>
       <p className="max-w-[420px] text-[13px] text-muted font-tight leading-snug">
@@ -126,7 +126,7 @@ function EmptyState() {
       <Link
         href="/settings"
         className={[
-          'mt-2 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-md cursor-pointer min-h-[44px]',
+          'mt-2 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full cursor-pointer min-h-[44px]',
           'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.16em] uppercase',
           'hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity',
         ].join(' ')}
@@ -155,8 +155,8 @@ function HeroGameCard({ game }: { game: FeedGame }) {
     <section aria-label="Your next game">
       <div
         className={[
-          'relative overflow-hidden rounded-xl border bg-surface',
-          isLive ? 'border-[rgb(var(--live)/0.35)]' : 'border-border',
+          'relative overflow-hidden rounded-card-xl bg-surface shadow-hero',
+          isLive ? 'ring-1 ring-inset ring-live/35' : '',
         ].join(' ')}
       >
         {/* Faint accent wash so the hero reads as a distinct tier, not just a bigger tile. */}
@@ -169,11 +169,8 @@ function HeroGameCard({ game }: { game: FeedGame }) {
           {/* Meta row: status + league */}
           <div className="flex items-center justify-center gap-2.5 font-mono text-[11px] sm:text-[12px] tracking-[0.1em] text-muted">
             {isLive ? (
-              <span className="inline-flex items-center gap-2 font-bold" style={{ color: 'rgb(var(--live))' }}>
-                <span
-                  className="w-2 h-2 rounded-full"
-                  style={{ backgroundColor: 'rgb(var(--live))', boxShadow: '0 0 0 4px rgb(var(--live) / 0.2)' }}
-                />
+              <span className="inline-flex items-center gap-2 font-bold text-live">
+                <span className="w-2 h-2 rounded-full bg-live shadow-[0_0_0_4px_rgb(var(--live)/0.2)]" />
                 LIVE
               </span>
             ) : (
@@ -256,10 +253,10 @@ function HeroTeamSide({
         isFinalOrLive && loser ? 'opacity-55' : 'opacity-100',
       ].join(' ')}
     >
-      <span className="w-14 h-14 sm:w-16 sm:h-16 lg:w-[72px] lg:h-[72px] rounded-lg bg-surface-hi border border-hairline overflow-hidden flex items-center justify-center flex-shrink-0">
+      <span className="w-14 h-14 sm:w-16 sm:h-16 lg:w-[72px] lg:h-[72px] rounded-full bg-surface-hi shadow-soft overflow-hidden flex items-center justify-center flex-shrink-0">
         {side.logoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={side.logoUrl} alt={side.name} className="w-full h-full object-contain p-1.5" />
+          <img src={side.logoUrl} alt={side.name} className="w-full h-full object-contain p-2" />
         ) : (
           <span className="font-display text-[26px] sm:text-[30px] lg:text-[34px] leading-none text-muted">
             {side.name.trim().charAt(0).toUpperCase()}
@@ -272,7 +269,7 @@ function HeroTeamSide({
           'font-tight font-bold text-[16px] sm:text-[20px] lg:text-[22px] tracking-[-0.01em] text-ink text-center',
           align === 'right' ? 'sm:text-right' : 'sm:text-left',
           'truncate max-w-full hover:text-accent transition-colors cursor-pointer',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full',
         ].join(' ')}
       >
         {side.name}
@@ -322,11 +319,11 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
     !hasStats && !hasLeaders && !hasForm && !record && !rankContext && !hasRoster && !hasAccolades;
 
   return (
-    <div className="bg-surface border border-border rounded-md overflow-hidden flex flex-col">
+    <div className="bg-surface rounded-card shadow-card hover:shadow-lift transition-shadow overflow-hidden flex flex-col">
       {/* Header row: identity + league tag + record */}
       <Link
         href={href}
-        className="group flex items-center gap-3 px-4 py-3.5 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+        className="group flex items-center gap-3 px-5 py-3.5 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset cursor-pointer"
       >
         <SearchResultIcon
           result={{ kind: 'team', id: team.teamId, name: team.name, hint: null, league: team.league, logoUrl: team.logoUrl }}
@@ -351,14 +348,14 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
 
       {/* Rank context — the standings-table replacement, one readable line */}
       {rankContext && (
-        <div className="px-4 py-2.5 border-t border-hairline bg-accent/[0.05]">
+        <div className="px-5 py-2.5 border-t border-hairline bg-accent/[0.05]">
           <span className="text-[12px] font-tight font-semibold text-ink">{rankContext}</span>
         </div>
       )}
 
       {/* Accolades — notable finishes (USAU teams surface these in place of a season record) */}
       {hasAccolades && (
-        <div className="px-4 py-3 border-t border-hairline">
+        <div className="px-5 py-3 border-t border-hairline">
           <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-2.5">
             Accolades
           </div>
@@ -370,10 +367,10 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
         </div>
       )}
 
-      {/* Stat tiles — matches team page grammar: bg-border/gap-px hairline grid */}
+      {/* Stat tiles — matches team page grammar: bg-hairline/gap-px hairline grid */}
       {hasStats && (
         <div
-          className="grid gap-px bg-border border-t border-hairline"
+          className="grid gap-px bg-hairline border-t border-hairline"
           style={{ gridTemplateColumns: `repeat(${stats.length}, minmax(0, 1fr))` }}
         >
           {stats.map((s) => (
@@ -384,7 +381,7 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
 
       {/* Leaders block — top players by category */}
       {hasLeaders && (
-        <div className="px-4 py-3.5 border-t border-hairline">
+        <div className="px-5 py-3.5 border-t border-hairline">
           <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-2.5">
             Team leaders
           </div>
@@ -398,7 +395,7 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
 
       {/* Roster — full team list (USAU club/college); scrollable so it stays contained in the card */}
       {hasRoster && (
-        <div className="px-4 py-3.5 border-t border-hairline">
+        <div className="px-5 py-3.5 border-t border-hairline">
           <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-2.5">
             Roster · {roster.length}
           </div>
@@ -412,7 +409,7 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
 
       {/* No stats/leaders/form/record/rankContext/roster/accolades (WFDF): keep the card whole */}
       {hasNothingElse && (
-        <div className="px-4 py-3 border-t border-hairline">
+        <div className="px-5 py-3 border-t border-hairline">
           <span className="text-[11.5px] text-faint font-tight">No season data yet.</span>
         </div>
       )}
@@ -434,8 +431,8 @@ function FormPips({ form }: { form: Array<'W' | 'L'> }) {
           key={i}
           aria-hidden="true"
           className={[
-            'inline-flex items-center justify-center w-[18px] h-[18px] rounded-[3px] text-[9px] font-bold font-mono',
-            r === 'W' ? 'bg-accent text-accent-ink' : 'bg-surface-hi text-faint border border-border',
+            'inline-flex items-center justify-center w-[18px] h-[18px] rounded-[5px] text-[9px] font-bold font-mono',
+            r === 'W' ? 'bg-accent text-accent-ink' : 'bg-ink/[0.08] text-faint',
           ].join(' ')}
         >
           {r}
@@ -475,7 +472,7 @@ function LeaderRow({ leader }: { leader: TeamLeader }) {
     return (
       <Link
         href={`/players/${leader.playerId}?from=${leader.league}`}
-        className="group flex items-center gap-2 rounded-md -mx-1.5 px-1.5 py-1 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="group flex items-center gap-2 rounded-card-sm -mx-1.5 px-1.5 py-1 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         {inner}
       </Link>
@@ -489,7 +486,7 @@ function AccoladeChip({ accolade }: { accolade: { placement: number; event: stri
   const isMedal = accolade.placement <= 3;
   const yr = String(accolade.season).slice(-2);
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface-hi px-2.5 py-1 max-w-full">
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-ink/5 px-2.5 py-1 max-w-full">
       <span
         className={[
           'font-display font-bold text-[13px] leading-none tabular shrink-0',
@@ -569,7 +566,7 @@ function FeedGameTile({ game }: { game: FeedGame }) {
   const homeWin = isFinal && game.home.score !== null && game.away.score !== null && game.home.score > game.away.score;
 
   return (
-    <div className="bg-surface border border-border px-4 py-3.5 flex flex-col gap-2.5">
+    <div className="bg-surface rounded-card shadow-card px-4 py-3.5 flex flex-col gap-2.5">
       <div className="flex justify-between items-center font-mono text-[10.5px] text-muted tracking-[0.06em]">
         <span className="inline-flex items-center gap-1.5">
           {status}
@@ -578,11 +575,8 @@ function FeedGameTile({ game }: { game: FeedGame }) {
           </span>
         </span>
         {isLive && (
-          <span className="inline-flex items-center gap-1.5 font-bold" style={{ color: 'rgb(var(--live))' }}>
-            <span
-              className="w-[7px] h-[7px] rounded-full"
-              style={{ backgroundColor: 'rgb(var(--live))', boxShadow: '0 0 0 3px rgb(var(--live) / 0.2)' }}
-            />
+          <span className="inline-flex items-center gap-1.5 font-bold text-live">
+            <span className="w-[7px] h-[7px] rounded-full bg-live shadow-[0_0_0_3px_rgb(var(--live)/0.2)]" />
             LIVE
           </span>
         )}
@@ -610,7 +604,7 @@ function FeedTeamRow({
   league: FavoriteLeague;
 }) {
   return (
-    <div className="flex items-center justify-between transition-opacity" style={{ opacity: loser ? 0.55 : 1 }}>
+    <div className={['flex items-center justify-between transition-opacity', loser ? 'opacity-55' : 'opacity-100'].join(' ')}>
       <span className="inline-flex items-center gap-2 min-w-0">
         <SearchResultIcon
           result={{ kind: 'team', id: side.teamId, name: side.name, hint: null, league, logoUrl: side.logoUrl }}
@@ -679,7 +673,7 @@ function TournamentRow({ tournament: t }: { tournament: FeedTournament }) {
     <li>
       <Link
         href={`/usau/events/${t.slug}`}
-        className="group flex items-center gap-3 px-4 py-3 rounded-md border border-border bg-surface hover:border-ink transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="group flex items-center gap-3 px-4 py-3 rounded-card bg-surface shadow-card hover:shadow-lift transition-shadow cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         <span className="flex-1 min-w-0">
           <span className="block text-[13px] font-semibold text-ink font-tight truncate group-hover:text-accent transition-colors">

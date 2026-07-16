@@ -66,7 +66,7 @@ export default async function UsauTeamPage({ params }: Props) {
         { label: team.name },
       ]}
     >
-      <div className="mb-8 rounded-xl border border-border bg-surface overflow-hidden">
+      <div className="mb-8 rounded-card-lg shadow-card bg-surface overflow-hidden">
         {/* Identity + stats row. The big page title above carries the team
             name; here the logo anchors the card and the stats sit opposite. */}
         <div className="flex items-center gap-4 p-4 lg:p-5">
@@ -96,7 +96,7 @@ export default async function UsauTeamPage({ params }: Props) {
         {/* Honors row — only when the team has medals. Sits in its own tinted
             band with a divider so it reads as a distinct trophy shelf. */}
         {medals.length > 0 && (
-          <div className="border-t border-hairline bg-bg/40 px-4 py-3.5 lg:px-5">
+          <div className="border-t border-hairline bg-bg px-4 py-3.5 lg:px-5">
             <TeamMedals medals={medals} heading="National Championships" showPlace />
           </div>
         )}

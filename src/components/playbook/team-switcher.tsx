@@ -50,8 +50,8 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
             current ? `Current team: ${current.name}. Click to switch.` : 'Personal scope. Click to switch.'
           }
           className={[
-            'list-none cursor-pointer flex items-center gap-2 px-2 py-2 rounded-md',
-            'border border-border bg-surface hover:border-ink transition-colors',
+            'list-none cursor-pointer flex items-center gap-2 px-2 py-2 rounded-full',
+            'bg-ink/5 hover:bg-ink/10 transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           ].join(' ')}
         >
@@ -70,7 +70,7 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
         <div
           className={[
             'absolute left-0 right-0 top-full mt-1 z-30',
-            'border border-border bg-bg shadow-lg rounded-md p-1.5',
+            'bg-surface rounded-card shadow-lift p-1.5',
             'flex flex-col gap-1.5 max-h-[60vh] overflow-y-auto',
           ].join(' ')}
         >
@@ -106,7 +106,7 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
 
           <Link
             href="/playbook/teams"
-            className="flex items-center justify-between gap-2 px-2 py-2 rounded-md hover:bg-surface transition-colors text-[11px] font-bold tracking-[0.14em] uppercase text-ink font-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="flex items-center justify-between gap-2 px-2 py-2 rounded-full hover:bg-ink/5 transition-colors text-[11px] font-bold tracking-[0.14em] uppercase text-ink font-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Manage teams
             <ArrowIcon />
@@ -128,9 +128,9 @@ function PersonalRow({ active, onSelect }: { active: boolean; onSelect: () => vo
         if (det) det.open = false;
       }}
       className={[
-        'flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer transition-colors',
+        'flex items-center gap-2 px-2 py-1.5 rounded-full text-left cursor-pointer transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        active ? 'bg-surface' : 'hover:bg-surface',
+        active ? 'bg-ink/5' : 'hover:bg-ink/5',
       ].join(' ')}
     >
       <PersonalDot />
@@ -180,9 +180,9 @@ function TeamGroup({
               if (det) det.open = false;
             }}
             className={[
-              'flex items-center gap-2 px-2 py-1.5 rounded-md text-left cursor-pointer transition-colors',
+              'flex items-center gap-2 px-2 py-1.5 rounded-full text-left cursor-pointer transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              active ? 'bg-surface' : 'hover:bg-surface',
+              active ? 'bg-ink/5' : 'hover:bg-ink/5',
             ].join(' ')}
           >
             <TeamDot team={t} />
@@ -210,7 +210,7 @@ function TeamDot({ team }: { team: Team }) {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0 text-[10px] font-bold tracking-[0.04em] text-white"
+      className="inline-flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 text-[10px] font-bold tracking-[0.04em] text-white"
       style={{ background: team.color }}
     >
       {team.shortName}
@@ -224,7 +224,7 @@ function PersonalDot() {
   return (
     <span
       aria-hidden="true"
-      className="inline-flex items-center justify-center w-7 h-7 rounded-md flex-shrink-0 bg-ink text-bg"
+      className="inline-flex items-center justify-center w-7 h-7 rounded-full flex-shrink-0 bg-ink text-bg"
     >
       <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />

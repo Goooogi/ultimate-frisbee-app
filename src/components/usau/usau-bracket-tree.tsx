@@ -19,6 +19,7 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
+import { formatGameTime } from '@/lib/usau/venue-tz';
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -29,6 +30,9 @@ interface Props {
    *  bye seeds explicitly); the bracket tree itself derives everything
    *  from the games array. */
   teams: Team[];
+  /** The event's US state — game times are shown as the VENUE's wall clock
+   *  (scheduled_at is a true UTC instant; see lib/usau/venue-tz). */
+  venueState?: string | null;
 }
 
 interface RoundColumn {
@@ -48,15 +52,15 @@ const ROW_PITCH_PX = 104;
  *  Place" → "GM Women"); '' when unprefixed. Combined masters championships
  *  run several INDEPENDENT championship brackets in one event (Masters /
  *  GM / GGM per gender) — the prefix is the only reliable way to tell a GM
- *  Women game from a GGM Women game (GGM teams share the GRAND_MASTERS
- *  level tag, so team-level filtering can't separate them). */
+ *  Women game from a GGM Women game within the games already loaded for the
+ *  combined event. */
 export function bracketGroupPrefix(name: string | null | undefined): string {
   if (!name) return '';
   const i = name.lastIndexOf('·');
   return i >= 0 ? name.slice(0, i).trim() : '';
 }
 
-export function UsauBracketTree({ games }: Props) {
+export function UsauBracketTree({ games, venueState }: Props) {
   // ── Pull championship-bracket games, split by group prefix ─────────────
   // One tree per independent championship bracket. Single-group events
   // (nearly all) render exactly as before; combined masters championships
@@ -91,6 +95,7 @@ export function UsauBracketTree({ games }: Props) {
             key={group.label || 'main'}
             games={group.games}
             label={groups.length > 1 ? group.label : null}
+            venueState={venueState ?? null}
           />
         ))}
       </div>
@@ -98,7 +103,15 @@ export function UsauBracketTree({ games }: Props) {
   );
 }
 
-function BracketTreeGroup({ games, label }: { games: Game[]; label: string | null }) {
+function BracketTreeGroup({
+  games,
+  label,
+  venueState,
+}: {
+  games: Game[];
+  label: string | null;
+  venueState: string | null;
+}) {
   // ── Split into round columns + assign vertical positions ───────────────
   const columns = useMemo(() => buildColumns(games), [games]);
   const positions = useMemo(() => assignPositions(columns), [columns]);
@@ -129,7 +142,7 @@ function BracketTreeGroup({ games, label }: { games: Game[]; label: string | nul
                 </div>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {col.games.map((g) => (
-                    <MatchCard key={g.id} game={g} compact />
+                    <MatchCard key={g.id} game={g} venueState={venueState} compact />
                   ))}
                 </ul>
               </div>
@@ -139,7 +152,7 @@ function BracketTreeGroup({ games, label }: { games: Game[]; label: string | nul
 
       {/* Desktop: horizontal columns with absolute-positioned cards */}
       <div className="hidden lg:block overflow-x-auto pb-2">
-        <DesktopBracket columns={columns} positions={positions} />
+        <DesktopBracket columns={columns} positions={positions} venueState={venueState} />
       </div>
     </div>
   );
@@ -150,15 +163,24 @@ function BracketTreeGroup({ games, label }: { games: Game[]; label: string | nul
 function DesktopBracket({
   columns,
   positions,
+  venueState,
 }: {
   columns: RoundColumn[];
   positions: Map<string, number>;
+  venueState: string | null;
 }) {
   // Determine total height needed: the tallest column sets the pitch count
   // (small regionals brackets are just 2 semis + a final — don't reserve
   // four rows of blank space for those). 32 covers the round-label row.
   const baseCount = Math.max(0, ...columns.map((c) => c.games.length));
-  const totalHeight = Math.max(baseCount, 2) * ROW_PITCH_PX + 32;
+  // A de-overlap pass can push a later-round card below the base-column count
+  // (two collided semis get spread to 156/260 while the QF column ends at 312),
+  // so also honor the lowest positioned card + one card-height so nothing clips.
+  const maxTop = Math.max(0, ...Array.from(positions.values()));
+  const totalHeight = Math.max(
+    Math.max(baseCount, 2) * ROW_PITCH_PX,
+    maxTop + ROW_PITCH_PX,
+  ) + 32;
 
   // Column count drives grid template.
   const renderedColumns = columns.filter((c) => c.games.length > 0);
@@ -184,7 +206,7 @@ function DesktopBracket({
                 className="absolute left-0 right-0"
                 style={{ top: `${top + 32}px` }}
               >
-                <MatchCard game={g} />
+                <MatchCard game={g} venueState={venueState} />
               </div>
             );
           })}
@@ -196,7 +218,15 @@ function DesktopBracket({
 
 // ── Match card ────────────────────────────────────────────────────────────
 
-function MatchCard({ game, compact = false }: { game: Game; compact?: boolean }) {
+function MatchCard({
+  game,
+  venueState,
+  compact = false,
+}: {
+  game: Game;
+  venueState: string | null;
+  compact?: boolean;
+}) {
   const aWon =
     game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const bWon =
@@ -206,16 +236,14 @@ function MatchCard({ game, compact = false }: { game: Game; compact?: boolean })
   return (
     <article
       className={[
-        'bg-surface border rounded-md overflow-hidden',
-        tone === 'live'
-          ? 'border-accent shadow-[0_0_0_3px_rgba(255,61,0,0.08)]'
-          : 'border-border',
+        'bg-surface rounded-card-sm overflow-hidden transition-shadow',
+        tone === 'live' ? 'shadow-lift ring-1 ring-accent/40' : 'shadow-card',
       ].join(' ')}
     >
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
         <StatusPill tone={tone} label={statusLabel(game)} />
         <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular">
-          {gameTime(game)}
+          {formatGameTime(game.scheduledAt, venueState)}
         </span>
       </div>
       <TeamLine
@@ -334,22 +362,6 @@ function statusLabel(game: Game): string {
   return 'Upcoming';
 }
 
-function gameTime(game: Game): string {
-  if (!game.scheduledAt) return '';
-  const d = new Date(game.scheduledAt);
-  // scheduled_at stores the VENUE-LOCAL clock time with a Z suffix (neither
-  // USAU nor ultirzr exposes a timezone, so ingest can't do better). Format
-  // in UTC to display that clock time as-is; converting to the viewer's zone
-  // would shift a 9:45 AM game to 3:45 AM. No zone label — we don't know it.
-  return d.toLocaleString('en-US', {
-    weekday: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'UTC',
-  });
-}
-
-
 // ── Helpers: filter, columns, position assignment ────────────────────────
 
 /**
@@ -370,12 +382,23 @@ function gameTime(game: Game): string {
  */
 export function isChampionshipBracket(g: Game): boolean {
   const raw = g.bracketName ?? '';
-  const b = raw.trim().toLowerCase();
+  // Combined masters events prefix every bracket with a group ("Masters Mixed ·
+  // Bracket Play"). Match on the TAIL after the last "·" so the exact-match
+  // rules below ("bracket play", "championship", …) still fire — otherwise a
+  // group-prefixed first-place bracket reads as unrecognized and its winner
+  // never surfaces as champion.
+  const lastDot = raw.lastIndexOf('·');
+  const tail = lastDot >= 0 ? raw.slice(lastDot + 1) : raw;
+  const b = tail.trim().toLowerCase();
 
   if (!b && ['quarter', 'semi', 'final'].includes(g.round)) return true;
   if (!b) return false;
 
-  if (b.includes('1st place') || b.includes('first place')) return true;
+  // Word-boundary the "1st place" / "first place" check — a naive substring
+  // match also fires on "2**1st place**" / "3**1st place**", which pulled
+  // Heavyweights' "21st/31st Place" side brackets into the championship tree and
+  // overlapped the real semifinals. The \b before "1" fails inside "21".
+  if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
 
   // Allow "Championship", "Championship Bracket", "Championship Final",
   // "National Championship", "Sectional Championship", "Regional
@@ -491,6 +514,22 @@ function assignPositions(columns: RoundColumn[]): Map<string, number> {
     col.games.sort(
       (a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0),
     );
+
+    // De-overlap: two games in the same column can resolve to the SAME
+    // midpoint and paint on top of each other (e.g. Heavyweights' two men's
+    // semis both averaged to the column center because the QF column is
+    // seed-ordered 1,2,3,4 — interleaving the two bracket halves — so each
+    // semi straddled the full column and both midpoints collapsed to 156px).
+    // Walk the now-sorted column top→down and push any card that sits closer
+    // than one row-pitch below its predecessor down to clear it. This keeps
+    // the tree readable regardless of how the base column was ordered.
+    for (let i = 1; i < col.games.length; i++) {
+      const prevTop = positions.get(col.games[i - 1].id) ?? 0;
+      const curTop = positions.get(col.games[i].id) ?? 0;
+      const minTop = prevTop + ROW_PITCH_PX;
+      if (curTop < minTop) positions.set(col.games[i].id, minTop);
+    }
+
     prevCol = col;
   }
 

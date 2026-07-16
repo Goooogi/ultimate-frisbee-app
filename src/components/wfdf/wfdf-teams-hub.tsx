@@ -86,8 +86,8 @@ export function WfdfTeamsHub({ teams }: Props) {
                   key={t.id}
                   href={`/wfdf/teams/${t.id}`}
                   className={[
-                    'flex items-center gap-3 rounded-lg border border-border bg-surface px-3 py-2.5',
-                    'no-underline hover:border-ink transition-colors duration-150',
+                    'flex items-center gap-3 bg-surface rounded-card px-3 py-2.5',
+                    'shadow-card no-underline transition-shadow hover:shadow-lift cursor-pointer',
                     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                   ].join(' ')}
                 >
@@ -145,7 +145,7 @@ export function SearchBox({
   return (
     <div className="flex items-center gap-3">
       <div className="relative flex-1">
-        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-faint pointer-events-none">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-faint pointer-events-none">
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
             <path d="M11 11L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -157,9 +157,9 @@ export function SearchBox({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           className={[
-            'w-full h-11 pl-9 pr-3 rounded-lg border border-border bg-surface',
+            'w-full h-11 pl-10 pr-4 rounded-full bg-surface shadow-soft',
             'text-[14px] font-tight text-ink placeholder:text-faint',
-            'focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent',
+            'focus:outline-none focus:ring-2 focus:ring-accent',
           ].join(' ')}
         />
       </div>
@@ -172,7 +172,7 @@ export function SearchBox({
 
 export function EmptyState({ query }: { query: string }) {
   return (
-    <div className="rounded-lg border border-border bg-surface p-10 text-center">
+    <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
       <p className="text-muted font-tight text-[14px]">
         {query ? `No matches for “${query}”.` : 'Nothing here yet.'}
       </p>

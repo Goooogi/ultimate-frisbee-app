@@ -80,6 +80,14 @@ function normName(s: string): string {
 const DIVISION_RE =
   /(Great Grand Master (?:Mixed|Open|Women'?s)|Grand Master (?:Mixed|Open|Women'?s)|Master (?:Mixed|Open|Women'?s)|Mixed|Open|Women'?s|Men)/;
 
+// WFDF Worlds events (WUC/WUGC) also run the GUTS discipline — a different sport,
+// NOT ultimate. Guts teams are named "<Country> Guts <Division>". We exclude Guts
+// by TEAM NAME (in parseGames + parseTeams), not by section header: the source
+// HTML sometimes files real ultimate games under a "Guts …" header, so a
+// header-based skip would wrongly drop them. Word-boundary + case-insensitive so
+// a real ultimate team can't false-positive.
+const GUTS_SECTION_RE = /\bguts\b/i;
+
 function classifyRound(label: string): { pool: string | null; bracket: boolean } {
   const l = label.toLowerCase();
   if (/pool\s+[a-z]/.test(l)) {
@@ -119,10 +127,16 @@ export function parseTeams(html: string): LegacyTeam[] {
     const id = Number(link[1]);
     if (seen.has(id)) continue;
     seen.add(id);
+    const name = decode(link[2]);
+    // Skip Guts teams (a non-ultimate discipline at WFDF Worlds). Their names are
+    // "<Country> Guts <Division>", so a word-boundary "Guts" match is exact and
+    // won't clip a real ultimate team. This keeps them out of wfdf_teams even
+    // though view=teams lists every team alphabetically.
+    if (GUTS_SECTION_RE.test(name)) continue;
     const cells = cellsOf(r);
     // cells: [team_name, country, "Roster Scoreboard Games"]
     const country = cells.length >= 2 ? cells[1] : null;
-    out.push({ wfdfTeamId: id, name: decode(link[2]), country: country || null });
+    out.push({ wfdfTeamId: id, name, country: country || null });
   }
   return out;
 }
@@ -174,6 +188,13 @@ export function parseGames(html: string): LegacyGame[] {
       if (cells[i + 2] === '-' && a !== null && b !== null) {
         const home = cells[i];
         const away = cells[i + 4] ?? '';
+        // Guts is a different sport (not ultimate). Its teams are named
+        // "<Country> Guts <Division>", so drop any game where a team name carries
+        // the Guts marker. We filter on the TEAM NAMES, not the section header:
+        // WFDF's HTML sometimes files real ultimate games (e.g. "Australia Open")
+        // under a "Guts Women's" header, and those must be KEPT. Team-name
+        // filtering removes exactly the Guts matchups and nothing else.
+        if (GUTS_SECTION_RE.test(home) || GUTS_SECTION_RE.test(away)) break;
         if (home && away && !/^\d+$/.test(home) && !/^\d+$/.test(away)) {
           games.push({
             division,

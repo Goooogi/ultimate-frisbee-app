@@ -34,14 +34,14 @@ export function Pagination({ page, total, limit }: PaginationProps) {
 
   const btnBase = [
     'inline-flex items-center justify-center',
-    'px-3 py-[6px] rounded-full',
+    'px-3.5 py-[7px] rounded-full min-h-[36px]',
     'text-[11px] font-bold tracking-[0.12em] uppercase font-tight',
-    'border transition-colors duration-150',
+    'transition-colors duration-150',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
   ].join(' ');
 
-  const activeBtn = 'bg-surface border-border text-ink hover:border-ink cursor-pointer';
-  const disabledBtn = 'bg-transparent border-hairline text-faint cursor-not-allowed';
+  const activeBtn = 'bg-ink/5 text-ink hover:bg-ink hover:text-bg cursor-pointer';
+  const disabledBtn = 'bg-transparent text-faint cursor-not-allowed';
 
   return (
     <div className="flex items-center justify-between mt-6">

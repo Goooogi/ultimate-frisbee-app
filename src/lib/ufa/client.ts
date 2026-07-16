@@ -220,13 +220,41 @@ export async function getPlayerInfo(playerID: string): Promise<UfaPlayerInfo | n
 
   const nameMatch = html.match(/audl-player-display-name"[^>]*>\s*([^<]+?)\s*</);
   const teamMatch = html.match(/audl-player-current-team-position"[^>]*>\s*([^<]+?)\s*</);
+  // Headshot lives on this same page as
+  //   <img ... src=".../profile-images/{id}_profile.{ext}">  (ext varies)
+  // ~90% of players have one; null when absent.
+  const headshotMatch = html.match(/src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i);
 
   if (!nameMatch) return null;
   return {
     playerID,
     name: nameMatch[1].trim(),
     currentTeam: teamMatch ? teamMatch[1].trim() : null,
+    headshotUrl: headshotMatch ? headshotMatch[1] : null,
   };
+}
+
+/**
+ * The player's SELF-HOSTED headshot URL from our ufa_players table (a Supabase
+ * Storage object we serve through the image transform). Preferred over the live
+ * watchufa scrape in getPlayerInfo — it's fast, cached, and won't 404 if
+ * watchufa changes. Returns null when we have no headshot for the player (UI
+ * falls back to a monogram); callers may then fall back to the live scrape.
+ */
+export async function getStoredHeadshotUrl(playerID: string): Promise<string | null> {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const { supabaseUrl, supabaseAnonKey } = await import('@/lib/supabase/env');
+    const db = createClient(supabaseUrl(), supabaseAnonKey(), { auth: { persistSession: false } });
+    const { data } = await db
+      .from('ufa_players')
+      .select('headshot_url')
+      .eq('id', playerID)
+      .maybeSingle();
+    return (data?.headshot_url as string | null) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Team stats ───────────────────────────────────────────────────────────────

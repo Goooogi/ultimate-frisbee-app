@@ -23,7 +23,14 @@
 
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
 
-const FLAGSHIP_LEVELS = ['CLUB', 'COLLEGE_D1', 'COLLEGE_D3', 'MASTERS', 'GRAND_MASTERS'];
+const FLAGSHIP_LEVELS = [
+  'CLUB',
+  'COLLEGE_D1',
+  'COLLEGE_D3',
+  'MASTERS',
+  'GRAND_MASTERS',
+  'GREAT_GRAND_MASTERS',
+];
 
 // How long to wait for a child invocation to be ACCEPTED before moving on. We
 // are NOT waiting for the child's ~90s of work — only for the functions gateway

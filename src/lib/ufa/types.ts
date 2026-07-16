@@ -173,6 +173,7 @@ export interface UfaPlayerInfo {
   playerID: string;
   name: string;
   currentTeam: string | null;  // free-text from watchufa, e.g. "Atlanta Hustle"; null if not extracted
+  headshotUrl: string | null;  // watchufa profile headshot; null when the player has none (~10%)
 }
 
 // ── Per-game endpoints ───────────────────────────────────────────────────────

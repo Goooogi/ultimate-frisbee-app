@@ -13,7 +13,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
-import { flightForName, type Flight } from '@/lib/usau/flights';
+import { flightForName, FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 
@@ -98,6 +98,15 @@ export interface UsauEventCard {
   url: string | null;
   /** Curated Triple Crown Tour flight, or null if unclassified. See flights.ts. */
   flight: Flight | null;
+  /**
+   * The event's decided winner for the card, or null if undecided/in-progress.
+   * `champion` = won the championship-bracket final; `pool-leader` = the unique
+   * best pool record when the event is pool-play-only (no bracket final). A
+   * combined masters event can crown several divisions — we surface the single
+   * most-recent championship final so the card stays one line; the detail page
+   * shows every division's banner.
+   */
+  winner: { name: string; kind: 'champion' | 'pool-leader' } | null;
 }
 
 export type CompetitionLevel =
@@ -109,10 +118,159 @@ export type CompetitionLevel =
   | 'YC'
   | 'MASTERS'
   | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS'
   | 'BEACH'
   | 'OTHER';
 
 /** All scraped USAU events, newest first. */
+/** Bracket-name tail after the group prefix ("Masters Mixed · 1st Place" →
+ *  "1st place"), lowercased. Combined masters events prefix every bracket. */
+function bracketTailLower(name: string | null | undefined): string {
+  if (!name) return '';
+  const i = name.lastIndexOf('·');
+  return (i >= 0 ? name.slice(i + 1) : name).trim().toLowerCase();
+}
+
+/** Is this the CHAMPIONSHIP (gold-medal) bracket — not a placement side bracket?
+ *  Server-side twin of usau-bracket-tree's isChampionshipBracket, kept in sync:
+ *  accepts 1st/first-place/championship/finals/bracket-play, rejects anything
+ *  carrying an ordinal ≥ the bare number (so "3rd Place" / "5th Place Bracket"
+ *  never crown a champion) plus consolation/placement. */
+function isChampionshipBracketName(name: string | null | undefined): boolean {
+  const b = bracketTailLower(name);
+  if (!b) return false;
+  if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
+  // Reject placement side brackets (any ordinal) + consolation.
+  if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
+  if (b.includes('consolation') || b.includes('placement')) return false;
+  if (b === 'finals') return true;
+  if (/(^|\s)championship(\s+(bracket|final|game))?$/.test(b)) return true;
+  if (b === 'bracket' || b === 'bracket play' || b === 'sunday bracket') return true;
+  return false;
+}
+
+/**
+ * Resolve each event's card "winner": the championship-final winner, or (for a
+ * pool-play-only event) the unique best pool record. Batched across all listed
+ * events in two queries — one for `round='final'` games (bracket champions),
+ * then a pool tally ONLY for events left without a champion (bounds the cost).
+ * Returns Map<eventId, { name, kind }>; events with no decided winner are absent.
+ */
+async function resolveEventWinners(
+  db: Awaited<ReturnType<typeof supabase>>,
+  eventIds: string[],
+): Promise<Map<string, { name: string; kind: 'champion' | 'pool-leader' }>> {
+  const out = new Map<string, { name: string; kind: 'champion' | 'pool-leader' }>();
+  if (eventIds.length === 0) return out;
+
+  // ── Bracket champions: latest decided championship final per event ──────
+  const { data: finals } = await db
+    .from('usau_games')
+    .select(
+      'event_id, bracket_name, scheduled_at, score_a, score_b, ' +
+        'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
+        'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
+    )
+    .in('event_id', eventIds)
+    .eq('round', 'final')
+    .eq('status', 'final');
+
+  type FinalRow = {
+    event_id: string;
+    bracket_name: string | null;
+    scheduled_at: string | null;
+    score_a: number | null;
+    score_b: number | null;
+    team_a: { name: string } | null;
+    team_b: { name: string } | null;
+  };
+  const bestFinalAt = new Map<string, string>();
+  for (const r of (finals ?? []) as unknown as FinalRow[]) {
+    if (!isChampionshipBracketName(r.bracket_name)) continue;
+    if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
+    const winnerName = (r.score_a > r.score_b ? r.team_a?.name : r.team_b?.name) ?? null;
+    if (!winnerName) continue;
+    // Keep the LATEST final per event (a combined event has one per division;
+    // one line on the card — detail page shows all).
+    const at = r.scheduled_at ?? '';
+    const prev = bestFinalAt.get(r.event_id);
+    if (prev == null || at > prev) {
+      bestFinalAt.set(r.event_id, at);
+      out.set(r.event_id, { name: winnerName, kind: 'champion' });
+    }
+  }
+
+  // ── Pool leaders: only for events with NO bracket champion ──────────────
+  const poolOnly = eventIds.filter((id) => !out.has(id));
+  if (poolOnly.length > 0) {
+    const { data: poolRows } = await db
+      .from('usau_games')
+      .select(
+        'event_id, bracket_name, score_a, score_b, status, ' +
+          'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
+          'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
+      )
+      .in('event_id', poolOnly)
+      .eq('status', 'final');
+
+    type PoolRow = {
+      event_id: string;
+      bracket_name: string | null;
+      score_a: number | null;
+      score_b: number | null;
+      team_a: { name: string } | null;
+      team_b: { name: string } | null;
+    };
+    // Per event: normalized-name W/L, deduped by matchup+score (dual-pipeline).
+    const perEvent = new Map<
+      string,
+      { rec: Map<string, { name: string; w: number; l: number }>; seen: Set<string> }
+    >();
+    for (const r of (poolRows ?? []) as unknown as PoolRow[]) {
+      const tail = bracketTailLower(r.bracket_name);
+      if (!tail.startsWith('pool') || tail.includes('crossover')) continue;
+      if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
+      const an = r.team_a?.name?.trim();
+      const bn = r.team_b?.name?.trim();
+      if (!an || !bn) continue;
+      let e = perEvent.get(r.event_id);
+      if (!e) {
+        e = { rec: new Map(), seen: new Set() };
+        perEvent.set(r.event_id, e);
+      }
+      const ka = an.toLowerCase();
+      const kb = bn.toLowerCase();
+      const pair = [ka, kb].sort();
+      const sc = [r.score_a, r.score_b].sort((x, y) => x - y);
+      const gkey = `${pair[0]}|${pair[1]}|${sc[0]}|${sc[1]}`;
+      if (e.seen.has(gkey)) continue;
+      e.seen.add(gkey);
+      const aWon = r.score_a > r.score_b;
+      const wk = aWon ? ka : kb;
+      const lk = aWon ? kb : ka;
+      const wn = aWon ? an : bn;
+      const ln = aWon ? bn : an;
+      const rw = e.rec.get(wk) ?? { name: wn, w: 0, l: 0 };
+      rw.w += 1;
+      e.rec.set(wk, rw);
+      const rl = e.rec.get(lk) ?? { name: ln, w: 0, l: 0 };
+      rl.l += 1;
+      e.rec.set(lk, rl);
+    }
+    for (const [eventId, { rec }] of perEvent) {
+      const standings = Array.from(rec.values()).sort((a, b) => b.w - a.w || a.l - b.l);
+      if (standings.length === 0) continue;
+      const top = standings[0];
+      if (top.w === 0 && top.l === 0) continue; // no games played
+      const tied = standings.filter((s) => s.w === top.w && s.l === top.l).length;
+      if (tied > 1) continue; // ambiguous — no leader
+      out.set(eventId, { name: top.name, kind: 'pool-leader' });
+    }
+  }
+
+  return out;
+}
+
 export async function listEvents(opts?: {
   season?: number;
   competitionLevel?: CompetitionLevel;
@@ -121,19 +279,39 @@ export async function listEvents(opts?: {
    *  the division lives on the participating teams. We treat an event
    *  as "in the X division" if any of its teams.gender_division = X. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
-  /** Filter to events curated into this Triple Crown Tour flight (see flights.ts).
-   *  Flight is a hand-maintained code map, not a USAU-published tournament field. */
-  flight?: Flight;
+  /** Filter to events curated into these Triple Crown Tour flights (see
+   *  flights.ts). Flight is a hand-maintained code map, not a USAU-published
+   *  tournament field. Empty/undefined ⇒ all flights (no filter). Multiple ⇒
+   *  events matching ANY of them. */
+  flights?: Flight[];
   limit?: number;
 }): Promise<UsauEventCard[]> {
   const db = await supabase();
+
+  // For a masters-family level, also surface combined-championship events tagged
+  // with a sibling level that field this division (see MASTERS_FAMILY note). We
+  // resolve those event IDs first, then broaden the filter to "own level OR one
+  // of these IDs" instead of a strict server-side eq().
+  const mastersInclusionIds =
+    opts?.competitionLevel && isMastersFamily(opts.competitionLevel)
+      ? await eventIdsWithTeamLevel(db, opts.competitionLevel)
+      : null;
+
   let q = db
     .from('usau_events')
     .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level, url')
     .order('start_date', { ascending: false, nullsFirst: false })
     .order('name', { ascending: true });
   if (opts?.season != null) q = q.eq('season', opts.season);
-  if (opts?.competitionLevel) q = q.eq('competition_level', opts.competitionLevel);
+  if (opts?.competitionLevel) {
+    if (mastersInclusionIds && mastersInclusionIds.size > 0) {
+      // own level OR any event that fields this division
+      const idList = Array.from(mastersInclusionIds).join(',');
+      q = q.or(`competition_level.eq.${opts.competitionLevel},id.in.(${idList})`);
+    } else {
+      q = q.eq('competition_level', opts.competitionLevel);
+    }
+  }
   if (opts?.limit) q = q.limit(opts.limit);
   const { data: events, error } = await q;
   if (error) throw error;
@@ -162,14 +340,23 @@ export async function listEvents(opts?: {
     }
   }
 
+  const flightSet = opts?.flights && opts.flights.length > 0 ? new Set(opts.flights) : null;
   const filtered = (events ?? []).filter((e) => {
     if (opts?.genderDivision) {
       const set = divisionsByEvent.get(e.id);
       if (!(set && set.has(opts.genderDivision))) return false;
     }
-    if (opts?.flight && flightForName(e.name) !== opts.flight) return false;
+    if (flightSet) {
+      const f = flightForName(e.name);
+      if (!f || !flightSet.has(f)) return false;
+    }
     return true;
   });
+
+  // Card winner (championship-final winner, or unique pool leader for pool-only
+  // events). Resolved over the FILTERED set so we don't fetch games for events
+  // that won't render.
+  const winners = await resolveEventWinners(db, filtered.map((e) => e.id));
 
   return filtered.map((e) => ({
     id: e.id,
@@ -184,6 +371,7 @@ export async function listEvents(opts?: {
     teamCount: countByEvent.get(e.id) ?? 0,
     url: e.url ?? null,
     flight: flightForName(e.name),
+    winner: winners.get(e.id) ?? null,
   }));
 }
 
@@ -223,7 +411,55 @@ const FLAGSHIP_LEVELS: CompetitionLevel[] = [
   'COLLEGE_D3',
   'MASTERS',
   'GRAND_MASTERS',
+  'GREAT_GRAND_MASTERS',
 ];
+
+// The masters family shares combined-championship events: the USA Ultimate
+// Masters Championships is ONE usau_events row (tagged with a single level,
+// e.g. GRAND_MASTERS) but hosts Masters, Grand Masters, AND Great Grand
+// Masters divisions — each team carries its own competition_level. So an event
+// list filtered by the event's own level would hide the combined championships
+// from the other two tabs even though those teams are present. For a
+// masters-family request we therefore include an event if EITHER its own level
+// matches OR it has a participating team at the requested level.
+const MASTERS_FAMILY: CompetitionLevel[] = [
+  'MASTERS',
+  'GRAND_MASTERS',
+  'GREAT_GRAND_MASTERS',
+];
+
+function isMastersFamily(level: CompetitionLevel): boolean {
+  return (MASTERS_FAMILY as string[]).includes(level);
+}
+
+/**
+ * Event IDs (from the given candidate set, or DB-wide when omitted) that have a
+ * participating team tagged with `level`. Used to surface combined-championship
+ * events under every masters-family tab whose division is actually present.
+ * Pages defensively past the PostgREST 1000-row cap.
+ */
+async function eventIdsWithTeamLevel(
+  db: Awaited<ReturnType<typeof supabase>>,
+  level: CompetitionLevel,
+  candidateIds?: string[],
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (candidateIds && candidateIds.length === 0) return out;
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    let q = db
+      .from('usau_event_teams')
+      .select('event_id, usau_teams!inner(competition_level)')
+      .eq('usau_teams.competition_level', level)
+      .range(from, from + PAGE - 1);
+    if (candidateIds) q = q.in('event_id', candidateIds);
+    const { data: page } = await q;
+    const rows = page ?? [];
+    for (const r of rows) out.add((r as { event_id: string }).event_id);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
 
 // Headline importance — higher wins when several events share a weekend. This
 // is a SUPERSET of the TCT flight tiers, because the true pinnacle events
@@ -307,13 +543,26 @@ export async function getCurrentEvent(opts?: {
     ? [opts.competitionLevel]
     : FLAGSHIP_LEVELS;
 
-  const { data: windowEvents } = await db
+  // Masters-family: also headline combined-championship events that field this
+  // division under a sibling tag (see MASTERS_FAMILY note).
+  const mastersInclusionIds =
+    opts?.competitionLevel && isMastersFamily(opts.competitionLevel)
+      ? await eventIdsWithTeamLevel(db, opts.competitionLevel)
+      : null;
+
+  let windowQ = db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date, competition_level')
-    .in('competition_level', levelFilter)
     .gte('start_date', windowBack)
     .lte('start_date', windowForward)
     .order('start_date', { ascending: true });
+  windowQ =
+    mastersInclusionIds && mastersInclusionIds.size > 0
+      ? windowQ.or(
+          `competition_level.eq.${opts!.competitionLevel},id.in.(${Array.from(mastersInclusionIds).join(',')})`,
+        )
+      : windowQ.in('competition_level', levelFilter);
+  const { data: windowEvents } = await windowQ;
 
   type EventRow = {
     id: string;
@@ -387,35 +636,64 @@ export async function getCurrentEvent(opts?: {
   // and event start/end dates are all compared as UTC calendar dates.
   const lookForward = now.getUTCDay() >= 3; // Wed(3) → Sat(6)
 
-  // An event is "upcoming" if it hasn't ended yet (today on or before end_date),
-  // "past" otherwise. Using end_date keeps a Fri–Sun event in the "this
-  // weekend" bucket through Sunday rather than flipping to past mid-tournament.
   const endOf = (e: EventRow) => e.end_date ?? e.start_date ?? '';
-  const isPast = (e: EventRow) => endOf(e) < today;
-  const isUpcomingOrNow = (e: EventRow) => endOf(e) >= today;
 
-  // "Highest-flight MOST RECENT": the nearest WEEKEND to now wins first, and
-  // flight only breaks ties AMONG same-weekend events. So last weekend's Pro
-  // Elite Challenge headlines over a 5-week-old College Championships, while a
-  // marquee event still out-headlines a co-scheduled local tournament.
-  // (Previously flight was the primary key, which wrongly surfaced an old
-  // pinnacle event over a much more recent one.) Events on the same weekend
-  // share a start_date, so start_date as the primary key groups them; flight is
-  // the secondary key within that group.
-  const byDateThenFlight = (recentFirst: boolean) => (a: EventRow, b: EventRow) => {
-    const dateCmp = recentFirst
-      ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
-      : (a.start_date ?? '').localeCompare(b.start_date ?? '');
-    if (dateCmp !== 0) return dateCmp;
-    return flightRankForName(b.name) - flightRankForName(a.name);
+  // Quantize a start date to its tournament WEEKEND (the Saturday of the
+  // Fri–Sun span) so co-scheduled events group together even when their
+  // start days differ (a Fri-start flagship vs a Sat-start local), letting
+  // flight break the tie within the weekend.
+  const weekendKey = (d: string | null): string => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt.getTime())) return d;
+    const dow = dt.getUTCDay();
+    // Sunday belongs to the weekend that began the day before; Thu/Fri (and
+    // rare mid-week starts) roll forward to the coming Saturday.
+    dt.setUTCDate(dt.getUTCDate() + (dow === 0 ? -1 : 6 - dow));
+    return dt.toISOString().slice(0, 10);
   };
 
-  const upcoming = events.filter(isUpcomingOrNow).sort(byDateThenFlight(false));
-  const past = events.filter(isPast).sort(byDateThenFlight(true));
+  // "Highest flight of the nearest WEEKEND": the closest weekend to now wins
+  // first, and flight only breaks ties among that weekend's events. So last
+  // weekend's Pro Elite Challenge headlines over a 5-week-old College
+  // Championships, while a marquee event still out-headlines a co-scheduled
+  // local tournament.
+  const byWeekendThenFlight = (recentFirst: boolean) => (a: EventRow, b: EventRow) => {
+    const wCmp = recentFirst
+      ? weekendKey(b.start_date).localeCompare(weekendKey(a.start_date))
+      : weekendKey(a.start_date).localeCompare(weekendKey(b.start_date));
+    if (wCmp !== 0) return wCmp;
+    const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
+    if (fCmp !== 0) return fCmp;
+    return recentFirst
+      ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
+      : (a.start_date ?? '').localeCompare(b.start_date ?? '');
+  };
+
+  // The preferred bucket differs by direction:
+  //   • Looking BACK (Sun–Tue): events that have STARTED (start_date ≤
+  //     today) — NOT events that have ENDED. "Last weekend's tournament"
+  //     must include one still finishing today: on the Sunday of a Sat–Sun
+  //     flagship, an ended-only bucket ranked a Saturday-only local
+  //     (Pioneer Valley Pool Party, ended 7/11) over the live Pro Elite
+  //     Challenge West (ends 7/12), because flight only breaks ties WITHIN
+  //     a bucket.
+  //   • Looking FORWARD (Wed–Sat): events that haven't finished (end ≥
+  //     today) — keeps a live Saturday tournament ahead of next weekend's
+  //     calendar entries.
+  const preferred = lookForward
+    ? events.filter((e) => endOf(e) >= today).sort(byWeekendThenFlight(false))
+    : events
+        .filter((e) => (e.start_date ?? '') !== '' && (e.start_date ?? '') <= today)
+        .sort(byWeekendThenFlight(true));
+  const preferredIds = new Set(preferred.map((e) => e.id));
+  const rest = events
+    .filter((e) => !preferredIds.has(e.id))
+    .sort(byWeekendThenFlight(!lookForward));
 
   // Preferred side first, then the other side as a graceful fallback (e.g. early
   // in a season there is no "last weekend"; at season's end no "next weekend").
-  const ordered = lookForward ? [...upcoming, ...past] : [...past, ...upcoming];
+  const ordered = [...preferred, ...rest];
 
   // Prefer an in-window event that actually has games. Only if NONE do (e.g. the
   // upcoming weekend's brackets aren't scraped yet) fall through to the best
@@ -431,12 +709,18 @@ export async function getCurrentEvent(opts?: {
 
   // Final fallback: most-recent flagship event with games anywhere in DB.
   // Apply the division filter via the team-participation join when set.
-  const { data: latest } = await db
+  let latestQ = db
     .from('usau_events')
     .select('id, usau_slug, start_date')
-    .in('competition_level', levelFilter)
     .order('start_date', { ascending: false, nullsFirst: false })
     .limit(80);
+  latestQ =
+    mastersInclusionIds && mastersInclusionIds.size > 0
+      ? latestQ.or(
+          `competition_level.eq.${opts!.competitionLevel},id.in.(${Array.from(mastersInclusionIds).join(',')})`,
+        )
+      : latestQ.in('competition_level', levelFilter);
+  const { data: latest } = await latestQ;
   for (const e of latest ?? []) {
     const { count } = await db
       .from('usau_games')
@@ -455,6 +739,226 @@ export async function getCurrentEvent(opts?: {
     return { slug: e.usau_slug, hasGames: true };
   }
   return null;
+}
+
+/**
+ * The next UPCOMING flagship event — for the home "Up next" card.
+ *
+ * getCurrentEvent() runs a look-back/look-forward weekend cadence tuned for the
+ * hero + "recent results" slots: Sun–Tue it deliberately returns LAST weekend's
+ * (now-finished) event. That's wrong for "Up next", which must always look
+ * FORWARD — otherwise the USAU "Up next" card vanishes for half of every week
+ * once last weekend's tournaments end.
+ *
+ * Only "flighted"-grade events qualify — the ones worth previewing: a recognized
+ * TCT flight (Pro/Elite/Select/Classic/Triple-Crown), a pinnacle championship,
+ * OR any Masters/College event (championships + regionals, which are the
+ * division equivalent of a flagship). Unclassified local CLUB tournaments (MOB
+ * Invite, Filling the Void, …) are skipped so the card jumps to the next event
+ * that actually matters (e.g. Select Flight Invite over a co-scheduled local).
+ *
+ * Among qualifying events it picks the NEAREST UPCOMING WEEKEND, and within it
+ * the HIGHEST FLIGHT. An event still in progress today counts as "upcoming"
+ * (end_date ≥ today) so a live Sat–Sun event stays in "Up next" through its
+ * final day. Returns the slug + hasGames, mirroring getCurrentEvent(); callers
+ * fetch the full event via getEvent().
+ */
+export async function getNextUpcomingEvent(opts?: {
+  genderDivision?: 'Men' | 'Women' | 'Mixed';
+  competitionLevel?: CompetitionLevel;
+}): Promise<{ slug: string; hasGames: boolean } | null> {
+  const db = await supabase();
+  const today = new Date().toISOString().slice(0, 10);
+  // Look ~120d ahead: far enough to always find the next flagship weekend even
+  // in a sparse stretch, tight enough to stay clear of the 1000-row cap.
+  const windowForward = new Date(Date.now() + 120 * 86400_000)
+    .toISOString()
+    .slice(0, 10);
+
+  const levelFilter = opts?.competitionLevel ? [opts.competitionLevel] : FLAGSHIP_LEVELS;
+
+  // Masters-family: also include combined-championship events fielding this
+  // division under a sibling tag (see MASTERS_FAMILY note).
+  const mastersInclusionIds =
+    opts?.competitionLevel && isMastersFamily(opts.competitionLevel)
+      ? await eventIdsWithTeamLevel(db, opts.competitionLevel)
+      : null;
+
+  // Upcoming = not yet ended (end_date ≥ today), so a live event stays here
+  // through its last day. Order soonest-first.
+  let upcomingQ = db
+    .from('usau_events')
+    .select('id, usau_slug, name, start_date, end_date, competition_level')
+    .gte('end_date', today)
+    .lte('start_date', windowForward)
+    .order('start_date', { ascending: true });
+  upcomingQ =
+    mastersInclusionIds && mastersInclusionIds.size > 0
+      ? upcomingQ.or(
+          `competition_level.eq.${opts!.competitionLevel},id.in.(${Array.from(mastersInclusionIds).join(',')})`,
+        )
+      : upcomingQ.in('competition_level', levelFilter);
+  const { data: rows } = await upcomingQ;
+
+  type Row = {
+    id: string;
+    usau_slug: string;
+    name: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    competition_level: string | null;
+  };
+  let events = (rows ?? []) as Row[];
+
+  // Keep only "flighted"-grade events. A plain CLUB tournament qualifies ONLY if
+  // it maps to a real TCT flight or is a pinnacle championship; Masters, Grand
+  // Masters, and College events always qualify (their championships + regionals
+  // are the division equivalent of a flagship). This drops unclassified local
+  // CLUB tournaments so "Up next" surfaces the next event that matters.
+  const isFlighted = (e: Row): boolean => {
+    if (e.competition_level !== 'CLUB') return true; // Masters/GM/College always
+    return flightForName(e.name) !== null || isPinnacleEventName(e.name);
+  };
+  events = events.filter(isFlighted);
+  if (events.length === 0) return null;
+
+  // Optional division filter: keep only events with a participating team in the
+  // requested gender division.
+  if (opts?.genderDivision) {
+    const ids = events.map((e) => e.id);
+    const withDiv = new Set<string>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_event_teams')
+        .select('event_id, usau_teams!inner(gender_division)')
+        .in('event_id', ids)
+        .eq('usau_teams.gender_division', opts.genderDivision)
+        .range(from, from + PAGE - 1);
+      const pageRows = page ?? [];
+      for (const r of pageRows) withDiv.add((r as { event_id: string }).event_id);
+      if (pageRows.length < PAGE) break;
+    }
+    events = events.filter((e) => withDiv.has(e.id));
+    if (events.length === 0) return null;
+  }
+
+  // Quantize each start to its tournament WEEKEND (the Saturday of the Fri–Sun
+  // span) so a Fri-start flagship and a Sat-start local on the same weekend
+  // group together — otherwise "earliest start_date" would isolate the Friday
+  // events and miss a higher-flight Saturday event on the same weekend.
+  const weekendKey = (d: string | null): string => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt.getTime())) return d;
+    const dow = dt.getUTCDay();
+    dt.setUTCDate(dt.getUTCDate() + (dow === 0 ? -1 : 6 - dow));
+    return dt.toISOString().slice(0, 10);
+  };
+
+  // Nearest upcoming weekend = the earliest weekend present. Restrict to that
+  // weekend's events, then pick the highest flight (Select > local), tie-broken
+  // by soonest start.
+  const nearestWeekendKey = events
+    .map((e) => weekendKey(e.start_date))
+    .filter(Boolean)
+    .sort()[0];
+  const nearestWeekend = events.filter((e) => weekendKey(e.start_date) === nearestWeekendKey);
+  nearestWeekend.sort((a, b) => {
+    const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
+    if (fCmp !== 0) return fCmp;
+    return (a.start_date ?? '').localeCompare(b.start_date ?? '');
+  });
+  const pick = nearestWeekend[0];
+
+  const { count } = await db
+    .from('usau_games')
+    .select('*', { count: 'exact', head: true })
+    .eq('event_id', pick.id);
+  return { slug: pick.usau_slug, hasGames: (count ?? 0) > 0 };
+}
+
+export interface UpcomingUsauEvent {
+  slug: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  /** TCT flight display label ("Pro Flight", "Select Flight", …) when the event
+   *  maps to one; null for pinnacle/Masters/College events (still listed). */
+  flightLabel: string | null;
+}
+
+/**
+ * The next N UPCOMING flighted USAU events — for the home "Up next" card, which
+ * lists several upcoming tournaments rather than one event's pool games.
+ *
+ * Same "flighted-grade" filter as getNextUpcomingEvent (a plain CLUB event needs
+ * a real TCT flight or pinnacle status; Masters/GM/College always qualify), so
+ * unclassified local tournaments are excluded. Ordered by tournament WEEKEND
+ * ascending (soonest first), and within a weekend by flight DESCENDING (the
+ * marquee event leads its weekend). An in-progress event (end_date ≥ today)
+ * still counts as upcoming so it stays listed through its final day.
+ */
+export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEvent[]> {
+  const db = await supabase();
+  const today = new Date().toISOString().slice(0, 10);
+  const windowForward = new Date(Date.now() + 120 * 86400_000).toISOString().slice(0, 10);
+
+  const { data: rows } = await db
+    .from('usau_events')
+    .select('id, usau_slug, name, start_date, end_date, competition_level')
+    .in('competition_level', FLAGSHIP_LEVELS)
+    .gte('end_date', today)
+    .lte('start_date', windowForward)
+    .order('start_date', { ascending: true });
+
+  type Row = {
+    id: string;
+    usau_slug: string;
+    name: string | null;
+    start_date: string | null;
+    end_date: string | null;
+    competition_level: string | null;
+  };
+  const events = ((rows ?? []) as Row[]).filter((e) =>
+    e.competition_level !== 'CLUB'
+      ? true
+      : flightForName(e.name) !== null || isPinnacleEventName(e.name),
+  );
+
+  // Quantize to the tournament weekend (Saturday of the Fri–Sun span) so a
+  // Fri-start flagship and a Sat-start event on the same weekend group together.
+  const weekendKey = (d: string | null): string => {
+    if (!d) return '';
+    const dt = new Date(d + 'T00:00:00Z');
+    if (isNaN(dt.getTime())) return d;
+    const dow = dt.getUTCDay();
+    dt.setUTCDate(dt.getUTCDate() + (dow === 0 ? -1 : 6 - dow));
+    return dt.toISOString().slice(0, 10);
+  };
+
+  // Sort: nearest weekend first; within a weekend, highest flight first, then
+  // soonest start, then name for stability.
+  events.sort((a, b) => {
+    const wk = weekendKey(a.start_date).localeCompare(weekendKey(b.start_date));
+    if (wk !== 0) return wk;
+    const fl = flightRankForName(b.name) - flightRankForName(a.name);
+    if (fl !== 0) return fl;
+    const st = (a.start_date ?? '').localeCompare(b.start_date ?? '');
+    if (st !== 0) return st;
+    return (a.name ?? '').localeCompare(b.name ?? '');
+  });
+
+  return events.slice(0, limit).map((e) => {
+    const flight = flightForName(e.name);
+    return {
+      slug: e.usau_slug,
+      name: e.name ?? e.usau_slug,
+      startDate: e.start_date,
+      endDate: e.end_date,
+      flightLabel: flight ? FLIGHT_LABELS[flight] : null,
+    };
+  });
 }
 
 /**
@@ -1060,6 +1564,10 @@ export async function recentUsauTournamentCards(
   now: Date = new Date(),
   limit = 200,
   competitionLevel: CompetitionLevel = 'CLUB',
+  /** Optional Triple Crown Tour flight filter (Club only) — mirrors /schedule.
+   *  Only events whose name maps to ONE OF these flights are returned. Empty ⇒
+   *  all flights. */
+  flights: Flight[] = [],
 ): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
   const today = now.toISOString().slice(0, 10);
@@ -1072,7 +1580,13 @@ export async function recentUsauTournamentCards(
   // year-round: in-season it reads the same as before, offseason it shows
   // the final tournaments of the season. The games inner-join keeps
   // result-less catalog shells from wasting one of the 10 slots.
+  // Show 10 recent events normally. When filtering to a single flight, fetch a
+  // wider candidate pool first (flight is a name-derived tag, not a column, so
+  // it's filtered in JS below) — otherwise a 10-event window that happens to
+  // contain few of the requested flight would show an almost-empty scores page.
   const RECENT_EVENT_COUNT = 10;
+  const hasFlightFilter = flights.length > 0;
+  const FETCH_COUNT = hasFlightFilter ? 120 : RECENT_EVENT_COUNT;
   const { data: events } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date, usau_games!inner(id)')
@@ -1080,18 +1594,30 @@ export async function recentUsauTournamentCards(
     .lt('end_date', today)
     .order('end_date', { ascending: false, nullsFirst: false })
     .limit(1, { foreignTable: 'usau_games' })
-    .limit(RECENT_EVENT_COUNT);
+    .limit(FETCH_COUNT);
 
   // ALL events at the level (not just ranked-flight flagships), ordered by
   // flight status below. Flight tags exist only on marquee events today, so
   // most sort to the bottom (no flight) — that's expected until more get tagged.
-  const recent = ((events ?? []) as Array<{
+  const allRecent = ((events ?? []) as Array<{
     id: string;
     usau_slug: string;
     name: string;
     start_date: string | null;
     end_date: string | null;
   }>);
+  // Apply the flight filter (name-derived) here, then cap to the display count.
+  // Without a flight, keep the original 10 most-recent. Multiple flights ⇒ match
+  // ANY of them.
+  const flightSet = hasFlightFilter ? new Set(flights) : null;
+  const recent = (
+    flightSet
+      ? allRecent.filter((e) => {
+          const f = flightForName(e.name);
+          return f != null && flightSet.has(f);
+        })
+      : allRecent
+  ).slice(0, RECENT_EVENT_COUNT);
   if (recent.length === 0) return [];
 
   const eventIds = recent.map((e) => e.id);
@@ -1212,14 +1738,18 @@ export async function recentUsauTournamentCards(
     });
   }
 
-  // Order by FLIGHT status first (highest flight at the top), then by recency
-  // (newest weekend first) as the tiebreak. Untagged events (no flight) fall to
-  // the bottom, most-recent-first among themselves.
-  results.sort(
-    (a, b) =>
-      flightRankForName(b.name) - flightRankForName(a.name) ||
-      (b.endDate ?? '').localeCompare(a.endDate ?? ''),
-  );
+  // Ordering:
+  //  - No flight filter → FLIGHT status first (marquee events float to the top),
+  //    then recency. Untagged events fall to the bottom, most-recent-first.
+  //  - Flight filter active → the user already chose the tier(s), so tier
+  //    ordering is noise. Order purely by DATE (newest weekend first).
+  results.sort((a, b) => {
+    if (!hasFlightFilter) {
+      const tier = flightRankForName(b.name) - flightRankForName(a.name);
+      if (tier !== 0) return tier;
+    }
+    return (b.endDate ?? '').localeCompare(a.endDate ?? '');
+  });
   return results.slice(0, limit);
 }
 
@@ -1242,6 +1772,7 @@ async function bestPoolRecordWinners(
     team_b_id: string | null;
     score_a: number | null;
     score_b: number | null;
+    bracket_name: string | null;
     team_a: TeamRef;
     team_b: TeamRef;
   };
@@ -1258,18 +1789,25 @@ async function bestPoolRecordWinners(
   // events read as "Results pending" even though the event page (which keys on
   // bracket_name) correctly shows a pool leader. Matching bracket_name keeps
   // the card and the event page in agreement.
+  //
+  // Fetch broadly with `%pool%` then confirm precisely on the bracket TAIL in
+  // JS: combined masters events prefix every bracket with a group ("Masters Men
+  // · Pool A"), so a `pool%` prefix filter MISSES them (the name starts with the
+  // group, not "Pool") — which made masters Super Qualifiers read "Results
+  // pending" despite a clear pool leader. `%pool%` also sweeps in crossovers
+  // ("Pool B-C Crossover"), excluded by the tail check below.
   const PAGE = 1000;
   const poolGames: Row[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data: page } = await db
       .from('usau_games')
       .select(
-        'id, event_id, team_a_id, team_b_id, score_a, score_b, ' +
+        'id, event_id, team_a_id, team_b_id, score_a, score_b, bracket_name, ' +
           'team_a:usau_teams!team_a_id(name, gender_division), ' +
           'team_b:usau_teams!team_b_id(name, gender_division)',
       )
       .in('event_id', eventIds)
-      .ilike('bracket_name', 'pool%')
+      .ilike('bracket_name', '%pool%')
       .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
       .range(from, from + PAGE - 1);
     const rows = (page ?? []) as unknown as Row[];
@@ -1304,6 +1842,15 @@ async function bestPoolRecordWinners(
   };
 
   for (const g of poolGames) {
+    // Confirm this is a real pool game on the bracket TAIL (after any group
+    // prefix): "Masters Men · Pool A" → "pool a". Excludes crossovers swept in
+    // by the broad `%pool%` fetch ("Pool B-C Crossover").
+    const tail = (() => {
+      const n = g.bracket_name ?? '';
+      const i = n.lastIndexOf('·');
+      return (i >= 0 ? n.slice(i + 1) : n).trim().toLowerCase();
+    })();
+    if (!tail.startsWith('pool') || tail.includes('crossover')) continue;
     if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
     // Division comes from the teams (pool games are single-division); require
@@ -1648,6 +2195,7 @@ export function usauTeamProminence(name: string, level: string | null | undefine
     case 'CLUB':
     case 'MASTERS':
     case 'GRAND_MASTERS':
+    case 'GREAT_GRAND_MASTERS':
       return 3; // adult club — most prominent
     case 'COLLEGE_D1':
     case 'COLLEGE_D3':
@@ -1694,6 +2242,18 @@ function formatEventDateRange(start: string | null, end: string | null): string 
     ? new Date(end + 'T00:00:00Z').toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' })
     : fmt(end);
   return `${s}–${e}`;
+}
+
+/** Sort two result names alphabetically, but when they're the SAME event across
+ *  different years (identical text apart from a trailing 4-digit year), order the
+ *  year descending so the current season surfaces first instead of last. */
+export function compareByNameThenYearDesc(a: string, b: string): number {
+  const ya = a.match(/^(.*?)[\s·-]*(\d{4})\s*$/);
+  const yb = b.match(/^(.*?)[\s·-]*(\d{4})\s*$/);
+  if (ya && yb && ya[1].trim().toLowerCase() === yb[1].trim().toLowerCase()) {
+    return Number(yb[2]) - Number(ya[2]); // newest year first
+  }
+  return a.localeCompare(b);
 }
 
 export async function search(query: string, limit = 8): Promise<SearchResult[]> {
@@ -1780,13 +2340,15 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
     ...tournamentMap.values(),
   ];
 
-  // Prefix matches first, then alphabetical.
+  // Prefix matches first, then alphabetical — except when two results are the
+  // same event across years (e.g. "Heavyweights 2024" vs "Heavyweights 2026"),
+  // where we want newest-first instead of oldest-first alphabetical.
   const lower = q.toLowerCase();
   results.sort((a, b) => {
     const ap = a.name.toLowerCase().startsWith(lower) ? 0 : 1;
     const bp = b.name.toLowerCase().startsWith(lower) ? 0 : 1;
     if (ap !== bp) return ap - bp;
-    return a.name.localeCompare(b.name);
+    return compareByNameThenYearDesc(a.name, b.name);
   });
 
   return results.slice(0, limit * 2);
@@ -2466,8 +3028,10 @@ export function looksLikeUsauUuid(id: string): boolean {
 // on the rankings page), so listOfficialUsauRankings supports exactly them.
 
 export interface OfficialRankedTeam {
-  /** usau_teams.id — links to the team profile / logo. */
-  id: string;
+  /** usau_teams.id — links to the team profile / logo. Null when the ranked
+   *  team couldn't be confidently matched to a usau_teams row (we still show
+   *  the team by name; there's just no profile link/logo). */
+  id: string | null;
   name: string;
   state: string | null;
   region: string | null;
@@ -2527,12 +3091,12 @@ export async function listOfficialUsauRankings(
   const head = (latest ?? [])[0] as { season: number; week: number } | undefined;
   if (!head) return { season: 0, week: 0, scrapedAt: null, teams: [] };
 
+  // Read the ranking's own stored identity (team_name/state), plus the OPTIONAL
+  // team_id link when we matched one. We no longer inner-join usau_teams (that
+  // silently dropped unmatched teams and left holes in the rank sequence).
   const { data, error } = await db
     .from('usau_rankings')
-    .select(
-      'rank, rating, wins, losses, region, scraped_at, ' +
-        'team:usau_teams!team_id(id, name, state)',
-    )
+    .select('rank, rating, wins, losses, region, scraped_at, team_id, team_name, state')
     .eq('division', division)
     .eq('season', head.season)
     .eq('week', head.week)
@@ -2547,21 +3111,21 @@ export async function listOfficialUsauRankings(
     losses: number | null;
     region: string | null;
     scraped_at: string | null;
-    team: { id: string; name: string; state: string | null } | null;
+    team_id: string | null;
+    team_name: string;
+    state: string | null;
   };
   const rows = (data ?? []) as unknown as Row[];
-  const teams: OfficialRankedTeam[] = rows
-    .filter((r) => r.team)
-    .map((r) => ({
-      id: r.team!.id,
-      name: r.team!.name,
-      state: r.team!.state,
-      region: r.region,
-      rank: r.rank,
-      rating: r.rating,
-      wins: r.wins,
-      losses: r.losses,
-    }));
+  const teams: OfficialRankedTeam[] = rows.map((r) => ({
+    id: r.team_id,
+    name: r.team_name,
+    state: r.state,
+    region: r.region,
+    rank: r.rank,
+    rating: r.rating,
+    wins: r.wins,
+    losses: r.losses,
+  }));
 
   return {
     season: head.season,
@@ -2600,7 +3164,13 @@ export interface RankedTeam {
  * @param season the season to rank by. Defaults to the most recent season
  *   that has a Nationals event with placement data.
  */
-type RankableLevel = 'CLUB' | 'COLLEGE_D1' | 'COLLEGE_D3' | 'MASTERS' | 'GRAND_MASTERS';
+type RankableLevel =
+  | 'CLUB'
+  | 'COLLEGE_D1'
+  | 'COLLEGE_D3'
+  | 'MASTERS'
+  | 'GRAND_MASTERS'
+  | 'GREAT_GRAND_MASTERS';
 
 // Per-level ILIKE patterns identifying a level's Nationals/Championship event,
 // so College's "Championships" doesn't collide with Club's "Nationals".
@@ -2610,6 +3180,11 @@ const CHAMPIONSHIP_NAME_LIKE: Record<RankableLevel, string> = {
   COLLEGE_D3: '%D-III College Championship%',
   MASTERS: '%Masters Championship%',
   GRAND_MASTERS: '%Grand Masters Championship%',
+  // GGM plays inside the SAME combined "USA Ultimate Masters Championships"
+  // event as Masters/GM (there is no separately-named GGM championship), so it
+  // matches on the shared event name; the team-level filter below isolates the
+  // GGM teams within it.
+  GREAT_GRAND_MASTERS: '%Masters Championship%',
 };
 function championshipNameLikeFor(level: RankableLevel): string {
   return CHAMPIONSHIP_NAME_LIKE[level];
@@ -2743,6 +3318,7 @@ export async function listRankedTeams(opts?: {
     COLLEGE_D3: '%D-III College Regional%',
     MASTERS: '%Masters%Regional%',
     GRAND_MASTERS: '%Grand Masters%Regional%',
+    GREAT_GRAND_MASTERS: '%Masters%Regional%',
   };
 
   // Decide which season to rank.
@@ -2812,14 +3388,17 @@ export async function listRankedTeams(opts?: {
     if (!row.usau_teams) continue;
     const t = row.usau_teams;
     if (opts?.genderDivision && t.gender_division !== opts.genderDivision) continue;
-    // Masters and Grand Masters share events (combined regionals/championships
-    // are tagged one event-level but host teams of BOTH levels, each team
-    // tagged per-group). Filtering events alone therefore mixes the levels —
-    // also require the TEAM's own level to match. Scoped to masters/GM only:
-    // club/college teams are sometimes mis-tagged in source data, and their
-    // events never mix levels, so the event filter alone stays correct there.
+    // Masters / Grand Masters / Great Grand Masters share events (the combined
+    // championships are tagged one event-level but host teams of ALL three
+    // levels, each team tagged per-group). Filtering events alone therefore
+    // mixes the levels — also require the TEAM's own level to match. Scoped to
+    // the masters family only: club/college teams are sometimes mis-tagged in
+    // source data, and their events never mix levels, so the event filter alone
+    // stays correct there.
     if (
-      (compLevel === 'MASTERS' || compLevel === 'GRAND_MASTERS') &&
+      (compLevel === 'MASTERS' ||
+        compLevel === 'GRAND_MASTERS' ||
+        compLevel === 'GREAT_GRAND_MASTERS') &&
       t.competition_level !== compLevel
     ) {
       continue;

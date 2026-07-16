@@ -87,10 +87,10 @@ export function CreatePlayDialog({
             withDefense,
           });
         }}
-        className="w-full max-w-[640px] max-h-full overflow-y-auto bg-bg border border-border rounded-md shadow-xl flex flex-col"
+        className="w-full max-w-[640px] max-h-full overflow-y-auto bg-surface rounded-card-lg shadow-hero flex flex-col"
       >
         <div className="px-5 py-4 border-b border-hairline flex items-baseline justify-between gap-3">
-          <h2 id="new-play-title" className="text-[20px] font-bold font-tight tracking-[-0.02em] text-ink m-0">
+          <h2 id="new-play-title" className="font-display italic text-[24px] font-bold tracking-[-0.02em] leading-[0.95] text-ink m-0">
             New play
           </h2>
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
@@ -111,7 +111,7 @@ export function CreatePlayDialog({
               onChange={(e) => setName(e.target.value)}
               placeholder={defaultName}
               spellCheck={false}
-              className="bg-surface border border-border px-3 py-2 text-[14px] font-semibold text-ink font-tight focus-visible:outline-none focus-visible:border-ink rounded"
+              className="bg-bg border border-hairline px-3 py-2 text-[14px] font-semibold text-ink font-tight focus-visible:outline-none focus-visible:border-ink rounded-card-sm"
             />
           </label>
 
@@ -130,11 +130,9 @@ export function CreatePlayDialog({
                     onClick={() => setFieldType(ft.id)}
                     aria-pressed={active}
                     className={[
-                      'flex flex-col gap-2 p-3 rounded-md cursor-pointer transition-colors text-left',
+                      'flex flex-col gap-2 p-3 rounded-card-sm cursor-pointer transition-shadow text-left bg-bg',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                      active
-                        ? 'bg-surface border border-accent'
-                        : 'bg-surface border border-border hover:border-ink',
+                      active ? 'shadow-lift ring-1 ring-accent' : 'shadow-soft hover:shadow-lift',
                     ].join(' ')}
                   >
                     <FieldTypeIcon type={ft.id} active={active} />
@@ -167,11 +165,11 @@ export function CreatePlayDialog({
                     onClick={() => setFormation(id)}
                     aria-pressed={active}
                     className={[
-                      'flex flex-col gap-1.5 p-2 rounded-md cursor-pointer transition-colors',
+                      'flex flex-col gap-1.5 p-2 rounded-card-sm cursor-pointer transition-shadow',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                       active
-                        ? 'bg-accent text-accent-ink'
-                        : 'bg-surface border border-border text-muted hover:border-ink hover:text-ink',
+                        ? 'bg-accent text-accent-ink shadow-lift'
+                        : 'bg-bg shadow-soft text-muted hover:text-ink hover:shadow-lift',
                     ].join(' ')}
                   >
                     <div className="w-full aspect-[70/120] rounded-sm overflow-hidden">
@@ -217,17 +215,17 @@ export function CreatePlayDialog({
           </fieldset>
         </div>
 
-        <div className="px-5 py-3 border-t border-hairline flex items-center justify-end gap-2 bg-surface">
+        <div className="px-5 py-3 border-t border-hairline flex items-center justify-end gap-2 bg-bg">
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 rounded text-[11px] font-bold tracking-[0.14em] uppercase text-muted hover:text-ink font-tight cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
+            className="px-4 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase text-muted hover:text-ink font-tight cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors"
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="px-4 py-2 rounded bg-ink text-bg text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity"
+            className="px-5 py-2.5 rounded-full bg-accent text-accent-ink text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-opacity"
           >
             Create play
           </button>
@@ -254,11 +252,9 @@ function DefenseOption({
       onClick={onSelect}
       aria-pressed={active}
       className={[
-        'flex-1 flex items-center gap-3 px-3 py-2.5 rounded-md cursor-pointer transition-colors text-left',
+        'flex-1 flex items-center gap-3 px-3 py-2.5 rounded-card-sm cursor-pointer transition-shadow text-left bg-bg',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        active
-          ? 'bg-surface border border-accent'
-          : 'bg-surface border border-border hover:border-ink',
+        active ? 'shadow-lift ring-1 ring-accent' : 'shadow-soft hover:shadow-lift',
       ].join(' ')}
     >
       <span
