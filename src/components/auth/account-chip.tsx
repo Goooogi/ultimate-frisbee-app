@@ -18,6 +18,22 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/lib/auth/auth-provider';
 import dynamic from 'next/dynamic';
 
+// Avatars are stored in the `avatars` Storage bucket as full-size originals.
+// Serve them through Supabase's image transform so the nav chip downloads a
+// small resized+recompressed image instead of a multi-MB original — same
+// pattern as PlayerHeadshot's displaySrc. Only rewrite our bucket objects.
+const AVATAR_STORAGE_OBJECT = '/storage/v1/object/public/avatars/';
+const AVATAR_STORAGE_RENDER = '/storage/v1/render/image/public/avatars/';
+/** Chip is 32px default × 2 for retina. */
+const AVATAR_RENDER_PX = 64;
+
+function avatarDisplaySrc(url: string): string {
+  if (!url.includes(AVATAR_STORAGE_OBJECT)) return url; // non-Supabase URL → as-is
+  const rendered = url.replace(AVATAR_STORAGE_OBJECT, AVATAR_STORAGE_RENDER);
+  const sep = rendered.includes('?') ? '&' : '?';
+  return `${rendered}${sep}width=${AVATAR_RENDER_PX}&height=${AVATAR_RENDER_PX}&resize=cover&quality=80`;
+}
+
 // The auth modal (and its ~44 kB obscenity profanity dataset) is only needed
 // once a signed-out visitor opens sign-in/up. Load it on demand so it stays
 // out of the global-nav bundle that ships on every page.
@@ -56,6 +72,14 @@ export function AccountChip({
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const avatarUrl = user?.profile?.avatar_url ?? null;
+  // Latches to the initials fallback if the image fails to load. MUST reset
+  // when avatar_url changes — otherwise a failed load sticks around and
+  // masks a newly-uploaded photo (same gotcha as PlayerHeadshot).
+  const [imgFailed, setImgFailed] = useState(false);
+  useEffect(() => {
+    setImgFailed(false);
+  }, [avatarUrl]);
 
   // Close popover on outside click + Esc.
   useEffect(() => {
@@ -175,7 +199,18 @@ export function AccountChip({
         ].join(' ')}
         style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
       >
-        {user.initials}
+        {avatarUrl && !imgFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            key={avatarUrl}
+            src={avatarDisplaySrc(avatarUrl)}
+            alt={user.name}
+            className="w-full h-full rounded-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          user.initials
+        )}
       </button>
 
       {/* Red notification dot — admins only, when content is awaiting review.

@@ -14,6 +14,8 @@ import {
   USERNAME_RE,
 } from '@/lib/fantasy/data';
 import { moderateName } from '@/lib/moderation';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { AvatarUploadModal } from '@/components/settings/avatar-upload-modal';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -109,6 +111,62 @@ function SaveButton({
         'Save'
       )}
     </button>
+  );
+}
+
+// ─── Profile icon (account avatar) ────────────────────────────────────────────
+// The nav-bar avatar shown in AccountChip in place of the initials monogram.
+// Sourced from useAuth() (not the local getMyProfile() load above) since that's
+// the same context AccountChip reads from — keeps this row and the nav in sync
+// on the same refreshProfile() signal.
+
+function ProfileIconField() {
+  const { user } = useAuth();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const avatarUrl = user?.profile?.avatar_url ?? null;
+  const displayName = user?.name ?? '';
+  const initials = user?.initials ?? '';
+
+  return (
+    <div className="flex flex-col gap-0">
+      <FieldLabel htmlFor="settings-profile-icon" label="Profile icon" />
+      <div className="flex items-center gap-3.5">
+        <div className="w-14 h-14 rounded-full overflow-hidden bg-ink/5 flex items-center justify-center shrink-0">
+          {avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={avatarUrl}
+              alt={`${displayName} profile photo`}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="font-display italic font-bold text-[18px] text-muted" aria-hidden="true">
+              {initials}
+            </span>
+          )}
+        </div>
+        <button
+          id="settings-profile-icon"
+          type="button"
+          onClick={() => setModalOpen(true)}
+          className={[
+            'inline-flex items-center justify-center px-4 py-2 rounded-full min-h-[44px] cursor-pointer',
+            'bg-ink/[0.06] text-ink font-tight text-[11px] font-bold tracking-[0.14em] uppercase',
+            'hover:bg-ink/[0.1] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
+        >
+          Change photo
+        </button>
+      </div>
+
+      <AvatarUploadModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        currentAvatarUrl={avatarUrl}
+        displayName={displayName}
+      />
+    </div>
   );
 }
 
@@ -404,6 +462,7 @@ export function ProfileSettings() {
 
       {/* Fields */}
       <div className="px-5 py-5 flex flex-col gap-6">
+        <ProfileIconField />
         <DisplayNameField initial={profile.displayName ?? ''} />
         <HandleField initial={profile.username} />
       </div>

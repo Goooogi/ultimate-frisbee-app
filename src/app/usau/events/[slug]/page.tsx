@@ -14,6 +14,7 @@ import { PageShell } from '@/components/page-shell';
 import { getEvent, type UsauEventSummary } from '@/lib/usau/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
+import { USAU_LEVELS, buildLeagueQs, type UsauLevel } from '@/lib/league';
 
 export const revalidate = 60;
 
@@ -40,6 +41,15 @@ export default async function UsauEventPage({ params }: Props) {
     .filter(Boolean)
     .join(' · ');
 
+  // "The Games" back-link carries the event's competition level so you land on
+  // the games tab filtered to the SAME level (e.g. a Masters event → Masters
+  // games), not always Club. Only for real UsauLevel values — HS/BEACH/OTHER
+  // aren't level-filter options, so they fall back to the plain games tab.
+  const eventLevel = USAU_LEVELS.includes(event.competitionLevel as UsauLevel)
+    ? (event.competitionLevel as UsauLevel)
+    : null;
+  const gamesHref = `/scores${buildLeagueQs('usau', null, eventLevel)}`;
+
   return (
     <PageShell
       title={event.name}
@@ -47,7 +57,7 @@ export default async function UsauEventPage({ params }: Props) {
       subtitle={subtitle ?? undefined}
       breadcrumbs={[
         { label: 'Home', href: '/' },
-        { label: 'The Games', href: '/scores?league=usau' },
+        { label: 'The Games', href: gamesHref },
         { label: event.name },
       ]}
     >

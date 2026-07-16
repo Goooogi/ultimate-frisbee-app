@@ -384,6 +384,53 @@ export async function setDisplayName(name: string): Promise<void> {
 }
 
 /**
+ * Set (or clear) the signed-in user's profile-icon URL — the avatar shown in
+ * the nav account chip in place of the initials monogram. Pass null to clear it
+ * back to initials. The value is a public storage URL in the `avatars` bucket
+ * (upload keyed to the user's own {user_id}/… folder via storage RLS). Writes
+ * the user's own profiles row (profiles_update_own RLS).
+ */
+export async function setAvatarUrl(url: string | null): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  // Only accept a same-project Supabase storage URL (or null). Prevents a
+  // caller from pointing the avatar at an arbitrary external/attacker URL.
+  if (url !== null) {
+    const ok = /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/object\/public\/avatars\//.test(url);
+    if (!ok) throw new Error('Invalid avatar URL.');
+  }
+
+  // Read the current avatar first so we can delete its storage object after a
+  // successful swap — a public-bucket URL never expires, so a replaced/removed
+  // photo would otherwise stay publicly reachable forever (privacy).
+  const { data: prev } = await supabase
+    .from('profiles')
+    .select('avatar_url')
+    .eq('id', user.id)
+    .maybeSingle();
+  const prevUrl = prev?.avatar_url ?? null;
+
+  const { error } = await supabase.from('profiles').update({ avatar_url: url }).eq('id', user.id);
+  if (error) throw error;
+
+  // Best-effort cleanup of the OLD object (only when it actually changed and
+  // was one of ours). Storage RLS still scopes deletion to the user's folder,
+  // and a failure here must not fail the avatar change — the column is the
+  // source of truth. Path = everything after `/public/avatars/`.
+  if (prevUrl && prevUrl !== url) {
+    const m = prevUrl.match(/\/storage\/v1\/object\/public\/avatars\/(.+)$/);
+    const oldPath = m ? decodeURIComponent(m[1]) : null;
+    // Only remove objects under THIS user's folder (defense in depth on top of RLS).
+    if (oldPath && oldPath.startsWith(`${user.id}/`)) {
+      await supabase.storage.from('avatars').remove([oldPath]).catch(() => {});
+    }
+  }
+}
+
+/**
  * Create (or return existing) the signed-in user's beta team. owner_id comes
  * from the session; owner_username is force-set by a DB trigger from the
  * profile, so a client value can't stick (defense in depth: we don't send one).

@@ -479,7 +479,10 @@ function EventTabsView(props: {
                   <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
                     Level
                   </span>
-                  <UsauLevelSelect restrictTo={availableLevels} />
+                  <UsauLevelSelect
+                    restrictTo={availableLevels}
+                    value={level || undefined}
+                  />
                 </div>
               )}
               {eventDivisions.length > 1 && (

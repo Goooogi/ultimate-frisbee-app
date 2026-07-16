@@ -64,18 +64,23 @@ export async function deleteContent(id: string) {
     .maybeSingle();
   if (readError) throw new Error(readError.message);
 
+  let storageWarning: string | null = null;
   if (row?.storage_path) {
     const { error: storageError } = await supabase.storage
       .from(STORAGE_BUCKET)
       .remove([row.storage_path]);
     if (storageError) {
-      // Storage delete failure shouldn't block the row delete — log and
-      // proceed so the row goes away. We can sweep orphans later.
+      // Storage delete failure shouldn't block the row delete — the row is the
+      // source of truth for what's visible, so we still remove it. But the
+      // failure must NOT be silent: log it AND surface it to the admin so a
+      // real orphan (permanent public CDN object) gets noticed, not buried.
       console.error('[admin/content] storage delete failed', storageError);
+      storageWarning = `Row deleted, but the stored file (${row.storage_path}) could not be removed and is now orphaned: ${storageError.message}`;
     }
   }
 
   const { error } = await supabase.from('player_content').delete().eq('id', id);
   if (error) throw new Error(error.message);
   revalidatePath('/admin/content');
+  return storageWarning ? { storageWarning } : { storageWarning: null };
 }

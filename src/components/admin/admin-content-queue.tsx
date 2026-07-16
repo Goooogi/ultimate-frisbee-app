@@ -65,12 +65,17 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
   const [showRejectForm, setShowRejectForm] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
 
-  function run(action: () => Promise<void>) {
+  function run(action: () => Promise<void | { storageWarning: string | null }>) {
     setError(null);
+    setWarning(null);
     startTransition(async () => {
       try {
-        await action();
+        const result = await action();
+        // Non-fatal issues (e.g. an orphaned storage object left behind after
+        // a row delete) come back as a storageWarning rather than a throw.
+        if (result && result.storageWarning) setWarning(result.storageWarning);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Action failed.');
       }
@@ -125,6 +130,12 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
         {error && (
           <p role="alert" className="text-[12px] text-red-500 font-tight">
             {error}
+          </p>
+        )}
+
+        {warning && (
+          <p role="alert" className="text-[12px] text-amber-600 font-tight">
+            {warning}
           </p>
         )}
 
