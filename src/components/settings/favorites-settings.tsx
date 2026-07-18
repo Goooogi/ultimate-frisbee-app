@@ -11,18 +11,23 @@ import {
   getMyFavorites,
   type FavoriteLeague,
   type FavoriteTeam,
+  type FavoritePlayer,
 } from '@/lib/favorites/data';
 import { FavoritesPicker } from '@/components/settings/favorites-picker';
 
 export function FavoritesSettings() {
-  const [initial, setInitial] = useState<{ leagues: FavoriteLeague[]; teams: FavoriteTeam[] } | null>(null);
+  const [initial, setInitial] = useState<{
+    leagues: FavoriteLeague[];
+    teams: FavoriteTeam[];
+    players: FavoritePlayer[];
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     getMyFavorites()
       .then((f) => {
-        setInitial({ leagues: f.leagues, teams: f.teams });
+        setInitial({ leagues: f.leagues, teams: f.teams, players: f.players });
         setLoading(false);
       })
       .catch(() => {
@@ -64,7 +69,11 @@ export function FavoritesSettings() {
         )}
 
         {!loading && !loadError && initial && (
-          <FavoritesPicker initialLeagues={initial.leagues} initialTeams={initial.teams} />
+          <FavoritesPicker
+            initialLeagues={initial.leagues}
+            initialTeams={initial.teams}
+            initialPlayers={initial.players}
+          />
         )}
       </div>
     </div>

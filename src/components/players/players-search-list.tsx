@@ -9,6 +9,7 @@ import Link from 'next/link';
 import { TeamLogo } from '@/components/team-logo';
 import { teamMetaByAbbr } from '@/lib/ufa/teams';
 import { SearchGlyph } from '@/components/search-modal';
+import { SortableTh } from '@/components/players/sortable-th';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { searchUfaPlayers } from '@/lib/ufa/search-actions';
 import { listUsauPlayers, type UsauPlayerListRow } from '@/lib/usau/data';
@@ -31,9 +32,12 @@ interface Props {
   mode: Mode;
   /** Label shown next to the result count (e.g. "2026 UFA leaders"). */
   scopeLabel: string;
+  /** Current sort field + direction (from the URL), for clickable column headers. */
+  currentSort?: string;
+  currentDir?: 'asc' | 'desc';
 }
 
-export function PlayersSearchList({ mode, scopeLabel }: Props) {
+export function PlayersSearchList({ mode, scopeLabel, currentSort = 'impact', currentDir = 'desc' }: Props) {
   const [raw, setRaw] = useState('');
   const query = useDeferredValue(raw);
   const needle = query.trim().toLowerCase();
@@ -181,7 +185,7 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
       {searching && count === 0 ? null : count === 0 ? (
         <EmptyState query={needle} />
       ) : filtered.kind === 'ufa' ? (
-        <UfaList stats={filtered.stats} championTeamIds={filtered.championTeamIds} />
+        <UfaList stats={filtered.stats} championTeamIds={filtered.championTeamIds} currentSort={currentSort} currentDir={currentDir} />
       ) : (
         <UsauList players={filtered.players} />
       )}
@@ -192,34 +196,52 @@ export function PlayersSearchList({ mode, scopeLabel }: Props) {
 function UfaList({
   stats,
   championTeamIds,
+  currentSort,
+  currentDir,
 }: {
   stats: UfaPlayerStat[];
   championTeamIds: string[];
+  currentSort: string;
+  currentDir: 'asc' | 'desc';
 }) {
   const champSet = new Set(championTeamIds.map((id) => id.toLowerCase()));
+  // Alignment-neutral base — the Player column is left-aligned, stat columns are
+  // right-aligned (thStat). Keeping `text-right` OUT of the base avoids the
+  // conflicting `text-right text-left` on the Player header (it read right-aligned
+  // even though the name cells below are left-aligned).
   const thBase =
-    'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint whitespace-nowrap text-right';
+    'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint whitespace-nowrap';
+  const thStat = `${thBase} text-right`;
   // Cap the Player column so one long name can't balloon it to 2/3 of the row.
   // The name itself scrolls horizontally inside this fixed box (see the <td>).
   const playerColCls = 'w-[150px] min-w-[150px] max-w-[150px] sm:w-[200px] sm:min-w-[200px] sm:max-w-[200px]';
+  // Clickable stat header — maps a UFA column to its ?sort= field. (Cmp% has no
+  // API sort field, so it stays a plain header.)
+  const sortableProps = (field: string, accent = false) => ({
+    sortField: field,
+    currentSort,
+    currentDir,
+    accent,
+    className: `${thStat}${accent ? ' text-accent' : ''}`,
+  });
   return (
     <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
       <table className="w-full min-w-[920px] border-collapse table-fixed">
         <thead>
           <tr>
             <th className={`${thBase} text-left pl-5 ${playerColCls}`} scope="col">Player</th>
-            <th className={thBase} scope="col" title="Games Played">GP</th>
-            <th className={thBase} scope="col" title="Goals">G</th>
-            <th className={thBase} scope="col" title="Assists">A</th>
-            <th className={thBase} scope="col" title="Hockey Assists">HA</th>
-            <th className={thBase} scope="col" title="Scores (Goals + Assists)">Scr</th>
-            <th className={`${thBase} text-accent`} scope="col" title="Impact (Goals + Assists + Blocks)">IMP</th>
-            <th className={thBase} scope="col" title="Completions">Cmp</th>
-            <th className={thBase} scope="col" title="Completion %">Cmp%</th>
-            <th className={thBase} scope="col" title="Throwaways">TA</th>
-            <th className={thBase} scope="col" title="Drops">D</th>
-            <th className={thBase} scope="col" title="Blocks">Blk</th>
-            <th className={`${thBase} pr-5`} scope="col" title="Plus / Minus">+/−</th>
+            <SortableTh label="GP" title="Games Played" {...sortableProps('gamesPlayed')} />
+            <SortableTh label="G" title="Goals" {...sortableProps('goals')} />
+            <SortableTh label="A" title="Assists" {...sortableProps('assists')} />
+            <SortableTh label="HA" title="Hockey Assists" {...sortableProps('hockeyAssists')} />
+            <SortableTh label="Scr" title="Scores (Goals + Assists)" {...sortableProps('scores')} />
+            <SortableTh label="IMP" title="Impact (Goals + Assists + Blocks)" {...sortableProps('impact', true)} />
+            <SortableTh label="Cmp" title="Completions" {...sortableProps('completions')} />
+            <th className={thStat} scope="col" title="Completion %">Cmp%</th>
+            <SortableTh label="TA" title="Throwaways" {...sortableProps('throwaways')} />
+            <SortableTh label="D" title="Drops" {...sortableProps('drops')} />
+            <SortableTh label="Blk" title="Blocks" {...sortableProps('blocks')} />
+            <SortableTh label="+/−" title="Plus / Minus" {...sortableProps('plusMinus')} className={`${thStat} pr-5`} />
           </tr>
         </thead>
         <tbody>

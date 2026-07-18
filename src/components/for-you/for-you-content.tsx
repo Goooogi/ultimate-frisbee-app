@@ -15,11 +15,13 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
-import { getMyFavorites, type FavoriteLeague } from '@/lib/favorites/data';
+import { getMyFavorites, type FavoriteLeague, type MyFavorites } from '@/lib/favorites/data';
 import { LEAGUE_DISPLAY } from '@/lib/for-you/leagues';
 import {
   getForYouFeed,
   type FeedGame,
+  type FeedLeague,
+  type FeedPlayer,
   type FeedTournament,
   type ForYouFeed,
   type TeamLeader,
@@ -31,29 +33,36 @@ import { SearchResultIcon } from '@/components/search-result-icon';
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
+const LIVE_YEAR = new Date().getFullYear();
+/** How many past seasons to offer in the year filter. */
+const YEAR_SPAN = 6;
+const YEAR_OPTIONS = Array.from({ length: YEAR_SPAN }, (_, i) => LIVE_YEAR - i);
+
 export function ForYouContent() {
+  const [favorites, setFavorites] = useState<MyFavorites | null>(null);
   const [feed, setFeed] = useState<ForYouFeed | null>(null);
   const [empty, setEmpty] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [feedLoading, setFeedLoading] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [year, setYear] = useState<number>(LIVE_YEAR);
 
+  // Load favorites once. The feed re-fetches when `year` changes (below) — the
+  // favorites read doesn't need to repeat.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const favorites = await getMyFavorites();
+        const favs = await getMyFavorites();
         if (cancelled) return;
-        // The feed is team-driven — a favorite league alone isn't enough.
-        if (favorites.teams.length === 0) {
+        // The feed is team- + player-driven — a favorite league alone isn't
+        // enough, but a favorite player (with no teams) IS.
+        if (favs.teams.length === 0 && favs.players.length === 0) {
           setEmpty(true);
           setLoading(false);
           return;
         }
-        // Live per-league fetch (server action) keyed off the real favorites.
-        const f = await getForYouFeed(favorites);
-        if (cancelled) return;
-        setFeed(f);
-        setLoading(false);
+        setFavorites(favs);
       } catch {
         if (!cancelled) {
           setLoadError(true);
@@ -66,24 +75,236 @@ export function ForYouContent() {
     };
   }, []);
 
+  // Fetch the feed for the current favorites + selected year. Runs on first
+  // favorites load and on every year change.
+  useEffect(() => {
+    if (!favorites) return;
+    let cancelled = false;
+    setFeedLoading(true);
+    (async () => {
+      try {
+        const f = await getForYouFeed(favorites, { year });
+        if (cancelled) return;
+        setFeed(f);
+        setLoadError(false);
+      } catch {
+        if (!cancelled) setLoadError(true);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          setFeedLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [favorites, year]);
+
   return (
-    <PageShell title="For You" eyebrow="YOUR FEED" subtitle="Games, teams, and leagues you follow.">
+    <PageShell wide title="For You" eyebrow="YOUR FEED" subtitle="Games, teams, and leagues you follow.">
       {loading && <LoadingState />}
       {!loading && loadError && <ErrorState />}
       {!loading && !loadError && empty && <EmptyState />}
-      {!loading && !loadError && !empty && feed && <Loaded feed={feed} />}
+      {!loading && !loadError && !empty && feed && (
+        <Loaded feed={feed} year={year} onYearChange={setYear} feedLoading={feedLoading} />
+      )}
     </PageShell>
   );
 }
 
-function Loaded({ feed }: { feed: ForYouFeed }) {
+// ─── CRM dashboard layout — FIXED ZONES ─────────────────────────────────────
+// The For You page is an all-in-one dashboard with DESIGNATED zones, not a
+// dense auto-flow that reshuffles per data. Every content type has ONE home:
+//
+//   ┌─ HEADER BAND (full width) ────────────────────────┐
+//   │  [ Player spotlight ]   [ Hero game ]             │  ← always the top row
+//   ├─ MAIN (left, ~7/12) ──────────┬─ SIDE (right, 5/12)┤
+//   │  Your teams (stacked)         │  Tournaments       │
+//   │  Your other players           │  League standings  │
+//   │  Games list                   │                    │
+//   └───────────────────────────────┴────────────────────┘
+//
+// PROMOTE-TO-FILL: a zone renders only when it has content; when a whole side is
+// empty the surviving side widens to full width and its cards go multi-column,
+// so following just a league (or just a player) still fills the dashboard
+// intentionally rather than leaving a half-empty grid.
+
+function Loaded({
+  feed,
+  year,
+  onYearChange,
+  feedLoading,
+}: {
+  feed: ForYouFeed;
+  year: number;
+  onYearChange: (y: number) => void;
+  feedLoading: boolean;
+}) {
+  const isPast = year < LIVE_YEAR;
+  const [topPlayer, ...restPlayers] = feed.players;
+
+  // ── HEADER BAND — spotlight player + hero game. Present when either exists. ──
+  const hasSpotlight = !!topPlayer;
+  const hasHero = !!feed.heroGame;
+  const hasBand = hasSpotlight || hasHero;
+
+  // ── MAIN zone content (teams, other players, games) ──
+  const mainHasContent =
+    feed.teams.length > 0 || restPlayers.length > 0 || feed.games.length > 0;
+
+  // ── SIDE zone content (tournaments, league standings) ──
+  const sideHasContent = feed.tournaments.length > 0 || feed.leagues.length > 0;
+
+  // Promote-to-fill: if only one side has content, it takes the full width and
+  // lays its cards out multi-column instead of a narrow single column.
+  const onlyMain = mainHasContent && !sideHasContent;
+  const onlySide = sideHasContent && !mainHasContent;
+
   return (
-    <div className="flex flex-col gap-8 lg:gap-12">
-      {feed.heroGame && <HeroGameCard game={feed.heroGame} />}
-      <TeamsSection teams={feed.teams} />
-      {feed.games.length > 0 && <GamesSection games={feed.games} />}
-      {feed.tournaments.length > 0 && <TournamentsSection tournaments={feed.tournaments} />}
+    <div className="flex flex-col gap-5 lg:gap-6">
+      <YearFilter year={year} onChange={onYearChange} loading={feedLoading} />
+      {isPast && (
+        <p className="text-[12px] font-tight text-faint leading-snug">
+          Showing your {year} season — placements, events, and player lines. Live games and
+          upcoming schedules only appear for the current season.
+        </p>
+      )}
+
+      {/* HEADER BAND */}
+      {hasBand && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-stretch">
+          {hasSpotlight && (
+            <div className={hasHero ? 'lg:col-span-5' : 'lg:col-span-12'}>
+              <PlayerCard player={topPlayer} featured />
+            </div>
+          )}
+          {hasHero && (
+            <div className={hasSpotlight ? 'lg:col-span-7' : 'lg:col-span-12'}>
+              <HeroGameCard game={feed.heroGame!} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ZONE GRID — Main (left) + Side (right). Widths flip to full when a
+          side is empty (promote-to-fill). */}
+      {(mainHasContent || sideHasContent) && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-start">
+          {/* MAIN */}
+          {mainHasContent && (
+            <div className={['flex flex-col gap-4 lg:gap-5', onlyMain ? 'lg:col-span-12' : 'lg:col-span-7'].join(' ')}>
+              <MainZone teams={feed.teams} players={restPlayers} games={feed.games} wide={onlyMain} />
+            </div>
+          )}
+
+          {/* SIDE */}
+          {sideHasContent && (
+            <div className={['flex flex-col gap-4 lg:gap-5', onlySide ? 'lg:col-span-12' : 'lg:col-span-5'].join(' ')}>
+              <SideZone tournaments={feed.tournaments} leagues={feed.leagues} wide={onlySide} />
+            </div>
+          )}
+        </div>
+      )}
+
+      {isPast && feed.players.length === 0 && feed.tournaments.length === 0 && (
+        <SoftEmpty text={`No ${year} history for your favorites yet.`} />
+      )}
     </div>
+  );
+}
+
+// MAIN zone: teams (stacked dashboard cards) → your other players → games list.
+// `wide` = promoted to full width (only-main case) → lay teams/players 2-up.
+function MainZone({
+  teams,
+  players,
+  games,
+  wide,
+}: {
+  teams: TeamSnapshot[];
+  players: FeedPlayer[];
+  games: FeedGame[];
+  wide: boolean;
+}) {
+  const gridCols = wide ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1';
+  return (
+    <>
+      {teams.length > 0 && (
+        <ZoneGroup label="Your teams">
+          <div className={`grid ${gridCols} gap-4 lg:gap-5`}>
+            {teams.map((t) => (
+              <TeamDashboardCard key={`${t.team.league}-${t.team.teamId}`} snapshot={t} />
+            ))}
+          </div>
+        </ZoneGroup>
+      )}
+
+      {players.length > 0 && (
+        <ZoneGroup label="Your players">
+          <div className={`grid ${wide ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1 sm:grid-cols-2'} gap-4`}>
+            {players.map((p) => (
+              <PlayerCard key={`${p.league}-${p.playerId}`} player={p} />
+            ))}
+          </div>
+        </ZoneGroup>
+      )}
+
+      {games.length > 0 && (
+        <ZoneGroup label="More games">
+          <div className={`grid ${wide ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'} gap-4 lg:gap-5`}>
+            <GamesTile games={games} />
+          </div>
+        </ZoneGroup>
+      )}
+    </>
+  );
+}
+
+// SIDE zone: tournaments → league standings. `wide` = promoted to full width
+// (only-side case) → lay the cards multi-column.
+function SideZone({
+  tournaments,
+  leagues,
+  wide,
+}: {
+  tournaments: FeedTournament[];
+  leagues: FeedLeague[];
+  wide: boolean;
+}) {
+  return (
+    <>
+      {tournaments.length > 0 && (
+        <ZoneGroup label="Tournaments">
+          <TournamentsTile tournaments={tournaments} />
+        </ZoneGroup>
+      )}
+
+      {leagues.length > 0 && (
+        <ZoneGroup label="Leagues you follow">
+          <div className={`grid ${wide ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3' : 'grid-cols-1'} gap-4`}>
+            {leagues.map((lg, i) => (
+              <LeagueCard key={`${lg.league}-${lg.scope ?? i}`} card={lg} />
+            ))}
+          </div>
+        </ZoneGroup>
+      )}
+    </>
+  );
+}
+
+// A labeled zone group — a small uppercase header above its cards, so each
+// designated region reads as a titled section of the dashboard.
+function ZoneGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section aria-label={label}>
+      <div className="flex items-baseline justify-between mb-3">
+        <span className="font-sans text-[10px] font-bold tracking-[0.18em] uppercase text-muted">
+          {label}
+        </span>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -109,6 +330,60 @@ function ErrorState() {
       <span className="font-tight text-[13px] text-ink">
         Couldn&apos;t load your favorites. Please refresh and try again.
       </span>
+    </div>
+  );
+}
+
+// ─── Year filter — "go back in time" across the whole feed ─────────────────────
+// A horizontal segmented control of recent seasons. Current year (default) is
+// the live feed; a past year is a history lens (USAU placements/events + player
+// season lines). A subtle spinner shows while the feed re-fetches for a new year.
+
+function YearFilter({
+  year,
+  onChange,
+  loading,
+}: {
+  year: number;
+  onChange: (y: number) => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight shrink-0">
+        Season
+      </span>
+      <div
+        role="tablist"
+        aria-label="Filter feed by season"
+        className="flex items-center gap-1 overflow-x-auto no-scrollbar -mx-1 px-1"
+      >
+        {YEAR_OPTIONS.map((y) => {
+          const active = y === year;
+          return (
+            <button
+              key={y}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => onChange(y)}
+              className={[
+                'shrink-0 px-3.5 py-2 min-h-[36px] rounded-full text-[12px] font-bold font-tight tabular cursor-pointer',
+                'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                active ? 'bg-ink text-bg' : 'text-muted hover:text-ink hover:bg-ink/[0.05]',
+              ].join(' ')}
+            >
+              {y}
+            </button>
+          );
+        })}
+      </div>
+      {loading && (
+        <span
+          className="shrink-0 w-3.5 h-3.5 rounded-full border-2 border-ink/15 border-t-accent animate-spin"
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 }
@@ -152,10 +427,10 @@ function HeroGameCard({ game }: { game: FeedGame }) {
   const homeWin = isFinal && game.home.score !== null && game.away.score !== null && game.home.score > game.away.score;
 
   return (
-    <section aria-label="Your next game">
+    <section aria-label="Your next game" className="h-full">
       <div
         className={[
-          'relative overflow-hidden rounded-card-xl bg-surface shadow-hero',
+          'relative h-full overflow-hidden rounded-card-xl bg-surface shadow-hero',
           isLive ? 'ring-1 ring-inset ring-live/35' : '',
         ].join(' ')}
       >
@@ -165,7 +440,7 @@ function HeroGameCard({ game }: { game: FeedGame }) {
           className="pointer-events-none absolute inset-0 bg-gradient-to-b from-accent/[0.06] to-transparent"
         />
 
-        <div className="relative px-5 py-6 sm:px-8 sm:py-8 lg:px-12 lg:py-10 flex flex-col gap-6 lg:gap-8">
+        <div className="relative h-full px-5 py-6 sm:px-8 sm:py-8 lg:px-12 lg:py-10 flex flex-col justify-center gap-6 lg:gap-8">
           {/* Meta row: status + league */}
           <div className="flex items-center justify-center gap-2.5 font-mono text-[11px] sm:text-[12px] tracking-[0.1em] text-muted">
             {isLive ? (
@@ -223,10 +498,71 @@ function HeroGameCard({ game }: { game: FeedGame }) {
           <p className="text-center font-tight text-[11.5px] sm:text-[12.5px] text-faint">
             Following <span className="text-muted font-semibold">{game.favoriteTeamName}</span>
           </p>
+
+          {/* Players to watch — expanded detail for an upcoming game. Two columns
+              (away | home) each listing that team's top season performers. */}
+          {isUpcoming && game.playersToWatch &&
+            (game.playersToWatch.away.length > 0 || game.playersToWatch.home.length > 0) && (
+              <div className="border-t border-hairline pt-5 sm:pt-6">
+                <div className="text-center text-[9px] sm:text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-4">
+                  Players to Watch
+                </div>
+                <div className="grid grid-cols-2 gap-x-4 sm:gap-x-8 gap-y-3">
+                  <div className="flex flex-col gap-2.5">
+                    {game.playersToWatch.away.map((p, i) => (
+                      <HeroWatchPlayerRow key={i} player={p} align="right" />
+                    ))}
+                  </div>
+                  <div className="flex flex-col gap-2.5">
+                    {game.playersToWatch.home.map((p, i) => (
+                      <HeroWatchPlayerRow key={i} player={p} align="left" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
         </div>
       </div>
     </section>
   );
+}
+
+/** One "player to watch" row on the expanded hero card. `align` mirrors the row
+ *  toward its team's side of the matchup (away = right, home = left). */
+function HeroWatchPlayerRow({
+  player,
+  align,
+}: {
+  player: NonNullable<FeedGame['playersToWatch']>['away'][number];
+  align: 'left' | 'right';
+}) {
+  const avatar = (
+    <span className="shrink-0 inline-flex w-8 h-8 rounded-full overflow-hidden bg-ink/[0.06] items-center justify-center">
+      {player.headshotUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={player.headshotUrl} alt="" className="w-full h-full object-cover" />
+      ) : (
+        <span className="text-[9px] font-bold text-faint font-tight">
+          {player.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase()}
+        </span>
+      )}
+    </span>
+  );
+  const text = (
+    <span className={['min-w-0 flex flex-col leading-tight', align === 'right' ? 'items-end text-right' : 'items-start'].join(' ')}>
+      <span className="text-[11.5px] sm:text-[12.5px] font-semibold text-ink font-tight truncate max-w-full">
+        {player.name}
+      </span>
+      <span className="text-[9.5px] sm:text-[10px] text-faint font-mono truncate max-w-full">
+        {player.statLine}
+      </span>
+    </span>
+  );
+  const inner = align === 'right' ? (<>{text}{avatar}</>) : (<>{avatar}{text}</>);
+  const cls = ['flex items-center gap-2.5 min-w-0 hover:opacity-80 transition-opacity no-underline', align === 'right' ? 'justify-end' : 'justify-start'].join(' ');
+  return player.href
+    ? <Link href={player.href} className={cls}>{inner}</Link>
+    : <span className={cls}>{inner}</span>;
 }
 
 function HeroTeamSide({
@@ -286,27 +622,258 @@ function HeroTeamSide({
 // block. Teams with none of these (USAU/WFDF) still render a complete card via
 // record/standing/rankContext.
 
-function TeamsSection({ teams }: { teams: TeamSnapshot[] }) {
-  return (
-    <section aria-label="Your teams">
-      <div className="flex items-baseline justify-between mb-4">
-        <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted">
-          Your teams
-        </span>
-      </div>
-      {teams.length === 0 ? (
-        <SoftEmpty text="No favorite teams yet — add some from Settings." />
+// ─── Section: your players — 2K-style player cards ─────────────────────────────
+// A favorite player renders as a card with their headshot (UFA only; monogram
+// fallback elsewhere) in the corner, current-season stat tiles, and a link to
+// their full cross-league profile. Pro leagues carry a G/A/Blk/+- line; USAU
+// carries events-played; WFDF is a link-out.
+
+function playerInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return '?';
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+// The 2K player card. `featured` = the top-right anchor tile: a bigger portrait,
+// an accent identity band, and larger stat tiles. Non-featured = a compact tile
+// that packs into the bento alongside teams/games.
+function PlayerCard({ player, featured = false }: { player: FeedPlayer; featured?: boolean }) {
+  const { name, teamName, league, headshotUrl, stats, contextLine, href } = player;
+
+  const portrait = (
+    <span
+      className={[
+        'shrink-0 rounded-full overflow-hidden bg-ink/5 flex items-center justify-center ring-1 ring-hairline',
+        featured ? 'w-20 h-20' : 'w-14 h-14',
+      ].join(' ')}
+    >
+      {headshotUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={headshotUrl} alt={name} className="w-full h-full object-cover" loading="lazy" />
       ) : (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          {teams.map((t) => (
-            <TeamDashboardCard key={`${t.team.league}-${t.team.teamId}`} snapshot={t} />
-          ))}
+        <span
+          className={[
+            'font-display italic font-bold text-muted',
+            featured ? 'text-[26px]' : 'text-[18px]',
+          ].join(' ')}
+          aria-hidden="true"
+        >
+          {playerInitials(name)}
+        </span>
+      )}
+    </span>
+  );
+
+  return (
+    <Link
+      href={href}
+      className={[
+        'group relative block h-full bg-surface rounded-card overflow-hidden',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset cursor-pointer',
+        featured ? 'shadow-hero hover:shadow-hero' : 'shadow-card hover:shadow-lift transition-shadow',
+      ].join(' ')}
+    >
+      {/* Accent wash — heavier on the featured anchor so it reads as the star. */}
+      <div
+        aria-hidden="true"
+        className={[
+          'pointer-events-none absolute inset-0 bg-gradient-to-br to-transparent',
+          featured ? 'from-accent/[0.1]' : 'from-accent/[0.05]',
+        ].join(' ')}
+      />
+
+      {featured && (
+        <div className="relative px-6 pt-4 pb-0">
+          <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+            Player spotlight
+          </span>
         </div>
       )}
-    </section>
+
+      <div
+        className={[
+          'relative flex items-start gap-3.5',
+          featured ? 'px-6 pt-3 pb-4' : 'px-5 pt-5 pb-4',
+        ].join(' ')}
+      >
+        {portrait}
+        <span className="min-w-0 flex-1">
+          <span className="flex items-baseline gap-2">
+            <span
+              className={[
+                'font-tight font-bold leading-tight text-ink truncate group-hover:text-accent transition-colors',
+                featured ? 'text-[20px]' : 'text-[16px]',
+              ].join(' ')}
+            >
+              {name}
+            </span>
+            <span className="shrink-0 text-[9px] font-bold tracking-[0.12em] uppercase font-tight text-faint">
+              {LEAGUE_DISPLAY[league]}
+            </span>
+          </span>
+          {teamName && (
+            <span className={['block font-medium text-muted font-tight truncate mt-0.5', featured ? 'text-[13px]' : 'text-[12px]'].join(' ')}>
+              {teamName}
+            </span>
+          )}
+          {contextLine && (
+            <span className="block text-[10.5px] font-medium text-faint font-tight truncate mt-1">
+              {contextLine}
+            </span>
+          )}
+        </span>
+      </div>
+
+      {/* Season stat tiles */}
+      {stats.length > 0 && (
+        <div className={['relative pt-1', featured ? 'px-6' : 'px-5 pb-5'].join(' ')}>
+          {featured && (player.recentGames?.length ?? 0) > 0 && (
+            <div className="text-[8.5px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1.5">
+              Season
+            </div>
+          )}
+          <div className={['grid gap-2', stats.length >= 4 ? 'grid-cols-4' : 'grid-cols-2'].join(' ')}>
+            {stats.map((s) => (
+              <div
+                key={s.label}
+                className={['flex flex-col items-center justify-center rounded-card-sm bg-bg', featured ? 'py-3' : 'py-2'].join(' ')}
+              >
+                <span className={['font-display font-bold leading-none text-ink tabular', featured ? 'text-[26px]' : 'text-[20px]'].join(' ')}>
+                  {s.value}
+                </span>
+                <span className="mt-1 text-[8.5px] font-bold tracking-[0.1em] uppercase font-tight text-faint">
+                  {s.label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Last-N games — spotlight (featured) card only. A compact per-game row:
+          date + opponent + result/score on the left, box-stat chips on the right. */}
+      {featured && (player.recentGames?.length ?? 0) > 0 && (
+        <div className="relative px-6 pt-4 pb-6">
+          <div className="text-[8.5px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-2">
+            Last {player.recentGames!.length} games
+          </div>
+          <div className="flex flex-col divide-y divide-hairline rounded-card-sm bg-bg overflow-hidden">
+            {player.recentGames!.map((g, i) => (
+              <div key={i} className="flex items-center gap-3 px-3.5 py-2.5">
+                {/* Result pill + opponent logo + "vs Name" on one row, date/score below.
+                    Flexible width (min-w-0 + flex-1 basis) so the stat row never wraps. */}
+                <span className="min-w-0 flex-1 flex items-center gap-2">
+                  {g.result && (
+                    <span
+                      className={[
+                        'shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-[4px] text-[9px] font-bold font-mono',
+                        g.result === 'W' ? 'bg-accent text-accent-ink' : 'bg-ink/[0.08] text-faint',
+                      ].join(' ')}
+                      aria-hidden="true"
+                    >
+                      {g.result}
+                    </span>
+                  )}
+                  {g.opponentLogoUrl && (
+                    <span className="shrink-0 inline-flex w-5 h-5 rounded-full overflow-hidden bg-white items-center justify-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={g.opponentLogoUrl} alt="" className="w-full h-full object-contain p-0.5" />
+                    </span>
+                  )}
+                  <span className="min-w-0 flex flex-col leading-tight">
+                    <span className="text-[11px] font-semibold text-ink font-tight truncate">
+                      {g.opponent ? `vs ${g.opponent}` : '—'}
+                    </span>
+                    <span className="text-[9.5px] text-faint font-mono truncate">
+                      {[g.dateLabel, g.score].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                </span>
+                {/* Stat chips — NEVER wrap (was dropping YDS to a second line). */}
+                <span className="shrink-0 flex items-baseline justify-end gap-2.5 flex-nowrap">
+                  {g.stats.map((s) => (
+                    <span key={s.label} className="inline-flex items-baseline gap-0.5">
+                      <span className="font-display font-bold text-[13px] text-ink tabular leading-none">
+                        {s.value}
+                      </span>
+                      <span className="text-[8px] font-bold tracking-[0.06em] uppercase text-faint font-tight">
+                        {s.label}
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </Link>
   );
 }
 
+// ─── League card — top-of-the-league tile ──────────────────────────────────────
+// One card per favorited league (following a league, not just a team, surfaces
+// the top of its standings/rankings). UFA is multi-division → several cards.
+
+function LeagueCard({ card }: { card: FeedLeague }) {
+  return (
+    <div className="h-full bg-surface rounded-card shadow-card overflow-hidden flex flex-col">
+      <Link
+        href={card.href}
+        className="group flex items-baseline justify-between gap-2 px-5 py-3.5 border-b border-hairline hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset cursor-pointer"
+      >
+        <span className="min-w-0">
+          <span className="block font-tight font-bold text-[13px] text-ink group-hover:text-accent transition-colors">
+            {card.label}
+          </span>
+          {card.scope && (
+            <span className="block text-[10px] font-semibold tracking-[0.04em] uppercase font-tight text-faint mt-0.5 truncate">
+              {card.scope}
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 text-[9px] font-bold tracking-[0.12em] uppercase font-tight text-faint">
+          See all →
+        </span>
+      </Link>
+
+      <ol className="flex flex-col">
+        {card.rows.map((r) => (
+          <li
+            key={`${r.rank}-${r.teamId ?? r.name}`}
+            className="flex items-center gap-3 px-5 py-2.5 border-b border-hairline last:border-b-0"
+          >
+            <span className="shrink-0 w-5 text-center font-display font-bold text-[13px] text-faint tabular">
+              {r.rank}
+            </span>
+            {r.logoUrl ? (
+              <SearchResultIcon
+                result={{ kind: 'team', id: r.teamId ?? '', name: r.name, hint: null, league: card.league, logoUrl: r.logoUrl }}
+              />
+            ) : (
+              <span className="shrink-0 w-7 h-7 rounded-md bg-ink/5 flex items-center justify-center text-[9px] font-bold text-faint font-tight" aria-hidden="true">
+                {card.league === 'wfdf' ? '◈' : r.name.slice(0, 2).toUpperCase()}
+              </span>
+            )}
+            <span className="flex-1 min-w-0 font-tight font-semibold text-[13px] text-ink truncate">
+              {r.name}
+            </span>
+            {r.detail && (
+              <span className="shrink-0 font-tight text-[11px] font-semibold text-muted tabular">
+                {r.detail}
+              </span>
+            )}
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+// ─── Team dashboard card — a bento tile ─────────────────────────────────────────
+// Each favorite team: identity header (logo + name + league tag + record), form
+// pips, a rank-context line, a stat-tile strip, and a leaders/roster block.
 function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
   const { team, record, rankContext, form, stats, leaders, roster, accolades } = snapshot;
   const href = resultHref({ kind: 'team', id: team.teamId, name: team.name, league: team.league, hint: null });
@@ -319,7 +886,7 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
     !hasStats && !hasLeaders && !hasForm && !record && !rankContext && !hasRoster && !hasAccolades;
 
   return (
-    <div className="bg-surface rounded-card shadow-card hover:shadow-lift transition-shadow overflow-hidden flex flex-col">
+    <div className="h-full bg-surface rounded-card shadow-card hover:shadow-lift transition-shadow overflow-hidden flex flex-col">
       {/* Header row: identity + league tag + record */}
       <Link
         href={href}
@@ -540,20 +1107,20 @@ function RosterRow({
 // Compact tiles for everything not chosen as the hero — visually much lighter
 // than the hero, a supporting strip rather than a second anchor.
 
-function GamesSection({ games }: { games: FeedGame[] }) {
+// A bento tile: a titled card holding the "more games" list stacked inside it.
+function GamesTile({ games }: { games: FeedGame[] }) {
+  // Header comes from the enclosing ZoneGroup ("More games"), so the tile is
+  // just the stacked list.
   return (
-    <section aria-label="More games">
-      <div className="flex items-baseline justify-between mb-4">
-        <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted">
-          More games
-        </span>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {games.map((g) => (
-          <FeedGameTile key={g.id} game={g} />
+    <div className="h-full bg-surface rounded-card shadow-card overflow-hidden flex flex-col">
+      <div className="flex flex-col">
+        {games.map((g, i) => (
+          <div key={g.id} className={i > 0 ? 'border-t border-hairline' : ''}>
+            <FeedGameTile game={g} />
+          </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -566,7 +1133,7 @@ function FeedGameTile({ game }: { game: FeedGame }) {
   const homeWin = isFinal && game.home.score !== null && game.away.score !== null && game.home.score > game.away.score;
 
   return (
-    <div className="bg-surface rounded-card shadow-card px-4 py-3.5 flex flex-col gap-2.5">
+    <div className="px-4 py-3 flex flex-col gap-2">
       <div className="flex justify-between items-center font-mono text-[10.5px] text-muted tracking-[0.06em]">
         <span className="inline-flex items-center gap-1.5">
           {status}
@@ -583,12 +1150,13 @@ function FeedGameTile({ game }: { game: FeedGame }) {
       </div>
       <FeedTeamRow side={game.away} winner={awayWin} loser={homeWin} showScore={isFinal || isLive} league={game.league} />
       <FeedTeamRow side={game.home} winner={homeWin} loser={awayWin} showScore={isFinal || isLive} league={game.league} />
-      <p className="mt-0.5 text-[10.5px] text-faint font-tight leading-snug truncate">
+      <p className="text-[10.5px] text-faint font-tight leading-snug truncate">
         Following {game.favoriteTeamName}
       </p>
     </div>
   );
 }
+
 
 function FeedTeamRow({
   side,
@@ -624,43 +1192,45 @@ function FeedTeamRow({
 // USAU teams are event-based, so their "feed" is tournament entries — upcoming
 // + played, current year. Each links to the event page. Grouped upcoming/past.
 
-function TournamentsSection({ tournaments }: { tournaments: FeedTournament[] }) {
+// A bento tile: a titled card grouping the favorite USAU teams' tournaments
+// (upcoming then results) as a stacked list.
+function TournamentsTile({ tournaments }: { tournaments: FeedTournament[] }) {
   const upcoming = tournaments.filter((t) => t.status === 'upcoming');
   const past = tournaments.filter((t) => t.status === 'past');
+  // Header comes from the enclosing ZoneGroup ("Tournaments").
   return (
-    <section aria-label="Your tournaments">
-      <div className="flex items-baseline justify-between mb-4">
-        <span className="font-sans text-[10.5px] font-bold tracking-[0.18em] uppercase text-muted">
-          Tournaments
-        </span>
-      </div>
-      <div className="flex flex-col gap-5">
+    <div className="h-full bg-surface rounded-card shadow-card overflow-hidden flex flex-col">
+      <div className="flex flex-col pt-1">
         {upcoming.length > 0 && (
-          <div>
-            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-              Upcoming
-            </div>
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <>
+            <SubLabel text="Upcoming" />
+            <ul className="flex flex-col">
               {upcoming.map((t) => (
                 <TournamentRow key={t.id} tournament={t} />
               ))}
             </ul>
-          </div>
+          </>
         )}
         {past.length > 0 && (
-          <div>
-            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-              Results
-            </div>
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <>
+            <SubLabel text="Results" />
+            <ul className="flex flex-col">
               {past.map((t) => (
                 <TournamentRow key={t.id} tournament={t} />
               ))}
             </ul>
-          </div>
+          </>
         )}
       </div>
-    </section>
+    </div>
+  );
+}
+
+function SubLabel({ text }: { text: string }) {
+  return (
+    <div className="px-5 pt-3 pb-1 text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+      {text}
+    </div>
   );
 }
 
@@ -673,7 +1243,7 @@ function TournamentRow({ tournament: t }: { tournament: FeedTournament }) {
     <li>
       <Link
         href={`/usau/events/${t.slug}`}
-        className="group flex items-center gap-3 px-4 py-3 rounded-card bg-surface shadow-card hover:shadow-lift transition-shadow cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="group flex items-center gap-3 px-5 py-2.5 hover:bg-surface-hi transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset border-t border-hairline first:border-t-0"
       >
         <span className="flex-1 min-w-0">
           <span className="block text-[13px] font-semibold text-ink font-tight truncate group-hover:text-accent transition-colors">

@@ -10,25 +10,31 @@
 // based with no ongoing team schedule → they contribute team snapshots + league
 // context but NOT games. This is expected, not a gap.
 
-import type { FavoriteLeague, FavoriteTeam } from '@/lib/favorites/data';
+import type { FavoriteLeague, FavoriteTeam, FavoritePlayer } from '@/lib/favorites/data';
 import { LEAGUE_DISPLAY } from '@/lib/for-you/leagues';
+import { resultHref } from '@/lib/usau/search-nav';
 import {
   getCurrentGames,
   getGamesByYears,
   getStandings,
   getTeamStats,
   getAllPlayerStats,
+  getPlayerSeasons,
+  getPlayerGameLog,
+  getStoredHeadshotUrl,
   currentSeasonYear,
 } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
-import { teamMeta } from '@/lib/ufa/teams';
+import { teamMeta, teamMetaByAbbr } from '@/lib/ufa/teams';
 import type { UfaGame, UfaTeamStat, UfaPlayerStat } from '@/lib/ufa/types';
 import {
   listPulGames,
   getPulStandings,
   getPulTeam,
   getPulRoster,
-  PUL_CURRENT_SEASON,
+  getPulPlayer,
+  getPulPlayerCareerByName,
+  getPulPlayerGameLog,
   type PulPlayer,
 } from '@/lib/pul/data';
 import {
@@ -36,13 +42,42 @@ import {
   getWulStandings,
   getWulTeam,
   getWulRoster,
-  WUL_CURRENT_SEASON,
+  getWulPlayer,
+  getWulPlayerCareerByName,
+  getWulPlayerGameLog,
   type WulPlayer,
 } from '@/lib/wul/data';
-import { getTeam as getUsauTeam, getEvent as getUsauEvent } from '@/lib/usau/data';
-import { getTeam as getWfdfTeam } from '@/lib/wfdf/data';
+import {
+  getTeam as getUsauTeam,
+  getEvent as getUsauEvent,
+  getPlayerProfile as getUsauPlayerProfile,
+  listOfficialUsauRankings,
+} from '@/lib/usau/data';
+import { usauTeamLogo } from '@/lib/usau/team-logo';
+
+/** The 5 official USAU rank-sets (OfficialRankDivision isn't exported from
+ *  usau/data — mirror the literal here). */
+type UsauRankDivision =
+  | 'Club-Men' | 'Club-Women' | 'Club-Mixed'
+  | 'College-Men' | 'College-Women';
+import {
+  getTeam as getWfdfTeam,
+  getCurrentWfdfEvent,
+  getEvent as getWfdfEvent,
+} from '@/lib/wfdf/data';
 
 // ─── Output shapes (mirror preview-data, isPreview:false) ───────────────────
+
+/** A "player to watch" on the expanded hero (upcoming-game) card. */
+export interface HeroWatchPlayer {
+  playerId: string | null;
+  name: string;
+  /** Headshot URL (UFA) or null → monogram. */
+  headshotUrl: string | null;
+  /** One-line season stat blurb, e.g. "38G · 52A · 6Blk". */
+  statLine: string;
+  href: string | null;
+}
 
 export interface FeedGame {
   id: string;
@@ -55,6 +90,9 @@ export interface FeedGame {
   favoriteTeamName: string;
   /** Sort key — epoch ms; games with no date sort last. */
   sortTs: number;
+  /** Top players to watch per side — populated ONLY for the hero (featured)
+   *  upcoming game, where the extra per-team fetch is worth the detail. */
+  playersToWatch?: { away: HeroWatchPlayer[]; home: HeroWatchPlayer[] };
   isPreview: false;
 }
 
@@ -132,6 +170,77 @@ export interface FeedTournament {
   sortTs: number;
 }
 
+/**
+ * A favorite PLAYER's 2K-style card: current-season stat line + headshot +
+ * where to go for the full profile. Pro leagues (UFA/PUL/WUL) carry a rich
+ * box-score stat line; USAU carries events-played (no per-player box score);
+ * WFDF is name-routed with minimal stats.
+ */
+/** One recent game line for the spotlight player's "last 3 games" strip. */
+export interface PlayerGameLine {
+  /** Short date, e.g. "Jul 12". */
+  dateLabel: string;
+  /** Opponent name (e.g. "Seattle Cascades") or short abbr, or null. */
+  opponent: string | null;
+  /** Opponent team logo URL for the row, or null → no logo shown. */
+  opponentLogoUrl: string | null;
+  /** 'W' | 'L' | null (from the player's team POV). */
+  result: 'W' | 'L' | null;
+  /** "24–18" team–opp score, or null. */
+  score: string | null;
+  /** Box stat tiles for that game (G/A/Blk/+-, plus Yds where available). */
+  stats: TeamStat[];
+}
+
+export interface FeedPlayer {
+  league: FavoriteLeague;
+  /** The stored favorite id (UUID for anchor leagues, name for WFDF). */
+  playerId: string;
+  name: string;
+  /** Their team this season, if known. */
+  teamName: string | null;
+  /** UFA headshot URL, or null → the card shows an initials monogram. */
+  headshotUrl: string | null;
+  /** The season these stats are for (e.g. 2026), or null if unknown. */
+  season: number | null;
+  /** Stat tiles for the card (G/A/Blk/+- for pro; "Events" for USAU). */
+  stats: TeamStat[];
+  /** Secondary context line — e.g. "5 USAU events in 2026" or "12 games". */
+  contextLine: string | null;
+  /** Route to the full profile (/players/[id] or /wfdf/players/by-name/[name]). */
+  href: string;
+  /** Last few games (most recent first) — populated ONLY for the spotlight
+   *  player (the featured card), where the extra fetch is worth the detail. */
+  recentGames?: PlayerGameLine[];
+}
+
+/** One ranked row in a league-level card (top of the standings / rankings). */
+export interface LeagueTopRow {
+  rank: number;
+  teamId: string | null;
+  name: string;
+  logoUrl: string | null;
+  /** Right-aligned context — "12-2" (record) or "#1 · 1980" (rating), etc. */
+  detail: string | null;
+}
+
+/**
+ * A LEAGUE-level summary card — shown for a favorited league so following a
+ * league (not just a team) surfaces real content: the top of that league's
+ * standings/rankings. UFA/PUL/WUL → season standings; USAU → official Top-N
+ * rankings for a rank-set; WFDF → most-recent Worlds medalists.
+ */
+export interface FeedLeague {
+  league: FavoriteLeague;
+  /** Section eyebrow — e.g. "UFA Standings", "USAU Club-Men", "Worlds 2025". */
+  label: string;
+  /** Sub-label for grouping (e.g. UFA division name, USAU rank-set). */
+  scope: string | null;
+  rows: LeagueTopRow[];
+  /** Where "see all" routes (league landing / standings page). */
+  href: string;
+}
+
 export interface ForYouFeed {
   /**
    * The single most important game to feature big at the top: a live game if any,
@@ -143,6 +252,10 @@ export interface ForYouFeed {
   games: FeedGame[];
   tournaments: FeedTournament[];
   teams: TeamSnapshot[];
+  /** Favorite players (2K-style cards). Empty when the user follows no players. */
+  players: FeedPlayer[];
+  /** League-level summary cards for favorited leagues. */
+  leagues: FeedLeague[];
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -252,12 +365,16 @@ function ufaStatus(g: UfaGame): 'upcoming' | 'live' | 'final' {
   return s.isLive ? 'live' : s.isFinal ? 'final' : 'upcoming';
 }
 
-async function ufaGamesFor(favTeamIds: Set<string>, now: number): Promise<FeedGame[]> {
+async function ufaGamesFor(favTeamIds: Set<string>, now: number, year: number): Promise<FeedGame[]> {
   if (favTeamIds.size === 0) return [];
+  const isCurrent = year >= currentSeasonYear();
   // Current slate covers live + near-term; the season pull backfills recents.
+  // For a PAST year we only need that season's completed games (no live slate),
+  // and we keep ALL of them (the recency window doesn't apply to history — the
+  // snapshot uses these to compute that season's record + form).
   const [current, season] = await Promise.all([
-    getCurrentGames().catch(() => [] as UfaGame[]),
-    getGamesByYears([currentSeasonYear()]).catch(() => [] as UfaGame[]),
+    isCurrent ? getCurrentGames().catch(() => [] as UfaGame[]) : Promise.resolve([] as UfaGame[]),
+    getGamesByYears([year]).catch(() => [] as UfaGame[]),
   ]);
   const byId = new Map<string, UfaGame>();
   for (const g of [...season, ...current]) byId.set(g.gameID, g); // current wins (fresher)
@@ -271,7 +388,9 @@ async function ufaGamesFor(favTeamIds: Set<string>, now: number): Promise<FeedGa
     const status = ufaStatus(g);
     const date = g.startTimestamp ? new Date(g.startTimestamp) : null;
     const ts = date ? date.getTime() : now; // dateless → treat as "now" (keep)
-    if (date && !inWindow(ts, now, status)) continue;
+    // Recency windowing only applies to the live current season; past-year
+    // history keeps every completed game so the snapshot's record is accurate.
+    if (isCurrent && date && !inWindow(ts, now, status)) continue;
 
     const favName = favIsHome ? `${g.homeTeamCity} ${g.homeTeamName}` : `${g.awayTeamCity} ${g.awayTeamName}`;
     out.push({
@@ -413,10 +532,17 @@ async function ufaSnapshot(
   const divRows = s ? divisionRows.get(s.division) ?? [] : [];
   const rankContext = s ? rankContextLine(divRows, team.teamId, s.division) : null;
 
+  // Record: from live standings when available (current season); otherwise
+  // derive it from the season's completed games (past-year lens).
+  const record = s
+    ? `${s.wins}-${s.losses}`
+    : recordFromGames(teamGames, team.teamId);
+  const standing = s ? `${s.division} Division` : `${year} season`;
+
   return {
     team,
-    record: s ? `${s.wins}-${s.losses}` : null,
-    standing: s ? `${s.division} Division` : null,
+    record,
+    standing,
     rankContext,
     form: formFromGames(teamGames, team.teamId),
     stats,
@@ -425,6 +551,24 @@ async function ufaSnapshot(
     accolades: [],
     isPreview: false,
   };
+}
+
+/** Win-loss record for a team from a set of FeedGames (decided finals only). */
+function recordFromGames(games: FeedGame[], teamId: string): string | null {
+  let w = 0;
+  let l = 0;
+  for (const g of games) {
+    if (g.status !== 'final') continue;
+    if (g.home.score == null || g.away.score == null) continue;
+    const isHome = g.home.teamId === teamId;
+    const isAway = g.away.teamId === teamId;
+    if (!isHome && !isAway) continue;
+    const mine = isHome ? g.home.score : g.away.score;
+    const theirs = isHome ? g.away.score : g.home.score;
+    if (mine > theirs) w++;
+    else if (mine < theirs) l++;
+  }
+  return w + l > 0 ? `${w}-${l}` : null;
 }
 
 /** PUL + WUL share PulPlayer/WulPlayer stat shape — one enricher. */
@@ -491,6 +635,12 @@ async function proSnapshot(
 
 async function usauSnapshot(team: FavoriteTeam, year: number): Promise<TeamSnapshot> {
   const t = await getUsauTeam(team.teamId).catch(() => null);
+  // USAU logos resolve from the local manifest by name + division + level (not a
+  // stored URL), so the denormalized favorite carries none — resolve it here so
+  // the card shows the club/college crest instead of a monogram.
+  const logoUrl =
+    (t && usauTeamLogo(t.name, t.genderDivision, t.competitionLevel)) || team.logoUrl || null;
+  const teamWithLogo: FavoriteTeam = { ...team, logoUrl };
   // Prefer the CURRENT season; fall back to the newest the team has.
   const season = t?.seasons?.find((s) => s.season === year) ?? t?.seasons?.[0] ?? null;
   const latest = season?.events?.[0] ?? null;
@@ -518,7 +668,7 @@ async function usauSnapshot(team: FavoriteTeam, year: number): Promise<TeamSnaps
   accolades.sort((a, b) => a.placement - b.placement || b.season - a.season);
 
   return {
-    team,
+    team: teamWithLogo,
     record: null, // USAU is event-based; no season W-L record here
     standing: placement != null ? `Finished ${ordinal(placement)} · ${latest?.name ?? ''}`.trim() : (latest?.name ?? null),
     rankContext: null,
@@ -640,14 +790,368 @@ async function wfdfSnapshot(team: FavoriteTeam): Promise<TeamSnapshot> {
 // LEAGUE_DISPLAY lives in ./leagues (a plain module) — this file is 'use server'
 // and can only export async functions, so display constants can't live here.
 
+// ─── Favorite players (2K-style cards) ──────────────────────────────────────
+
+/** Route a favorite player to their profile (reuses the app's routing switch). */
+function playerHref(p: FavoritePlayer): string {
+  return resultHref({ kind: 'player', id: p.playerId, name: p.name, hint: null, league: p.league });
+}
+
+/**
+ * Build a FeedPlayer for one favorite, honoring the selected `year`:
+ *   - UFA        → getPlayerSeasons, picked for `year` (reg+playoffs) + headshot
+ *   - PUL / WUL  → career-by-name, the stint matching `year` (id is season-bound)
+ *   - USAU       → getPlayerProfile → events played that season (no box score)
+ *   - WFDF       → name-routed; minimal (no id-based stat source), card links out
+ * Returns null on a hard fetch failure so one bad player doesn't sink the feed.
+ */
+async function playerSnapshotFor(p: FavoritePlayer, year: number): Promise<FeedPlayer | null> {
+  const base = {
+    league: p.league,
+    playerId: p.playerId,
+    name: p.name,
+    teamName: p.teamName,
+    href: playerHref(p),
+  };
+
+  try {
+    switch (p.league) {
+      case 'ufa': {
+        const [rows, headshot] = await Promise.all([
+          getPlayerSeasons(p.playerId).catch(() => []),
+          getStoredHeadshotUrl(p.playerId).catch(() => null),
+        ]);
+        const seasonRows = rows.filter((r) => r.year === year);
+        const use = seasonRows.length > 0 ? seasonRows : rows.filter((r) => r.year === Math.max(...rows.map((x) => x.year)));
+        const season = use[0]?.year ?? null;
+        const sum = use.reduce(
+          (a, r) => {
+            a.g += r.goals; a.as += r.assists; a.blk += r.blocks; a.gp += r.gamesPlayed;
+            a.thr += r.throwaways; a.drp += r.drops; a.stl += r.stalls;
+            return a;
+          },
+          { g: 0, as: 0, blk: 0, gp: 0, thr: 0, drp: 0, stl: 0 },
+        );
+        const pm = sum.g + sum.as + sum.blk - sum.thr - sum.drp - sum.stl;
+        return {
+          ...base,
+          headshotUrl: headshot ?? p.headshotUrl ?? null,
+          season,
+          stats: use.length
+            ? [
+                { label: 'G', value: String(sum.g) },
+                { label: 'A', value: String(sum.as) },
+                { label: 'Blk', value: String(sum.blk) },
+                { label: '+/-', value: plusMinus(pm) },
+              ]
+            : [],
+          contextLine: use.length ? `${sum.gp} game${sum.gp === 1 ? '' : 's'}${season ? ` · ${season}` : ''}` : null,
+        };
+      }
+      case 'pul':
+      case 'wul': {
+        // PUL/WUL store one row per player per SEASON, keyed by a season-specific
+        // id — so the favorite's stored id only resolves one season. To honor the
+        // year filter we fetch the player's whole career BY NAME and pick the
+        // stint for the selected year (falling back to the id-row, then newest).
+        const career = p.league === 'pul'
+          ? await getPulPlayerCareerByName(p.name).catch(() => null)
+          : await getWulPlayerCareerByName(p.name).catch(() => null);
+        const stints = career?.stints ?? [];
+        const chosen =
+          stints.find((s) => s.season === year)?.player ??
+          // fall back to the saved id-row, then the newest season on record
+          (await (p.league === 'pul' ? getPulPlayer(p.playerId) : getWulPlayer(p.playerId)).catch(() => null)) ??
+          stints[0]?.player ??
+          null;
+        if (!chosen) return { ...base, headshotUrl: null, season: null, stats: [], contextLine: null };
+        return {
+          ...base,
+          headshotUrl: null,
+          season: chosen.season,
+          teamName: base.teamName,
+          stats: [
+            { label: 'G', value: String(chosen.goals) },
+            { label: 'A', value: String(chosen.assists) },
+            { label: 'Blk', value: String(chosen.blocks) },
+            { label: '+/-', value: plusMinus(chosen.plusMinus) },
+          ],
+          contextLine: `${chosen.gamesPlayed} game${chosen.gamesPlayed === 1 ? '' : 's'} · ${chosen.season}`,
+        };
+      }
+      case 'usau': {
+        const prof = await getUsauPlayerProfile(p.playerId).catch(() => null);
+        if (!prof) return { ...base, headshotUrl: null, season: null, stats: [], contextLine: null };
+        // Current-season events; fall back to the most recent season present.
+        const seasons = prof.teamHistory.map((h) => h.season);
+        const useSeason = seasons.includes(year) ? year : (seasons.length ? Math.max(...seasons) : null);
+        const seasonStints = useSeason == null ? [] : prof.teamHistory.filter((h) => h.season === useSeason);
+        const events = seasonStints.flatMap((h) => h.events);
+        const teamName = seasonStints[0]?.teamName ?? base.teamName;
+        return {
+          ...base,
+          headshotUrl: null,
+          season: useSeason,
+          teamName,
+          stats: [{ label: 'Events', value: String(events.length) }],
+          contextLine: useSeason != null
+            ? `${events.length} USAU event${events.length === 1 ? '' : 's'} in ${useSeason}`
+            : null,
+        };
+      }
+      case 'wfdf':
+        // WFDF players are name-routed with no id-keyed stat source here — the
+        // card is a link-out with whatever we stored at favorite time.
+        return { ...base, headshotUrl: null, season: null, stats: [], contextLine: 'View WFDF profile' };
+    }
+  } catch {
+    return { ...base, headshotUrl: null, season: null, stats: [], contextLine: null };
+  }
+}
+
+/** How many recent games to show on the spotlight card. */
+const SPOTLIGHT_RECENT_GAMES = 3;
+
+/** Short "Jul 12" from a UFA date-embedded gameID ("2026-07-12-COL-NY") or ISO. */
+function gameDateLabel(dateStr: string | null): string {
+  if (!dateStr) return '';
+  const iso = /^\d{4}-\d{2}-\d{2}/.exec(dateStr)?.[0];
+  const d = iso ? new Date(iso + 'T00:00:00') : new Date(dateStr);
+  return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+/**
+ * The spotlight player's last few game lines (most-recent-first). Only called
+ * for the featured card, so the extra per-game fetch is one player deep.
+ * Pro leagues (UFA/PUL/WUL) have box scores; USAU/WFDF have none → empty.
+ */
+async function recentGamesFor(p: FavoritePlayer, year: number): Promise<PlayerGameLine[]> {
+  try {
+    if (p.league === 'ufa') {
+      const log = await getPlayerGameLog(p.playerId, year).catch(() => []);
+      // UFA rows have no explicit date/opponent name; the gameID embeds the date
+      // and the two team abbrevs ("2026-07-12-COL-NY"). Sort by that date desc.
+      const sorted = [...log].sort((a, b) => (a.gameID < b.gameID ? 1 : -1));
+      return sorted.slice(0, SPOTLIGHT_RECENT_GAMES).map((g) => {
+        const parts = g.gameID.split('-');
+        const date = parts.slice(0, 3).join('-');
+        const mine = g.isHome ? g.scoreHome : g.scoreAway;
+        const opp = g.isHome ? g.scoreAway : g.scoreHome;
+        // gameID is "YYYY-MM-DD-<AWAY>-<HOME>" (parts[3]=away, parts[4]=home).
+        // The OPPONENT is the OTHER side: if the player was home, the opponent is
+        // the away abbrev; if away, the home abbrev. (This was inverted — it
+        // showed the player's OWN team as the opponent.)
+        const oppAbbr = g.isHome ? parts[3] : parts[4];
+        const oppMeta = oppAbbr ? teamMetaByAbbr(oppAbbr) : null;
+        const oppName = oppMeta ? [oppMeta.city, oppMeta.name].filter(Boolean).join(' ') : oppAbbr ?? null;
+        const pm = g.goals + g.assists + g.blocks - g.throwaways - g.drops - g.stalls;
+        const yds = (g.yardsThrown ?? 0) + (g.yardsReceived ?? 0);
+        const stats: TeamStat[] = [
+          { label: 'G', value: String(g.goals) },
+          { label: 'A', value: String(g.assists) },
+          { label: 'Blk', value: String(g.blocks) },
+          { label: '+/-', value: plusMinus(pm) },
+        ];
+        if (yds > 0) stats.push({ label: 'Yds', value: String(yds) });
+        return {
+          dateLabel: gameDateLabel(date),
+          opponent: oppName,
+          opponentLogoUrl: oppMeta?.logo ?? null,
+          result: mine != null && opp != null ? (mine >= opp ? 'W' : 'L') : null,
+          score: mine != null && opp != null ? `${mine}–${opp}` : null,
+          stats,
+        };
+      });
+    }
+
+    if (p.league === 'pul' || p.league === 'wul') {
+      const log = p.league === 'pul'
+        ? await getPulPlayerGameLog(p.name, year).catch(() => [])
+        : await getWulPlayerGameLog(p.name, year).catch(() => []);
+      const sorted = [...log].sort((a, b) => ((a.date ?? '') < (b.date ?? '') ? 1 : -1));
+      return sorted.slice(0, SPOTLIGHT_RECENT_GAMES).map((g) => {
+        const stats: TeamStat[] = [
+          { label: 'G', value: String(g.goals) },
+          { label: 'A', value: String(g.assists) },
+          { label: 'Blk', value: String(g.blocks) },
+          { label: '+/-', value: plusMinus(g.plusMinus) },
+        ];
+        if ('totalYards' in g && g.totalYards) stats.push({ label: 'Yds', value: String(g.totalYards) });
+        return {
+          dateLabel: gameDateLabel(g.date),
+          opponent: g.opponentAbbrev,
+          opponentLogoUrl: null, // PUL/WUL logs carry no opponent team id → no logo
+          result: g.result,
+          score: g.teamScore != null && g.oppScore != null ? `${g.teamScore}–${g.oppScore}` : null,
+          stats,
+        };
+      });
+    }
+
+    return []; // USAU / WFDF: no per-game box scores
+  } catch {
+    return [];
+  }
+}
+
+/** Top N players to watch on one UFA team this season, by Impact (G+A+Blk). */
+async function heroWatchTeam(teamId: string, year: number, n: number): Promise<HeroWatchPlayer[]> {
+  const rows = await getAllPlayerStats(
+    { year, per: 'total', teamID: teamId, limit: 30 },
+    { maxPages: 2 },
+  ).catch(() => [] as UfaPlayerStat[]);
+  const ranked = [...rows]
+    .sort((a, b) =>
+      ((b.goals ?? 0) + (b.assists ?? 0) + (b.blocks ?? 0)) -
+      ((a.goals ?? 0) + (a.assists ?? 0) + (a.blocks ?? 0)),
+    )
+    .slice(0, n);
+  // Headshots in parallel (UFA is the only league with them).
+  return Promise.all(
+    ranked.map(async (p) => ({
+      playerId: p.playerID,
+      name: p.name,
+      headshotUrl: await getStoredHeadshotUrl(p.playerID).catch(() => null),
+      statLine: `${p.goals ?? 0}G · ${p.assists ?? 0}A · ${p.blocks ?? 0}Blk`,
+      href: `/players/${p.playerID}?from=ufa`,
+    })),
+  );
+}
+
+/** Players-to-watch for both sides of the hero upcoming game (2 per team). */
+async function heroWatchPlayers(
+  awayTeamId: string,
+  homeTeamId: string,
+  year: number,
+): Promise<{ away: HeroWatchPlayer[]; home: HeroWatchPlayer[] }> {
+  const [away, home] = await Promise.all([
+    heroWatchTeam(awayTeamId, year, 2),
+    heroWatchTeam(homeTeamId, year, 2),
+  ]);
+  return { away, home };
+}
+
+// ─── League-level summary cards ─────────────────────────────────────────────
+// Shown for a favorited league so following a LEAGUE (not just a team) surfaces
+// real content. UFA/PUL/WUL are built from standings the main entry already
+// fetched (no extra calls). USAU/WFDF fetch their own (cheap, cached where
+// possible).
+
+const LEAGUE_TOP_N = 5;
+
+/** UFA: top of each division (UFA is multi-division). One card per division. */
+function ufaLeagueCards(
+  divisionRows: Map<string, Array<{ teamId: string; wins: number; losses: number; name: string }>>,
+): FeedLeague[] {
+  const cards: FeedLeague[] = [];
+  for (const [division, rows] of divisionRows) {
+    if (rows.length === 0) continue;
+    cards.push({
+      league: 'ufa',
+      label: 'UFA',
+      scope: division,
+      href: '/teams',
+      rows: rows.slice(0, LEAGUE_TOP_N).map((r, i) => ({
+        rank: i + 1,
+        teamId: r.teamId,
+        name: r.name,
+        logoUrl: teamMeta(r.teamId).logo ?? null,
+        detail: `${r.wins}-${r.losses}`,
+      })),
+    });
+  }
+  return cards;
+}
+
+/** PUL/WUL: single-division standings → one card. */
+function proLeagueCard(
+  league: 'pul' | 'wul',
+  places: { teamId: string; wins: number; losses: number; place: number; name: string }[],
+  logoById: Map<string, string | null>,
+): FeedLeague | null {
+  if (places.length === 0) return null;
+  return {
+    league,
+    label: league.toUpperCase(),
+    scope: 'Standings',
+    href: league === 'pul' ? '/pul/teams' : '/wul/teams',
+    rows: places.slice(0, LEAGUE_TOP_N).map((r) => ({
+      rank: r.place,
+      teamId: r.teamId,
+      name: r.name,
+      logoUrl: logoById.get(r.teamId) ?? null,
+      detail: `${r.wins}-${r.losses}`,
+    })),
+  };
+}
+
+/** USAU: official Top-N rankings for a rank-set (default Club-Men). */
+async function usauLeagueCard(division: UsauRankDivision): Promise<FeedLeague | null> {
+  const res = await listOfficialUsauRankings(division, LEAGUE_TOP_N).catch(() => null);
+  if (!res || res.teams.length === 0) return null;
+  return {
+    league: 'usau',
+    label: 'USAU',
+    scope: `${division.replace('-', ' · ')} · ${res.season}`,
+    href: '/teams?league=usau',
+    rows: res.teams.slice(0, LEAGUE_TOP_N).map((t) => ({
+      rank: t.rank,
+      teamId: t.id,
+      name: t.name,
+      logoUrl: null, // USAU logos resolve by name+division elsewhere; skip here
+      detail: t.rating != null ? `${t.rating}` : (t.wins != null ? `${t.wins}-${t.losses}` : null),
+    })),
+  };
+}
+
+/** WFDF: most-recent Worlds event medalists (finalStanding ≤ 3), first division. */
+async function wfdfLeagueCard(): Promise<FeedLeague | null> {
+  const ev = await getCurrentWfdfEvent().catch(() => null);
+  if (!ev) return null;
+  const detail = await getWfdfEvent(ev.slug).catch(() => null);
+  if (!detail) return null;
+  const medalists = detail.teams
+    .filter((t) => t.finalStanding != null && t.finalStanding <= LEAGUE_TOP_N)
+    .sort((a, b) => (a.finalStanding ?? 99) - (b.finalStanding ?? 99));
+  if (medalists.length === 0) return null;
+  return {
+    league: 'wfdf',
+    label: 'Worlds',
+    scope: `${ev.name}`,
+    href: `/wfdf/events/${ev.slug}`,
+    rows: medalists.slice(0, LEAGUE_TOP_N).map((t) => ({
+      rank: t.finalStanding ?? 0,
+      teamId: t.id,
+      name: t.countryName ?? t.name,
+      logoUrl: null, // WFDF uses country flags, rendered by the UI from the name/code
+      detail: t.divisionName,
+    })),
+  };
+}
+
 // ─── Main entry ─────────────────────────────────────────────────────────────
 
-export async function getForYouFeed(favorites: {
-  leagues: FavoriteLeague[];
-  teams: FavoriteTeam[];
-}): Promise<ForYouFeed> {
+export async function getForYouFeed(
+  favorites: {
+    leagues: FavoriteLeague[];
+    teams: FavoriteTeam[];
+    players?: FavoritePlayer[];
+  },
+  opts?: { year?: number },
+): Promise<ForYouFeed> {
   const now = Date.now();
   const teams = favorites.teams;
+  const favPlayers = favorites.players ?? [];
+
+  // Year lens. Default = the live current year (full feed: live games, upcoming,
+  // hero, current standings). A PAST year is a HISTORY lens — the games strip and
+  // hero are current-season/live concepts with no meaning in a finished season,
+  // so they're suppressed; the payoff is season-scoped USAU tournaments/placements
+  // and per-player season lines. Scheduled leagues (UFA/PUL/WUL) show whatever
+  // season-scoped data they can for that year.
+  const liveYear = new Date(now).getFullYear();
+  const selectedYear = opts?.year ?? liveYear;
+  const isCurrentYear = selectedYear >= liveYear;
 
   const favByLeague = (lg: FavoriteLeague) =>
     new Set(teams.filter((t) => t.league === lg).map((t) => t.teamId));
@@ -673,13 +1177,17 @@ export async function getForYouFeed(favorites: {
     wulStandingsRaw,
     ufaTeamStatsRaw,
   ] = await Promise.all([
-    needUfa ? ufaGamesFor(favByLeague('ufa'), now) : Promise.resolve([] as FeedGame[]),
-    needUfa ? getStandings().catch(() => []) : Promise.resolve([]),
-    needPul ? listPulGames({ season: PUL_CURRENT_SEASON }).catch(() => []) : Promise.resolve([]),
-    needPul ? getPulStandings(PUL_CURRENT_SEASON).catch(() => []) : Promise.resolve([]),
-    needWul ? listWulGames({ season: WUL_CURRENT_SEASON }).catch(() => []) : Promise.resolve([]),
-    needWul ? getWulStandings(WUL_CURRENT_SEASON).catch(() => []) : Promise.resolve([]),
-    needUfa ? getTeamStats({ year: currentSeasonYear() }).then((r) => r.stats ?? []).catch(() => [] as UfaTeamStat[]) : Promise.resolve([] as UfaTeamStat[]),
+    needUfa ? ufaGamesFor(favByLeague('ufa'), now, selectedYear) : Promise.resolve([] as FeedGame[]),
+    // Standings API is CURRENT-season only (no year param). For a past year the
+    // snapshot derives record + rank from that season's games instead.
+    needUfa && isCurrentYear ? getStandings().catch(() => []) : Promise.resolve([]),
+    // PUL/WUL seasons ARE calendar years, so the selected year maps directly to
+    // the season — the year filter works across every league's team data.
+    needPul ? listPulGames({ season: selectedYear }).catch(() => []) : Promise.resolve([]),
+    needPul ? getPulStandings(selectedYear).catch(() => []) : Promise.resolve([]),
+    needWul ? listWulGames({ season: selectedYear }).catch(() => []) : Promise.resolve([]),
+    needWul ? getWulStandings(selectedYear).catch(() => []) : Promise.resolve([]),
+    needUfa ? getTeamStats({ year: selectedYear }).then((r) => r.stats ?? []).catch(() => [] as UfaTeamStat[]) : Promise.resolve([] as UfaTeamStat[]),
   ]);
 
   // UFA standings index (teamID → wins/losses/division/pointDiff)
@@ -721,15 +1229,23 @@ export async function getForYouFeed(favorites: {
 
   // ── USAU upcoming scheduled games (pool play) for favorite USAU teams ──
   // Event-based → walk each favorite USAU team's near-term events for its
-  // not-yet-played matchups. Fetched per team (each does its own event fetches).
-  const currentYear = new Date(now).getFullYear();
+  // not-yet-played matchups. Only meaningful for the live current year (there
+  // are no "upcoming" games in a finished past season).
   const usauFavTeams = teams.filter((t) => t.league === 'usau');
-  const usauGameLists = await Promise.all(
-    usauFavTeams.map((t) => usauUpcomingGamesFor(t, now, currentYear).catch(() => [] as FeedGame[])),
-  );
+  const usauGameLists = isCurrentYear
+    ? await Promise.all(
+        usauFavTeams.map((t) => usauUpcomingGamesFor(t, now, selectedYear).catch(() => [] as FeedGame[])),
+      )
+    : [];
   const usauGames = usauGameLists.flat();
 
-  const allGames = [...ufaGamesRaw, ...pulGames, ...wulGames, ...usauGames].sort((a, b) => {
+  // For a past year the games strip + hero are suppressed (live/upcoming/recent
+  // results are current-season concepts). We still compute `allGames` for the
+  // current year so form pips + the strip work; past years get an empty set.
+  const allGames = (isCurrentYear
+    ? [...ufaGamesRaw, ...pulGames, ...wulGames, ...usauGames]
+    : []
+  ).sort((a, b) => {
     // Upcoming/live first (ascending by time), then finals (most recent first).
     const aFinal = a.status === 'final';
     const bFinal = b.status === 'final';
@@ -749,16 +1265,20 @@ export async function getForYouFeed(favorites: {
   });
 
   // ── Team snapshots (per favorite team) — record/standing + stats + leaders ──
-  // Form is computed off the UNtrimmed game set (allGames) so a team's last 5
-  // results survive the strip's per-team recency cap.
-  const ufaYear = currentSeasonYear();
+  // UFA honors the selected year: team-stats + leaders come from that season
+  // (getTeamStats/getAllPlayerStats take a year), and record + form come from
+  // that season's games (ufaGamesRaw). The live standings API is current-only,
+  // so a PAST year has no standings row → the snapshot derives record from games
+  // and drops the divisional rank-context (can't reconstruct final standings).
+  // Form uses ufaGamesRaw (the selected-year UFA set) — NOT allGames, which is
+  // empty on a past-year lens where the strip is suppressed.
   const snapshots = await Promise.all(
     teams.map((t) => {
       switch (t.league) {
-        case 'ufa': return ufaSnapshot(t, ufaStandingsById, ufaDivisionRows, ufaTeamStatsById, allGames, ufaYear);
-        case 'pul': return proSnapshot(t, 'pul', pulPlaces, allGames, PUL_CURRENT_SEASON);
-        case 'wul': return proSnapshot(t, 'wul', wulPlaces, allGames, WUL_CURRENT_SEASON);
-        case 'usau': return usauSnapshot(t, currentYear);
+        case 'ufa': return ufaSnapshot(t, ufaStandingsById, ufaDivisionRows, ufaTeamStatsById, ufaGamesRaw, selectedYear);
+        case 'pul': return proSnapshot(t, 'pul', pulPlaces, allGames, selectedYear);
+        case 'wul': return proSnapshot(t, 'wul', wulPlaces, allGames, selectedYear);
+        case 'usau': return usauSnapshot(t, selectedYear);
         case 'wfdf': return wfdfSnapshot(t);
       }
     }),
@@ -770,7 +1290,7 @@ export async function getForYouFeed(favorites: {
   // names the event; only USAU gets the tournament list. (currentYear +
   // usauFavTeams are computed above with the USAU games fetch.)
   const tournamentLists = await Promise.all(
-    usauFavTeams.map((t) => usauTournamentsFor(t, now, currentYear).catch(() => [] as FeedTournament[])),
+    usauFavTeams.map((t) => usauTournamentsFor(t, now, selectedYear).catch(() => [] as FeedTournament[])),
   );
   const tournaments = tournamentLists.flat().sort((a, b) => {
     // Upcoming first (soonest first), then past (most recent first).
@@ -784,8 +1304,67 @@ export async function getForYouFeed(favorites: {
   // Priority: a live game > the soonest upcoming game > the most recent final.
   // `games` is already sorted (live/upcoming ascending, then finals descending),
   // so the first element is exactly that. Pull it out so the strip shows the rest.
-  const heroGame = games.length > 0 ? games[0] : null;
+  let heroGame = games.length > 0 ? games[0] : null;
   const stripGames = heroGame ? games.slice(1) : games;
 
-  return { heroGame, games: stripGames, tournaments, teams: snapshots };
+  // Enrich the hero UPCOMING game with per-team "players to watch" (UFA only —
+  // the league with per-team season stats + headshots). One game, two fetches.
+  if (heroGame && heroGame.league === 'ufa' && heroGame.status === 'upcoming') {
+    const watch = await heroWatchPlayers(heroGame.away.teamId, heroGame.home.teamId, selectedYear).catch(() => null);
+    if (watch) heroGame = { ...heroGame, playersToWatch: watch };
+  }
+
+  // ── Favorite players (2K-style cards) — fetched per player by their league ──
+  // Order is FIRST-ADDED first (getMyFavorites returns players ascending), so
+  // players[0] is the spotlight. Nulls (hard fetch failures) are dropped.
+  const playerSnaps = await Promise.all(favPlayers.map((p) => playerSnapshotFor(p, selectedYear)));
+  const players = playerSnaps.filter((p): p is FeedPlayer => p !== null);
+
+  // Enrich ONLY the spotlight player (players[0]) with their last-few game lines
+  // — a richer featured card without an N-player fan-out. Match the FavoritePlayer
+  // back by (league, playerId) rather than index (a failed snapshot could shift it).
+  if (players.length > 0) {
+    const spot = players[0];
+    const fav = favPlayers.find((f) => f.league === spot.league && f.playerId === spot.playerId);
+    if (fav) {
+      const recentGames = await recentGamesFor(fav, selectedYear).catch(() => []);
+      if (recentGames.length > 0) players[0] = { ...spot, recentGames };
+    }
+  }
+
+  // ── League-level cards — one per FAVORITED league (following a league, not a
+  // team, still surfaces the top of that league). UFA/PUL/WUL reuse standings
+  // already fetched above; USAU/WFDF fetch their own (cheap/cached). Suppressed
+  // on a past-year lens (these are current-season standings/rankings).
+  const leagueCards: FeedLeague[] = [];
+  if (isCurrentYear) {
+    const favLeagues = new Set(favorites.leagues);
+
+    if (favLeagues.has('ufa')) leagueCards.push(...ufaLeagueCards(ufaDivisionRows));
+
+    if (favLeagues.has('pul')) {
+      const logos = new Map<string, string | null>(
+        pulStandingsRaw.map((r) => [r.team.id, r.team.logoUrl ?? null]),
+      );
+      const c = proLeagueCard('pul', pulPlaces, logos);
+      if (c) leagueCards.push(c);
+    }
+    if (favLeagues.has('wul')) {
+      const logos = new Map<string, string | null>(
+        wulStandingsRaw.map((r) => [r.team.id, r.team.logoUrl ?? null]),
+      );
+      const c = proLeagueCard('wul', wulPlaces, logos);
+      if (c) leagueCards.push(c);
+    }
+
+    // USAU + WFDF fetch on demand (only when favorited).
+    const [usauCard, wfdfCard] = await Promise.all([
+      favLeagues.has('usau') ? usauLeagueCard('Club-Men') : Promise.resolve(null),
+      favLeagues.has('wfdf') ? wfdfLeagueCard() : Promise.resolve(null),
+    ]);
+    if (usauCard) leagueCards.push(usauCard);
+    if (wfdfCard) leagueCards.push(wfdfCard);
+  }
+
+  return { heroGame, games: stripGames, tournaments, teams: snapshots, players, leagues: leagueCards };
 }

@@ -47,6 +47,8 @@ import { RankingsCard } from '@/components/home/rankings-card';
 import { UpNextCards } from '@/components/home/up-next-card';
 import { RecentResultsCards } from '@/components/home/recent-results-card';
 import { PulStandingsSection, WulStandingsSection } from '@/components/home/league-standings-sections';
+import { StandoutsCarousel } from '@/components/home/standouts-carousel';
+import { getStandoutPerformances } from '@/lib/home/standouts';
 import { SiteFooter } from '@/components/site-footer';
 
 export const revalidate = 60;
@@ -63,7 +65,7 @@ export default async function HomePage() {
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
@@ -95,6 +97,10 @@ export default async function HomePage() {
       // WFDF: current Worlds event — same Wed weekend-cadence flip as USAU
       // (e.g. WMUCC through Tue, then WJUC from Wednesday).
       getCurrentWfdfEvent(),
+      // Standout player performances (last 4 weeks, strength-gated recency) for
+      // the home carousel. UFA/PUL/WUL wired; only leagues with recent games
+      // contribute. Cheap windowed Supabase reads (per-game box-score tables).
+      getStandoutPerformances(),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -109,6 +115,8 @@ export default async function HomePage() {
     standingsRes.status === 'fulfilled' ? standingsRes.value : [];
   const teamStats: UfaTeamStat[] =
     teamStatsRes.status === 'fulfilled' ? teamStatsRes.value.stats ?? [] : [];
+  const standouts =
+    standoutsRes.status === 'fulfilled' ? standoutsRes.value : [];
 
   // ── Cross-league slide data ──────────────────────────────────────────────
   const usauEvent = usauRes.status === 'fulfilled' ? usauRes.value : null;
@@ -146,7 +154,12 @@ export default async function HomePage() {
   //               (games[0] keeps it from being empty mid-season; EmptyHero
   //               renders for a truly empty slate).
   const topGame = pickTopGame(games, standings);
-  const gotwGame = pickUpcomingGameOfWeek(games, standings) ?? games[0];
+  // Fallback keeps the UFA slide non-empty mid-season, but must NEVER be a
+  // cancelled/postponed game (those aren't upcoming/live/final, so the pickers
+  // already skip them — the raw games[0] fallback would leak one). Prefer the
+  // first non-cancelled game.
+  const firstShowableGame = games.find((g) => !gameUiState(g).isCancelled) ?? games[0];
+  const gotwGame = pickUpcomingGameOfWeek(games, standings) ?? firstShowableGame;
 
   // Records for a game's two teams (from current standings).
   const recordOf = (slug?: string): string | undefined => {
@@ -247,7 +260,28 @@ export default async function HomePage() {
         <LeaguesStrip />
       </div>
 
-      {/* 3. "Up next" — UFA + USAU cards, side by side on desktop so they
+      {/* 3. "Standout performances" — rotating carousel of the best individual
+             stat-lines from recent games (last 4 weeks, strength-gated), with
+             UFA award-watch (MVP/OPOY/DPOY) + Callahan tags. Sits above "Up
+             next" so player highlights lead. Renders only when there are recent
+             lines (currently UFA season). */}
+      {standouts.length > 0 && (
+        <div className="px-5 lg:px-10 pt-9 lg:pt-11">
+          <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
+            <div>
+              <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
+                Player spotlight
+              </span>
+              <h2 className="font-display italic font-bold text-[26px] lg:text-[34px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
+                Standout performances
+              </h2>
+            </div>
+          </div>
+          <StandoutsCarousel lines={standouts} />
+        </div>
+      )}
+
+      {/* 4. "Up next" — UFA + USAU cards, side by side on desktop so they
              fill the width instead of stacking narrow in a single column. */}
       <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 lg:grid-cols-2 gap-5">
         <UpNextCards ufaGames={upNext} usauEvents={usauUpcomingEvents} />

@@ -6,6 +6,9 @@ export interface GameUiState {
   isUpcoming: boolean;
   isLive: boolean;
   isFinal: boolean;
+  /** Cancelled / postponed / suspended — should be hidden from live feeds
+   *  (hero carousel, "up next"), not treated as an in-play game. */
+  isCancelled: boolean;
   hasScore: boolean;
   awayWin: boolean;
   homeWin: boolean;
@@ -26,15 +29,31 @@ export function isFinalStatus(status: string | null | undefined): boolean {
   return s === 'final' || s === 'completed' || s === 'forfeit';
 }
 
+/** True when the game was cancelled / postponed / suspended and should NOT show
+ *  as live or upcoming. Matched defensively (both US/UK spellings + variants)
+ *  since UFA's status is a free-text phase string, not an enum. CRITICAL: this
+ *  must be checked BEFORE isLiveStatus — live is defined by exclusion, so a
+ *  cancelled game would otherwise read as "in play" and leak into the hero. */
+export function isCancelledStatus(status: string | null | undefined): boolean {
+  const s = (status ?? '').toLowerCase().trim();
+  return (
+    s.includes('cancel') ||   // "Cancelled" / "Canceled"
+    s.includes('postpon') ||  // "Postponed"
+    s.includes('suspend')     // "Suspended"
+  );
+}
+
 /** True when the game is in play. UFA has NO literal "Live" status — it sends
  *  the current phase ("First Quarter", "Halftime", "Fourth Quarter",
- *  "Overtime", …). So live = anything that is neither upcoming nor final.
- *  Defined by exclusion so new/unseen phase strings still read as live. */
+ *  "Overtime", …). So live = anything that is neither upcoming, final, NOR
+ *  cancelled. Defined by exclusion so new/unseen phase strings still read as
+ *  live — but cancelled/postponed must be excluded or they masquerade as live. */
 export function isLiveStatus(status: string | null | undefined): boolean {
-  return !isUpcomingStatus(status) && !isFinalStatus(status);
+  return !isUpcomingStatus(status) && !isFinalStatus(status) && !isCancelledStatus(status);
 }
 
 export function gameUiState(game: UfaGame): GameUiState {
+  const isCancelled = isCancelledStatus(game.status);
   const isLive = isLiveStatus(game.status);
   const isFinal = isFinalStatus(game.status);
   const isUpcoming = isUpcomingStatus(game.status);
@@ -44,7 +63,7 @@ export function gameUiState(game: UfaGame): GameUiState {
   const margin = Math.abs(game.awayScore - game.homeScore);
   const isClose = hasScore && margin <= 1 && (isLive || isFinal);
   const startDate = game.startTimestamp ? new Date(game.startTimestamp) : null;
-  return { isUpcoming, isLive, isFinal, hasScore, awayWin, homeWin, isClose, startDate };
+  return { isUpcoming, isLive, isFinal, isCancelled, hasScore, awayWin, homeWin, isClose, startDate };
 }
 
 // UFA timestamps are ISO strings carrying the GAME's local UTC offset, e.g.

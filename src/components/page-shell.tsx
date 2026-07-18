@@ -119,6 +119,9 @@ interface PageShellProps {
   stickyName?: string;
   /** Hide the SiteFooter on mobile (<lg) only; desktop keeps it. See AppShell. */
   hideFooterMobile?: boolean;
+  /** Wider content cap for dashboard/bento layouts (e.g. For You) that need more
+   *  horizontal room than the default reading width. */
+  wide?: boolean;
   children: React.ReactNode;
 }
 
@@ -131,11 +134,15 @@ export function PageShell({
   breadcrumbs,
   stickyName,
   hideFooterMobile,
+  wide,
   children,
 }: PageShellProps) {
   return (
     <AppShell topNavSlot={topNavSlot} hideFooterMobile={hideFooterMobile}>
-      <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
+      <div className={[
+        'px-5 pt-4 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto',
+        wide ? 'lg:px-10 xl:px-8 lg:max-w-[1320px]' : 'lg:px-14 lg:max-w-[1080px]',
+      ].join(' ')}>
         {stickyName && <StickyName name={stickyName} />}
         {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />}
         <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />

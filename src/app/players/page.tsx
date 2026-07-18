@@ -27,6 +27,7 @@ import { PlayersSearchList } from '@/components/players/players-search-list';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { SortControl } from '@/components/sort-control';
+import { SortableTh } from '@/components/players/sortable-th';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { PulTeamLogo } from '@/components/pul-team-logo';
@@ -204,34 +205,42 @@ export default async function PlayersPage({ searchParams }: Props) {
               <thead>
                 <tr>
                   {[
-                    { label: '#',       title: 'Rank',                     left: true,  w: 'w-10' },
-                    { label: 'Player',  title: 'Player name',              left: true,  w: 'w-[140px] sm:w-[180px]' },
-                    { label: 'Team',    title: 'Team',                     left: true,  w: 'w-[120px]' },
-                    { label: 'G',       title: 'Goals',                    left: false, w: '' },
-                    { label: 'A',       title: 'Assists',                  left: false, w: '' },
-                    { label: 'Blk',     title: 'Blocks',                   left: false, w: '' },
-                    { label: 'TO',      title: 'Turnovers',                left: false, w: '' },
-                    { label: 'Touch',   title: 'Touches',                  left: false, w: '' },
-                    { label: 'O-Pts',   title: 'Offensive Points Played',  left: false, w: '' },
-                    { label: 'D-Pts',   title: 'Defensive Points Played',  left: false, w: '' },
-                    { label: '+/−',     title: 'Plus / Minus',             left: false, w: '' },
-                  ].map((h, hi, arr) => (
-                    <th
-                      key={h.label}
-                      scope="col"
-                      title={h.title}
-                      className={[
-                        'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint',
-                        'whitespace-nowrap',
-                        h.left ? 'text-left' : 'text-right',
-                        hi === 0 ? 'pl-5' : '',
-                        hi === arr.length - 1 ? 'pr-5' : '',
-                        h.w,
-                      ].join(' ')}
-                    >
-                      {h.label}
-                    </th>
-                  ))}
+                    { label: '#',       title: 'Rank',                     left: true,  w: 'w-10',                 sort: null },
+                    { label: 'Player',  title: 'Player name',              left: true,  w: 'w-[140px] sm:w-[180px]', sort: null },
+                    { label: 'Team',    title: 'Team',                     left: true,  w: 'w-[120px]',            sort: null },
+                    { label: 'G',       title: 'Goals',                    left: false, w: '',                     sort: 'goals' },
+                    { label: 'A',       title: 'Assists',                  left: false, w: '',                     sort: 'assists' },
+                    { label: 'Blk',     title: 'Blocks',                   left: false, w: '',                     sort: 'blocks' },
+                    { label: 'TO',      title: 'Turnovers',                left: false, w: '',                     sort: null },
+                    { label: 'Touch',   title: 'Touches',                  left: false, w: '',                     sort: 'touches' },
+                    { label: 'O-Pts',   title: 'Offensive Points Played',  left: false, w: '',                     sort: 'o_points' },
+                    { label: 'D-Pts',   title: 'Defensive Points Played',  left: false, w: '',                     sort: 'd_points' },
+                    { label: '+/−',     title: 'Plus / Minus',             left: false, w: '',                     sort: 'plus_minus' },
+                  ].map((h, hi, arr) => {
+                    const cls = [
+                      'px-3 py-3 text-[10px] font-bold tracking-wide uppercase',
+                      'whitespace-nowrap',
+                      h.left ? 'text-left' : 'text-right',
+                      hi === 0 ? 'pl-5' : '',
+                      hi === arr.length - 1 ? 'pr-5' : '',
+                      h.w,
+                    ].join(' ');
+                    return h.sort ? (
+                      <SortableTh
+                        key={h.label}
+                        label={h.label}
+                        title={h.title}
+                        sortField={h.sort}
+                        currentSort={sortBy}
+                        currentDir={dir}
+                        className={cls}
+                      />
+                    ) : (
+                      <th key={h.label} scope="col" title={h.title} className={`${cls} text-faint`}>
+                        {h.label}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -337,34 +346,42 @@ export default async function PlayersPage({ searchParams }: Props) {
               <thead>
                 <tr>
                   {[
-                    { label: '#',      title: 'Rank',                     left: true,  w: 'w-10' },
-                    { label: 'Player', title: 'Player name',              left: true,  w: 'w-[140px] sm:w-[180px]' },
-                    { label: 'Team',   title: 'Team',                     left: true,  w: 'w-[120px]' },
-                    { label: 'G',      title: 'Goals',                    left: false, w: '' },
-                    { label: 'A',      title: 'Assists',                  left: false, w: '' },
-                    { label: 'Blk',    title: 'Blocks',                   left: false, w: '' },
-                    { label: 'TO',     title: 'Turnovers',                left: false, w: '' },
-                    { label: 'Touch',  title: 'Touches',                  left: false, w: '' },
-                    { label: 'O-Pts',  title: 'Offensive Points Played',  left: false, w: '' },
-                    { label: 'D-Pts',  title: 'Defensive Points Played',  left: false, w: '' },
-                    { label: '+/−',    title: 'Plus / Minus',             left: false, w: '' },
-                  ].map((h, hi, arr) => (
-                    <th
-                      key={h.label}
-                      scope="col"
-                      title={h.title}
-                      className={[
-                        'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint',
-                        'whitespace-nowrap',
-                        h.left ? 'text-left' : 'text-right',
-                        hi === 0 ? 'pl-5' : '',
-                        hi === arr.length - 1 ? 'pr-5' : '',
-                        h.w,
-                      ].join(' ')}
-                    >
-                      {h.label}
-                    </th>
-                  ))}
+                    { label: '#',      title: 'Rank',                     left: true,  w: 'w-10',                 sort: null },
+                    { label: 'Player', title: 'Player name',              left: true,  w: 'w-[140px] sm:w-[180px]', sort: null },
+                    { label: 'Team',   title: 'Team',                     left: true,  w: 'w-[120px]',            sort: null },
+                    { label: 'G',      title: 'Goals',                    left: false, w: '',                     sort: 'goals' },
+                    { label: 'A',      title: 'Assists',                  left: false, w: '',                     sort: 'assists' },
+                    { label: 'Blk',    title: 'Blocks',                   left: false, w: '',                     sort: 'blocks' },
+                    { label: 'TO',     title: 'Turnovers',                left: false, w: '',                     sort: null },
+                    { label: 'Touch',  title: 'Touches',                  left: false, w: '',                     sort: 'touches' },
+                    { label: 'O-Pts',  title: 'Offensive Points Played',  left: false, w: '',                     sort: 'o_points' },
+                    { label: 'D-Pts',  title: 'Defensive Points Played',  left: false, w: '',                     sort: 'd_points' },
+                    { label: '+/−',    title: 'Plus / Minus',             left: false, w: '',                     sort: 'plus_minus' },
+                  ].map((h, hi, arr) => {
+                    const cls = [
+                      'px-3 py-3 text-[10px] font-bold tracking-wide uppercase',
+                      'whitespace-nowrap',
+                      h.left ? 'text-left' : 'text-right',
+                      hi === 0 ? 'pl-5' : '',
+                      hi === arr.length - 1 ? 'pr-5' : '',
+                      h.w,
+                    ].join(' ');
+                    return h.sort ? (
+                      <SortableTh
+                        key={h.label}
+                        label={h.label}
+                        title={h.title}
+                        sortField={h.sort}
+                        currentSort={sortBy}
+                        currentDir={dir}
+                        className={cls}
+                      />
+                    ) : (
+                      <th key={h.label} scope="col" title={h.title} className={`${cls} text-faint`}>
+                        {h.label}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -521,6 +538,8 @@ export default async function PlayersPage({ searchParams }: Props) {
       <PlayersSearchList
         mode={{ kind: 'ufa', stats: ranked, championTeamIds, year }}
         scopeLabel={`${year} UFA leaders`}
+        currentSort={sort}
+        currentDir={dir}
       />
     </PageShell>
   );

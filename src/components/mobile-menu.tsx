@@ -1071,21 +1071,33 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // SSR guard — createPortal is browser-only.
   useEffect(() => { setMounted(true); }, []);
 
-  // "For You" appears in the menu ONLY when the signed-in user has a favorite
-  // TEAM (a favorite league alone isn't enough — the feed is team-driven).
-  // Checked whenever the menu opens or the session changes, so it lights up as
-  // soon as a team is favorited and hides if all teams are removed.
-  const [hasFavorites, setHasFavorites] = useState(false);
+  // "For You" appears in the menu when the signed-in user has a favorite TEAM or
+  // PLAYER (a favorite league alone isn't enough — the feed is team/player-driven,
+  // matching the /for-you empty-state rule). Fetched as soon as the SESSION is
+  // known — NOT gated on the menu opening — so the row is already resolved by the
+  // time the menu renders (previously it popped in a beat late on every open, and
+  // reset to hidden between opens, causing a flash). `null` = not-yet-known.
+  const [hasFavorites, setHasFavorites] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!open || !user) { setHasFavorites(false); return; }
+    if (!user) { setHasFavorites(false); return; }
     let cancelled = false;
     getMyFavorites()
       .then((f) => {
-        if (!cancelled) setHasFavorites(f.teams.length > 0);
+        // Only ever SET to the resolved value — never reset to false/null on a
+        // refetch, so re-opening the menu can update the row in the background
+        // without ever hiding a row that should show (no flash).
+        if (!cancelled) setHasFavorites(f.teams.length > 0 || f.players.length > 0);
       })
-      .catch(() => { if (!cancelled) setHasFavorites(false); });
+      .catch(() => {
+        // Keep any prior known value on a transient failure; only default to
+        // hidden if we never resolved it.
+        if (!cancelled) setHasFavorites((prev) => prev ?? false);
+      });
     return () => { cancelled = true; };
-  }, [open, user]);
+    // Re-run when the session changes OR the menu opens, so a mid-session
+    // favorite change is reflected — but the fetch on user-change means the row
+    // is already resolved before the first open (no late render).
+  }, [user, open]);
 
   // ── Derive initial expanded state from URL ──────────────────────────────
   const activeApp = detectSubApp(pathname);
@@ -1470,9 +1482,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             the flex column so overflow scrolls here, not the whole panel). */}
         <nav aria-label="Primary navigation" className="relative flex-1 min-h-0 overflow-y-auto px-3 pb-8 flex flex-col gap-1.5">
 
-          {/* ── FOR YOU — first, only when the user has a favorite team ───
-              Gated off entirely by FOR_YOU_ENABLED while the page is unfinished
-              (2026-07-10). Flip the flag in lib/for-you/leagues.ts to restore. */}
+          {/* ── FOR YOU — first, shown when the user has a favorite team or
+              player (resolved on session load so it doesn't render late).
+              Gated by FOR_YOU_ENABLED (lib/for-you/leagues.ts). */}
           {FOR_YOU_ENABLED && hasFavorites && (
             <SubAppRow
               app="for-you"
