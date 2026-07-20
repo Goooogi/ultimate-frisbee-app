@@ -86,6 +86,48 @@ function validateFile(f: File): string | null {
   return null;
 }
 
+/** Target avatar edge in px (chip shows ≤64px; 256 covers retina + settings preview). */
+const AVATAR_MAX_PX = 256;
+
+/**
+ * Downscale + re-encode an avatar to a small square WEBP in the browser, so the
+ * STORED object is already avatar-sized and can be served plainly — no Supabase
+ * image transform (which is metered per origin image per billing cycle). Returns
+ * a { blob, ext, contentType } or null when resizing isn't applicable/possible.
+ *
+ * Animated GIFs are skipped (a canvas would flatten to one frame) — they're rare
+ * and small, so we upload them untouched.
+ */
+async function resizeAvatar(
+  file: File,
+): Promise<{ blob: Blob; ext: string; contentType: string } | null> {
+  if (file.type === 'image/gif') return null; // preserve animation
+  if (typeof document === 'undefined' || typeof createImageBitmap !== 'function') return null;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const side = Math.min(AVATAR_MAX_PX, bitmap.width, bitmap.height);
+    // Center-crop to a square (cover), matching the round chip's object-cover.
+    const sx = (bitmap.width - Math.min(bitmap.width, bitmap.height)) / 2;
+    const sy = (bitmap.height - Math.min(bitmap.width, bitmap.height)) / 2;
+    const srcSide = Math.min(bitmap.width, bitmap.height);
+    const canvas = document.createElement('canvas');
+    canvas.width = side;
+    canvas.height = side;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) { bitmap.close(); return null; }
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(bitmap, sx, sy, srcSide, srcSide, 0, 0, side, side);
+    bitmap.close();
+    const blob: Blob | null = await new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b), 'image/webp', 0.82),
+    );
+    if (!blob || blob.size === 0) return null;
+    return { blob, ext: '.webp', contentType: 'image/webp' };
+  } catch {
+    return null; // any decode/encode failure → fall back to the original upload
+  }
+}
+
 export function AvatarUploadModal({
   open,
   onClose,
@@ -180,14 +222,22 @@ export function AvatarUploadModal({
       return;
     }
 
-    const ext = guessExtension(file);
+    // Downscale to a small square in the browser so the stored object is already
+    // avatar-sized and can be served plainly (no Supabase image transform, which
+    // is metered per billing cycle). Falls back to the original on any failure
+    // or for animated GIFs.
+    const resized = await resizeAvatar(file);
+    const body: Blob | File = resized?.blob ?? file;
+    const ext = resized?.ext ?? guessExtension(file);
+    const contentType = resized?.contentType ?? file.type;
     const objectPath = `${user.id}/${crypto.randomUUID()}${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(objectPath, file, {
-        cacheControl: '3600',
-        contentType: file.type,
+      .upload(objectPath, body, {
+        // Long cache — the object is immutable (unique uuid path per upload).
+        cacheControl: '31536000',
+        contentType,
         upsert: false,
       });
     if (uploadError) {

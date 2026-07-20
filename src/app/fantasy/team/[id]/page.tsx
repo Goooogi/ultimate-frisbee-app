@@ -8,11 +8,12 @@ import { PageShell } from '@/components/page-shell';
 import {
   getFantasyTeam,
   getTeamRoster,
+  getTeamWeekBreakdown,
   currentFantasyWeek,
 } from '@/lib/fantasy/data';
-import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import type { FantasyRole } from '@/lib/fantasy/scoring';
 import type { Crumb } from '@/components/breadcrumbs';
+import { WeeklyBreakdown } from '@/components/fantasy/weekly-breakdown';
 
 interface Props {
   params: { id: string };
@@ -29,6 +30,16 @@ export default async function FantasyTeamPage({ params }: Props) {
   ]);
 
   if (!team) notFound();
+
+  // Per-week roster + per-player point breakdowns for the expandable weekly list.
+  // Newest week first (most relevant on top). One breakdown per scored week.
+  const weekBreakdowns = (
+    await Promise.all(
+      [...team.weeklyPoints]
+        .sort((a, b) => b.week.localeCompare(a.week, undefined, { numeric: true }))
+        .map((w) => getTeamWeekBreakdown(id, w.week).catch(() => null)),
+    )
+  ).filter((b): b is NonNullable<typeof b> => b !== null);
 
   // Load current week's roster (or latest if no active week).
   const latestWeek =
@@ -78,33 +89,16 @@ export default async function FantasyTeamPage({ params }: Props) {
         )}
       </div>
 
-      {/* ── Weekly breakdown ──────────────────────────────────────────────── */}
-      {team.weeklyPoints.length > 0 && (
+      {/* ── Weekly breakdown (expandable per-week roster + player points) ──── */}
+      {weekBreakdowns.length > 0 && (
         <section aria-labelledby="weekly-heading" className="mb-8">
-          <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3">
+          <div
+            id="weekly-heading"
+            className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3"
+          >
             Weekly Points
           </div>
-          <div className="bg-surface rounded-card shadow-card overflow-hidden">
-            <ol aria-label="Weekly point breakdown">
-              {team.weeklyPoints.map((w, idx) => (
-                <li
-                  key={w.week}
-                  className={[
-                    'flex items-center justify-between gap-3 px-5 py-3',
-                    idx > 0 ? 'border-t border-hairline' : '',
-                  ].join(' ')}
-                >
-                  <span className="font-tight text-[13px] font-semibold text-muted">
-                    {formatWeekLabel(w.week)}
-                  </span>
-                  <span className="font-tight text-[14px] font-bold tabular text-right text-ink">
-                    {w.points}
-                    <span className="text-[11px] font-medium text-faint ml-1">pts</span>
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </div>
+          <WeeklyBreakdown weeks={weekBreakdowns} />
         </section>
       )}
 
