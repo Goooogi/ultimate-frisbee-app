@@ -33,13 +33,22 @@ interface Tab {
   icon: 'home' | 'games' | 'schedule' | 'teams' | 'players' | 'leaderboard' | 'myteam' | 'myleague';
   /** Rendered greyed-out, non-navigable — a "coming soon" placeholder tab. */
   soon?: boolean;
+  /** When true, the tab links to a GLOBAL destination and does NOT carry the
+   *  active ?league= query string (e.g. Home → the app landing at "/"). */
+  global?: boolean;
 }
 
+// The Home tab links to the app landing page ("/") — a real global home, NOT a
+// league-scoped page — so it never carries ?league=. Shared across every sub-app
+// (league / Fantasy / WFDF) so "Home" always means the same thing.
+const HOME_TAB: Tab = { id: 'home', label: 'Home', href: '/', match: '__home__', icon: 'home', global: true };
+
 const TABS: Tab[] = [
-  // "Home" tab still opens the games hub (/scores) — the rename is per user
-  // feedback; the Recents/Upcoming/Other shortcuts that idea also mentioned are
-  // deferred until the destination UX is decided (backlog #8).
-  { id: 'games',    label: 'Home',     href: '/scores',   match: '/scores',   aliases: ['/g', '/usau/events'], icon: 'home' },
+  // Home → the app landing ("/"); Scores → the games hub (/scores). Previously a
+  // single "Home" tab wore the house icon but opened /scores; split into two
+  // (backlog #8) so the house actually goes home and Scores is its own tab.
+  HOME_TAB,
+  { id: 'games',    label: 'Scores',   href: '/scores',   match: '/scores',   aliases: ['/g', '/usau/events'], icon: 'games' },
   { id: 'schedule', label: 'Schedule', href: '/schedule', match: '/schedule', icon: 'schedule' },
   { id: 'teams',    label: 'Teams',    href: '/teams',    match: '/teams',    aliases: ['/usau/teams'], icon: 'teams' },
   { id: 'players',  label: 'Players',  href: '/players',  match: '/players',  icon: 'players' },
@@ -49,6 +58,7 @@ const TABS: Tab[] = [
 // the shared TABS above would bounce a WFDF user back to UFA. When on any
 // /wfdf/* page we swap in WFDF's own tab set so Teams/Players stay in WFDF.
 const WFDF_TABS: Tab[] = [
+  HOME_TAB,
   { id: 'events',  label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events',  icon: 'games' },
   { id: 'scores',  label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores',  icon: 'schedule' },
   { id: 'teams',   label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams',   aliases: ['/wfdf/teams'], icon: 'teams' },
@@ -59,6 +69,7 @@ const WFDF_TABS: Tab[] = [
 // Leaderboard IS the /fantasy landing page, My Team is nested under /fantasy/team,
 // and My League is a "coming soon" placeholder — not yet a real route.
 const FANTASY_TABS: Tab[] = [
+  HOME_TAB,
   { id: 'leaderboard', label: 'Leaderboard', href: '/fantasy',      match: '/fantasy',      icon: 'leaderboard' },
   { id: 'myteam',      label: 'My Team',     href: '/fantasy/team', match: '/fantasy/team', icon: 'myteam' },
   { id: 'myleague',    label: 'My League',   href: '#',             match: '__none__',      icon: 'myleague', soon: true },
@@ -68,6 +79,7 @@ const FANTASY_TABS: Tab[] = [
 // it — so plain prefix matching would light up BOTH tabs on /fantasy/team.
 // Mirrors isFantasyActive in games-subnav.tsx exactly.
 function isFantasyActive(pathname: string, tab: Tab): boolean {
+  if (tab.match === '__home__') return pathname === '/';
   if (tab.match === '/fantasy') {
     return pathname === '/fantasy';
   }
@@ -78,6 +90,8 @@ function isFantasyActive(pathname: string, tab: Tab): boolean {
 }
 
 function isActive(pathname: string, tab: Tab): boolean {
+  // Home ("/") must match EXACTLY — prefix matching would light it on every page.
+  if (tab.match === '__home__') return pathname === '/';
   const matches = (prefix: string) =>
     pathname === prefix || pathname.startsWith(`${prefix}/`);
   if (matches(tab.match)) return true;
@@ -144,10 +158,12 @@ export function MobileBottomNav() {
         }
 
         const active = isFantasy ? isFantasyActive(pathname, tab) : isActive(pathname, tab);
+        // Global tabs (Home → "/") never carry the league qs; league tabs do.
+        const href = tab.global ? tab.href : `${tab.href}${qs}`;
         return (
           <Link
             key={tab.id}
-            href={`${tab.href}${qs}`}
+            href={href}
             aria-current={active ? 'page' : undefined}
             aria-label={tab.label}
             className={[

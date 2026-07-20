@@ -1089,6 +1089,15 @@ function proLeagueCard(
 async function usauLeagueCard(division: UsauRankDivision): Promise<FeedLeague | null> {
   const res = await listOfficialUsauRankings(division, LEAGUE_TOP_N).catch(() => null);
   if (!res || res.teams.length === 0) return null;
+  // Resolve each team's crest from the manifest by name + division (the rank-set
+  // encodes gender + level). Previously null → every league-card row rendered a
+  // monogram even when a crest exists.
+  const gender: 'Men' | 'Women' | 'Mixed' = division.endsWith('Women')
+    ? 'Women'
+    : division.endsWith('Mixed')
+      ? 'Mixed'
+      : 'Men';
+  const level = division.startsWith('College') ? 'COLLEGE_D1' : 'CLUB';
   return {
     league: 'usau',
     label: 'USAU',
@@ -1098,7 +1107,7 @@ async function usauLeagueCard(division: UsauRankDivision): Promise<FeedLeague | 
       rank: t.rank,
       teamId: t.id,
       name: t.name,
-      logoUrl: null, // USAU logos resolve by name+division elsewhere; skip here
+      logoUrl: usauTeamLogo(t.name, gender, level),
       detail: t.rating != null ? `${t.rating}` : (t.wins != null ? `${t.wins}-${t.losses}` : null),
     })),
   };

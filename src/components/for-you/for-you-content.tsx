@@ -171,11 +171,14 @@ function Loaded({
         </p>
       )}
 
-      {/* HEADER BAND */}
+      {/* HEADER BAND. Spotlight + hero sit side-by-side (5/7). A LONE spotlight
+          (no hero) is capped at ~half width instead of stretching full-width —
+          a featured player card blown out to 12 cols looks broken (stats float
+          to the far edge). A lone hero DOES fill 12 (it's built for that). */}
       {hasBand && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-stretch">
           {hasSpotlight && (
-            <div className={hasHero ? 'lg:col-span-5' : 'lg:col-span-12'}>
+            <div className={hasHero ? 'lg:col-span-5' : 'lg:col-span-6 lg:col-start-1'}>
               <PlayerCard player={topPlayer} featured />
             </div>
           )}
@@ -805,6 +808,20 @@ function PlayerCard({ player, featured = false }: { player: FeedPlayer; featured
                 </span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Graceful empty state — a player with no stats AND no recent games (bye,
+          DNP, USAU player with no box score, or an off-season/no-data year)
+          would otherwise render as an empty card void. Show a quiet line so the
+          card always reads as intentional, not broken. */}
+      {stats.length === 0 && (player.recentGames?.length ?? 0) === 0 && (
+        <div className={['relative', featured ? 'px-6 pb-6 pt-1' : 'px-5 pb-5 pt-1'].join(' ')}>
+          <div className="rounded-card-sm bg-bg px-4 py-4 text-center">
+            <span className="text-[11.5px] font-tight text-faint">
+              No {player.season ?? ''} stat line{player.league === 'usau' ? ' — view profile for events played' : ' yet'}.
+            </span>
           </div>
         </div>
       )}

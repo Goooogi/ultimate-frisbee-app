@@ -126,6 +126,55 @@ function YearDropdown({
   );
 }
 
+/** "1st" / "2nd" / "3rd" / "4th" … */
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
+/** The team's finish at a tournament. Podium places (1–3) get a medal-tinted
+ *  chip; everything else is a clean "Nth place" label. */
+function PlacementBadge({ place }: { place: number }) {
+  const podium =
+    place === 1
+      ? { ring: 'bg-[#E8B923]/15 text-[#9A7B0A]', label: 'Champions' }
+      : place === 2
+        ? { ring: 'bg-[#9AA3AD]/20 text-[#5C6672]', label: `${ordinal(place)} place` }
+        : place === 3
+          ? { ring: 'bg-[#C77B3B]/15 text-[#8A5222]', label: `${ordinal(place)} place` }
+          : null;
+
+  if (podium) {
+    return (
+      <span
+        className={[
+          'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1',
+          'text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
+          podium.ring,
+        ].join(' ')}
+      >
+        <MedalGlyph />
+        {podium.label}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded-full bg-ink/[0.05] px-2.5 py-1 text-[11px] font-bold tracking-[0.06em] uppercase text-muted font-tight">
+      {ordinal(place)} place
+    </span>
+  );
+}
+
+function MedalGlyph() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="15" r="6" stroke="currentColor" strokeWidth="2" />
+      <path d="M8 4l4 6 4-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function EventCard({
   event,
   genderDivision,
@@ -150,22 +199,22 @@ function EventCard({
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
             {date ?? '—'}
           </span>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {event.seed != null && (
-              <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight">
-                Seed {event.seed}
-              </span>
-            )}
-            {event.finalPlacement != null && (
-              <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-accent font-tight">
-                #{event.finalPlacement}
-              </span>
-            )}
-          </div>
+          {event.seed != null && (
+            <span className="flex-shrink-0 text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight">
+              Seed {event.seed}
+            </span>
+          )}
         </div>
         <div className="font-display italic font-bold text-[17px] leading-tight tracking-[-0.02em] text-ink group-hover:text-accent transition-colors">
           {event.name}
         </div>
+        {/* Result: the place the team finished at this tournament (the headline
+            of the card per backlog #12). Podium finishes get a medal chip. */}
+        {event.finalPlacement != null && (
+          <div className="mt-2">
+            <PlacementBadge place={event.finalPlacement} />
+          </div>
+        )}
         {event.pool && (
           <div className="mt-1 text-[11px] text-muted font-tight">{event.pool}</div>
         )}
