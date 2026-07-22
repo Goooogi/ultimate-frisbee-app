@@ -12,6 +12,8 @@ import { LogoStrikeInline } from '@/components/logo-strike';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { AccountChip } from '@/components/auth/account-chip';
 import { useTheme } from '@/lib/use-theme';
+import { useAuth } from '@/lib/auth/auth-provider';
+import { canUseUtcg } from '@/lib/auth/types';
 
 const LINKS: Array<{ label: string; href: string; tag?: 'beta' | 'soon' }> = [
   { label: 'GAMES',     href: '/scores' },
@@ -20,10 +22,11 @@ const LINKS: Array<{ label: string; href: string; tag?: 'beta' | 'soon' }> = [
   { label: 'STANDINGS', href: '/teams' },
 ];
 
-// The two mini-games, grouped under a "MINI GAMES" dropdown on the home strip.
-const MINI_GAMES: Array<{ label: string; href: string; blurb: string }> = [
+// The mini-games, grouped under a "MINI GAMES" dropdown on the home strip.
+// UTCG is beta-gated (admins + beta users) — filtered out for everyone else.
+const ALL_MINI_GAMES: Array<{ label: string; href: string; blurb: string; utcg?: boolean }> = [
   { label: '12-0', href: '/12-0', blurb: 'Draft the perfect undefeated roster' },
-  { label: 'UTCG', href: '/utcg', blurb: 'Collect cards, open packs, build a squad' },
+  { label: 'UTCG', href: '/utcg', blurb: 'Collect cards, open packs, build a squad', utcg: true },
 ];
 
 interface HomeNavProps {
@@ -34,7 +37,9 @@ interface HomeNavProps {
 export function HomeNav({ today, weekLabel }: HomeNavProps) {
   const pathname = usePathname() ?? '/';
   const [theme] = useTheme();
+  const { user } = useAuth();
   const [miniOpen, setMiniOpen] = useState(false);
+  const MINI_GAMES = ALL_MINI_GAMES.filter((g) => !g.utcg || canUseUtcg(user?.profile?.role));
   const isActive = (href: string) =>
     href === '/' ? pathname === '/' : pathname === href || pathname.startsWith(`${href}/`);
   const miniActive = MINI_GAMES.some((g) => isActive(g.href));

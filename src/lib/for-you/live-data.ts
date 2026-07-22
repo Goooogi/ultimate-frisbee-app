@@ -53,6 +53,7 @@ import {
   getPlayerProfile as getUsauPlayerProfile,
   listOfficialUsauRankings,
 } from '@/lib/usau/data';
+import { flightForName } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 
 /** The 5 official USAU rank-sets (OfficialRankDivision isn't exported from
@@ -655,12 +656,15 @@ async function usauSnapshot(team: FavoriteTeam, year: number): Promise<TeamSnaps
   const rosterSize = roster.length;
   const stats: TeamStat[] = rosterSize > 0 ? [{ label: 'Roster', value: String(rosterSize) }] : [];
 
-  // Accolades: notable finishes (top-8 placements) across ALL seasons, best
-  // placement first. This is the "accolades" the user asked for on the card.
+  // Accolades: TOP-3 finishes at TCT events only (the Triple Crown Tour flights
+  // — US Open / Pro Championships / Club Nationals + Pro/Elite/Select flight
+  // tournaments), across ALL seasons, best placement first. TCT membership uses
+  // the same flightForName() classifier the rest of the app labels events with,
+  // so this stays in sync with what's shown as "TCT" elsewhere.
   const accolades: TeamSnapshot['accolades'] = [];
   for (const s of t?.seasons ?? []) {
     for (const ev of s.events) {
-      if (ev.finalPlacement != null && ev.finalPlacement <= 8) {
+      if (ev.finalPlacement != null && ev.finalPlacement <= 3 && flightForName(ev.name) !== null) {
         accolades.push({ placement: ev.finalPlacement, event: ev.name, season: s.season });
       }
     }

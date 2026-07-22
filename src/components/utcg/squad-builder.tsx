@@ -18,7 +18,7 @@
 // meter's fill already communicates it. Off-position slots draw a dashed
 // "off" line to their neighbors instead.
 
-import { useMemo, useState, useCallback, useEffect } from 'react';
+import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import type { OwnedCard } from '@/lib/utcg/server';
 import type { FormationKey, SlotType, Formation } from '@/lib/utcg/formations';
 import { FORMATIONS } from '@/lib/utcg/formations';
@@ -39,58 +39,116 @@ export type SquadAssignment = (string | null)[]; // aligned to formation.slots
 // hexagon, threeTwo = two side lanes (3 + 2) of cutters behind 2 handlers.
 
 const CARD_W = 92;
-const CARD_H = 120;
+// Full (non-compact) card height at CARD_W — portrait 3/4 photo + score /
+// position / name / team·year / rarity-bar rows. The field shows real cards
+// (same proportions + team·year as the collection), so slots are sized to fit
+// the whole card rather than the old short "compact" strip.
+const CARD_H = 210;
 const FIELD_W = 330;
+// Row pitch (vertical gap between stacked slots) and column pitch (horizontal)
+// — must exceed the card footprint so cards never overlap.
+const ROW_PITCH = CARD_H + 16; // 226
+const COL_PITCH = CARD_W + 20; // 112
 
 interface SlotPos {
   x: number;
   y: number;
 }
 
-const FORMATION_LAYOUT: Record<FormationKey, { positions: SlotPos[]; edges: [number, number][]; fieldH: number }> = {
-  // slots order: H1 H2 H3 C1 C2 C3 C4 (indices 0-6)
+const FORMATION_LAYOUT: Record<FormationKey, { positions: SlotPos[]; edges: [number, number][]; fieldH: number; fieldW?: number }> = {
+  // slots order: H1 H2 H3 C1 C2 C3 C4 (indices 0-6). MOBILE/base Ho: 3 handlers
+  // across the back, 4 cutters in a compact 2×2 below (a 4-wide row is too wide
+  // for a phone). Desktop swaps to HO_WIDE (single cutter row). Full-size cards,
+  // rows ROW_PITCH (226) apart.
   ho: {
     positions: [
-      { x: 8, y: 24 }, { x: 119, y: 24 }, { x: 230, y: 24 }, // handlers, back row
-      { x: 55, y: 188 }, { x: 183, y: 188 }, { x: 55, y: 326 }, { x: 183, y: 326 }, // cutters, 2x2
+      { x: 8, y: 28 }, { x: 120, y: 28 }, { x: 232, y: 28 }, // handlers, back row
+      { x: 64, y: 254 }, { x: 232, y: 254 }, { x: 64, y: 480 }, { x: 232, y: 480 }, // cutters, 2×2
     ],
     edges: [[0, 1], [1, 2], [0, 3], [1, 3], [1, 4], [2, 4], [3, 4], [3, 5], [4, 6]],
-    fieldH: 452,
+    fieldW: 336,
+    fieldH: 714, // 480 + 210 + 24
   },
-  // slots order: H1 H2 C1 C2 C3 C4 C5 (indices 0-6) — the true vertical stack:
-  // 2 handlers across the BACK (bottom) and a single clean column of 5 cutters
-  // climbing straight up the middle, matching formation-select's mini-diagram.
-  // Row pitch is CARD_H+8 (128) so the column never overlaps itself, and the
-  // handlers sit a full row below the lowest cutter, leaving clear space for
-  // the bottom "Handlers" label (anchored at handler-y − 22).
+  // slots order: H1 H2 C1 C2 C3 C4 C5 (indices 0-6). This is the TALL (portrait)
+  // vert — 2 handlers across the bottom, 5 cutters climbing straight up. Used on
+  // narrow/mobile viewports where a tall column fits the screen's aspect. On
+  // WIDE viewports the Field swaps to VERT_WIDE (sideways row) so a phone stays
+  // vertical and a desktop goes sideways — whichever fits the screen best.
   vert: {
     positions: [
-      { x: 64, y: 712 }, { x: 174, y: 712 }, // handlers, back row (bottom)
-      { x: 119, y: 536 }, { x: 119, y: 408 }, { x: 119, y: 280 }, { x: 119, y: 152 }, { x: 119, y: 24 }, // 5-cutter column climbing upfield
+      { x: 64, y: 1182 }, { x: 174, y: 1182 }, // handlers, back row (bottom; gap above for the Handlers label)
+      { x: 119, y: 932 }, { x: 119, y: 706 }, { x: 119, y: 480 }, { x: 119, y: 254 }, { x: 119, y: 28 }, // 5-cutter column climbing up
     ],
     edges: [[0, 1], [0, 2], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
-    fieldH: 832,
+    fieldH: 1416, // 1182 (handlers) + 210 (card) + 24 breathing room
   },
-  // slots order: H1 H2 H3 H4 C1 C2 C3 (indices 0-6) — positionless hexagon
+  // hex / threeTwo are NOT selectable (FORMATION_ORDER = vert, ho) — kept only
+  // so an in-flight run saved with one still renders. Simple non-overlapping
+  // grids sized for full cards; not visually tuned since they're unreachable.
+  // slots order: H1 H2 H3 H4 C1 C2 C3 (indices 0-6)
   hex: {
     positions: [
-      { x: 119, y: 24 }, { x: 8, y: 130 }, { x: 230, y: 130 }, { x: 119, y: 236 }, // handlers ring the hex
-      { x: 8, y: 340 }, { x: 119, y: 400 }, { x: 230, y: 340 }, // cutters underneath
+      { x: 8, y: 24 }, { x: 176, y: 24 }, { x: 344, y: 24 }, { x: 512, y: 24 }, // handlers row of 4
+      { x: 92, y: 250 }, { x: 260, y: 250 }, { x: 428, y: 250 }, // cutters row of 3
     ],
     edges: [[0, 1], [0, 2], [1, 3], [2, 3], [1, 4], [3, 4], [3, 5], [3, 6], [2, 6]],
-    fieldH: 528,
+    fieldW: 612,
+    fieldH: 484,
   },
-  // slots order: H1 H2 C1 C2 C3 C4 C5 (indices 0-6) — wide 3+2 side lanes
+  // slots order: H1 H2 C1 C2 C3 C4 C5 (indices 0-6)
   threeTwo: {
     positions: [
-      { x: 64, y: 436 }, { x: 174, y: 436 }, // handlers, back-center
-      { x: 8, y: 288 }, { x: 8, y: 156 }, { x: 8, y: 24 }, // left lane of 3
-      { x: 230, y: 222 }, { x: 230, y: 90 }, // right lane of 2
+      { x: 8, y: 24 }, { x: 120, y: 24 }, // handlers
+      { x: 232, y: 24 }, { x: 344, y: 24 }, { x: 456, y: 24 }, { x: 568, y: 24 }, { x: 680, y: 24 }, // 5 cutters
     ],
-    edges: [[0, 1], [0, 2], [1, 5], [2, 3], [3, 4], [5, 6]],
-    fieldH: 564,
+    edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+    fieldW: 784,
+    fieldH: 258,
   },
 };
+
+// Wide/sideways vert — a single horizontal row of all 7 (2 handlers on the
+// left = "back", then the 5-cutter stack running right). Swapped in for the
+// tall vert on wide (desktop) viewports so the whole stack is visible in the
+// screen's landscape aspect; the tall column stays on mobile. Column pitch =
+// COL_PITCH (112) so cards never overlap.
+const VERT_WIDE: (typeof FORMATION_LAYOUT)[FormationKey] = {
+  positions: [
+    { x: 8, y: 28 }, { x: 120, y: 28 }, // handlers (left)
+    { x: 232, y: 28 }, { x: 344, y: 28 }, { x: 456, y: 28 }, { x: 568, y: 28 }, { x: 680, y: 28 }, // 5 cutters →
+  ],
+  edges: [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6]],
+  fieldW: 784,
+  fieldH: 262, // 28 (top gap for labels) + 210 (card) + 24 (breathing room)
+};
+
+// Wide/desktop Ho stack — 3 handlers on the back row, all 4 cutters in a SINGLE
+// row below (instead of the 2×2 the narrow layout uses). Evenly spread at
+// COL_PITCH so the row reads cleanly. Mobile keeps the more compact base `ho`.
+const HO_WIDE: (typeof FORMATION_LAYOUT)[FormationKey] = {
+  positions: [
+    { x: 120, y: 28 }, { x: 288, y: 28 }, { x: 456, y: 28 }, // 3 handlers, back row (spread over the 4-wide row)
+    { x: 8, y: 254 }, { x: 200, y: 254 }, { x: 392, y: 254 }, { x: 584, y: 254 }, // 4 cutters in one row
+  ],
+  edges: [[0, 1], [1, 2], [0, 3], [1, 3], [1, 4], [2, 4], [3, 4], [3, 5], [4, 6]],
+  fieldW: 684,
+  fieldH: 488, // 254 + 210 + 24
+};
+
+// True on wide (≥ sm/640px) viewports — desktop goes sideways for vert, mobile
+// stays vertical. matchMedia so it reacts to resize/rotate. SSR-safe (false
+// first paint → hydrates to real value).
+function useIsWide(): boolean {
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)');
+    const on = () => setWide(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return wide;
+}
 
 function cx(p: SlotPos): number { return p.x + CARD_W / 2; }
 function cy(p: SlotPos): number { return p.y + CARD_H / 2; }
@@ -119,7 +177,14 @@ export function SquadBuilder({
   onGoToPacks,
 }: SquadBuilderProps) {
   const formation = FORMATIONS[formationKey];
-  const layout = FORMATION_LAYOUT[formationKey];
+  const isWide = useIsWide();
+  // On wide (desktop) viewports: vert goes SIDEWAYS and Ho puts all 4 cutters in
+  // one row; on mobile both keep their more compact base layouts. Whichever fits
+  // the screen's aspect best.
+  const layout =
+    isWide && formationKey === 'vert' ? VERT_WIDE
+    : isWide && formationKey === 'ho' ? HO_WIDE
+    : FORMATION_LAYOUT[formationKey];
   const [pickerSlot, setPickerSlot] = useState<number | null>(null);
   const [lastPlaced, setLastPlaced] = useState<number | null>(null);
 
@@ -313,29 +378,51 @@ function Field({
   lastPlaced: number | null;
   onTap: (i: number) => void;
 }) {
-  const scale = Math.min(1, 342 / FIELD_W);
+  const fieldW = layout.fieldW ?? FIELD_W;
   const fieldH = layout.fieldH;
 
+  // Scale the field to fit the container's actual width (never upscale past 1x),
+  // so it fills the space it has: a phone (~350px) and a desktop column both
+  // show the whole squad without horizontal scroll, and cards render as large as
+  // the available width allows rather than a hardcoded cap.
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [avail, setAvail] = useState(342);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (w) setAvail(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const scale = Math.min(1, avail / fieldW);
+
   return (
-    <div className="w-full flex justify-center overflow-x-auto">
+    <div ref={wrapRef} className="w-full flex justify-center">
       <div
         className="relative flex-shrink-0"
-        style={{ width: FIELD_W * scale, height: fieldH * scale }}
+        style={{ width: fieldW * scale, height: fieldH * scale }}
       >
         <div
           className="absolute top-0 left-0 origin-top-left"
-          style={{ width: FIELD_W, height: fieldH, transform: `scale(${scale})` }}
+          style={{ width: fieldW, height: fieldH, transform: `scale(${scale})` }}
         >
-          {/* Group labels — anchored to each group's topmost slot, since
-              handlers sit at the BOTTOM in vert/3-2 but on top in ho/hex. */}
+          {/* Group labels — anchored just above-left of each group's own slots
+              (its min x / min y), so they sit over the right group whether the
+              group is a vertical column (ho/hex/3-2) or a horizontal row (vert
+              laid sideways), rather than always pinning to the field's left. */}
           {(['handler', 'cutter'] as const).map((type) => {
-            const ys = layout.positions.filter((_, i) => formation.slots[i] === type).map((p) => p.y);
-            if (ys.length === 0) return null;
+            const pts = layout.positions.filter((_, i) => formation.slots[i] === type);
+            if (pts.length === 0) return null;
+            const minX = Math.min(...pts.map((p) => p.x));
+            const minY = Math.min(...pts.map((p) => p.y));
             return (
               <span
                 key={type}
-                className="absolute left-0 text-[10px] font-bold tracking-[0.22em] uppercase text-faint"
-                style={{ top: Math.min(...ys) - 22 }}
+                className="absolute text-[10px] font-bold tracking-[0.22em] uppercase text-faint"
+                style={{ top: minY - 22, left: minX }}
               >
                 {type === 'handler' ? 'Handlers' : 'Cutters'}
               </span>
@@ -343,7 +430,7 @@ function Field({
           })}
 
           {/* Link lines */}
-          <svg className="absolute inset-0 pointer-events-none overflow-visible" width={FIELD_W} height={fieldH}>
+          <svg className="absolute inset-0 pointer-events-none overflow-visible" width={fieldW} height={fieldH}>
             {layout.edges.map(([a, b]) => {
               const keyA = assignment[a];
               const keyB = assignment[b];
@@ -412,7 +499,7 @@ function Field({
               >
                 {owned ? (
                   <div className="relative w-full h-full" key={key + (lastPlaced === i ? '-p' : '')}>
-                    <CardTile card={owned.card} onClick={() => onTap(i)} offRole={off} compact className="motion-safe:animate-card-flip-in" />
+                    <CardTile card={owned.card} onClick={() => onTap(i)} offRole={off} className="motion-safe:animate-card-flip-in" />
                     <span
                       className={[
                         'absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center',

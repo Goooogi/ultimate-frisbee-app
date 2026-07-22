@@ -1,7 +1,8 @@
 // PUL team logo component — shared across /pul/teams, /pul/teams/[id], /pul/players.
-// Renders a real <img> from R2 when logoUrl is present; otherwise a colored
-// monogram tile derived from the mascot name. Plain <img> (not Next/Image) to
-// avoid domain config requirements for the R2 CDN.
+// Renders a real <img> from the self-hosted logo (/public/teams/PUL/<id>.png)
+// when logoUrl is present; otherwise a colored monogram tile derived from the
+// mascot name. Plain <img> (not Next/Image) — the paths are same-origin static
+// assets, so no loader/domain config is needed.
 
 import type { PulTeam } from '@/lib/pul/data';
 

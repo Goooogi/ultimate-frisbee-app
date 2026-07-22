@@ -16,6 +16,7 @@ import { FORMATIONS, scoreSquad, type SquadScoreResult, type ScoredCard } from '
 import type { DraftRun, DraftRoundResult } from '@/lib/utcg/draft';
 import { mapDraftRun, startDraft, pickDraftCard, playDraftRound, abandonDraft, DRAFT_ENTRY_FEE } from '@/lib/utcg/draft';
 import { AuthModal } from '@/components/auth/auth-modal';
+import { useAuth } from '@/lib/auth/auth-provider';
 import { PackStore } from '@/components/utcg/pack-store';
 import { PackOpenAnimation } from '@/components/utcg/pack-open-animation';
 import { CollectionGrid } from '@/components/utcg/collection-grid';
@@ -49,7 +50,18 @@ interface UtcgGameProps {
 
 export function UtcgGame({ snapshot }: UtcgGameProps) {
   const router = useRouter();
+  const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('play');
+
+  // Sign-in reconciliation: `snapshot.signedIn` is computed server-side at
+  // render time. When the user signs in via the AuthModal on this page, the
+  // client AuthProvider picks up the new session but the server snapshot is
+  // stale, so the signed-out CTA lingers until a manual reload. Once the client
+  // sees a user while the server still thinks we're signed out, refresh so the
+  // page re-runs getUtcgSnapshot() with the new session cookie and admits them.
+  useEffect(() => {
+    if (user && !snapshot.signedIn) router.refresh();
+  }, [user, snapshot.signedIn, router]);
 
   // Wallet + collection — seeded from snapshot, optimistically mutated.
   const [coins, setCoins] = useState(snapshot.wallet?.coins ?? 0);

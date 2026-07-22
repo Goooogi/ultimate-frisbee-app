@@ -86,10 +86,17 @@ export interface PulPlayer {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// Logos only ever come from our own R2 bucket (set by the backfill). Assert the
-// prefix before exposing it to an <img src> — defense-in-depth so even a polluted
-// DB row (which RLS already prevents) can't point the tag at an arbitrary origin.
-const ALLOWED_LOGO_PREFIX = 'https://pub-d284bbb3229c435b8e085787c253db6f.r2.dev/';
+// Logos are self-hosted committed assets under /public/teams/PUL/<id>.png (one
+// per team id), same idiom as WUL — no remote R2 dependency, no image-transform
+// quota exposure, and New York (which never had an R2 logo) works too. Derived
+// from the team id, so the DB logo_url column is no longer read for rendering.
+const PUL_TEAM_IDS = new Set([
+  'atlanta', 'austin', 'columbus', 'dc', 'indy', 'la', 'medellin', 'milwaukee',
+  'minnesota', 'nashville', 'newyork', 'philadelphia', 'portland', 'raleigh',
+]);
+function pulLogoPath(id: string): string | null {
+  return PUL_TEAM_IDS.has(id) ? `/teams/PUL/${id}.png` : null;
+}
 
 function mapTeam(row: DbTeamRow): PulTeam {
   return {
@@ -97,7 +104,7 @@ function mapTeam(row: DbTeamRow): PulTeam {
     name: row.name,
     city: row.city,
     mascot: row.mascot,
-    logoUrl: row.logo_url?.startsWith(ALLOWED_LOGO_PREFIX) ? row.logo_url : null,
+    logoUrl: pulLogoPath(row.id),
     accentColor: row.accent_color ?? null,
   };
 }

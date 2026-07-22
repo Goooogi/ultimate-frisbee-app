@@ -11,6 +11,16 @@ export const USER_ROLES: { value: UserRole; label: string }[] = [
   { value: 'admin', label: 'Admin' },
 ];
 
+/**
+ * UTCG is in beta — restricted to admins + beta testers. Single source of truth
+ * for that rule, used by the /utcg route gate AND the nav (to hide the link).
+ * When UTCG opens to everyone, change this to `return true` in one place.
+ * Pure (no client/server deps) so both layers can import it.
+ */
+export function canUseUtcg(role: UserRole | null | undefined): boolean {
+  return role === 'admin' || role === 'beta';
+}
+
 export interface Profile {
   id: string;
   email: string;

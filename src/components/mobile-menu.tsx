@@ -52,6 +52,7 @@ import {
 } from '@/lib/league';
 import { useTheme } from '@/lib/use-theme';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { canUseUtcg } from '@/lib/auth/types';
 import { AvatarIconView, iconResolvable } from '@/components/profile/avatar-icon-view';
 import { getMyFavorites } from '@/lib/favorites/data';
 import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
@@ -1767,13 +1768,16 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                 active={pathname === '/12-0' || pathname.startsWith('/12-0/')}
                 onClose={onClose}
               />
-              <MiniGameLink
-                href="/utcg"
-                label="UTCG"
-                blurb="Collect cards, open packs, build a squad"
-                active={pathname === '/utcg' || pathname.startsWith('/utcg/')}
-                onClose={onClose}
-              />
+              {/* UTCG is beta-gated — only admins + beta users see it. */}
+              {canUseUtcg(user?.profile?.role) && (
+                <MiniGameLink
+                  href="/utcg"
+                  label="UTCG"
+                  blurb="Collect cards, open packs, build a squad"
+                  active={pathname === '/utcg' || pathname.startsWith('/utcg/')}
+                  onClose={onClose}
+                />
+              )}
             </div>
           )}
 
