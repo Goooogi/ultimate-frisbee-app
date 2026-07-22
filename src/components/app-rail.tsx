@@ -46,6 +46,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/playbook', 'playbook'],
   ['/fantasy',  'fantasy'],
   ['/12-0',     'twelve-oh'],
+  ['/utcg',     'twelve-oh'],  // UTCG shares the "Mini Games" grouping with 12-0
   // Games sub-app: /scores /schedule /teams /players /g /usau
   ['/scores',   'games'],
   ['/schedule', 'games'],

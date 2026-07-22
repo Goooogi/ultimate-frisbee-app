@@ -177,6 +177,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/playbook', 'playbook'],
   ['/fantasy',  'fantasy'],
   ['/12-0',     'twelve-oh'],
+  ['/utcg',     'twelve-oh'],  // UTCG lives in the same "Mini Games" group as 12-0
   ['/scores',   'games'],
   ['/schedule', 'games'],
   ['/teams',    'games'],
@@ -338,6 +339,58 @@ function SubAppRow({
       </span>
       {/* Trailing arrow — subtle affordance that shifts toward the accent on
           hover/active. */}
+      <svg
+        className={[
+          'w-4 h-4 flex-shrink-0 transition-colors duration-150',
+          active ? 'text-ink' : 'text-faint group-hover:text-ink',
+        ].join(' ')}
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="M4 8h8M8.5 4.5L12 8l-3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </Link>
+  );
+}
+
+// A sub-link inside the "Mini Games" accordion — indented under the group
+// header, showing the game name + a one-line blurb. Mirrors the inset,
+// left-spine treatment of the expanded League rows.
+function MiniGameLink({
+  href,
+  label,
+  blurb,
+  active,
+  onClose,
+}: {
+  href: string;
+  label: string;
+  blurb: string;
+  active: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClose}
+      aria-current={active ? 'page' : undefined}
+      className={[
+        'group flex items-center justify-between gap-3 w-full pl-4 pr-2.5 py-2.5 rounded-xl',
+        'no-underline transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        // Left accent spine on the active game, matching the League fly-out rows.
+        active ? 'bg-surface border-l-2 border-accent' : 'border-l-2 border-transparent hover:bg-surface',
+      ].join(' ')}
+    >
+      <span className="flex flex-col min-w-0">
+        <span className="font-display italic font-bold text-[22px] leading-[0.95] tracking-[-0.02em] whitespace-nowrap text-ink">
+          {label}
+        </span>
+        <span className="text-[12px] text-muted font-tight leading-snug mt-0.5">
+          {blurb}
+        </span>
+      </span>
       <svg
         className={[
           'w-4 h-4 flex-shrink-0 transition-colors duration-150',
@@ -1128,6 +1181,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const initialGamesOpen = activeApp === 'games';
   const [gamesOpen, setGamesOpen] = useState(initialGamesOpen);
 
+  // "Mini Games" section (12-0 · UTCG) — expanded by default when on either.
+  const [miniGamesOpen, setMiniGamesOpen] = useState(activeApp === 'twelve-oh');
+
   // ── League fly-out (the left panel showing a league's pages + team grid) ──
   // Set by hovering (desktop) or tapping (mobile) a league row. null = closed.
   const [flyoutLeague, setFlyoutLeague] = useState<MegaLeagueId | null>(null);
@@ -1677,14 +1733,49 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             onClose={onClose}
           />
 
-          {/* ── 12-0 ─────────────────────────────────────────────────── */}
-          <SubAppRow
-            app="twelve-oh"
-            href="/12-0"
-            label="12-0"
-            active={activeApp === 'twelve-oh'}
-            onClose={onClose}
-          />
+          {/* ── MINI GAMES accordion (12-0 · UTCG) ───────────────────────
+              An expandable group, same visual treatment as The League row.
+              Collapsed by default unless the user is on one of the games. */}
+          <button
+            type="button"
+            onClick={() => setMiniGamesOpen((v) => !v)}
+            aria-expanded={miniGamesOpen}
+            className={[
+              'group flex items-center justify-between gap-3 w-full px-2.5 py-3 rounded-xl text-left cursor-pointer',
+              'transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              activeApp === 'twelve-oh' || miniGamesOpen ? 'bg-surface' : 'hover:bg-surface',
+            ].join(' ')}
+          >
+            <span className="font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em] text-ink">
+              Mini Games
+            </span>
+            <ChevronDown
+              className={[
+                'w-4 h-4 flex-shrink-0 transition-transform duration-200',
+                miniGamesOpen ? 'rotate-180 text-ink' : 'text-faint',
+              ].join(' ')}
+            />
+          </button>
+
+          {miniGamesOpen && (
+            <div className="mb-1 flex flex-col gap-0.5">
+              <MiniGameLink
+                href="/12-0"
+                label="12-0"
+                blurb="Draft the perfect undefeated roster"
+                active={pathname === '/12-0' || pathname.startsWith('/12-0/')}
+                onClose={onClose}
+              />
+              <MiniGameLink
+                href="/utcg"
+                label="UTCG"
+                blurb="Collect cards, open packs, build a squad"
+                active={pathname === '/utcg' || pathname.startsWith('/utcg/')}
+                onClose={onClose}
+              />
+            </div>
+          )}
 
           {/* ── FANTASY (beta) ───────────────────────────────────────── */}
           <SubAppRow

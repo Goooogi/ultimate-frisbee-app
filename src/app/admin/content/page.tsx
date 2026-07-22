@@ -11,6 +11,7 @@ import { notFound } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { getPendingContent, getRecentReviewedContent } from '@/lib/player-content/server';
 import { getAllFeedback } from '@/lib/feedback/server';
+import { getAllUsers } from '@/lib/admin/roles';
 import { PageShell } from '@/components/page-shell';
 import { AdminPortal, type AdminTab } from '@/components/admin/admin-tabs';
 
@@ -36,13 +37,15 @@ export default async function AdminPage({
     .maybeSingle();
   if (profile?.role !== 'admin') notFound();
 
-  const [pending, recent, feedback] = await Promise.all([
+  const [pending, recent, feedback, users] = await Promise.all([
     getPendingContent(),
     getRecentReviewedContent(25),
     getAllFeedback(200),
+    getAllUsers(),
   ]);
   const newFeedback = feedback.filter((i) => i.status === 'new').length;
-  const initialTab: AdminTab = searchParams.tab === 'feedback' ? 'feedback' : 'content';
+  const initialTab: AdminTab =
+    searchParams.tab === 'feedback' ? 'feedback' : searchParams.tab === 'roles' ? 'roles' : 'content';
 
   return (
     <PageShell
@@ -61,6 +64,8 @@ export default async function AdminPage({
           recent={recent}
           feedback={feedback}
           newFeedback={newFeedback}
+          users={users}
+          currentUserId={userData.user.id}
           initialTab={initialTab}
         />
       </Suspense>

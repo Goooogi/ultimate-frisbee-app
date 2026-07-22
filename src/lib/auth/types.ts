@@ -1,4 +1,15 @@
-export type UserRole = 'user' | 'admin';
+// Mirrors the DB `user_role` enum. Every account defaults to 'user'. 'beta' is
+// a gate for beta-test access to in-progress features (e.g. UTCG); 'admin' has
+// full admin-portal access. Changing roles is admin-only (set_user_role RPC +
+// a DB trigger that blocks self-promotion).
+export type UserRole = 'user' | 'beta' | 'admin';
+
+/** Ordered list for pickers/labels. */
+export const USER_ROLES: { value: UserRole; label: string }[] = [
+  { value: 'user', label: 'User' },
+  { value: 'beta', label: 'Beta User' },
+  { value: 'admin', label: 'Admin' },
+];
 
 export interface Profile {
   id: string;
