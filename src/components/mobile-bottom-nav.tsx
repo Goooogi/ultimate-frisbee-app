@@ -13,7 +13,6 @@
 // instead of the shared league TABS, so a Fantasy/WFDF user isn't bounced
 // back into the league's Games/Schedule/Teams/Players tabs.
 
-import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
   DEFAULT_LEAGUE,
@@ -23,6 +22,7 @@ import {
   parseLeagueParam,
   parseLevelParam,
 } from '@/lib/league';
+import { FloatingTabBar, type FloatingTab } from '@/components/floating-tab-bar';
 
 interface Tab {
   id: string;
@@ -119,85 +119,38 @@ export function MobileBottomNav() {
   const activeLevel = parseLevelParam(searchParams.get('level'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
-  const tabs = isFantasy ? FANTASY_TABS : isWfdf ? WFDF_TABS : TABS;
+  const tabSet = isFantasy ? FANTASY_TABS : isWfdf ? WFDF_TABS : TABS;
   // Fantasy + WFDF are self-contained sub-apps — no ?league= qs, same as desktop.
   const qs = isFantasy || isWfdf ? '' : leagueQs;
 
-  return (
-    <nav
-      aria-label="Mobile navigation"
-      className={[
-        // Floating hub pill (Instagram-style): detached from the screen edges
-        // with margins + a bottom gap, rounded-full, elevated with shadow-lift
-        // so it clearly reads as floating above the content rather than a
-        // flush edge-to-edge bar.
-        // Background is a translucent glass fill — bg-bg/25 (very see-through)
-        // lets scrolled content show through behind the icons while backdrop-blur
-        // keeps them legible in both themes; border softened to border-hairline/60
-        // so the pill still reads as a distinct shape without a heavy outline.
-        'lg:hidden fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] inset-x-3 z-40',
-        'rounded-full border border-hairline/60 bg-bg/25 backdrop-blur-md shadow-lift',
-        'px-2 py-2.5 flex items-center justify-around',
-      ].join(' ')}
-    >
-      {tabs.map((tab) => {
-        // "Coming soon" placeholder — faint, non-navigable icon only (mirrors the
-        // `soon` treatment in games-subnav.tsx's desktop FANTASY_NAV_ITEMS, minus
-        // the label since this pill is icon-only).
-        if (tab.soon) {
-          return (
-            <span
-              key={tab.id}
-              aria-disabled="true"
-              aria-label={`${tab.label} (coming soon)`}
-              className="flex items-center justify-center w-11 h-11 rounded-full cursor-not-allowed select-none"
-            >
-              <Icon kind={tab.icon} active={false} faint />
-            </span>
-          );
-        }
+  const activeTab = tabSet.find((t) =>
+    isFantasy ? isFantasyActive(pathname, t) : isActive(pathname, t),
+  );
 
-        const active = isFantasy ? isFantasyActive(pathname, tab) : isActive(pathname, tab);
-        // Global tabs (Home → "/") never carry the league qs; league tabs do.
-        const href = tab.global ? tab.href : `${tab.href}${qs}`;
-        return (
-          <Link
-            key={tab.id}
-            href={href}
-            aria-current={active ? 'page' : undefined}
-            aria-label={tab.label}
-            className={[
-              'flex items-center justify-center w-11 h-11 rounded-full no-underline shrink-0',
-              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              // Active tab gets an accent-tinted disc behind its icon so the
-              // current page is unmistakable; inactive tabs have no fill (their
-              // icon is the same accent hue, dimmed — see Icon()).
-              active ? 'bg-accent/15' : '',
-            ].join(' ')}
-          >
-            <Icon kind={tab.icon} active={active} />
-          </Link>
-        );
-      })}
-    </nav>
+  const bars: FloatingTab[] = tabSet.map((tab) => ({
+    id: tab.id,
+    label: tab.label,
+    // Global tabs (Home → "/") never carry the league qs; league tabs do.
+    href: tab.soon ? undefined : `${tab.global ? tab.href : `${tab.href}${qs}`}`,
+    disabled: tab.soon,
+    icon: ({ size }) => <Icon kind={tab.icon} size={size} />,
+  }));
+
+  return (
+    <FloatingTabBar
+      ariaLabel="App navigation"
+      activeId={activeTab?.id ?? ''}
+      tabs={bars}
+      // 5 tabs — a touch wider than the default so labels don't cramp.
+      maxWidthClass="max-w-lg"
+    />
   );
 }
 
-function Icon({
-  kind,
-  active,
-  faint = false,
-}: {
-  kind: Tab['icon'];
-  active: boolean;
-  /** Renders the icon in the faint (disabled) token instead of muted/ink/accent. */
-  faint?: boolean;
-}) {
-  // Icon-only pill: every icon is accent (orange). The active tab reads full
-  // strength; inactive tabs are the same accent hue at reduced opacity, so the
-  // whole bar stays on-brand while the active tab (backed by an accent disc,
-  // see the Link above) still clearly stands out. "Soon" placeholders stay faint.
-  const c = faint ? 'text-faint' : active ? 'text-accent' : 'text-accent/45';
+// Nav icons — inherit color (currentColor) from the FloatingTabBar wrapper,
+// which drives active/inactive/disabled tones on the dark glass.
+function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
+  const c = '';
   const ball = c;
   switch (kind) {
     case 'home':

@@ -275,15 +275,17 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ...wfdfEventResults,
   ];
 
-  // Rank by: (1) match quality via `matchTier` — exact (0) > whole-word (1) >
-  // starts-with (2) > contains (3); then (2) prominence DESC — adult club +
-  // pro-league teams above college, above youth/HS, so "Colorado" floats real
-  // clubs over U-20/Academy noise; then (3) alphabetical. Missing prominence
-  // defaults to 2 (neutral), which is where bare players/tournaments land.
+  // Rank by: (1) match quality via `matchTier` — exact (0) > name-starts-with /
+  // FIRST NAME (1) > whole-word elsewhere (2) > contains (3); then (2)
+  // prominence DESC — adult club + pro-league teams above college, above
+  // youth/HS, so "Colorado" floats real clubs over U-20/Academy noise; then (3)
+  // alphabetical. Missing prominence defaults to 2 (neutral), which is where
+  // bare players/tournaments land.
   //
-  // The whole-word tier is what makes "bravo" surface "Johnny Bravo" and makes
-  // a full-word query like "hunter" treat "Hunter May" as a strong hit (not a
-  // generic substring) — a word boundary match is nearly as good as a prefix.
+  // FIRST-NAME PRIORITY: tier 1 (name starts with the query) sits ABOVE the
+  // whole-word tier, so "hunter" ranks "Hunter May" (first name) over "John
+  // Hunter" (surname) — the surname is still a whole-word hit (tier 2), just
+  // below. The whole-word tier is what makes "bravo" surface "Johnny Bravo".
   const prom = (r: SearchResult): number => r.prominence ?? 2;
   // Stamp each result with its match tier so the client can also ORDER THE
   // GROUPS by best match (a strong player hit can outrank weak team hits,
@@ -307,9 +309,12 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
 /**
  * Match-quality tier for ranking a result name against the query.
  *   0 = exact (name === query)
- *   1 = whole-word match (query appears as a standalone word — "bravo" in
- *       "Johnny Bravo", "hunter" in "Hunter May")
- *   2 = prefix (name starts with query — "hunt" in "Hunt for Drunk October")
+ *   1 = name STARTS WITH the query — for "First Last" names this is the FIRST
+ *       NAME ("hunter" -> "Hunter May", "hunt" -> "Hunt for Drunk October").
+ *       Deliberately above the whole-word tier so first-name hits beat surname
+ *       hits.
+ *   2 = whole-word match elsewhere (query is a standalone word but not the
+ *       start — "hunter" in "John Hunter", "bravo" in "Johnny Bravo")
  *   3 = contains / fuzzy-only (substring anywhere, or a trigram match the RPC
  *       surfaced that isn't even a substring)
  * `needle` must already be lowercased + trimmed.
@@ -321,10 +326,10 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
 function matchTier(name: string, needle: string): number {
   const n = name.toLowerCase();
   if (n === needle) return 0;
-  // Whole-word: query bounded by non-alphanumerics (or string edges). Escape
-  // regex metacharacters in the needle so a name with punctuation is safe.
+  if (n.startsWith(needle)) return 1; // first name / name prefix — top priority
+  // Whole-word elsewhere: query bounded by non-alphanumerics (or string edges).
+  // Escape regex metacharacters in the needle so a name with punctuation is safe.
   const esc = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:[^a-z0-9]|$)`, 'i').test(n)) return 1;
-  if (n.startsWith(needle)) return 2;
+  if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:[^a-z0-9]|$)`, 'i').test(n)) return 2;
   return 3;
 }

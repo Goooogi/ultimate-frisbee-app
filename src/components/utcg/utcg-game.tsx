@@ -17,6 +17,7 @@ import type { DraftRun, DraftRoundResult } from '@/lib/utcg/draft';
 import { mapDraftRun, startDraft, pickDraftCard, playDraftRound, abandonDraft, DRAFT_ENTRY_FEE } from '@/lib/utcg/draft';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { FloatingTabBar } from '@/components/floating-tab-bar';
 import { PackStore } from '@/components/utcg/pack-store';
 import { PackOpenAnimation } from '@/components/utcg/pack-open-animation';
 import { CollectionGrid } from '@/components/utcg/collection-grid';
@@ -791,60 +792,28 @@ const UTCG_TABS: { id: Tab; label: string; icon: 'play' | 'packs' | 'collection'
   { id: 'market', label: 'Market', icon: 'market' },
 ];
 
-// Bottom tab bar — a floating glass pill matching the app's MobileBottomNav
-// pattern (fixed above the safe-area, rounded-full, backdrop-blur, accent-disc
-// on the active tab). UTCG's tabs are internal state, so this is state-driven
-// rather than route-based; icon + short label since there are only three.
-// Shown on every breakpoint — a centered pill that stays compact (max-w-sm)
-// so it reads as a deliberate floating control rather than stranded in empty
-// space at 1440px, matching how we bottom-anchor the switcher on mobile.
+// Bottom tab bar — the shared liquid-glass FloatingTabBar. UTCG's tabs are
+// internal state, so this is state-driven (activeId + onChange). Shown on every
+// breakpoint as a centered floating pill.
 function UtcgTabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   return (
-    <nav
-      aria-label="UTCG sections"
-      className={[
-        'fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] inset-x-3 z-40 mx-auto max-w-sm',
-        'rounded-full border border-hairline/60 bg-surface/90 backdrop-blur-md shadow-lift',
-        'px-2 py-2 flex items-center justify-around',
-      ].join(' ')}
-    >
-      {UTCG_TABS.map((t) => {
-        const active = tab === t.id;
-        return (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => onChange(t.id)}
-            aria-current={active ? 'page' : undefined}
-            aria-label={t.label}
-            className={[
-              'flex flex-col items-center justify-center gap-0.5 min-w-[64px] h-12 rounded-full',
-              'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              'cursor-pointer',
-              active ? 'bg-accent/15' : '',
-            ].join(' ')}
-          >
-            <UtcgTabIcon kind={t.icon} active={active} />
-            <span
-              className={[
-                'text-[9px] font-bold tracking-[0.08em] uppercase font-tight leading-none',
-                active ? 'text-accent' : 'text-muted',
-              ].join(' ')}
-            >
-              {t.label}
-            </span>
-          </button>
-        );
-      })}
-    </nav>
+    <FloatingTabBar
+      ariaLabel="UTCG sections"
+      activeId={tab}
+      onChange={(id) => onChange(id as Tab)}
+      tabs={UTCG_TABS.map((t) => ({
+        id: t.id,
+        label: t.label,
+        icon: ({ active, size }) => <UtcgTabIcon kind={t.icon} active={active} size={size} />,
+      }))}
+    />
   );
 }
 
-function UtcgTabIcon({ kind, active, size = 20 }: { kind: 'play' | 'packs' | 'collection' | 'market'; active: boolean; size?: number }) {
-  // Active = full accent; inactive = a muted ink tone (NOT low-opacity accent
-  // — accent/45 on cream washes out to near-illegible, confirmed in the
-  // pre-restyle screenshots).
-  const c = active ? 'text-accent' : 'text-muted';
+function UtcgTabIcon({ kind, size = 20 }: { kind: 'play' | 'packs' | 'collection' | 'market'; active?: boolean; size?: number }) {
+  // Inherit color from the FloatingTabBar wrapper (light tones on the dark
+  // glass) via currentColor — the bar drives active/inactive coloring.
+  const c = '';
   if (kind === 'play') {
     // Disc-in-motion / play — a flying disc arc.
     return (

@@ -32,10 +32,13 @@ import { PlayerHeadshot } from '@/components/players/player-headshot';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { usauEventHref } from '@/lib/usau/event-href';
+import type { PlayerConnection } from '@/lib/players/connections';
 
 interface Props {
   profile: UnifiedPlayerProfile;
   content: PlayerContentItem[];
+  /** Second-hop "Connections" (teammates of teammates). May be empty. */
+  connections: PlayerConnection[];
   // Which league the user navigated from (via ?from=), so "< Players" returns
   // them there. Undefined → root /players (UFA). See PLAYERS_LIST_HREF.
   fromLeague?: string;
@@ -52,7 +55,7 @@ const PLAYERS_LIST_HREF: Record<string, string> = {
   wfdf: '/wfdf/players',
 };
 
-export function UnifiedProfile({ profile, content, fromLeague }: Props) {
+export function UnifiedProfile({ profile, content, connections, fromLeague }: Props) {
   const { career, years } = profile;
   const eyebrow = buildEyebrow(profile);
 
@@ -207,6 +210,12 @@ export function UnifiedProfile({ profile, content, fromLeague }: Props) {
             ))}
           </div>
         </section>
+      )}
+
+      {/* Connections — second-hop players (teammates of teammates). Entry point
+          to The Thread. Hidden when the graph has nothing for this player. */}
+      {connections.length > 0 && (
+        <ConnectionsSection connections={connections} threadHref={`/players/${profile.anchorId}/thread?from=${profile.anchorLeague}`} />
       )}
 
       {/* PlayerContentGallery only supports 'ufa' | 'usau' refs today.
@@ -1222,4 +1231,107 @@ function parseResult(g: UfaPlayerGameRow): {
     win,
     loss,
   };
+}
+
+// ─── Connections (second-hop players) ──────────────────────────────────────
+// A compact card of teammates-of-teammates the player hasn't directly played
+// with, best bridges first. The entry point to The Thread. Name-matched
+// identity, so a subtle caveat sits at the bottom.
+function ConnectionsSection({
+  connections,
+  threadHref,
+}: {
+  connections: PlayerConnection[];
+  threadHref: string;
+}) {
+  return (
+    <section className="mb-10 mt-2" aria-labelledby="connections-heading">
+      <div className="flex items-end justify-between gap-4 mb-4">
+        <h2
+          id="connections-heading"
+          className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans m-0"
+        >
+          Connections
+        </h2>
+        <Link
+          href={threadHref}
+          className="text-[10px] font-bold tracking-[0.1em] uppercase text-muted hover:text-accent transition-colors font-sans no-underline inline-flex items-center gap-1"
+        >
+          See the full Thread
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+            <path d="M2 6h8M6.5 2.5 10 6l-3.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
+      </div>
+      <p className="text-[12px] text-muted font-tight mb-3 -mt-1.5">
+        Notable players you haven&apos;t teamed with — pros, Nationals-goers, and program alumni who share teammates with you.
+      </p>
+      <ul className="flex flex-col gap-2">
+        {connections.map((c) => {
+          const proChip =
+            c.score != null && c.score >= 85
+              ? (c.score >= 93 ? 'Elite' : 'Star')
+              : c.isPro
+                ? 'Pro'
+                : null;
+          const chips = [
+            proChip,
+            c.isAlumni ? 'Alumni' : null,
+            c.isNationals ? 'Nationals' : null,
+          ].filter((chip): chip is string => chip != null).slice(0, 2);
+          const inner = (
+            <>
+              <div className="min-w-0 flex-1">
+                <span className="font-display italic font-bold text-[15px] text-ink truncate block">
+                  {c.displayName}
+                </span>
+                {c.viaDisplay && (
+                  <span className="text-[11px] text-muted font-tight">
+                    via {c.viaDisplay}
+                    {c.bridgeCount > 1 ? ` +${c.bridgeCount - 1} more` : ''}
+                  </span>
+                )}
+              </div>
+              {chips.length > 0 && (
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  {chips.map((chip) => (
+                    <span
+                      key={chip}
+                      className={
+                        chip === 'Elite' || chip === 'Star' || chip === 'Pro'
+                          ? 'text-[9px] font-bold tracking-[0.1em] uppercase px-2 py-0.5 rounded-full bg-accent/15 text-accent flex-shrink-0'
+                          : 'text-[9px] font-bold tracking-[0.1em] uppercase px-2 py-0.5 rounded-full bg-ink/[0.06] text-muted flex-shrink-0'
+                      }
+                    >
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <span className="text-[10px] font-semibold tabular text-faint flex-shrink-0">
+                {c.bridgeCount} link{c.bridgeCount === 1 ? '' : 's'}
+              </span>
+            </>
+          );
+          return c.href ? (
+            <li key={c.name}>
+              <Link
+                href={c.href}
+                className="rounded-card bg-surface shadow-card px-4 py-3 flex items-center gap-3 no-underline hover:shadow-lift transition-shadow"
+              >
+                {inner}
+              </Link>
+            </li>
+          ) : (
+            <li key={c.name} className="rounded-card bg-surface shadow-card px-4 py-3 flex items-center gap-3">
+              {inner}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-[10px] text-faint font-tight mt-2.5">
+        Connections are matched by name across UFA, USAU, PUL &amp; WUL rosters — occasional mismatches are expected.
+      </p>
+    </section>
+  );
 }

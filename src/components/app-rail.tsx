@@ -14,15 +14,12 @@
 // and the account controls; the inner shells (AppShell, PlaybookShell) must NOT
 // render duplicate copies of those controls on desktop.
 //
-// The Games sub-app's desktop page-switcher (Scores/Schedule/Teams/Players
-// pills + league slot) lives here now instead of the old below-rail
-// GamesSubnav bar — see games-subnav.tsx. Two independent pieces:
-//   - GamesPageSwitcherPills: always rendered (self-gates to nothing on
-//     non-Games pages), placed in the absolutely-centered zone so it's truly
-//     centered regardless of the left/right zone widths.
+// The Games sub-app's page-SWITCHER (Scores/Schedule/Teams/Players) moved OUT
+// of this rail to the floating liquid-glass bottom bar (MobileBottomNav →
+// FloatingTabBar), which now renders on every breakpoint. What remains here:
 //   - GamesLeagueSlot: fed by the `gamesSlot` prop (the resolved leagueSlot
 //     node from AppShell), rendered in the normal right-hand flex zone next
-//     to Account — NOT part of the centered block.
+//     to Account. The league switcher is NOT a tab switcher, so it stays.
 // gamesSlotMobile: kept in the props for backward compat but no longer
 //   rendered — league selection now lives inside the MobileMenu overlay.
 
@@ -35,7 +32,7 @@ import { AccountChip } from '@/components/auth/account-chip';
 import { SearchBar } from '@/components/search-bar';
 import { SearchModal, SearchGlyph } from '@/components/search-modal';
 import { MobileMenu } from '@/components/mobile-menu';
-import { GamesPageSwitcherPills, GamesLeagueSlot } from '@/components/games-subnav';
+import { GamesLeagueSlot } from '@/components/games-subnav';
 
 // ─── Sub-app definitions ──────────────────────────────────────────────────────
 
@@ -128,16 +125,10 @@ function RailInner({ gamesSlot, gamesSlotMobile }: RailInnerProps) {
         </div>
       </div>
 
-      {/* CENTER zone — desktop page-switcher pills (Scores/Schedule/Teams/
-          Players, or the Fantasy/WFDF equivalents), centered in the rail.
-          flex-shrink-0 justify-center: the pills reserve their own space and sit
-          on the true viewport center because the LEFT and RIGHT zones are equal
-          flex-1 weight. Hidden below lg — the mobile equivalent is
-          MobileBottomNav; on mobile this zone collapses to nothing. Renders
-          nothing outside the Games/Fantasy/WFDF sub-apps. */}
-      <div className="hidden lg:flex flex-shrink-0 justify-center">
-        <GamesPageSwitcherPills />
-      </div>
+      {/* The page-switcher (Scores/Schedule/Teams/Players, or Fantasy/WFDF)
+          moved OUT of the rail to the floating liquid-glass bottom bar
+          (MobileBottomNav → FloatingTabBar), which now renders on every
+          breakpoint. The league switcher stays in the RIGHT zone below. */}
 
       {/* RIGHT zone — Search (mobile) · League slot (desktop) · Account ·
           Hamburger. flex-1 justify-end: equal weight to the LEFT zone so the

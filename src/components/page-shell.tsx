@@ -73,26 +73,27 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
 
       {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
           sits above the floating hub nav's reserved space. The hub floats
-          bottom-3 (12px) off the screen edge and is ~64px tall (44px tap
-          target + py-2.5 padding), so content needs more clearance than the
-          old flush bar (which only reserved its own height). */}
+          bottom-3 (12px) off the screen edge and is ~64px tall, so content
+          needs clearance so the last row isn't hidden behind it. */}
       <div className="lg:hidden flex-1 overflow-y-auto pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]">
         {children}
         {!hideFooterMobile && <SiteFooter />}
-        <Suspense fallback={SUSPENSE_FALLBACK}>
-          <MobileBottomNav />
-        </Suspense>
       </div>
 
-      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. The footer
-          rides at the bottom of the scrolling main so it clears short pages
-          (flex-1 content) yet scrolls into view on tall ones. ── */}
+      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. Same bottom
+          clearance so the floating tab bar doesn't cover the last row. ── */}
       <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 overflow-y-auto flex flex-col">
+        <main className="flex-1 overflow-y-auto flex flex-col pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]">
           <div className="flex-1">{children}</div>
           <SiteFooter />
         </main>
       </div>
+
+      {/* Floating liquid-glass page switcher — fixed, so one instance floats
+          over every breakpoint (the switcher that moved out of the top rail). */}
+      <Suspense fallback={SUSPENSE_FALLBACK}>
+        <MobileBottomNav />
+      </Suspense>
     </div>
   );
 }
