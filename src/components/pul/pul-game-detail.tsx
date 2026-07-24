@@ -12,6 +12,8 @@ import Link from 'next/link';
 import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { PulTeamLogo } from '@/components/pul-team-logo';
+import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
+import type { SpotlightPlayer } from '@/lib/pro/player-spotlight';
 import type { PulGame, PulGameBoxscore, PulBoxscoreRow, PulGameTeamSide } from '@/lib/pul/data';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -19,6 +21,7 @@ import type { PulGame, PulGameBoxscore, PulBoxscoreRow, PulGameTeamSide } from '
 interface PulGameDetailProps {
   game: PulGame;
   boxscore: PulGameBoxscore;
+  spotlight?: { away: SpotlightPlayer | null; home: SpotlightPlayer | null };
 }
 
 // ── Adapter: PulGameTeamSide → minimal PulTeam shape for PulTeamLogo ─────────
@@ -73,17 +76,17 @@ const NEUTRAL_COLOR = '#6b7280';
 
 // ── Root component ────────────────────────────────────────────────────────────
 
-export function PulGameDetail({ game, boxscore }: PulGameDetailProps) {
+export function PulGameDetail({ game, boxscore, spotlight }: PulGameDetailProps) {
   return (
     <AppShell>
-      <DetailBody game={game} boxscore={boxscore} />
+      <DetailBody game={game} boxscore={boxscore} spotlight={spotlight} />
     </AppShell>
   );
 }
 
 // ── Detail body ───────────────────────────────────────────────────────────────
 
-function DetailBody({ game, boxscore }: PulGameDetailProps) {
+function DetailBody({ game, boxscore, spotlight }: PulGameDetailProps) {
   const { away, home } = game;
   const isFinal = game.status === 'final';
 
@@ -130,6 +133,18 @@ function DetailBody({ game, boxscore }: PulGameDetailProps) {
           />
         </div>
       </div>
+
+      {/* ── Player spotlight: to-watch (upcoming) / player of the game (final) ── */}
+      {spotlight && (spotlight.away || spotlight.home) && (
+        <div className="px-5 pb-5 md:px-14 md:pb-8">
+          <PlayerSpotlightSection
+            variant="bare"
+            isFinal={isFinal}
+            away={{ abbr: away.abbrev, logo: <PulTeamLogo team={sideToLogoTeam(away)} size={16} />, player: spotlight.away }}
+            home={{ abbr: home.abbrev, logo: <PulTeamLogo team={sideToLogoTeam(home)} size={16} />, player: spotlight.home }}
+          />
+        </div>
+      )}
 
       {/* ── Team totals comparison (only when box score data is present) ── */}
       {hasBoxscore && (

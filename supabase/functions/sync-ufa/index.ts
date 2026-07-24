@@ -25,7 +25,9 @@
 // upstream player id is SKIPPED (never aborts the run — that exact crash is why
 // the manual script silently stopped landing stats).
 //
-// Request body (all optional): { "year": 2026, "windowDays": 14, "maxGames": 12 }
+// Request body (all optional):
+//   { "year": 2026, "windowDays": 14, "maxGames": 12, "retryDays": 5,
+//     "maxPlayerFetches": 120 }   (larger for manual repair runs; wall-clock caps ~400)
 // Auth: verify_jwt off (server-to-server; pg_cron passes the service-role key).
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
@@ -43,6 +45,13 @@ const FETCH_GAP_MS = 150;   // gentle pacing to the UFA backend
 // hourly run catches any remainder. ~120 fetches × ~120ms ≈ 15–20s of fetching.
 const DEFAULT_WINDOW_DAYS = 14;
 const DEFAULT_MAX_GAMES = 12;
+// How long we keep retrying a Final game whose stats exist but don't reconcile
+// with the final score. Mid-game freezes heal on the next run; but some games'
+// upstream stat sheets are PERMANENTLY short (e.g. 2026-07-18-MTL-BOS sums to
+// 10 away goals against a real score of 11 — verified at the source), and
+// without a cutoff those would re-fan-out ~40 player logs every hourly run
+// until they age out of the window.
+const DEFAULT_RETRY_DAYS = 5;
 const MAX_PLAYER_FETCHES = 120;
 // Headshots (watchufa profile-page scrape) are only fetched for players we don't
 // already have one for, capped per run so a big first-time sweep never blows the
@@ -165,7 +174,7 @@ interface ApiGame {
   startTimestamp?: string;
   locationName?: string;
 }
-interface ApiRosterPlayer { playerID: string; firstName?: string; lastName?: string }
+interface ApiRosterPlayer { playerID: string; firstName?: string; lastName?: string; status?: string }
 interface ApiRosterReports { home?: ApiRosterPlayer[]; away?: ApiRosterPlayer[] }
 interface ApiPlayerGameRow {
   gameID: string; isHome: boolean;
@@ -216,13 +225,16 @@ function gameRowOf(g: ApiGame, year: number) {
   };
 }
 
-async function run(body: { year?: number; windowDays?: number; maxGames?: number }) {
+async function run(body: { year?: number; windowDays?: number; maxGames?: number; retryDays?: number; maxPlayerFetches?: number }) {
   const supabase = db();
   const now = new Date();
   const year = body.year ?? (now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1);
   const windowDays = body.windowDays ?? DEFAULT_WINDOW_DAYS;
   const maxGames = body.maxGames ?? DEFAULT_MAX_GAMES;
+  const retryDays = body.retryDays ?? DEFAULT_RETRY_DAYS;
+  const maxPlayerFetches = body.maxPlayerFetches ?? MAX_PLAYER_FETCHES;
   const windowStartMs = now.getTime() - windowDays * 86400_000;
+  const retryStartMs = now.getTime() - retryDays * 86400_000;
 
   // 1. Season games. Upsert ALL of them (cheap) so schedule/scores/status stay
   //    fresh even for games we don't fan-out stats for this run.
@@ -259,21 +271,37 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     })
     .sort((a, b) => (b.startTimestamp ?? '').localeCompare(a.startTimestamp ?? ''));
 
-  // Skip Final games that ALREADY have stats — they won't change, so there's no
-  // reason to re-fan-out ~50 player logs for them. In-progress games are always
-  // (re)processed (scores/stats still moving). This is what keeps steady-state
-  // runs cheap: once a weekend's games are scored, nothing re-fetches.
+  // Skip Final games only when their stats are COMPLETE (per-side goal sums
+  // match the final score — ufa_complete_stat_game_ids). "Has any stats" is NOT
+  // enough: a game synced while InProgress froze at its mid-game snapshot the
+  // moment it flipped Final, and 10 of the Jul 17-19 2026 weekend's games got
+  // stuck partial that way (feeding standouts + fantasy bad lines). In-progress
+  // games are always (re)processed. A game whose upstream stat sheet never
+  // reconciles re-fetches until it ages out of the window — bounded waste.
   const candidateIds = candidates.map((g) => g.gameID);
-  const haveStats = new Set<string>();
+  const completeStats = new Set<string>();
+  const anyStats = new Set<string>();
   if (candidateIds.length > 0) {
+    const { data: complete, error: completeErr } = await supabase
+      .rpc('ufa_complete_stat_game_ids', { p_ids: candidateIds });
+    if (completeErr) throw new Error(`ufa_complete_stat_game_ids: ${completeErr.message}`);
+    for (const r of complete ?? []) completeStats.add((r as { game_id: string }).game_id);
     const { data: withStats } = await supabase
       .from('ufa_game_player_stats')
       .select('game_id')
       .in('game_id', candidateIds);
-    for (const r of withStats ?? []) haveStats.add((r as { game_id: string }).game_id);
+    for (const r of withStats ?? []) anyStats.add((r as { game_id: string }).game_id);
   }
   const recent = candidates
-    .filter((g) => normalizeStatus(g.status) === 'InProgress' || !haveStats.has(g.gameID))
+    .filter((g) => {
+      if (normalizeStatus(g.status) === 'InProgress') return true; // still moving
+      if (completeStats.has(g.gameID)) return false;               // done, reconciled
+      if (!anyStats.has(g.gameID)) return true;                    // never synced
+      // Partial Final game: retry only while recent (retryDays). Beyond that the
+      // shortfall is upstream's, not a mid-game freeze — stop burning the budget.
+      const t = g.startTimestamp ? new Date(g.startTimestamp).getTime() : NaN;
+      return !Number.isNaN(t) && t >= retryStartMs;
+    })
     .slice(0, maxGames);
 
   // Players that already have a (self-hosted) headshot → never re-fetch. One
@@ -307,7 +335,7 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     // Stop starting new games once the fetch budget is (nearly) spent — a game
     // needs a full roster's worth of fetches to be useful, so don't begin one we
     // can't finish. The next hourly run resumes with the leftover games.
-    if (playerFetches >= MAX_PLAYER_FETCHES) { fetchBudgetHit = true; break; }
+    if (playerFetches >= maxPlayerFetches) { fetchBudgetHit = true; break; }
     let roster: ApiRosterReports;
     try {
       roster = await ufaGet<ApiRosterReports>(`roster-reports?gameID=${encodeURIComponent(g.gameID)}`);
@@ -315,7 +343,12 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
       console.warn(`[sync-ufa] roster failed for ${g.gameID}: ${(err as Error).message}`);
       continue;
     }
-    const rosterPlayers = [...(roster.home ?? []), ...(roster.away ?? [])];
+    // Drop "Not Rostered" org players — roster-reports returns the WHOLE org
+    // (~70+ entries incl. practice squad); only game-rostered players can have a
+    // stat line, and fetching dead logs was burning most of the fetch budget
+    // (~30 wasted fetches/game — starved multi-game runs).
+    const rosterPlayers = [...(roster.home ?? []), ...(roster.away ?? [])]
+      .filter((rp) => rp.status !== 'Not Rostered');
 
     for (const rp of rosterPlayers) {
       if (!isSafeId(rp.playerID)) { skippedPlayers++; continue; }
@@ -435,7 +468,7 @@ Deno.serve(async (req) => {
     });
   }
   playerLogCache.clear();
-  let body: { year?: number; windowDays?: number; maxGames?: number } = {};
+  let body: { year?: number; windowDays?: number; maxGames?: number; retryDays?: number; maxPlayerFetches?: number } = {};
   try { body = await req.json(); } catch { /* empty ok */ }
   try {
     const result = await run(body);

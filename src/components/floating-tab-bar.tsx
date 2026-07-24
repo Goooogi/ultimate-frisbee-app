@@ -71,18 +71,20 @@ export function FloatingTabBar({
       className={[
         'fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] inset-x-3 z-40 mx-auto',
         maxWidthClass,
-        // Apple/Instagram liquid glass: a DARK, heavily-blurred + saturated
+        // Apple/Instagram liquid glass: a near-BLACK, heavily-blurred + saturated
         // frost so whatever scrolls behind shows through, tinted, brightened.
         // The glass "material" reads via three stacked edges: a hairline white
         // outer border, an inset top-highlight ring, and a soft deep shadow.
         // A faint top-down gloss overlay (::before) adds the wet sheen.
-        'relative isolate rounded-[28px] p-1.5',
-        'bg-[rgb(20_22_28/0.55)] supports-[backdrop-filter]:bg-[rgb(20_22_28/0.42)]',
+        // Tint is near-pure black (rgb 8/9/11) at high opacity so the bar reads
+        // black, not translucent grey, while the blur still lets motion through.
+        'relative isolate rounded-[24px] p-1',
+        'bg-[rgb(8_9_11/0.78)] supports-[backdrop-filter]:bg-[rgb(8_9_11/0.62)]',
         'backdrop-blur-2xl backdrop-saturate-[1.8] backdrop-brightness-110',
         'border border-white/15 shadow-[0_10px_50px_-10px_rgba(0,0,0,0.6)]',
         'ring-1 ring-inset ring-white/[0.12]',
         // Glossy top sheen — a subtle white gradient over the top third.
-        'before:pointer-events-none before:absolute before:inset-0 before:rounded-[28px] before:-z-[1]',
+        'before:pointer-events-none before:absolute before:inset-0 before:rounded-[24px] before:-z-[1]',
         'before:bg-[linear-gradient(180deg,rgba(255,255,255,0.14),transparent_42%)]',
       ].join(' ')}
     >
@@ -95,7 +97,7 @@ export function FloatingTabBar({
           <span
             aria-hidden="true"
             className={[
-              'absolute top-0 bottom-0 rounded-[22px]',
+              'absolute top-0 bottom-0 rounded-[18px]',
               'bg-white/[0.14] ring-1 ring-inset ring-white/25',
               'shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_2px_10px_-2px_rgba(0,0,0,0.4)]',
               'motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-[cubic-bezier(0.22,0.7,0.25,1)]',
@@ -113,11 +115,11 @@ export function FloatingTabBar({
                   with currentColor inherit this; ones that hardcode their own
                   color keep it (acceptable fallback). */}
               <span className={t.disabled ? 'text-white/30' : active ? 'text-white' : 'text-white/60'}>
-                {t.icon({ active, size: 22 })}
+                {t.icon({ active, size: 20 })}
               </span>
               <span
                 className={[
-                  'text-[9px] font-bold tracking-[0.08em] uppercase font-tight leading-none',
+                  'text-[9px] font-bold tracking-[0.08em] uppercase font-tight leading-none whitespace-nowrap',
                   // The glass is always a dark frost, so use light tones for
                   // legibility regardless of the surrounding app theme.
                   t.disabled ? 'text-white/30' : active ? 'text-white' : 'text-white/55',
@@ -128,7 +130,7 @@ export function FloatingTabBar({
             </>
           );
           const cls = [
-            'relative z-[1] flex flex-1 flex-col items-center justify-center gap-1 min-w-[60px] h-[52px] rounded-[20px]',
+            'relative z-[1] flex flex-1 flex-col items-center justify-center gap-0.5 min-w-[60px] px-2 h-[44px] rounded-[16px]',
             'motion-safe:transition-colors motion-safe:duration-150',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             t.disabled ? 'cursor-not-allowed select-none' : 'cursor-pointer',

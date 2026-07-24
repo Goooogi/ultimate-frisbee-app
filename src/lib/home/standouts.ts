@@ -77,9 +77,10 @@ export interface StandoutLine {
 }
 
 const MS_DAY = 86_400_000;
-const WINDOW_DAYS = 28; // max 4 weeks back
+const WINDOW_DAYS = 21; // max 3 weeks back — the section is "recent" great games
 const MAX_CARDS = 10;
 const PER_GAME_CAP = 1; // at most one standout per game so one blowout doesn't flood
+const PER_PLAYER_CAP = 1; // at most one card per player — their single best recent game
 
 // ─── Perf score ───────────────────────────────────────────────────────────────
 
@@ -120,15 +121,22 @@ function perfScore(l: RawLine): number {
 
 /**
  * Strength-gated recency threshold: how strong a line must be to survive at a
- * given age. Fresh (≤3 days) lines pass at a low bar; each additional week
- * raises the bar so only elite older lines linger. Tuned to the perf scale
- * above (recent weekend tops ~40-50; the gate reaches ~40 by 4 weeks).
+ * given age. Fresh (≤3 days) lines pass at a low bar; the bar then climbs
+ * steeply so the section reads as "this week / last week" and an older game must
+ * be near-elite (and, past ~3 weeks, a genuine monster) to keep its spot. A
+ * strong recent game therefore displaces a merely-good older one for the same
+ * player. Tuned to the perf scale above (a recent weekend tops ~50-65).
+ *
+ * Reference points on the current UFA data: a 4G/9A/761yd line (~perf 50) at 3
+ * weeks old no longer survives (needs 54), but the same player's fresher
+ * 3G/14A/938yd line (~perf 65) sails through — so the recent game wins the card.
  */
 function gateThreshold(ageDays: number): number {
   if (ageDays <= 3) return 10; // this weekend — easy to appear
-  if (ageDays <= 10) return 22; // ~1-1.5 weeks
-  if (ageDays <= 17) return 30; // ~2-2.5 weeks
-  return 38; // 3-4 weeks — near-elite only
+  if (ageDays <= 10) return 24; // ~1-1.5 weeks — solid line
+  if (ageDays <= 14) return 34; // ~2 weeks — strong line only
+  if (ageDays <= 17) return 44; // ~2.5 weeks — near-elite
+  return 54; // 18-21 days — monster games only (WINDOW_DAYS caps the tail)
 }
 
 // ─── UFA ──────────────────────────────────────────────────────────────────────
@@ -596,15 +604,30 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
   // award line is dropped and replaced by a season card below.
   const gated = all.filter(clearsGate);
 
-  // At most PER_GAME_CAP standouts per game (keep the best), so one blowout
-  // doesn't fill the carousel with the same game's players. Cap by perf.
+  // Cap the field: at most PER_GAME_CAP standouts per game (so one blowout
+  // doesn't flood the rail) AND at most PER_PLAYER_CAP card per player (so a
+  // player with several standout weeks shows only their single best recent
+  // game, not a stack of cards). Lines are sorted by perf desc, so the first
+  // time we see a game/player is their best line. Award players are exempt from
+  // the per-player cap — an award leader's real game line still competes with
+  // their season-totals fallback below (award dedup keeps one per award).
   gated.sort((a, b) => b.perf - a.perf);
   const perGame = new Map<string, number>();
+  const perPlayer = new Map<string, number>();
   const capped: StandoutLine[] = [];
   for (const l of gated) {
-    const n = (perGame.get(l.gameKey) ?? 0) + 1;
-    perGame.set(l.gameKey, n);
-    if (n <= PER_GAME_CAP) capped.push(l);
+    const gN = (perGame.get(l.gameKey) ?? 0) + 1;
+    perGame.set(l.gameKey, gN);
+    if (gN > PER_GAME_CAP) continue;
+    // Per-player cap keyed by playerId (UFA) or name (PUL/WUL box rows have no
+    // id). Skip the cap for award-watch players (handled by award dedup).
+    if (!l.awardWatch) {
+      const pKey = l.playerId ?? `${l.league}:${l.playerName}`;
+      const pN = (perPlayer.get(pKey) ?? 0) + 1;
+      perPlayer.set(pKey, pN);
+      if (pN > PER_PLAYER_CAP) continue;
+    }
+    capped.push(l);
   }
 
   // SEASON cards for award players who did NOT earn a game card (quiet week or

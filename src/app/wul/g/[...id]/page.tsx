@@ -12,6 +12,7 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getWulGame, getWulGameBoxscore } from '@/lib/wul/data';
+import { getWulSpotlight } from '@/lib/wul/spotlight';
 import { WulGameDetail } from '@/components/wul/wul-game-detail';
 
 export const revalidate = 300; // 5 min — scores refresh frequently during season
@@ -49,6 +50,7 @@ export default async function WulGamePage({ params }: Props) {
   if (!game) notFound();
 
   const boxscore = await getWulGameBoxscore(game).catch(() => ({ away: [], home: [] }));
+  const spotlight = await getWulSpotlight(game, boxscore).catch(() => ({ away: null, home: null }));
 
-  return <WulGameDetail game={game} boxscore={boxscore} />;
+  return <WulGameDetail game={game} boxscore={boxscore} spotlight={spotlight} />;
 }

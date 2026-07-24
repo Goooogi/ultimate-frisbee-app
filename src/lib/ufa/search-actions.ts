@@ -303,7 +303,33 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     return compareByNameThenYearDesc(a.name, b.name);
   });
 
-  return merged.slice(0, limit * 2);
+  // ── Final cross-league PLAYER dedup ──────────────────────────────────────
+  // The per-league dedup above only skips players already covered by a USAU
+  // row. A human who is in two NON-USAU leagues (e.g. UFA + WFDF) — or whose
+  // USAU player row got sliced off USAU search's own capped result set — still
+  // yields two identical rows. Since every league's player row opens the same
+  // unified /players/[id] profile (which merges careers by name), one row is
+  // enough. Collapse player rows sharing an EXACT display name (lowercased +
+  // trimmed — the conservative rule; we deliberately do NOT fuzzy-merge here so
+  // two genuinely-distinct same-surname people aren't hidden from search).
+  //
+  // Runs AFTER the sort, so the FIRST surviving row per name is the best-ranked
+  // one; insertion order + stable sort also make an anchor-league row (UFA/PUL/
+  // WUL, real /players/[id]) win a tie over a WFDF by-name row. Only `kind ===
+  // 'player'` participates — a team/tournament sharing a person's name is left
+  // untouched.
+  const seenPlayerName = new Set<string>();
+  const deduped: SearchResult[] = [];
+  for (const r of merged) {
+    if (r.kind === 'player') {
+      const nameKey = r.name.trim().toLowerCase();
+      if (seenPlayerName.has(nameKey)) continue;
+      seenPlayerName.add(nameKey);
+    }
+    deduped.push(r);
+  }
+
+  return deduped.slice(0, limit * 2);
 }
 
 /**

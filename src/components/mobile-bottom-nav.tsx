@@ -156,7 +156,7 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
     case 'home':
       // House glyph — reads as "home" at a glance, distinct from the disc.
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
           <path
             d="M3.5 9.5 11 3.5l7.5 6M5 8.5v8a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1v-8"
             stroke="currentColor"
@@ -168,14 +168,14 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
       );
     case 'games':
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={ball}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={ball}>
           <ellipse cx="11" cy="11" rx="9" ry="3.2" stroke="currentColor" strokeWidth="1.5" />
           <ellipse cx="11" cy="11" rx="9" ry="9" stroke="currentColor" strokeWidth="1.5" opacity="0.4" />
         </svg>
       );
     case 'schedule':
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
           <rect x="3" y="4.5" width="16" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
           <path d="M3 9h16" stroke="currentColor" strokeWidth="1.5" />
           <path d="M7 3v3M15 3v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -183,7 +183,7 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
       );
     case 'teams':
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
           <circle cx="7" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5" />
           <circle cx="15" cy="8" r="2.5" stroke="currentColor" strokeWidth="1.5" />
           <path d="M2.5 18c.7-2.5 2.5-3.5 4.5-3.5s3.8 1 4.5 3.5M11 18c.7-2.5 2.5-3.5 4.5-3.5s3.8 1 4.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -193,7 +193,7 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
       // Single-person glyph — distinguishes from the multi-person "teams"
       // icon at a glance.
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
           <circle cx="11" cy="8" r="3.5" stroke="currentColor" strokeWidth="1.5" />
           <path d="M4 19c1-3.5 4-5 7-5s6 1.5 7 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>
@@ -201,7 +201,7 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
     case 'leaderboard':
       // Podium / ranking bars — three stepped columns, tallest in the middle.
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={ball}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={ball}>
           <rect x="2.5" y="11" width="5" height="8" rx="1" stroke="currentColor" strokeWidth="1.5" />
           <rect x="8.5" y="5" width="5" height="14" rx="1" stroke="currentColor" strokeWidth="1.5" />
           <rect x="14.5" y="8.5" width="5" height="10.5" rx="1" stroke="currentColor" strokeWidth="1.5" />
@@ -211,7 +211,7 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
       // Jersey glyph — distinguishes "my team" from the generic multi-person
       // "teams" icon used in the league tab set.
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
           <path
             d="M8 3.5 6 5 3 6.5 4.5 10 6.5 9v9.5A1.5 1.5 0 0 0 8 20h6a1.5 1.5 0 0 0 1.5-1.5V9l2 1 1.5-3.5L16 5l-2-1.5"
             stroke="currentColor"
@@ -225,7 +225,7 @@ function Icon({ kind, size = 22 }: { kind: Tab['icon']; size?: number }) {
       // Shield glyph — "league" as an institution/membership, matching the
       // disabled "coming soon" placeholder tone used on desktop.
       return (
-        <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
+        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true" className={c}>
           <path
             d="M11 3 4 5.5V10c0 4.5 3 7.7 7 9 4-1.3 7-4.5 7-9V5.5L11 3Z"
             stroke="currentColor"

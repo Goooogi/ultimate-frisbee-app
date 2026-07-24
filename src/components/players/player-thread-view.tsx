@@ -748,15 +748,32 @@ function ThreadEdgeLine({
   const opacity = dimmed ? 0.12 : 1;
 
   if (edge.kind === 'direct') {
-    // Thickness ∝ weight — stronger bond, thicker line. Clamp so a very high
-    // weight doesn't overwhelm the canvas.
-    const width = Math.max(1.5, Math.min(6, 1.5 + edge.weight * 3.5));
+    // Thickness ∝ weight — stronger bond, thicker line. Kept slim (max 3px) so
+    // the accent spokes read as connective tissue, not bold bars that dominate
+    // the canvas and swallow the node circles.
+    const width = Math.max(1, Math.min(3, 1 + edge.weight * 1.75));
+    // Stop each end short of its node's circle (plus a small gap) instead of
+    // running to the center — so the spoke meets the node's edge rather than
+    // plunging through the ring. An endpoint sitting at CENTER is the anchor.
+    const fromR = nodeRadius(from.node, from.x === CENTER && from.y === CENTER) + 4;
+    const toR = nodeRadius(to.node, to.x === CENTER && to.y === CENTER) + 4;
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len;
+    const uy = dy / len;
+    // Guard: if the nodes are so close their radii overlap, don't invert the line.
+    const usable = Math.max(0, len - fromR - toR);
+    const x1 = from.x + ux * fromR;
+    const y1 = from.y + uy * fromR;
+    const x2 = x1 + ux * usable;
+    const y2 = y1 + uy * usable;
     return (
       <line
-        x1={from.x}
-        y1={from.y}
-        x2={to.x}
-        y2={to.y}
+        x1={x1}
+        y1={y1}
+        x2={x2}
+        y2={y2}
         stroke="rgb(var(--accent))"
         strokeWidth={width}
         strokeLinecap="round"

@@ -18,6 +18,8 @@ import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { GameBoxscore } from '@/components/game-boxscore';
 import { TeamLogo } from '@/components/team-logo';
+import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
+import type { SpotlightPlayer } from '@/lib/pro/player-spotlight';
 
 export interface GameEnrichment {
   awayStanding: UfaStanding | null;
@@ -26,6 +28,9 @@ export interface GameEnrichment {
   homeTeamStat: UfaTeamStat | null;
   season: number;
   gameStats: UfaGameStatsResponse | null;
+  /** Players to watch (upcoming/live) or player of the game (final), one per
+   *  team. Either side may be null when we couldn't resolve a pick. */
+  spotlight?: { away: SpotlightPlayer | null; home: SpotlightPlayer | null };
 }
 
 interface GameDetailProps {
@@ -165,6 +170,14 @@ function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; 
           </div>
         )}
       </div>
+
+      {enrichment?.spotlight && (enrichment.spotlight.away || enrichment.spotlight.home) && (
+        <PlayerSpotlightSection
+          isFinal={state.isFinal}
+          away={{ abbr: away.abbr, logo: <TeamLogo team={away} size={16} />, player: enrichment.spotlight.away }}
+          home={{ abbr: home.abbr, logo: <TeamLogo team={home} size={16} />, player: enrichment.spotlight.home }}
+        />
+      )}
 
       {hasGameStats && (
         <FieldGameLeaders

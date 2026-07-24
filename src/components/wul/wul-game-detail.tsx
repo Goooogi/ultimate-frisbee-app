@@ -12,6 +12,8 @@
 import Link from 'next/link';
 import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
+import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
+import type { SpotlightPlayer } from '@/lib/pro/player-spotlight';
 import type { WulGame, WulGameBoxscore, WulBoxscoreRow, WulGameTeamSide } from '@/lib/wul/data';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -19,6 +21,7 @@ import type { WulGame, WulGameBoxscore, WulBoxscoreRow, WulGameTeamSide } from '
 interface WulGameDetailProps {
   game: WulGame;
   boxscore: WulGameBoxscore;
+  spotlight?: { away: SpotlightPlayer | null; home: SpotlightPlayer | null };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -51,17 +54,17 @@ const NEUTRAL_COLOR = '#6b7280';
 
 // ── Root component ────────────────────────────────────────────────────────────
 
-export function WulGameDetail({ game, boxscore }: WulGameDetailProps) {
+export function WulGameDetail({ game, boxscore, spotlight }: WulGameDetailProps) {
   return (
     <AppShell>
-      <DetailBody game={game} boxscore={boxscore} />
+      <DetailBody game={game} boxscore={boxscore} spotlight={spotlight} />
     </AppShell>
   );
 }
 
 // ── Detail body ───────────────────────────────────────────────────────────────
 
-function DetailBody({ game, boxscore }: WulGameDetailProps) {
+function DetailBody({ game, boxscore, spotlight }: WulGameDetailProps) {
   const { away, home } = game;
   const isFinal = game.status === 'final';
 
@@ -107,6 +110,18 @@ function DetailBody({ game, boxscore }: WulGameDetailProps) {
           />
         </div>
       </div>
+
+      {/* ── Player spotlight: to-watch (upcoming) / player of the game (final) ── */}
+      {spotlight && (spotlight.away || spotlight.home) && (
+        <div className="px-5 pb-5 md:px-14 md:pb-8">
+          <PlayerSpotlightSection
+            variant="bare"
+            isFinal={isFinal}
+            away={{ abbr: away.abbrev, logo: <WulTeamLogoBlock logoUrl={away.logoUrl} accentColor={away.accentColor} abbrev={away.abbrev} size={16} />, player: spotlight.away }}
+            home={{ abbr: home.abbrev, logo: <WulTeamLogoBlock logoUrl={home.logoUrl} accentColor={home.accentColor} abbrev={home.abbrev} size={16} />, player: spotlight.home }}
+          />
+        </div>
+      )}
 
       {/* ── Team totals comparison (only when box score data is present) ── */}
       {hasBoxscore && (
