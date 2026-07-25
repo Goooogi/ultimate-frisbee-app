@@ -78,7 +78,10 @@ export function FloatingTabBar({
         // A faint top-down gloss overlay (::before) adds the wet sheen.
         // Tint is near-pure black (rgb 8/9/11) at high opacity so the bar reads
         // black, not translucent grey, while the blur still lets motion through.
-        'relative isolate rounded-[24px] p-1',
+        // `isolate` (not `relative`) establishes the stacking context for the
+        // ::before gloss — using `relative` here would override the `fixed`
+        // above (same CSS `position` property) and un-pin the bar.
+        'isolate rounded-[24px] p-1',
         'bg-[rgb(8_9_11/0.78)] supports-[backdrop-filter]:bg-[rgb(8_9_11/0.62)]',
         'backdrop-blur-2xl backdrop-saturate-[1.8] backdrop-brightness-110',
         'border border-white/15 shadow-[0_10px_50px_-10px_rgba(0,0,0,0.6)]',

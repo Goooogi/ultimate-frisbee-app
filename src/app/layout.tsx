@@ -1,9 +1,11 @@
+import { Suspense } from 'react';
 import type { Metadata, Viewport } from 'next';
 import { Antonio, Inter, Inter_Tight } from 'next/font/google';
 import './globals.css';
 import { ThemeBootstrap } from '@/components/theme-bootstrap';
 import { AuthProvider } from '@/lib/auth/auth-provider';
 import { FavoritesOnboardingModal } from '@/components/favorites/favorites-onboarding-modal';
+import { MobileBottomNav } from '@/components/mobile-bottom-nav';
 
 const interTight = Inter_Tight({
   subsets: ['latin'],
@@ -58,6 +60,14 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           {children}
           <FavoritesOnboardingModal />
+          {/* Global static bottom bar (mobile only — self-gated lg:hidden).
+              Mounted ONCE at the root so it's truly app-wide regardless of which
+              shell a page uses (AppShell, PlaybookShell, bespoke home, etc.) and
+              so its `position: fixed` resolves against the viewport, not a
+              transformed shell ancestor. Suspense: it reads usePathname. */}
+          <Suspense fallback={null}>
+            <MobileBottomNav />
+          </Suspense>
         </AuthProvider>
       </body>
     </html>

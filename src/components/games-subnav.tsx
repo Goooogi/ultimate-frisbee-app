@@ -19,6 +19,7 @@
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
+import { SectionNav } from '@/components/section-nav';
 import {
   DEFAULT_LEAGUE,
   buildLeagueQs,
@@ -86,6 +87,55 @@ function isActive(pathname: string, item: NavItem): boolean {
     pathname === prefix || pathname.startsWith(`${prefix}/`);
   if (matches(item.match)) return true;
   return item.aliases?.some(matches) ?? false;
+}
+
+// ─── Shared resolved-tab source (reused by the desktop pills + SectionNav) ────
+// One place computes "which section-tab set applies here, with resolved hrefs +
+// active flags" from pathname + league qs, so the desktop pill nav and the new
+// Strava-style SectionNav render identical nav data in two visual treatments.
+
+export interface ResolvedSectionTab {
+  label: string;
+  /** Final href with the ?league= qs applied where relevant. '#' for soon tabs. */
+  href: string;
+  active: boolean;
+  soon?: boolean;
+}
+
+/**
+ * Resolve the section-nav tabs for the current route, or null when the current
+ * page has no section nav (admin, settings, playbook internals, home, etc.).
+ * Must be called under a Suspense boundary (uses useSearchParams).
+ */
+export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: string } | null {
+  const pathname = usePathname() ?? '/';
+  const searchParams = useSearchParams();
+
+  const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+  const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  if (!isFantasy && !isLeaguePage(pathname)) return null;
+
+  const activeLeague = searchParams.get('league')
+    ? parseLeagueParam(searchParams.get('league'))
+    : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
+  const activeDivision = parseDivisionParam(searchParams.get('div'));
+  const activeLevel = parseLevelParam(searchParams.get('level'));
+  const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
+
+  const noQs = isFantasy || isWfdf;
+  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
+
+  const tabs: ResolvedSectionTab[] = items.map((item) => ({
+    label: item.label,
+    href: item.soon ? '#' : noQs ? item.href : `${item.href}${leagueQs}`,
+    active: item.soon ? false : isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item),
+    soon: item.soon,
+  }));
+
+  return {
+    tabs,
+    ariaLabel: isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages',
+  };
 }
 
 // Route prefixes that ARE league pages — the only ones that get the
@@ -202,6 +252,30 @@ export function GamesPageSwitcherPills() {
   return (
     <Suspense fallback={null}>
       <GamesPageSwitcherPillsInner />
+    </Suspense>
+  );
+}
+
+// ─── SectionNav (second nav) — route-mode, fed by useSectionTabs ─────────────
+// Phase 1: rendered on MOBILE only (the shell gates it with lg:hidden). Renders
+// nothing on pages with no section nav.
+
+function SectionNavForRouteInner({ className }: { className?: string }) {
+  const resolved = useSectionTabs();
+  if (!resolved) return null;
+  return <SectionNav tabs={resolved.tabs} ariaLabel={resolved.ariaLabel} className={className} />;
+}
+
+/**
+ * The section second-nav for the current route (Scores/Schedule/Teams/Players,
+ * or the Fantasy/WFDF sets), rendered as Strava-style underline tabs. Renders
+ * nothing where no section nav applies. `className` lets the shell gate the
+ * breakpoint (e.g. `lg:hidden` for the Phase-1 mobile treatment).
+ */
+export function SectionNavForRoute({ className }: { className?: string } = {}) {
+  return (
+    <Suspense fallback={null}>
+      <SectionNavForRouteInner className={className} />
     </Suspense>
   );
 }

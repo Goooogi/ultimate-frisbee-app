@@ -241,7 +241,7 @@ export default async function HomePage() {
   ].filter((s): s is React.ReactElement => s !== null);
 
   return (
-    <div className="min-h-screen bg-bg text-ink pb-20 lg:pb-0">
+    <div className="min-h-screen bg-bg text-ink pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)] lg:pb-0">
       {/* Global top rail — app switching + logo + account (untouched) */}
       <AppRail />
 

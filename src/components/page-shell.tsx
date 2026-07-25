@@ -12,7 +12,7 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { AppRail } from '@/components/app-rail';
-import { MobileBottomNav } from '@/components/mobile-bottom-nav';
+import { SectionNavForRoute } from '@/components/games-subnav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 import { SiteFooter } from '@/components/site-footer';
 
@@ -71,6 +71,14 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
         gamesSlotMobile={mobileTab}
       />
 
+      {/* ── Second nav (SectionNav) — page/section-specific tabs directly under
+          the rail, above content. Replaces the section-switching role the
+          bottom bar used to play. Left-aligned scrollable row on mobile;
+          CENTERED under the rail on desktop (where there's no bottom bar).
+          Renders nothing on pages with no section nav. Sits OUTSIDE the scroll
+          panes so it stays pinned under the rail. ── */}
+      <SectionNavForRoute />
+
       {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
           sits above the floating hub nav's reserved space. The hub floats
           bottom-3 (12px) off the screen edge and is ~64px tall, so content
@@ -80,20 +88,20 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
         {!hideFooterMobile && <SiteFooter />}
       </div>
 
-      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. Same bottom
-          clearance so the floating tab bar doesn't cover the last row. ── */}
+      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. The bottom bar
+          is mobile-only now (MobileBottomNav is lg:hidden), so desktop needs no
+          floating-bar clearance — content flows straight into the footer. ── */}
       <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 overflow-y-auto flex flex-col pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]">
+        <main className="flex-1 overflow-y-auto flex flex-col pb-14">
           <div className="flex-1">{children}</div>
           <SiteFooter />
         </main>
       </div>
 
-      {/* Floating liquid-glass page switcher — fixed, so one instance floats
-          over every breakpoint (the switcher that moved out of the top rail). */}
-      <Suspense fallback={SUSPENSE_FALLBACK}>
-        <MobileBottomNav />
-      </Suspense>
+      {/* The global static bottom bar (MobileBottomNav) is mounted ONCE at the
+          root layout now (app/layout.tsx), so it's app-wide regardless of shell
+          and its fixed positioning resolves against the viewport. Not rendered
+          here anymore. */}
     </div>
   );
 }

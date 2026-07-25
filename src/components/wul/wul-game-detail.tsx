@@ -81,7 +81,7 @@ function DetailBody({ game, boxscore, spotlight }: WulGameDetailProps) {
   const homeTotals = sumTotals(boxscore.home);
 
   return (
-    <div className="bg-bg-warm flex flex-col font-tight text-ink">
+    <div className="flex flex-col font-tight text-ink">
 
       {/* ── Breadcrumbs + eyebrow ────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-2 md:px-14 md:pt-7 md:pb-3 flex-shrink-0">

@@ -17,7 +17,7 @@ import type { DraftRun, DraftRoundResult } from '@/lib/utcg/draft';
 import { mapDraftRun, startDraft, pickDraftCard, playDraftRound, abandonDraft, DRAFT_ENTRY_FEE } from '@/lib/utcg/draft';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { useAuth } from '@/lib/auth/auth-provider';
-import { FloatingTabBar } from '@/components/floating-tab-bar';
+import { SectionNav } from '@/components/section-nav';
 import { PackStore } from '@/components/utcg/pack-store';
 import { PackOpenAnimation } from '@/components/utcg/pack-open-animation';
 import { CollectionGrid } from '@/components/utcg/collection-grid';
@@ -548,9 +548,24 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
         </div>
       </div>
 
-      {/* Phase content — bottom padding clears the fixed tab bar. */}
+      {/* Game options as the second nav — directly under the header, Strava-style
+          underline tabs. Centered on desktop, scrollable row on mobile. Replaces
+          the old floating bottom tab bar (UTCG's game options "move back to a
+          second nav bar"). Hidden while a full-screen pack reveal / draft run is
+          up. State-driven (UTCG's tabs are internal state, not routes). */}
+      {!showPackReveal && !showDraftRun && (
+        <SectionNav
+          mode="state"
+          ariaLabel="UTCG game sections"
+          tabs={UTCG_TABS.map((t) => ({ id: t.id, label: t.label }))}
+          activeId={tab}
+          onChange={(id) => setTab(id as Tab)}
+        />
+      )}
+
+      {/* Phase content. No bottom bar anymore → no bottom-bar clearance needed. */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6 pb-[calc(env(safe-area-inset-bottom)+96px)]">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
           {tab === 'play' && (
             <>
               {/* First-time onboarding — a new user owns no cards yet, so they
@@ -656,14 +671,6 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
             router.refresh();
           }}
         />
-      )}
-
-      {/* Bottom tab bar — matches the app's floating-pill mobile nav pattern,
-          but state-driven (UTCG's tabs are internal, not routes). Hidden while
-          a full-screen pack reveal or draft run is up (those overlays sit
-          above it anyway). */}
-      {!showPackReveal && !showDraftRun && (
-        <UtcgTabBar tab={tab} onChange={setTab} />
       )}
 
       {showPackReveal && (
@@ -783,75 +790,11 @@ function FirstPackPrompt({
   );
 }
 
-// Tab definitions — single source of truth rendered by BOTH the mobile
-// floating bar and the desktop segmented control below.
-const UTCG_TABS: { id: Tab; label: string; icon: 'play' | 'packs' | 'collection' | 'market' }[] = [
-  { id: 'play', label: 'Play', icon: 'play' },
-  { id: 'packs', label: 'Packs', icon: 'packs' },
-  { id: 'collection', label: 'Cards', icon: 'collection' },
-  { id: 'market', label: 'Market', icon: 'market' },
+// Tab definitions — the four UTCG sections, rendered as the top SectionNav
+// (Strava underline tabs). Text-only, so no per-tab icons anymore.
+const UTCG_TABS: { id: Tab; label: string }[] = [
+  { id: 'play', label: 'Play' },
+  { id: 'packs', label: 'Packs' },
+  { id: 'collection', label: 'Cards' },
+  { id: 'market', label: 'Market' },
 ];
-
-// Bottom tab bar — the shared liquid-glass FloatingTabBar. UTCG's tabs are
-// internal state, so this is state-driven (activeId + onChange). Shown on every
-// breakpoint as a centered floating pill.
-function UtcgTabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
-  return (
-    <FloatingTabBar
-      ariaLabel="UTCG sections"
-      activeId={tab}
-      onChange={(id) => onChange(id as Tab)}
-      tabs={UTCG_TABS.map((t) => ({
-        id: t.id,
-        label: t.label,
-        icon: ({ active, size }) => <UtcgTabIcon kind={t.icon} active={active} size={size} />,
-      }))}
-    />
-  );
-}
-
-function UtcgTabIcon({ kind, size = 20 }: { kind: 'play' | 'packs' | 'collection' | 'market'; active?: boolean; size?: number }) {
-  // Inherit color from the FloatingTabBar wrapper (light tones on the dark
-  // glass) via currentColor — the bar drives active/inactive coloring.
-  const c = '';
-  if (kind === 'play') {
-    // Disc-in-motion / play — a flying disc arc.
-    return (
-      <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" className={c}>
-        <ellipse cx="10" cy="10" rx="8" ry="4.2" stroke="currentColor" strokeWidth="1.5" />
-        <ellipse cx="10" cy="10" rx="4" ry="2.1" stroke="currentColor" strokeWidth="1.5" opacity="0.45" />
-      </svg>
-    );
-  }
-  if (kind === 'packs') {
-    // Pack / envelope glyph.
-    return (
-      <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" className={c}>
-        <rect x="4" y="3" width="12" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M4 6.5h12" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M8 3v3.5M12 3v3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-      </svg>
-    );
-  }
-  if (kind === 'collection') {
-    // collection — stacked cards.
-    return (
-      <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" className={c}>
-        <rect x="6" y="4" width="10" height="12" rx="1.6" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M3.5 6.5v8A1.5 1.5 0 0 0 5 16h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5" />
-      </svg>
-    );
-  }
-  // market — price tag.
-  return (
-    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true" className={c}>
-      <path
-        d="M10.5 3.5h4a1 1 0 0 1 1 1v4a1 1 0 0 1-.3.7l-7.2 7.2a1 1 0 0 1-1.4 0l-4.7-4.7a1 1 0 0 1 0-1.4l7.2-7.2a1 1 0 0 1 .7-.3Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <circle cx="13" cy="7" r="1.1" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
