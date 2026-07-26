@@ -13,6 +13,12 @@ import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
+import {
+  STICKY_LEAD_HEAD,
+  STICKY_NAME_HEAD,
+  STICKY_LEAD_BODY,
+  STICKY_NAME_BODY,
+} from '@/components/sticky-cols';
 import type { SpotlightPlayer } from '@/lib/pro/player-spotlight';
 import type { PulGame, PulGameBoxscore, PulBoxscoreRow, PulGameTeamSide } from '@/lib/pul/data';
 
@@ -760,7 +766,7 @@ function BoxscoreTable({ side, rows }: { side: PulGameTeamSide; rows: PulBoxscor
         <table className="w-full min-w-[540px] border-collapse" aria-label={title}>
           <thead>
             <tr>
-              {BOX_COLS.map((col) => (
+              {BOX_COLS.map((col, ci) => (
                 <th
                   key={col.key}
                   scope="col"
@@ -770,6 +776,8 @@ function BoxscoreTable({ side, rows }: { side: PulGameTeamSide; rows: PulBoxscor
                     'whitespace-nowrap',
                     col.align === 'left' ? 'text-left' : 'text-right',
                     col.hide ? 'hidden sm:table-cell' : '',
+                    // Freeze # + Player so identity stays put while stats scroll.
+                    ci === 0 ? `${STICKY_LEAD_HEAD} bg-surface` : ci === 1 ? `${STICKY_NAME_HEAD} bg-surface` : '',
                   ].join(' ')}
                 >
                   {col.label}
@@ -799,10 +807,10 @@ function BoxscoreRow({ row }: { row: PulBoxscoreRow }) {
 
   const cells = (
     <>
-      <td className="px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight">
+      <td className={`px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi`}>
         {row.jerseyNumber ?? '—'}
       </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight min-w-[120px]">
+      <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight min-w-[120px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi`}>
         {row.playerName}
       </td>
       <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-right tabular text-muted font-tight">
@@ -830,10 +838,10 @@ function BoxscoreRow({ row }: { row: PulBoxscoreRow }) {
     return (
       <tr className="hover:bg-surface-hi transition-colors duration-100 cursor-pointer group">
         {/* Wrap the row in a link via the player name cell; the tr itself is the interaction target */}
-        <td className="px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight">
+        <td className={`px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi`}>
           {row.jerseyNumber ?? '—'}
         </td>
-        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px]">
+        <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi`}>
           <Link
             href={`/players/${row.profileId}?from=pul`}
             className="text-ink group-hover:text-accent transition-colors duration-100 focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
@@ -864,7 +872,7 @@ function BoxscoreRow({ row }: { row: PulBoxscoreRow }) {
   }
 
   return (
-    <tr className="hover:bg-surface-hi transition-colors duration-100">
+    <tr className="group hover:bg-surface-hi transition-colors duration-100">
       {cells}
     </tr>
   );

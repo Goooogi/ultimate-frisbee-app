@@ -17,10 +17,9 @@
 //     uses instead of routing. (Wired in a later phase.)
 //
 // Placement (rendered by the shell, under the AppRail, above the page title):
-//   • mobile (<lg): left-aligned, horizontally-scrollable row.
-//   • desktop (lg+): tabs CENTERED under the rail, within the reading-width
-//     column — Hunter's "centered options for the sub-app pages". Desktop has no
-//     bottom bar, so this second nav is the only page-switcher there.
+// tabs are CENTERED on every breakpoint (per Hunter). On desktop this is the
+// only page-switcher (no bottom bar there); on mobile it complements the static
+// bottom bar. Degrades to a left-scroll row if labels ever overflow.
 
 import Link from 'next/link';
 
@@ -89,10 +88,12 @@ export function SectionNav(props: Props) {
         className ?? '',
       ].join(' ')}
     >
-      {/* Mobile: left-aligned, horizontally scrollable row. Desktop: tabs
-          centered under the rail (Hunter's "centered options for sub-app pages"),
-          within the same reading-width column the rail/content use. */}
-      <div className="flex items-stretch px-4 lg:justify-center lg:mx-auto lg:max-w-[1080px]">
+      {/* Tabs CENTERED on every breakpoint (Hunter's "they should be centered").
+          `justify-center` still degrades to left-scroll if the labels ever
+          overflow a narrow viewport (they don't at today's 4-tab label sets).
+          A max-width column on desktop keeps the centered group within the same
+          reading width the rail + content use. */}
+      <div className="flex items-stretch justify-center px-4 mx-auto lg:max-w-[1080px]">
         {props.mode === 'state'
           ? props.tabs.map((t) => {
               const active = t.id === props.activeId;

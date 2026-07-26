@@ -22,6 +22,7 @@ import type {
 import { teamMetaByAbbr } from '@/lib/ufa/teams';
 import { PageShell } from '@/components/page-shell';
 import { TeamLogo } from '@/components/team-logo';
+import { STICKY_NAMEONLY_HEAD, STICKY_NAMEONLY_BODY } from '@/components/sticky-cols';
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
@@ -575,7 +576,7 @@ function PulGameLogTable({ games }: { games: PulPlayerGameRow[] }) {
     <table className="w-full min-w-[560px] border-collapse">
       <thead>
         <tr>
-          <th scope="col" className={`${thBase} text-left`}>Date</th>
+          <th scope="col" className={`${thBase} text-left ${STICKY_NAMEONLY_HEAD} bg-surface`}>Date</th>
           <th scope="col" className={`${thBase} text-left`}>Opp</th>
           <th scope="col" className={`${thBase} text-left`}>Result</th>
           <th scope="col" className={`${thBase} text-right`}>G</th>
@@ -598,8 +599,8 @@ function PulGameLogTable({ games }: { games: PulPlayerGameRow[] }) {
               ? `${g.teamScore}–${g.oppScore}`
               : '';
           return (
-            <tr key={g.gameId} className="hover:bg-surface-hi transition-colors duration-100">
-              <td className={`${tdBase} text-left text-faint tabular`}>{date}</td>
+            <tr key={g.gameId} className="group hover:bg-surface-hi transition-colors duration-100">
+              <td className={`${tdBase} text-left text-faint tabular ${STICKY_NAMEONLY_BODY} bg-surface group-hover:bg-surface-hi`}>{date}</td>
               <td className={`${tdBase} text-left`}>
                 {g.opponentAbbrev ? (
                   <span className="text-muted font-semibold">{g.opponentAbbrev}</span>
@@ -798,7 +799,7 @@ function WulGameLogTable({ games }: { games: WulPlayerGameRow[] }) {
     <table className="w-full min-w-[660px] border-collapse">
       <thead>
         <tr>
-          <th scope="col" className={`${thBase} text-left`}>Date</th>
+          <th scope="col" className={`${thBase} text-left ${STICKY_NAMEONLY_HEAD} bg-surface`}>Date</th>
           <th scope="col" className={`${thBase} text-left`}>Opp</th>
           <th scope="col" className={`${thBase} text-left`}>Result</th>
           <th scope="col" className={`${thBase} text-right`}>G</th>
@@ -824,8 +825,8 @@ function WulGameLogTable({ games }: { games: WulPlayerGameRow[] }) {
               : '';
           const pm = g.plusMinus;
           return (
-            <tr key={g.gameId} className="hover:bg-surface-hi transition-colors duration-100">
-              <td className={`${tdBase} text-left text-faint tabular`}>{date}</td>
+            <tr key={g.gameId} className="group hover:bg-surface-hi transition-colors duration-100">
+              <td className={`${tdBase} text-left text-faint tabular ${STICKY_NAMEONLY_BODY} bg-surface group-hover:bg-surface-hi`}>{date}</td>
               <td className={`${tdBase} text-left`}>
                 {g.opponentAbbrev ? (
                   <span className="text-muted font-semibold">{g.opponentAbbrev}</span>
@@ -993,7 +994,7 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
     <table className="w-full min-w-[760px] border-collapse">
       <thead>
         <tr>
-          <th scope="col" className={`${thBase} text-left`}>Date</th>
+          <th scope="col" className={`${thBase} text-left ${STICKY_NAMEONLY_HEAD} bg-surface`}>Date</th>
           <th scope="col" className={`${thBase} text-left`}>Opponent</th>
           <th scope="col" className={`${thBase} text-left`}>Result</th>
           <th scope="col" className={`${thBase} text-right`}>G</th>
@@ -1015,8 +1016,8 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
           const cmpPct = g.throwsAttempted ? (g.completions / g.throwsAttempted) * 100 : 0;
           const huckPct = g.hucksAttempted ? (g.hucksCompleted / g.hucksAttempted) * 100 : 0;
           return (
-            <tr key={g.gameID} className="hover:bg-surface-hi transition-colors duration-100">
-              <td className={`${tdBase} text-left text-faint tabular`}>{date}</td>
+            <tr key={g.gameID} className="group hover:bg-surface-hi transition-colors duration-100">
+              <td className={`${tdBase} text-left text-faint tabular ${STICKY_NAMEONLY_BODY} bg-surface group-hover:bg-surface-hi`}>{date}</td>
               <td className={`${tdBase} text-left`}>
                 {opp.team ? (
                   <Link

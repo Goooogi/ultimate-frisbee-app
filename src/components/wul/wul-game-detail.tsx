@@ -15,6 +15,12 @@ import { Breadcrumbs } from '@/components/breadcrumbs';
 import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
 import type { SpotlightPlayer } from '@/lib/pro/player-spotlight';
 import type { WulGame, WulGameBoxscore, WulBoxscoreRow, WulGameTeamSide } from '@/lib/wul/data';
+import {
+  STICKY_LEAD_HEAD,
+  STICKY_NAME_HEAD,
+  STICKY_LEAD_BODY,
+  STICKY_NAME_BODY,
+} from '@/components/sticky-cols';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
@@ -764,7 +770,7 @@ function BoxscoreTable({ side, rows }: { side: WulGameTeamSide; rows: WulBoxscor
         <table className="w-full min-w-[540px] border-collapse" aria-label={title}>
           <thead>
             <tr>
-              {BOX_COLS.map((col) => (
+              {BOX_COLS.map((col, ci) => (
                 <th
                   key={col.key}
                   scope="col"
@@ -774,6 +780,8 @@ function BoxscoreTable({ side, rows }: { side: WulGameTeamSide; rows: WulBoxscor
                     'whitespace-nowrap',
                     col.align === 'left' ? 'text-left' : 'text-right',
                     col.hide ? 'hidden sm:table-cell' : '',
+                    // Freeze # + Player so identity stays put while stats scroll.
+                    ci === 0 ? `${STICKY_LEAD_HEAD} bg-surface` : ci === 1 ? `${STICKY_NAME_HEAD} bg-surface` : '',
                   ].join(' ')}
                 >
                   {col.label}
@@ -831,10 +839,10 @@ function BoxscoreRow({ row }: { row: WulBoxscoreRow }) {
   if (row.profileId) {
     return (
       <tr className="hover:bg-surface-hi transition-colors duration-100 cursor-pointer group">
-        <td className="px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight">
+        <td className={`px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi`}>
           {row.jerseyNumber ?? '—'}
         </td>
-        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px]">
+        <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi`}>
           <Link
             href={`/players/${row.profileId}?from=wul`}
             className="text-ink group-hover:text-accent transition-colors duration-100 focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
@@ -848,11 +856,11 @@ function BoxscoreRow({ row }: { row: WulBoxscoreRow }) {
   }
 
   return (
-    <tr className="hover:bg-surface-hi transition-colors duration-100">
-      <td className="px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight">
+    <tr className="group hover:bg-surface-hi transition-colors duration-100">
+      <td className={`px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi`}>
         {row.jerseyNumber ?? '—'}
       </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight min-w-[120px]">
+      <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight min-w-[120px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi`}>
         {row.playerName}
       </td>
       {statCells}

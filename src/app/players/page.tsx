@@ -28,6 +28,12 @@ import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { SortControl } from '@/components/sort-control';
 import { SortableTh } from '@/components/players/sortable-th';
+import {
+  STICKY_LEAD_HEAD,
+  STICKY_NAME_HEAD,
+  STICKY_LEAD_BODY,
+  STICKY_NAME_BODY,
+} from '@/components/sticky-cols';
 import Link from 'next/link';
 import { Suspense } from 'react';
 import { PulTeamLogo } from '@/components/pul-team-logo';
@@ -217,13 +223,21 @@ export default async function PlayersPage({ searchParams }: Props) {
                     { label: 'D-Pts',   title: 'Defensive Points Played',  left: false, w: '',                     sort: 'd_points' },
                     { label: '+/−',     title: 'Plus / Minus',             left: false, w: '',                     sort: 'plus_minus' },
                   ].map((h, hi, arr) => {
+                    // Freeze # + Player so identity stays put while stats (and the
+                    // Team column) scroll on mobile. See sticky-cols.ts.
+                    const frozen = hi === 0
+                      ? `${STICKY_LEAD_HEAD} bg-surface`
+                      : hi === 1
+                        ? `${STICKY_NAME_HEAD} bg-surface`
+                        : '';
                     const cls = [
                       'px-3 py-3 text-[10px] font-bold tracking-wide uppercase',
                       'whitespace-nowrap',
                       h.left ? 'text-left' : 'text-right',
-                      hi === 0 ? 'pl-5' : '',
                       hi === arr.length - 1 ? 'pr-5' : '',
-                      h.w,
+                      // Frozen col 0 uses LEAD_W (from `frozen`); others keep h.w.
+                      hi === 0 ? '' : h.w,
+                      frozen,
                     ].join(' ');
                     return h.sort ? (
                       <SortableTh
@@ -247,11 +261,11 @@ export default async function PlayersPage({ searchParams }: Props) {
                 {ranked.map((player, i) => {
                   const team = teamMap.get(player.teamId);
                   return (
-                    <tr key={player.id} className="hover:bg-surface-hi transition-colors duration-100">
-                      <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight w-10 pl-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
+                    <tr key={player.id} className="group hover:bg-surface-hi transition-colors duration-100">
+                      <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {i + 1}
                       </td>
-                      <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${i === 0 ? '' : 'border-t border-hairline'}`}>
+                      <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         <Link
                           href={`/players/${player.id}?from=pul`}
                           className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"
@@ -358,13 +372,21 @@ export default async function PlayersPage({ searchParams }: Props) {
                     { label: 'D-Pts',  title: 'Defensive Points Played',  left: false, w: '',                     sort: 'd_points' },
                     { label: '+/−',    title: 'Plus / Minus',             left: false, w: '',                     sort: 'plus_minus' },
                   ].map((h, hi, arr) => {
+                    // Freeze # + Player so identity stays put while stats (and the
+                    // Team column) scroll on mobile. See sticky-cols.ts.
+                    const frozen = hi === 0
+                      ? `${STICKY_LEAD_HEAD} bg-surface`
+                      : hi === 1
+                        ? `${STICKY_NAME_HEAD} bg-surface`
+                        : '';
                     const cls = [
                       'px-3 py-3 text-[10px] font-bold tracking-wide uppercase',
                       'whitespace-nowrap',
                       h.left ? 'text-left' : 'text-right',
-                      hi === 0 ? 'pl-5' : '',
                       hi === arr.length - 1 ? 'pr-5' : '',
-                      h.w,
+                      // Frozen col 0 uses LEAD_W (from `frozen`); others keep h.w.
+                      hi === 0 ? '' : h.w,
+                      frozen,
                     ].join(' ');
                     return h.sort ? (
                       <SortableTh
@@ -388,11 +410,11 @@ export default async function PlayersPage({ searchParams }: Props) {
                 {ranked.map((player, i) => {
                   const team = teamMap.get(player.teamId);
                   return (
-                    <tr key={player.id} className="hover:bg-surface-hi transition-colors duration-100">
-                      <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight w-10 pl-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
+                    <tr key={player.id} className="group hover:bg-surface-hi transition-colors duration-100">
+                      <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         {i + 1}
                       </td>
-                      <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${i === 0 ? '' : 'border-t border-hairline'}`}>
+                      <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         <Link
                           href={`/players/${player.id}?from=wul`}
                           className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"

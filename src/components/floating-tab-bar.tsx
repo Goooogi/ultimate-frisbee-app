@@ -82,7 +82,9 @@ export function FloatingTabBar({
         // ::before gloss — using `relative` here would override the `fixed`
         // above (same CSS `position` property) and un-pin the bar.
         'isolate rounded-[24px] p-1',
-        'bg-[rgb(8_9_11/0.78)] supports-[backdrop-filter]:bg-[rgb(8_9_11/0.62)]',
+        // Tint matches the mobile app's GlassTabBar exactly: rgba(8,9,11,0.72)
+        // over the blur (a touch lower with backdrop-filter so the frost reads).
+        'bg-[rgb(8_9_11/0.72)] supports-[backdrop-filter]:bg-[rgb(8_9_11/0.62)]',
         'backdrop-blur-2xl backdrop-saturate-[1.8] backdrop-brightness-110',
         'border border-white/15 shadow-[0_10px_50px_-10px_rgba(0,0,0,0.6)]',
         'ring-1 ring-inset ring-white/[0.12]',
@@ -100,7 +102,9 @@ export function FloatingTabBar({
           <span
             aria-hidden="true"
             className={[
-              'absolute top-0 bottom-0 rounded-[18px]',
+              // Inset 4px top/bottom (like the app's GlassTabBar indicator) so
+              // the lozenge floats inside the item rather than filling its height.
+              'absolute top-1 bottom-1 rounded-[18px]',
               'bg-white/[0.14] ring-1 ring-inset ring-white/25',
               'shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_2px_10px_-2px_rgba(0,0,0,0.4)]',
               'motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-[cubic-bezier(0.22,0.7,0.25,1)]',
@@ -118,7 +122,7 @@ export function FloatingTabBar({
                   with currentColor inherit this; ones that hardcode their own
                   color keep it (acceptable fallback). */}
               <span className={t.disabled ? 'text-white/30' : active ? 'text-white' : 'text-white/60'}>
-                {t.icon({ active, size: 20 })}
+                {t.icon({ active, size: 22 })}
               </span>
               <span
                 className={[
@@ -133,7 +137,10 @@ export function FloatingTabBar({
             </>
           );
           const cls = [
-            'relative z-[1] flex flex-1 flex-col items-center justify-center gap-0.5 min-w-[60px] px-2 h-[44px] rounded-[16px]',
+            // Item geometry matches the mobile app's GlassTabBar: 56px tall,
+            // 56px min-width, 3px icon↔label gap (was slimmed to 44/20/2 in an
+            // earlier pass — realigned to the app per the parity request).
+            'relative z-[1] flex flex-1 flex-col items-center justify-center gap-[3px] min-w-[56px] px-2 h-[56px] rounded-[18px]',
             'motion-safe:transition-colors motion-safe:duration-150',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             t.disabled ? 'cursor-not-allowed select-none' : 'cursor-pointer',
