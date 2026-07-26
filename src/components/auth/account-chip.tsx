@@ -19,21 +19,12 @@ import { useAuth } from '@/lib/auth/auth-provider';
 import { AvatarIconView } from '@/components/profile/avatar-icon-view';
 import dynamic from 'next/dynamic';
 
-// Avatars are stored in the `avatars` Storage bucket as full-size originals.
-// Serve them through Supabase's image transform so the nav chip downloads a
-// small resized+recompressed image instead of a multi-MB original — same
-// pattern as PlayerHeadshot's displaySrc. Only rewrite our bucket objects.
-const AVATAR_STORAGE_OBJECT = '/storage/v1/object/public/avatars/';
-const AVATAR_STORAGE_RENDER = '/storage/v1/render/image/public/avatars/';
+// Avatars are stored in the `avatars` bucket already downscaled at upload time
+// (avatar-upload-modal resizes to ≤256px WEBP before uploading). We serve the
+// stored object DIRECTLY — no Supabase image transform, which is metered per
+// origin image per billing cycle. Pre-sized upload + plain serve = no quota cost.
 /** Chip is 32px default × 2 for retina. */
 const AVATAR_RENDER_PX = 64;
-
-function avatarDisplaySrc(url: string): string {
-  if (!url.includes(AVATAR_STORAGE_OBJECT)) return url; // non-Supabase URL → as-is
-  const rendered = url.replace(AVATAR_STORAGE_OBJECT, AVATAR_STORAGE_RENDER);
-  const sep = rendered.includes('?') ? '&' : '?';
-  return `${rendered}${sep}width=${AVATAR_RENDER_PX}&height=${AVATAR_RENDER_PX}&resize=cover&quality=80`;
-}
 
 // The auth modal (and its ~44 kB obscenity profanity dataset) is only needed
 // once a signed-out visitor opens sign-in/up. Load it on demand so it stays
@@ -235,8 +226,10 @@ export function AccountChip({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             key={avatarUrl}
-            src={avatarDisplaySrc(avatarUrl)}
+            src={avatarUrl}
             alt={user.name}
+            width={AVATAR_RENDER_PX}
+            height={AVATAR_RENDER_PX}
             className="w-full h-full rounded-full object-cover"
             onError={() => setImgFailed(true)}
           />

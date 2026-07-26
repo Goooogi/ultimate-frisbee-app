@@ -11,6 +11,11 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
+import {
+  LEAD_W,
+  NAME_LEFT,
+  STICKY_EDGE,
+} from '@/components/sticky-cols';
 
 interface Props {
   players: UfaPlayerStat[];
@@ -111,6 +116,13 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
           <tr>
             {COLUMNS.map((h, hi) => {
               const active = sortKey === h.key;
+              // Freeze the identity columns (# + Player) on the left so they stay
+              // visible while the stat columns scroll horizontally on mobile —
+              // mirrors the app's frozen PLAYER column. `#` pins at left-0;
+              // `Player` pins just past it (STICKY_JERSEY_W). Both carry the
+              // surface bg so scrolled cells don't bleed under them, and Player
+              // gets a right-edge hairline to mark the freeze boundary.
+              const frozen = hi === 0 ? `sticky left-0 z-20 bg-surface ${LEAD_W}` : hi === 1 ? `sticky ${NAME_LEFT} z-20 bg-surface ${STICKY_EDGE}` : '';
               return (
                 <th
                   key={h.label}
@@ -123,8 +135,10 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
                     'transition-colors hover:text-ink focus-visible:outline-none focus-visible:text-ink',
                     active ? 'text-ink' : 'text-faint',
                     h.left ? 'text-left' : 'text-right',
-                    hi === 0 ? 'pl-5' : '',
+                    // Frozen columns keep plain px-3 (they're pinned to the card
+                    // edge); only the last scrolling column gets the pr-5 inset.
                     hi === COLUMNS.length - 1 ? 'pr-5' : '',
+                    frozen,
                   ].join(' ')}
                 >
                   <button
@@ -156,9 +170,9 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
             const fallbackNum = players.indexOf(p) + 1;
             const rowTop = i === 0 ? '' : 'border-t border-hairline';
             return (
-              <tr key={p.playerID} className="hover:bg-surface-hi transition-colors duration-100">
-                <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight pl-5 ${rowTop}`}>{jersey ?? fallbackNum}</td>
-                <td className={`px-3 py-2.5 text-[13px] text-left text-ink font-medium font-tight ${rowTop}`}>
+              <tr key={p.playerID} className="group hover:bg-surface-hi transition-colors duration-100">
+                <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight sticky left-0 z-10 bg-surface group-hover:bg-surface-hi ${LEAD_W} ${rowTop}`}>{jersey ?? fallbackNum}</td>
+                <td className={`px-3 py-2.5 text-[13px] text-left text-ink font-medium font-tight sticky ${NAME_LEFT} z-10 bg-surface group-hover:bg-surface-hi ${STICKY_EDGE} ${rowTop}`}>
                   <Link href={`/players/${p.playerID}?from=ufa`} className="hover:text-accent transition-colors duration-150">
                     {p.name}
                   </Link>

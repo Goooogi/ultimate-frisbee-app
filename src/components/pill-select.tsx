@@ -58,8 +58,11 @@ export function PillSelect<V extends string | number>({
     () => options.map((o, i) => (o.disabled ? -1 : i)).filter((i) => i >= 0),
     [options],
   );
+  // Fall back to the first option's label if `value` isn't among the options
+  // (e.g. a restricted option set that doesn't include the shared/default
+  // value) — otherwise the trigger renders as a bare chevron with no label.
   const currentLabel = useMemo(
-    () => options.find((o) => o.value === value)?.label ?? '',
+    () => options.find((o) => o.value === value)?.label ?? options[0]?.label ?? '',
     [options, value],
   );
 

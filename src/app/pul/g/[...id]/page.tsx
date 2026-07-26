@@ -12,6 +12,7 @@
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { getPulGame, getPulGameBoxscore } from '@/lib/pul/data';
+import { getPulSpotlight } from '@/lib/pul/spotlight';
 import { PulGameDetail } from '@/components/pul/pul-game-detail';
 
 export const revalidate = 300; // 5 min — scores refresh frequently during season
@@ -49,6 +50,7 @@ export default async function PulGamePage({ params }: Props) {
   if (!game) notFound();
 
   const boxscore = await getPulGameBoxscore(game).catch(() => ({ away: [], home: [] }));
+  const spotlight = await getPulSpotlight(game, boxscore).catch(() => ({ away: null, home: null }));
 
-  return <PulGameDetail game={game} boxscore={boxscore} />;
+  return <PulGameDetail game={game} boxscore={boxscore} spotlight={spotlight} />;
 }

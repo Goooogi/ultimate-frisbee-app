@@ -13,22 +13,15 @@ interface PlayerHeadshotProps {
   size?: number;
 }
 
-// Headshots are stored in the `ufa-headshots` Storage bucket as full-size
-// originals. We serve them through Supabase's image transform so the browser
-// downloads a small (~6 KB) resized+recompressed avatar instead of a multi-MB
-// original — fast + CDN-cached. Only rewrite OUR bucket objects; any legacy
-// watchufa hotlink (pre-migration) is used as-is.
-const STORAGE_OBJECT = '/storage/v1/object/public/ufa-headshots/';
-const STORAGE_RENDER = '/storage/v1/render/image/public/ufa-headshots/';
-/** Display size in CSS px (88 desktop) × 2 for retina. */
+// Headshots are stored in the `ufa-headshots` Storage bucket. We serve the
+// stored object DIRECTLY (plain `/object/` URL) — NOT Supabase's image transform
+// endpoint. Image transformations are metered per unique origin image per billing
+// cycle (Pro plan: 100/cycle), and these ~100 KB originals are already small
+// enough to serve as-is (CDN-cached for a year via the bucket's cacheControl).
+// Serving plain objects costs nothing against the transform quota.
+/** Native render box in CSS px (88 desktop) × 2 for retina — sets width/height
+ *  attributes only; the object is served at its stored resolution. */
 const RENDER_PX = 176;
-
-function displaySrc(url: string): string {
-  if (!url.includes(STORAGE_OBJECT)) return url; // legacy/watchufa → as-is
-  const rendered = url.replace(STORAGE_OBJECT, STORAGE_RENDER);
-  const sep = rendered.includes('?') ? '&' : '?';
-  return `${rendered}${sep}width=${RENDER_PX}&height=${RENDER_PX}&resize=cover&quality=80`;
-}
 
 export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHeadshotProps) {
   // `imgFailed` latches to the monogram only after we've exhausted a retry.
@@ -55,9 +48,10 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
   const showImage = Boolean(headshotUrl) && !imgFailed;
 
   if (showImage) {
-    const base = displaySrc(headshotUrl!);
+    const base = headshotUrl!; // plain stored object — no transform rewrite
     // On the retry, append a cache-buster so a poisoned/edge-cached transient
-    // error isn't just replayed from cache.
+    // error isn't just replayed from cache. (Plain object → no transform quota
+    // cost from the extra variant.)
     const src = attempt > 0 ? `${base}${base.includes('?') ? '&' : '?'}r=${attempt}` : base;
     return (
       // eslint-disable-next-line @next/next/no-img-element

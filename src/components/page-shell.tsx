@@ -12,7 +12,7 @@
 
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { AppRail } from '@/components/app-rail';
-import { MobileBottomNav } from '@/components/mobile-bottom-nav';
+import { SectionNavForRoute } from '@/components/games-subnav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
 import { SiteFooter } from '@/components/site-footer';
 
@@ -71,28 +71,37 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
         gamesSlotMobile={mobileTab}
       />
 
+      {/* ── Second nav (SectionNav) — page/section-specific tabs directly under
+          the rail, above content. Replaces the section-switching role the
+          bottom bar used to play. Left-aligned scrollable row on mobile;
+          CENTERED under the rail on desktop (where there's no bottom bar).
+          Renders nothing on pages with no section nav. Sits OUTSIDE the scroll
+          panes so it stays pinned under the rail. ── */}
+      <SectionNavForRoute />
+
       {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
           sits above the floating hub nav's reserved space. The hub floats
-          bottom-3 (12px) off the screen edge and is ~64px tall (44px tap
-          target + py-2.5 padding), so content needs more clearance than the
-          old flush bar (which only reserved its own height). */}
+          bottom-3 (12px) off the screen edge and is ~64px tall, so content
+          needs clearance so the last row isn't hidden behind it. */}
       <div className="lg:hidden flex-1 overflow-y-auto pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]">
         {children}
         {!hideFooterMobile && <SiteFooter />}
-        <Suspense fallback={SUSPENSE_FALLBACK}>
-          <MobileBottomNav />
-        </Suspense>
       </div>
 
-      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. The footer
-          rides at the bottom of the scrolling main so it clears short pages
-          (flex-1 content) yet scrolls into view on tall ones. ── */}
+      {/* ── Desktop (lg+) ── no sidebar; content goes full-width. The bottom bar
+          is mobile-only now (MobileBottomNav is lg:hidden), so desktop needs no
+          floating-bar clearance — content flows straight into the footer. ── */}
       <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 overflow-y-auto flex flex-col">
+        <main className="flex-1 overflow-y-auto flex flex-col pb-14">
           <div className="flex-1">{children}</div>
           <SiteFooter />
         </main>
       </div>
+
+      {/* The global static bottom bar (MobileBottomNav) is mounted ONCE at the
+          root layout now (app/layout.tsx), so it's app-wide regardless of shell
+          and its fixed positioning resolves against the viewport. Not rendered
+          here anymore. */}
     </div>
   );
 }
@@ -119,6 +128,9 @@ interface PageShellProps {
   stickyName?: string;
   /** Hide the SiteFooter on mobile (<lg) only; desktop keeps it. See AppShell. */
   hideFooterMobile?: boolean;
+  /** Wider content cap for dashboard/bento layouts (e.g. For You) that need more
+   *  horizontal room than the default reading width. */
+  wide?: boolean;
   children: React.ReactNode;
 }
 
@@ -131,11 +143,15 @@ export function PageShell({
   breadcrumbs,
   stickyName,
   hideFooterMobile,
+  wide,
   children,
 }: PageShellProps) {
   return (
     <AppShell topNavSlot={topNavSlot} hideFooterMobile={hideFooterMobile}>
-      <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
+      <div className={[
+        'px-5 pt-4 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto',
+        wide ? 'lg:px-10 xl:px-8 lg:max-w-[1320px]' : 'lg:px-14 lg:max-w-[1080px]',
+      ].join(' ')}>
         {stickyName && <StickyName name={stickyName} />}
         {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />}
         <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />

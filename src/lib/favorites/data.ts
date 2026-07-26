@@ -38,14 +38,30 @@ export interface FavoriteTeam {
   logoUrl: string | null;
 }
 
+/** A favorite PLAYER — stored as the (league, playerId) pair resultHref routes
+ *  on (playerId = UUID for anchor leagues, the player's NAME for WFDF), with
+ *  team + headshot denormalized for the feed. */
+export interface FavoritePlayer {
+  league: FavoriteLeague;
+  playerId: string;
+  name: string;
+  /** Their team (SearchResult.hint), for the feed's secondary line. */
+  teamName: string | null;
+  /** UFA-only (the only league with headshots); null → monogram fallback. */
+  headshotUrl: string | null;
+}
+
 export interface MyFavorites {
   leagues: FavoriteLeague[];
   teams: FavoriteTeam[];
+  players: FavoritePlayer[];
 }
 
 /** Hard cap so a script can't balloon a user's favorites row set. Enforced
  *  client-side here AND worth a DB trigger later if it ever matters. */
 export const MAX_FAVORITE_TEAMS = 50;
+/** Same cap for favorite players. */
+export const MAX_FAVORITE_PLAYERS = 50;
 
 // ─── Reads ──────────────────────────────────────────────────────────────────
 
@@ -55,9 +71,9 @@ export async function getMyFavorites(): Promise<MyFavorites> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { leagues: [], teams: [] };
+  if (!user) return { leagues: [], teams: [], players: [] };
 
-  const [teamsRes, leaguesRes] = await Promise.all([
+  const [teamsRes, leaguesRes, playersRes] = await Promise.all([
     supabase
       .from('user_favorite_teams')
       .select('league, team_id, name, logo_url')
@@ -67,10 +83,19 @@ export async function getMyFavorites(): Promise<MyFavorites> {
       .from('user_favorite_leagues')
       .select('league')
       .eq('user_id', user.id),
+    // Players ascending (oldest first) so the FIRST player a user added anchors
+    // the For You "player spotlight" — adding a second player doesn't bump the
+    // original out of the spotlight. (Teams stay newest-first above.)
+    supabase
+      .from('user_favorite_players')
+      .select('league, player_id, name, team_name, headshot_url')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: true }),
   ]);
 
   if (teamsRes.error) throw teamsRes.error;
   if (leaguesRes.error) throw leaguesRes.error;
+  if (playersRes.error) throw playersRes.error;
 
   const teams: FavoriteTeam[] = ((teamsRes.data ?? []) as {
     league: FavoriteLeague; team_id: string; name: string; logo_url: string | null;
@@ -84,7 +109,17 @@ export async function getMyFavorites(): Promise<MyFavorites> {
   const leagues = ((leaguesRes.data ?? []) as { league: FavoriteLeague }[])
     .map((r) => r.league);
 
-  return { leagues, teams };
+  const players: FavoritePlayer[] = ((playersRes.data ?? []) as {
+    league: FavoriteLeague; player_id: string; name: string; team_name: string | null; headshot_url: string | null;
+  }[]).map((r) => ({
+    league: r.league,
+    playerId: r.player_id,
+    name: r.name,
+    teamName: r.team_name ?? null,
+    headshotUrl: r.headshot_url ?? null,
+  }));
+
+  return { leagues, teams, players };
 }
 
 // ─── Team writes ──────────────────────────────────────────────────────────────
@@ -149,6 +184,72 @@ export async function removeFavoriteTeam(
     .eq('user_id', user.id)
     .eq('league', league)
     .eq('team_id', teamId);
+  if (error) throw error;
+}
+
+// ─── Player writes ──────────────────────────────────────────────────────────────
+
+/**
+ * Add a favorite player. Idempotent (upsert on the (user, league, player) PK).
+ * Throws if the user is at MAX_FAVORITE_PLAYERS. owner id comes from the session.
+ */
+export async function addFavoritePlayer(player: FavoritePlayer): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  // Count guard — mirrors addFavoriteTeam: block genuinely-new past the cap,
+  // still allow re-favoriting an existing one (upsert).
+  const { count, error: countErr } = await supabase
+    .from('user_favorite_players')
+    .select('player_id', { count: 'exact', head: true })
+    .eq('user_id', user.id);
+  if (countErr) throw countErr;
+  if ((count ?? 0) >= MAX_FAVORITE_PLAYERS) {
+    const { data: existing } = await supabase
+      .from('user_favorite_players')
+      .select('player_id')
+      .eq('user_id', user.id)
+      .eq('league', player.league)
+      .eq('player_id', player.playerId)
+      .maybeSingle();
+    if (!existing) {
+      throw new Error(`You can favorite up to ${MAX_FAVORITE_PLAYERS} players.`);
+    }
+  }
+
+  const { error } = await supabase.from('user_favorite_players').upsert(
+    {
+      user_id: user.id,
+      league: player.league,
+      player_id: player.playerId,
+      name: player.name,
+      team_name: player.teamName,
+      headshot_url: player.headshotUrl,
+    },
+    { onConflict: 'user_id,league,player_id' },
+  );
+  if (error) throw error;
+}
+
+/** Remove a favorite player by its (league, playerId). No-op if not favorited. */
+export async function removeFavoritePlayer(
+  league: FavoriteLeague,
+  playerId: string,
+): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  const { error } = await supabase
+    .from('user_favorite_players')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('league', league)
+    .eq('player_id', playerId);
   if (error) throw error;
 }
 

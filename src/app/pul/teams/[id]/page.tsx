@@ -9,14 +9,19 @@ import { PageShell } from '@/components/page-shell';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { TeamMedals } from '@/components/team-medals';
 import { ProRosterTable } from '@/components/pro-roster-table';
+import { ProTeamGameLog } from '@/components/pro-team-game-log';
 import { pulTeamState, proTeamCountry, locationLine } from '@/lib/team-geo';
 import {
   getPulRoster,
+  listPulGames,
   listPulTeams,
   getPulTeamPodiums,
   type PulTeam,
   type PulPlayer,
+  type PulGame,
 } from '@/lib/pul/data';
+
+const PUL_SEASON = 2026;
 
 export const revalidate = 3600;
 
@@ -35,10 +40,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function PulTeamPage({ params }: Props) {
-  const [teams, roster, podiums] = await Promise.all([
+  const [teams, roster, podiums, games] = await Promise.all([
     listPulTeams().catch((): PulTeam[] => []),
-    getPulRoster(params.id, 2026).catch((): PulPlayer[] => []),
+    getPulRoster(params.id, PUL_SEASON).catch((): PulPlayer[] => []),
     getPulTeamPodiums(params.id).catch(() => []),
+    listPulGames({ season: PUL_SEASON }).catch((): PulGame[] => []),
   ]);
 
   const team = teams.find((t) => t.id === params.id);
@@ -117,6 +123,9 @@ export default async function PulTeamPage({ params }: Props) {
           </div>
         )}
       </section>
+
+      {/* Season game log — every game the team played this season. */}
+      <ProTeamGameLog teamId={params.id} games={games} league="pul" season={PUL_SEASON} />
     </PageShell>
   );
 }

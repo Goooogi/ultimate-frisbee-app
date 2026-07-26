@@ -14,6 +14,7 @@ import { getUnifiedPlayerProfile } from '@/lib/unified-player';
 import { UnifiedProfile } from '@/components/players/unified-player-profile';
 import { DivisionSync } from '@/components/players/division-sync';
 import { getApprovedContentForPlayers } from '@/lib/player-content/server';
+import { getPlayerConnections } from '@/lib/players/connections';
 
 // Content rows are user-uploaded and approved on demand — they can change
 // any time without an underlying data refresh. Drop the page-level revalidate
@@ -42,16 +43,24 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
   // Fetch content across ALL of the person's league ids (contentRefs), not just
   // the anchor — so a photo uploaded under any league id shows no matter which
   // url reached the profile. Falls back to the anchor pair when refs is empty.
-  const content = await getApprovedContentForPlayers(
-    profile.contentRefs.length > 0
-      ? profile.contentRefs
-      : [{ kind: profile.anchorLeague, ref: profile.anchorId }],
-  );
+  const [content, connections] = await Promise.all([
+    getApprovedContentForPlayers(
+      profile.contentRefs.length > 0
+        ? profile.contentRefs
+        : [{ kind: profile.anchorLeague, ref: profile.anchorId }],
+    ),
+    getPlayerConnections(profile.displayName, 5),
+  ]);
 
   return (
     <>
       <DivisionSync division={profile.mostRecentUsauDivision} />
-      <UnifiedProfile profile={profile} content={content} fromLeague={searchParams.from} />
+      <UnifiedProfile
+        profile={profile}
+        content={content}
+        connections={connections}
+        fromLeague={searchParams.from}
+      />
     </>
   );
 }

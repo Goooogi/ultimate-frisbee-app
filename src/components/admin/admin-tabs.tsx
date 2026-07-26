@@ -12,14 +12,17 @@
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AdminContentQueue } from '@/components/admin/admin-content-queue';
 import { AdminFeedbackList } from '@/components/admin/admin-feedback-list';
+import { AdminRolesList } from '@/components/admin/admin-roles-list';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import type { FeedbackItem } from '@/lib/feedback/server';
+import type { AdminUserRow } from '@/lib/admin/roles';
 
-export type AdminTab = 'content' | 'feedback';
+export type AdminTab = 'content' | 'feedback' | 'roles';
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: 'content', label: 'Content' },
   { id: 'feedback', label: 'Feedback' },
+  { id: 'roles', label: 'Roles' },
 ];
 
 interface AdminPortalProps {
@@ -27,20 +30,24 @@ interface AdminPortalProps {
   recent: PlayerContentItem[];
   feedback: FeedbackItem[];
   newFeedback: number;
+  users: AdminUserRow[];
+  currentUserId: string;
   initialTab: AdminTab;
 }
 
-export function AdminPortal({ pending, recent, feedback, newFeedback, initialTab }: AdminPortalProps) {
+export function AdminPortal({ pending, recent, feedback, newFeedback, users, currentUserId, initialTab }: AdminPortalProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const rawTab = searchParams.get('tab');
-  const activeTab: AdminTab = rawTab === 'feedback' ? 'feedback' : rawTab === 'content' ? 'content' : initialTab;
+  const activeTab: AdminTab =
+    rawTab === 'feedback' ? 'feedback' : rawTab === 'roles' ? 'roles' : rawTab === 'content' ? 'content' : initialTab;
 
   const counts: Record<AdminTab, number> = {
     content: pending.length,
     feedback: newFeedback,
+    roles: users.length,
   };
 
   function setTab(tab: AdminTab) {
@@ -87,6 +94,23 @@ export function AdminPortal({ pending, recent, feedback, newFeedback, initialTab
             </span>
           </StatusPillRow>
           <AdminFeedbackList items={feedback} />
+        </section>
+      )}
+
+      {activeTab === 'roles' && (
+        <section aria-labelledby="admin-roles-heading" role="tabpanel" id="admin-panel-roles" aria-label="User roles">
+          <h2 id="admin-roles-heading" className="sr-only">
+            User roles
+          </h2>
+          <StatusPillRow>
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-ink text-bg">
+              {users.length} users
+            </span>
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-accent/15 text-accent">
+              {users.filter((u) => u.role === 'beta').length} beta
+            </span>
+          </StatusPillRow>
+          <AdminRolesList users={users} currentUserId={currentUserId} />
         </section>
       )}
     </div>

@@ -12,8 +12,10 @@ import {
   getGameRoster,
   getUfaTeamPodiums,
   currentSeasonYear,
+  recentSeasons,
 } from '@/lib/ufa/client';
 import { TeamMedals } from '@/components/team-medals';
+import { YearSelector } from '@/components/year-selector';
 import { teamMeta } from '@/lib/ufa/teams';
 import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame, UfaPlayerStat, UfaStanding } from '@/lib/ufa/types';
@@ -27,6 +29,16 @@ export const revalidate = 300;
 
 interface Props {
   params: { id: string };
+  searchParams: { year?: string };
+}
+
+/** Clamp ?year= to a real UFA season (2021..current); default current. Guards
+ *  against a hand-typed or stale year producing an empty page. */
+function resolveYear(raw: string | undefined): number {
+  const current = currentSeasonYear();
+  const n = raw ? parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(n) || n < 2021 || n > current) return current;
+  return n;
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -35,21 +47,26 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `${meta.city} ${meta.name} · The Layout` };
 }
 
-export default async function TeamPage({ params }: Props) {
+export default async function TeamPage({ params, searchParams }: Props) {
   const id = params.id;
   const meta = teamMeta(id);
 
   if (meta.internalID === 0) notFound();
 
-  const year = currentSeasonYear();
+  const year = resolveYear(searchParams.year);
+  const isCurrentYear = year === currentSeasonYear();
 
   // Fire all fetches in parallel.
   const [standingsResult, teamStatsResult, seasonGamesResult, liveGamesResult, playersResult, podiumsResult] =
     await Promise.allSettled([
-      getStandings(),
+      // Standings are current-season only; skip for a past year (record is
+      // derived from that season's finals instead).
+      isCurrentYear ? getStandings() : Promise.resolve([]),
       getTeamStats({ year }),
       getAllGamesByYears([year], { teamID: id }),
-      getCurrentGames(),
+      // Live games are current-season only — skip the call for a past year so a
+      // live game from the current season can't leak into a historical view.
+      isCurrentYear ? getCurrentGames() : Promise.resolve([]),
       getAllPlayerStats({ year, teamID: id, sort: 'scores', dir: 'desc' }),
       getUfaTeamPodiums(id),
     ]);
@@ -114,25 +131,45 @@ export default async function TeamPage({ params }: Props) {
     }
   }
 
-  // Find this team's standing row.
-  const standing = standings.find((s) => s.teamID === id);
+  // Find this team's standing row. The standings endpoint is CURRENT-SEASON
+  // only, so for a past year there's no row — we fall back to a record derived
+  // from that season's finals below.
+  const standing = isCurrentYear ? standings.find((s) => s.teamID === id) : null;
 
   // Find team stats row.
   const teamStatRow = teamStats.find((t) => t.teamID === id);
 
-  const recordStr = standing
-    ? `${standing.wins}–${standing.losses}${standing.ties > 0 ? `–${standing.ties}` : ''}`
+  // Win/loss/tie for the hero. Use the live standings row when it exists
+  // (current season); otherwise derive from the season's completed games so a
+  // historical year still shows a record. Ties = equal final scores (rare).
+  const derivedRecord = seasonFinals.reduce(
+    (acc, g) => {
+      const mine = g.homeTeamID === id ? g.homeScore : g.awayScore;
+      const theirs = g.homeTeamID === id ? g.awayScore : g.homeScore;
+      if (mine == null || theirs == null) return acc;
+      if (mine > theirs) acc.wins++;
+      else if (mine < theirs) acc.losses++;
+      else acc.ties++;
+      return acc;
+    },
+    { wins: 0, losses: 0, ties: 0 },
+  );
+  const record = standing ?? (derivedRecord.wins + derivedRecord.losses + derivedRecord.ties > 0 ? derivedRecord : null);
+
+  const recordStr = record
+    ? `${record.wins}–${record.losses}${record.ties > 0 ? `–${record.ties}` : ''}`
     : null;
 
   return (
     <PageShell
       title={`${meta.city} ${meta.name}`}
-      eyebrow={`UFA · ${meta.division ?? 'Team'}`}
+      eyebrow={`UFA · ${meta.division ?? 'Team'} · ${year}`}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'Teams', href: '/teams' },
         { label: `${meta.city} ${meta.name}` },
       ]}
+      controls={<YearSelector currentYear={year} />}
     >
       {/* Hero band with team color — floats on shadow, softened corners */}
       <div
@@ -182,13 +219,15 @@ export default async function TeamPage({ params }: Props) {
             </div>
           </div>
 
-          {/* Record + point diff */}
-          {standing && (
+          {/* Record + point diff. Point diff is only carried by the live
+              standings row (current season); a derived historical record shows
+              the W-L only. */}
+          {recordStr && (
             <div className="flex flex-col items-end gap-1">
               <div className="tabular font-display italic text-[36px] md:text-[44px] font-bold leading-[0.95]" style={{ color: '#fff' }}>
                 {recordStr}
               </div>
-              {standing.pointDiff !== 0 && (
+              {standing && standing.pointDiff !== 0 && (
                 <div className="text-[11px] font-bold tracking-[0.1em] uppercase font-sans" style={{ color: 'rgba(255,255,255,0.55)' }}>
                   {standing.pointDiff > 0 ? `+${standing.pointDiff}` : standing.pointDiff} point diff
                 </div>
@@ -290,7 +329,7 @@ export default async function TeamPage({ params }: Props) {
               No games found
             </div>
             <div className="text-[13px] text-faint max-w-sm">
-              No game data available for {meta.city} {meta.name} this season.
+              No game data available for {meta.city} {meta.name} in {year}.
             </div>
           </div>
         )}

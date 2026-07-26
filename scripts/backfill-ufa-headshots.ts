@@ -21,6 +21,13 @@
  *   npx tsx scripts/backfill-ufa-headshots.ts --all      # also (re)scrape the
  *                                                          watchufa page for
  *                                                          players missing a url
+ *   npx tsx scripts/backfill-ufa-headshots.ts --only=ehawkins,jsmith
+ *                                                        # heal just these player
+ *                                                          ids (implies --all for
+ *                                                          them, so null rows are
+ *                                                          re-scraped). Use to fix
+ *                                                          a newly-synced player
+ *                                                          without a full pass.
  *
  * REQUIRED ENV (.env / .env.local):
  *   NEXT_PUBLIC_SUPABASE_URL
@@ -133,7 +140,14 @@ async function selfHost(playerID: string, srcUrl: string): Promise<string | null
 }
 
 async function main() {
-  const scrapeMissing = process.argv.includes('--all');
+  // --only=id1,id2 heals just those player ids (and implies --all for them so a
+  // null headshot_url is re-scraped). Useful for a freshly-synced player whose
+  // row post-dates the last full backfill (e.g. mid-season stat sync).
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const onlyIds = onlyArg
+    ? new Set(onlyArg.slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean))
+    : null;
+  const scrapeMissing = process.argv.includes('--all') || onlyIds !== null;
 
   // Players to process: those with an existing (watchufa) headshot_url, plus —
   // when --all — those without one (we'll scrape their page first).
@@ -163,9 +177,10 @@ async function main() {
     !!u && u.includes(`/storage/v1/object/public/${BUCKET}/`);
 
   const work = (players ?? []).filter((p) => {
+    if (onlyIds && !onlyIds.has(p.id)) return false; // --only= restricts the set
     if (alreadyHosted(p.headshot_url)) return false; // already self-hosted
     if (p.headshot_url) return true;                 // has a watchufa url to fetch
-    return scrapeMissing;                            // no url → only if --all
+    return scrapeMissing;                            // no url → only if --all/--only
   });
 
   console.log(`Players to self-host: ${work.length}${scrapeMissing ? ' (incl. scrape-missing)' : ''}`);

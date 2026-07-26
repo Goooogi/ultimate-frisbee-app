@@ -12,13 +12,22 @@
 import Link from 'next/link';
 import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
+import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
+import type { SpotlightPlayer } from '@/lib/pro/player-spotlight';
 import type { WulGame, WulGameBoxscore, WulBoxscoreRow, WulGameTeamSide } from '@/lib/wul/data';
+import {
+  STICKY_LEAD_HEAD,
+  STICKY_NAME_HEAD,
+  STICKY_LEAD_BODY,
+  STICKY_NAME_BODY,
+} from '@/components/sticky-cols';
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 interface WulGameDetailProps {
   game: WulGame;
   boxscore: WulGameBoxscore;
+  spotlight?: { away: SpotlightPlayer | null; home: SpotlightPlayer | null };
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -51,17 +60,17 @@ const NEUTRAL_COLOR = '#6b7280';
 
 // ── Root component ────────────────────────────────────────────────────────────
 
-export function WulGameDetail({ game, boxscore }: WulGameDetailProps) {
+export function WulGameDetail({ game, boxscore, spotlight }: WulGameDetailProps) {
   return (
     <AppShell>
-      <DetailBody game={game} boxscore={boxscore} />
+      <DetailBody game={game} boxscore={boxscore} spotlight={spotlight} />
     </AppShell>
   );
 }
 
 // ── Detail body ───────────────────────────────────────────────────────────────
 
-function DetailBody({ game, boxscore }: WulGameDetailProps) {
+function DetailBody({ game, boxscore, spotlight }: WulGameDetailProps) {
   const { away, home } = game;
   const isFinal = game.status === 'final';
 
@@ -78,7 +87,7 @@ function DetailBody({ game, boxscore }: WulGameDetailProps) {
   const homeTotals = sumTotals(boxscore.home);
 
   return (
-    <div className="bg-bg-warm flex flex-col font-tight text-ink">
+    <div className="flex flex-col font-tight text-ink">
 
       {/* ── Breadcrumbs + eyebrow ────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-2 md:px-14 md:pt-7 md:pb-3 flex-shrink-0">
@@ -107,6 +116,18 @@ function DetailBody({ game, boxscore }: WulGameDetailProps) {
           />
         </div>
       </div>
+
+      {/* ── Player spotlight: to-watch (upcoming) / player of the game (final) ── */}
+      {spotlight && (spotlight.away || spotlight.home) && (
+        <div className="px-5 pb-5 md:px-14 md:pb-8">
+          <PlayerSpotlightSection
+            variant="bare"
+            isFinal={isFinal}
+            away={{ abbr: away.abbrev, logo: <WulTeamLogoBlock logoUrl={away.logoUrl} accentColor={away.accentColor} abbrev={away.abbrev} size={16} />, player: spotlight.away }}
+            home={{ abbr: home.abbrev, logo: <WulTeamLogoBlock logoUrl={home.logoUrl} accentColor={home.accentColor} abbrev={home.abbrev} size={16} />, player: spotlight.home }}
+          />
+        </div>
+      )}
 
       {/* ── Team totals comparison (only when box score data is present) ── */}
       {hasBoxscore && (
@@ -749,7 +770,7 @@ function BoxscoreTable({ side, rows }: { side: WulGameTeamSide; rows: WulBoxscor
         <table className="w-full min-w-[540px] border-collapse" aria-label={title}>
           <thead>
             <tr>
-              {BOX_COLS.map((col) => (
+              {BOX_COLS.map((col, ci) => (
                 <th
                   key={col.key}
                   scope="col"
@@ -759,6 +780,8 @@ function BoxscoreTable({ side, rows }: { side: WulGameTeamSide; rows: WulBoxscor
                     'whitespace-nowrap',
                     col.align === 'left' ? 'text-left' : 'text-right',
                     col.hide ? 'hidden sm:table-cell' : '',
+                    // Freeze # + Player so identity stays put while stats scroll.
+                    ci === 0 ? `${STICKY_LEAD_HEAD} bg-surface` : ci === 1 ? `${STICKY_NAME_HEAD} bg-surface` : '',
                   ].join(' ')}
                 >
                   {col.label}
@@ -816,10 +839,10 @@ function BoxscoreRow({ row }: { row: WulBoxscoreRow }) {
   if (row.profileId) {
     return (
       <tr className="hover:bg-surface-hi transition-colors duration-100 cursor-pointer group">
-        <td className="px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight">
+        <td className={`px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi`}>
           {row.jerseyNumber ?? '—'}
         </td>
-        <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px]">
+        <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left font-medium font-tight min-w-[120px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi`}>
           <Link
             href={`/players/${row.profileId}?from=wul`}
             className="text-ink group-hover:text-accent transition-colors duration-100 focus-visible:outline-none focus-visible:underline focus-visible:underline-offset-2"
@@ -833,11 +856,11 @@ function BoxscoreRow({ row }: { row: WulBoxscoreRow }) {
   }
 
   return (
-    <tr className="hover:bg-surface-hi transition-colors duration-100">
-      <td className="px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight">
+    <tr className="group hover:bg-surface-hi transition-colors duration-100">
+      <td className={`px-3 py-2.5 text-[12px] border-b border-hairline text-left text-faint tabular font-tight ${STICKY_LEAD_BODY} bg-surface group-hover:bg-surface-hi`}>
         {row.jerseyNumber ?? '—'}
       </td>
-      <td className="px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight min-w-[120px]">
+      <td className={`px-3 py-2.5 text-[13px] border-b border-hairline text-left text-ink font-medium font-tight min-w-[120px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi`}>
         {row.playerName}
       </td>
       {statCells}

@@ -60,6 +60,21 @@ export interface RosterSlot {
   teamName: string | null;
 }
 
+/** A rostered player + the fantasy points they scored in a given week. */
+export interface WeekPlayerScore extends RosterSlot {
+  /** Fantasy points this player scored that week (rounded, may be 0 or negative). */
+  points: number;
+  /** Games this player played in the week (0 = bye/DNP → 0 pts). */
+  gamesPlayed: number;
+}
+
+/** One week of a team's history: total + per-player breakdown. */
+export interface WeekBreakdown {
+  week: string;
+  totalPoints: number;
+  players: WeekPlayerScore[];
+}
+
 export interface FantasyTeamView {
   id: string;
   teamName: string;
@@ -200,6 +215,57 @@ export async function getTeamRoster(teamId: string, week: string): Promise<Roste
       teamName: p?.ufa_teams?.full_name ?? p?.ufa_teams?.name ?? null,
     };
   });
+}
+
+/**
+ * Per-player fantasy points for a team in ONE week — the breakdown behind the
+ * team's weekly total. Computed on the fly from that week's roster slots + the
+ * players' UFA game stats, using the SAME scoring matrix as the scoring job
+ * (scoreStatLine via the UFA adapter). A player with no game that week scores 0.
+ * Returned sorted by points desc (best performers first).
+ */
+export async function getTeamWeekBreakdown(
+  teamId: string,
+  week: string,
+  year = fantasySeasonYear(),
+): Promise<WeekBreakdown> {
+  const roster = await getTeamRoster(teamId, week);
+  if (roster.length === 0) return { week, totalPoints: 0, players: [] };
+
+  const playerIds = roster.map((r) => r.playerId);
+  // That week's per-player stat lines (a player can appear in multiple games).
+  const { data: statRows } = await anon()
+    .from('ufa_game_player_stats')
+    .select(
+      'player_id, goals, assists, blocks, throwaways, drops, stalls, yards_thrown, yards_received, ufa_games!inner(week, year)',
+    )
+    .in('player_id', playerIds)
+    .eq('ufa_games.week', week)
+    .eq('ufa_games.year', year);
+
+  // Sum each player's points + games across the week's games.
+  const agg = new Map<string, { points: number; games: number }>();
+  for (const raw of statRows ?? []) {
+    const r = raw as Record<string, unknown>;
+    const pid = r.player_id as string;
+    const role = roster.find((s) => s.playerId === pid)?.role;
+    if (!role) continue; // stat row for a non-rostered player (shouldn't happen via .in)
+    const pts = scoreStatLine(ufaRowToStatLine(r as unknown as UfaStatRow), role);
+    const cur = agg.get(pid) ?? { points: 0, games: 0 };
+    cur.points += pts;
+    cur.games += 1;
+    agg.set(pid, cur);
+  }
+
+  const players: WeekPlayerScore[] = roster
+    .map((slot) => {
+      const a = agg.get(slot.playerId) ?? { points: 0, games: 0 };
+      return { ...slot, points: roundPoints(a.points), gamesPlayed: a.games };
+    })
+    .sort((a, b) => b.points - a.points);
+
+  const totalPoints = roundPoints(players.reduce((s, p) => s + p.points, 0));
+  return { week, totalPoints, players };
 }
 
 /** The global beta leaderboard: all league_id-NULL teams ranked by total points. */

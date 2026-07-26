@@ -4,15 +4,16 @@
 import type { FavoriteLeague } from '@/lib/favorites/data';
 
 /**
- * Feature flag for the "For You" personalized page. HIDDEN for now (2026-07-10):
- * the page is functional but not finished, so all its entry points are gated off
- * while the code stays intact in the background. Flip to `true` to re-expose:
- *   - the hamburger-menu "For You" row (mobile-menu.tsx)
+ * Feature flag for the "For You" personalized page. LIVE (re-enabled 2026-07-16
+ * after being hidden 2026-07-10). Gates all four entry points:
+ *   - the hamburger-menu "For You" row (mobile-menu.tsx) — shown once the user
+ *     has a favorite team
  *   - the favorites onboarding modal (favorites-onboarding-modal.tsx)
  *   - the /for-you route (app/for-you/page.tsx — otherwise redirects home)
- * Backlog item: "Finish the For You page + unhide it."
+ *   - the favorites editor card in Settings (settings/page.tsx)
+ * Set back to `false` to hide the whole feature again without deleting code.
  */
-export const FOR_YOU_ENABLED = false;
+export const FOR_YOU_ENABLED = true;
 
 /** Human display name per league (wfdf → "Worlds (WFDF)"). */
 export const LEAGUE_DISPLAY: Record<FavoriteLeague, string> = {

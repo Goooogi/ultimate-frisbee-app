@@ -61,6 +61,53 @@
   --shadow-lift: 0 0 0 1px rgba(244, 242, 235, 0.07), 0 18px 40px -20px rgba(0, 0, 0, 0.65);
 }
 
+/* ─── UTCG blue theme ───
+   Scoped override so the whole /utcg game mode adopts the dark navy palette of
+   the Draft Gauntlet (#0E1622 + white text), without touching the rest of the
+   app. Every UTCG component styles off the semantic tokens (bg-bg, text-ink,
+   bg-surface, text-muted, border-hairline …), so redefining the tokens on this
+   wrapper recolors the chrome in one place. Card FACES are intentionally left
+   alone — they're physical cards (cream/colored), exactly as the gauntlet
+   already shows them. Accent stays coral (the gauntlet's Play button is coral).
+   Applied regardless of the app-level field/broadcast theme. */
+.utcg-theme,
+:root[data-theme='field'] .utcg-theme,
+:root[data-theme='broadcast'] .utcg-theme {
+  --bg: 14 22 34;             /* #0E1622 — gauntlet navy */
+  --surface: 26 37 54;        /* #1A2536 — lifted panel (opaque ≈ white/5 on navy) */
+  --surface-hi: 34 49 74;     /* #22314A */
+  --ink: 255 255 255;         /* white */
+  --muted: 155 166 181;       /* #9BA6B5 — ≈ white/60 */
+  --faint: 107 118 136;       /* #6B7688 — ≈ white/38 */
+  --border: 38 48 63;         /* #26303F */
+  --hairline: 34 44 59;       /* #222C3B — ≈ white/6 hairline on navy */
+  --live: 255 61 0;
+  --accent: 255 61 0;         /* #FF3D00 — coral, unchanged */
+  --accent-ink: 255 255 255;
+  --notify: 244 63 94;
+  --bg-warm: 19 28 43;        /* #131C2B — deeper navy for tonal sections */
+
+  /* Dark elevation: soft drops are invisible on navy, so lead with a faint
+     white ring for card separation, backed by a deep shadow (broadcast idiom). */
+  --shadow-card: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 24px -12px rgba(0, 0, 0, 0.55);
+  --shadow-soft: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 4px 16px -10px rgba(0, 0, 0, 0.5);
+  --shadow-hero: 0 0 0 1px rgba(255, 255, 255, 0.07), 0 30px 60px -24px rgba(0, 0, 0, 0.75);
+  --shadow-lift: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 18px 40px -20px rgba(0, 0, 0, 0.65);
+}
+
+/* Card faces stay LIGHT even inside the navy .utcg-theme — a UTCG card is a
+   physical cream/colored object (the gauntlet shows them light too). CardTile
+   styles its face off the semantic tokens, so re-pinning the light values on
+   the card root keeps text-ink / bg-surface / text-faint legible on the cream
+   face regardless of the surrounding theme override. */
+.utcg-card-face {
+  --surface: 255 255 255;     /* #FFFFFF */
+  --ink: 14 14 12;            /* #0E0E0C */
+  --muted: 111 107 98;        /* #6F6B62 */
+  --faint: 166 162 154;       /* #A6A29A */
+  --hairline: 239 236 227;    /* #EFECE3 */
+}
+
 html, body {
   background: rgb(var(--bg));
   color: rgb(var(--ink));

@@ -52,6 +52,7 @@ import {
 } from '@/lib/league';
 import { useTheme } from '@/lib/use-theme';
 import { useAuth } from '@/lib/auth/auth-provider';
+import { canUseUtcg } from '@/lib/auth/types';
 import { AvatarIconView, iconResolvable } from '@/components/profile/avatar-icon-view';
 import { getMyFavorites } from '@/lib/favorites/data';
 import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
@@ -177,6 +178,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/playbook', 'playbook'],
   ['/fantasy',  'fantasy'],
   ['/12-0',     'twelve-oh'],
+  ['/utcg',     'twelve-oh'],  // UTCG lives in the same "Mini Games" group as 12-0
   ['/scores',   'games'],
   ['/schedule', 'games'],
   ['/teams',    'games'],
@@ -338,6 +340,58 @@ function SubAppRow({
       </span>
       {/* Trailing arrow — subtle affordance that shifts toward the accent on
           hover/active. */}
+      <svg
+        className={[
+          'w-4 h-4 flex-shrink-0 transition-colors duration-150',
+          active ? 'text-ink' : 'text-faint group-hover:text-ink',
+        ].join(' ')}
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+      >
+        <path d="M4 8h8M8.5 4.5L12 8l-3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </Link>
+  );
+}
+
+// A sub-link inside the "Mini Games" accordion — indented under the group
+// header, showing the game name + a one-line blurb. Mirrors the inset,
+// left-spine treatment of the expanded League rows.
+function MiniGameLink({
+  href,
+  label,
+  blurb,
+  active,
+  onClose,
+}: {
+  href: string;
+  label: string;
+  blurb: string;
+  active: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={onClose}
+      aria-current={active ? 'page' : undefined}
+      className={[
+        'group flex items-center justify-between gap-3 w-full pl-4 pr-2.5 py-2.5 rounded-xl',
+        'no-underline transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        // Left accent spine on the active game, matching the League fly-out rows.
+        active ? 'bg-surface border-l-2 border-accent' : 'border-l-2 border-transparent hover:bg-surface',
+      ].join(' ')}
+    >
+      <span className="flex flex-col min-w-0">
+        <span className="font-display italic font-bold text-[22px] leading-[0.95] tracking-[-0.02em] whitespace-nowrap text-ink">
+          {label}
+        </span>
+        <span className="text-[12px] text-muted font-tight leading-snug mt-0.5">
+          {blurb}
+        </span>
+      </span>
       <svg
         className={[
           'w-4 h-4 flex-shrink-0 transition-colors duration-150',
@@ -1071,21 +1125,33 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // SSR guard — createPortal is browser-only.
   useEffect(() => { setMounted(true); }, []);
 
-  // "For You" appears in the menu ONLY when the signed-in user has a favorite
-  // TEAM (a favorite league alone isn't enough — the feed is team-driven).
-  // Checked whenever the menu opens or the session changes, so it lights up as
-  // soon as a team is favorited and hides if all teams are removed.
-  const [hasFavorites, setHasFavorites] = useState(false);
+  // "For You" appears in the menu when the signed-in user has a favorite TEAM or
+  // PLAYER (a favorite league alone isn't enough — the feed is team/player-driven,
+  // matching the /for-you empty-state rule). Fetched as soon as the SESSION is
+  // known — NOT gated on the menu opening — so the row is already resolved by the
+  // time the menu renders (previously it popped in a beat late on every open, and
+  // reset to hidden between opens, causing a flash). `null` = not-yet-known.
+  const [hasFavorites, setHasFavorites] = useState<boolean | null>(null);
   useEffect(() => {
-    if (!open || !user) { setHasFavorites(false); return; }
+    if (!user) { setHasFavorites(false); return; }
     let cancelled = false;
     getMyFavorites()
       .then((f) => {
-        if (!cancelled) setHasFavorites(f.teams.length > 0);
+        // Only ever SET to the resolved value — never reset to false/null on a
+        // refetch, so re-opening the menu can update the row in the background
+        // without ever hiding a row that should show (no flash).
+        if (!cancelled) setHasFavorites(f.teams.length > 0 || f.players.length > 0);
       })
-      .catch(() => { if (!cancelled) setHasFavorites(false); });
+      .catch(() => {
+        // Keep any prior known value on a transient failure; only default to
+        // hidden if we never resolved it.
+        if (!cancelled) setHasFavorites((prev) => prev ?? false);
+      });
     return () => { cancelled = true; };
-  }, [open, user]);
+    // Re-run when the session changes OR the menu opens, so a mid-session
+    // favorite change is reflected — but the fetch on user-change means the row
+    // is already resolved before the first open (no late render).
+  }, [user, open]);
 
   // ── Derive initial expanded state from URL ──────────────────────────────
   const activeApp = detectSubApp(pathname);
@@ -1115,6 +1181,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   // "The League" section is expanded by default when on a games page.
   const initialGamesOpen = activeApp === 'games';
   const [gamesOpen, setGamesOpen] = useState(initialGamesOpen);
+
+  // "Mini Games" section (12-0 · UTCG) — expanded by default when on either.
+  const [miniGamesOpen, setMiniGamesOpen] = useState(activeApp === 'twelve-oh');
 
   // ── League fly-out (the left panel showing a league's pages + team grid) ──
   // Set by hovering (desktop) or tapping (mobile) a league row. null = closed.
@@ -1470,9 +1539,9 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             the flex column so overflow scrolls here, not the whole panel). */}
         <nav aria-label="Primary navigation" className="relative flex-1 min-h-0 overflow-y-auto px-3 pb-8 flex flex-col gap-1.5">
 
-          {/* ── FOR YOU — first, only when the user has a favorite team ───
-              Gated off entirely by FOR_YOU_ENABLED while the page is unfinished
-              (2026-07-10). Flip the flag in lib/for-you/leagues.ts to restore. */}
+          {/* ── FOR YOU — first, shown when the user has a favorite team or
+              player (resolved on session load so it doesn't render late).
+              Gated by FOR_YOU_ENABLED (lib/for-you/leagues.ts). */}
           {FOR_YOU_ENABLED && hasFavorites && (
             <SubAppRow
               app="for-you"
@@ -1665,14 +1734,52 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             onClose={onClose}
           />
 
-          {/* ── 12-0 ─────────────────────────────────────────────────── */}
-          <SubAppRow
-            app="twelve-oh"
-            href="/12-0"
-            label="12-0"
-            active={activeApp === 'twelve-oh'}
-            onClose={onClose}
-          />
+          {/* ── MINI GAMES accordion (12-0 · UTCG) ───────────────────────
+              An expandable group, same visual treatment as The League row.
+              Collapsed by default unless the user is on one of the games. */}
+          <button
+            type="button"
+            onClick={() => setMiniGamesOpen((v) => !v)}
+            aria-expanded={miniGamesOpen}
+            className={[
+              'group flex items-center justify-between gap-3 w-full px-2.5 py-3 rounded-xl text-left cursor-pointer',
+              'transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              activeApp === 'twelve-oh' || miniGamesOpen ? 'bg-surface' : 'hover:bg-surface',
+            ].join(' ')}
+          >
+            <span className="font-display italic font-bold text-[28px] leading-[0.95] tracking-[-0.02em] text-ink">
+              Mini Games
+            </span>
+            <ChevronDown
+              className={[
+                'w-4 h-4 flex-shrink-0 transition-transform duration-200',
+                miniGamesOpen ? 'rotate-180 text-ink' : 'text-faint',
+              ].join(' ')}
+            />
+          </button>
+
+          {miniGamesOpen && (
+            <div className="mb-1 flex flex-col gap-0.5">
+              <MiniGameLink
+                href="/12-0"
+                label="12-0"
+                blurb="Draft the perfect undefeated roster"
+                active={pathname === '/12-0' || pathname.startsWith('/12-0/')}
+                onClose={onClose}
+              />
+              {/* UTCG is beta-gated — only admins + beta users see it. */}
+              {canUseUtcg(user?.profile?.role) && (
+                <MiniGameLink
+                  href="/utcg"
+                  label="UTCG"
+                  blurb="Collect cards, open packs, build a squad"
+                  active={pathname === '/utcg' || pathname.startsWith('/utcg/')}
+                  onClose={onClose}
+                />
+              )}
+            </div>
+          )}
 
           {/* ── FANTASY (beta) ───────────────────────────────────────── */}
           <SubAppRow

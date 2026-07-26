@@ -16,6 +16,7 @@ import {
   getMyFavorites,
   type FavoriteLeague,
   type FavoriteTeam,
+  type FavoritePlayer,
 } from '@/lib/favorites/data';
 import { FavoritesPicker } from '@/components/settings/favorites-picker';
 import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
@@ -25,7 +26,11 @@ const SEEN_KEY = 'favorites-onboarding-seen';
 export function FavoritesOnboardingModal() {
   const { user, loading: authLoading } = useAuth();
   const [phase, setPhase] = useState<'idle' | 'checking' | 'open' | 'done'>('idle');
-  const [initial, setInitial] = useState<{ leagues: FavoriteLeague[]; teams: FavoriteTeam[] } | null>(null);
+  const [initial, setInitial] = useState<{
+    leagues: FavoriteLeague[];
+    teams: FavoriteTeam[];
+    players: FavoritePlayer[];
+  } | null>(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => setMounted(true), []);
@@ -45,9 +50,9 @@ export function FavoritesOnboardingModal() {
     getMyFavorites()
       .then((f) => {
         if (cancelled) return;
-        const empty = f.leagues.length === 0 && f.teams.length === 0;
+        const empty = f.leagues.length === 0 && f.teams.length === 0 && f.players.length === 0;
         if (empty) {
-          setInitial(f);
+          setInitial({ leagues: f.leagues, teams: f.teams, players: f.players });
           setPhase('open');
         } else {
           // Already has favorites → never prompt; mark seen so we don't re-check.
@@ -109,7 +114,11 @@ export function FavoritesOnboardingModal() {
 
         {/* Picker */}
         <div className="px-6 py-5">
-          <FavoritesPicker initialLeagues={initial.leagues} initialTeams={initial.teams} />
+          <FavoritesPicker
+            initialLeagues={initial.leagues}
+            initialTeams={initial.teams}
+            initialPlayers={initial.players}
+          />
         </div>
 
         {/* Footer actions */}

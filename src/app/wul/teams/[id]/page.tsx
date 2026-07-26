@@ -11,14 +11,17 @@ import { PageShell } from '@/components/page-shell';
 import { WulTeamLogo } from '@/components/wul-team-logo';
 import {
   getWulRoster,
+  listWulGames,
   listWulTeams,
   getWulCurrentSeason,
   getWulTeamPodiums,
   type WulTeam,
   type WulPlayer,
+  type WulGame,
 } from '@/lib/wul/data';
 import { TeamMedals } from '@/components/team-medals';
 import { ProRosterTable } from '@/components/pro-roster-table';
+import { ProTeamGameLog } from '@/components/pro-team-game-log';
 import { wulTeamState, locationLine } from '@/lib/team-geo';
 
 export const revalidate = 3600;
@@ -40,10 +43,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function WulTeamPage({ params }: Props) {
   const season = await getWulCurrentSeason();
-  const [teams, roster, podiums] = await Promise.all([
+  const [teams, roster, podiums, games] = await Promise.all([
     listWulTeams().catch((): WulTeam[] => []),
     getWulRoster(params.id, season).catch((): WulPlayer[] => []),
     getWulTeamPodiums(params.id).catch(() => []),
+    listWulGames({ season }).catch((): WulGame[] => []),
   ]);
 
   const team = teams.find((t) => t.id === params.id);
@@ -122,6 +126,9 @@ export default async function WulTeamPage({ params }: Props) {
           </div>
         )}
       </section>
+
+      {/* Season game log — every game the team played this season. */}
+      <ProTeamGameLog teamId={params.id} games={games} league="wul" season={season} />
     </PageShell>
   );
 }
