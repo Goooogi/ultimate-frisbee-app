@@ -282,13 +282,51 @@ function splitName(full: string): { first: string; last: string } {
   return { first: parts[0], last: parts.slice(1).join(' ') };
 }
 
-/** chunked upsert so we never exceed PostgREST limits on a single statement. */
+/** chunked upsert so we never exceed PostgREST limits on a single statement.
+ *
+ * KEY-SHAPE PARTITIONING (do not remove). PostgREST builds ONE INSERT per batch
+ * and requires every object in the body to have identical keys — a mismatch is
+ * rejected with `PGRST102: All object keys must match`.
+ *
+ * `syncYear` deliberately builds NON-uniform player rows: it omits
+ * `headshot_url` for players that already have a self-hosted image (so a
+ * re-sync stays cheap) and includes it only for players it just scraped. Mixing
+ * both shapes in one batch therefore fails the whole chunk.
+ *
+ * The naive fixes are both wrong:
+ *   • filling the missing key with `undefined` — JSON.stringify drops it, so the
+ *     shapes stay mismatched and the batch still fails;
+ *   • filling it with `null` — uniform, but NULL then CLOBBERS the existing
+ *     headshot of every already-hosted player on conflict (verified against the
+ *     live API).
+ *
+ * So we group by key-shape and send one uniform batch per shape. Rows keep
+ * exactly the columns they meant to write: a row without `headshot_url` never
+ * touches that column, and a row with one always persists it.
+ *
+ * Why this matters: when these batches were failing, the images had ALREADY been
+ * uploaded to Storage — only the `ufa_players.headshot_url` write was lost. That
+ * left 1027 orphaned bucket objects and dropped 2026 headshot coverage to 18%,
+ * so players rendered as monograms in lists despite having a real image.
+ */
 async function upsert(table: string, rows: Record<string, unknown>[], onConflict: string) {
   const CHUNK = 500;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const slice = rows.slice(i, i + CHUNK);
-    const { error } = await db.from(table).upsert(slice, { onConflict });
-    if (error) throw new Error(`upsert ${table} [${i}..${i + slice.length}]: ${error.message}`);
+
+  // Group by key-shape so every batch we send has uniform keys.
+  const byShape = new Map<string, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const shape = Object.keys(r).sort().join(' ');
+    const list = byShape.get(shape);
+    if (list) list.push(r);
+    else byShape.set(shape, [r]);
+  }
+
+  for (const group of byShape.values()) {
+    for (let i = 0; i < group.length; i += CHUNK) {
+      const slice = group.slice(i, i + CHUNK);
+      const { error } = await db.from(table).upsert(slice, { onConflict });
+      if (error) throw new Error(`upsert ${table} [${i}..${i + slice.length}]: ${error.message}`);
+    }
   }
 }
 
