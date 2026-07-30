@@ -130,14 +130,17 @@ function SpotlightCard({
                 3472 yds · 7 GP · +31" sentence, which wrapped to three ragged
                 lines in a ~180px mobile column and was hard to scan.
                 Falls back to the compact string if `stats` is somehow empty. */}
+            {/* Fixed 3-up grid so the cells line up in tidy columns and rows
+                (G/A/BLK then YDS/GP/+/-) instead of flex-wrapping into ragged
+                rows whose widths shift with the value lengths. */}
             {p.stats && p.stats.length > 0 ? (
-              <div className="mt-1.5 flex items-end gap-x-3 md:gap-x-4 gap-y-1 flex-wrap">
+              <div className="mt-1.5 grid grid-cols-3 gap-x-2 md:gap-x-3 gap-y-2">
                 {p.stats.map((s) => (
-                  <div key={s.label} className="flex flex-col leading-none">
-                    <span className="text-[13px] md:text-[15px] font-bold text-ink font-tight tabular">
+                  <div key={s.label} className="flex flex-col leading-none min-w-0">
+                    <span className="text-[13px] md:text-[15px] font-bold text-ink font-tight tabular truncate">
                       {s.value}
                     </span>
-                    <span className="mt-1 text-[9px] font-bold tracking-[0.08em] md:tracking-[0.1em] uppercase text-faint font-tight">
+                    <span className="mt-1 text-[9px] font-bold tracking-[0.08em] md:tracking-[0.1em] uppercase text-faint font-tight truncate">
                       {s.label}
                     </span>
                   </div>

@@ -16,6 +16,56 @@ import { supabase } from '../_shared/supabase.ts';
 
 const DISPATCH_ACCEPT_TIMEOUT_MS = 4000;
 
+/**
+ * Max concurrent sync-event-rosters children, and max team scrapes launched per
+ * cron firing (across ALL events in the window).
+ *
+ * WHY: this dispatcher used to `Promise.all` over every unrostered team in an
+ * event, and loop that over every live event. Measured worst case on a busy
+ * weekend: **413 team dispatches in one firing, 109 concurrent from a single
+ * event**. Each child fetches its own USAU team page.
+ *
+ * That is precisely the burst that has burned us before —
+ * scripts/backfill-college-rosters.sh exists *because* "the deployed dispatcher
+ * fans out per-team IN PARALLEL — that's the exact burst pattern that got our
+ * Deno egress IP rate-limited". Operator backfills run ONE request at a time
+ * with a 12-20s gap; this cron was firing hundreds at once.
+ *
+ * The idempotent already-rostered filter hides this in steady state (a settled
+ * event dispatches 0), but a NEW event weekend has every team unrostered, so
+ * the full burst fires.
+ *
+ * Nothing is dropped: leftovers are picked up on the next firing (every 15 min,
+ * Thu-Sun) because the filter re-computes what still needs a roster.
+ */
+const MAX_CONCURRENT_TEAMS = 6;
+const MAX_TEAMS_PER_RUN = 40;
+/**
+ * Max teams a SINGLE event may launch in one firing. Without this, one large
+ * event (measured: 109 teams) eats the entire per-run budget and starves the
+ * other ~17 events in the window for hours. Capping each event's share spreads
+ * the same 40 dispatches across ~5 events per firing instead of 1, so every
+ * event makes progress each run.
+ */
+const MAX_TEAMS_PER_EVENT_PER_RUN = 8;
+
+/**
+ * Run `items` through `fn` with at most `limit` in flight. Preserves order.
+ */
+async function pooled<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker));
+  return out;
+}
+
 interface RequestBody {
   /** One event by slug (manual). Omit for LIVE mode: process every flagship
    *  event currently in its date window (used by the roster cron). */
@@ -94,6 +144,8 @@ interface EventDispatchResult {
   slug: string;
   season: number;
   teamsToScrape: number;
+  /** Teams left for a later firing because the per-run budget ran out. */
+  deferred?: number;
   dispatched: number;
   failedToDispatch: number;
 }
@@ -106,6 +158,8 @@ async function dispatchEvent(
   slug: string,
   season: number,
   includeResolved: boolean,
+  /** Max teams this event may launch this run (global budget remainder). */
+  budget: number = Number.MAX_SAFE_INTEGER,
 ): Promise<EventDispatchResult> {
   await resolveEventUrls(slug);
 
@@ -117,7 +171,7 @@ async function dispatchEvent(
   if (ptErr) throw new Error(`load event_teams: ${stringifyErr(ptErr)}`);
   let teamIds = (parts ?? []).map((p) => p.team_id as string);
   if (teamIds.length === 0) {
-    return { slug, season, teamsToScrape: 0, dispatched: 0, failedToDispatch: 0 };
+    return { slug, season, teamsToScrape: 0, deferred: 0, dispatched: 0, failedToDispatch: 0 };
   }
 
   // Idempotent: skip teams that already have a roster this season.
@@ -131,11 +185,18 @@ async function dispatchEvent(
     teamIds = teamIds.filter((id) => !done.has(id));
   }
 
-  const dispatches = await Promise.all(teamIds.map((id) => dispatchTeam(slug, id)));
+  // Bound BOTH the per-run count (global budget) and the in-flight concurrency.
+  // Teams beyond the budget are simply left for the next firing — the
+  // already-rostered filter above re-computes the remainder each time.
+  const totalNeeded = teamIds.length;
+  const allowance = Math.max(0, Math.min(budget, MAX_TEAMS_PER_EVENT_PER_RUN));
+  const slice = allowance >= totalNeeded ? teamIds : teamIds.slice(0, allowance);
+  const dispatches = await pooled(slice, MAX_CONCURRENT_TEAMS, (id) => dispatchTeam(slug, id));
   const launched = dispatches.filter((d) => d.dispatched).length;
   return {
     slug, season,
-    teamsToScrape: teamIds.length,
+    teamsToScrape: totalNeeded,
+    deferred: totalNeeded - slice.length,
     dispatched: launched,
     failedToDispatch: dispatches.length - launched,
   };
@@ -179,13 +240,26 @@ async function run(body: RequestBody) {
 
   const live = events ?? [];
   const perEvent: EventDispatchResult[] = [];
+  // Global per-run budget shared across ALL events in the window. Without this,
+  // 18 events x ~100 unrostered teams would still launch 400+ scrapes in one
+  // firing even with per-event concurrency capped. Remaining teams are picked up
+  // by the next cron firing (every 15 min Thu-Sun).
+  let budgetLeft = MAX_TEAMS_PER_RUN;
   // Sequential across events (each only fires fast resolve + fan-out, no heavy
   // work) so we respect the source with one event's resolve at a time.
   for (const e of live) {
+    if (budgetLeft <= 0) {
+      // Out of budget: record the event as fully deferred WITHOUT calling
+      // resolveEventUrls (which is itself a USAU request).
+      perEvent.push({ slug: e.usau_slug, season: e.season, teamsToScrape: 0, deferred: 0, dispatched: 0, failedToDispatch: 0 });
+      continue;
+    }
     try {
-      perEvent.push(await dispatchEvent(db, e.id, e.usau_slug, e.season, includeResolved));
+      const r = await dispatchEvent(db, e.id, e.usau_slug, e.season, includeResolved, budgetLeft);
+      budgetLeft -= r.dispatched;
+      perEvent.push(r);
     } catch (err) {
-      perEvent.push({ slug: e.usau_slug, season: e.season, teamsToScrape: 0, dispatched: 0, failedToDispatch: 0 });
+      perEvent.push({ slug: e.usau_slug, season: e.season, teamsToScrape: 0, deferred: 0, dispatched: 0, failedToDispatch: 0 });
       console.error(`[roster-dispatch] ${e.usau_slug} failed:`, stringifyErr(err));
     }
   }
@@ -195,7 +269,11 @@ async function run(body: RequestBody) {
     result: {
       mode: 'live',
       liveEvents: live.length,
+      maxTeamsPerRun: MAX_TEAMS_PER_RUN,
+      maxTeamsPerEventPerRun: MAX_TEAMS_PER_EVENT_PER_RUN,
+      maxConcurrentTeams: MAX_CONCURRENT_TEAMS,
       totalDispatched: perEvent.reduce((s, r) => s + r.dispatched, 0),
+      totalDeferred: perEvent.reduce((s, r) => s + (r.deferred ?? 0), 0),
       perEvent,
     },
   };

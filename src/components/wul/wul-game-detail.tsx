@@ -291,7 +291,7 @@ function ScoreHalf({
               {side.city}
             </div>
           )}
-          <div className="font-display text-[15px] md:text-[44px] font-bold text-ink tracking-[0.01em] leading-[1.05] md:leading-none uppercase truncate">
+          <div className="font-display text-[16px] md:text-[44px] font-bold text-ink tracking-[0.01em] leading-[1.05] md:leading-none uppercase truncate">
             {side.mascot ?? side.abbrev}
           </div>
         </div>

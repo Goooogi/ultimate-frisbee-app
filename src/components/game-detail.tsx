@@ -354,7 +354,7 @@ function ScoreHalf({
           <div className="hidden md:block font-sans text-[14px] text-muted font-medium truncate">
             {city}
           </div>
-          <div className="font-display italic text-[15px] md:text-[44px] font-bold text-ink tracking-[-0.01em] md:tracking-[-0.02em] leading-[1.05] md:leading-[0.95] uppercase truncate pr-[0.14em]">
+          <div className="font-display italic text-[16px] md:text-[44px] font-bold text-ink tracking-[-0.01em] md:tracking-[-0.02em] leading-[1.05] md:leading-[0.95] uppercase truncate pr-[0.14em]">
             {name}
           </div>
         </div>
