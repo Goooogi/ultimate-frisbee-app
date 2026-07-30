@@ -27,6 +27,23 @@ export interface SpotlightPlayer {
   statLine: string;
   /** Small secondary line, e.g. "12 GP · +71" (season) or null. */
   sub: string | null;
+  /**
+   * The same numbers as `statLine`/`sub`, but split into discrete
+   * label/value pairs so the UI can lay them out as an ESPN-style stat strip
+   * (value over label, evenly spaced) instead of one long wrapping sentence.
+   *
+   * `statLine`/`sub` are retained for any caller that wants the compact string
+   * form — this is additive, not a replacement.
+   */
+  stats: SpotlightStat[];
+}
+
+/** One cell in the ESPN-style stat strip: a short label and its value. */
+export interface SpotlightStat {
+  /** Short uppercase label, e.g. "G", "A", "BLK", "YDS", "GP", "+/-". */
+  label: string;
+  /** Preformatted value, e.g. "22", "6369", "+59". */
+  value: string;
 }
 
 // ─── Normalized inputs ──────────────────────────────────────────────────────
@@ -113,6 +130,32 @@ function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n);
 }
 
+/** Build the ESPN-style stat cells. Mirrors statLineOf()/sub exactly — same
+ *  numbers, just split so the UI can column them. Yards are omitted when absent
+ *  or zero (PUL supplies none), matching statLineOf's behavior. */
+function statCellsOf(opts: {
+  goals: number;
+  assists: number;
+  blocks: number;
+  yards?: number | null;
+  plusMinus: number;
+  gamesPlayed?: number | null;
+}): SpotlightStat[] {
+  const cells: SpotlightStat[] = [
+    { label: 'G', value: String(opts.goals) },
+    { label: 'A', value: String(opts.assists) },
+    { label: 'BLK', value: String(opts.blocks) },
+  ];
+  if (opts.yards != null && opts.yards > 0) {
+    cells.push({ label: 'YDS', value: String(Math.round(opts.yards)) });
+  }
+  if (opts.gamesPlayed != null && opts.gamesPlayed > 0) {
+    cells.push({ label: 'GP', value: String(opts.gamesPlayed) });
+  }
+  cells.push({ label: '+/-', value: signed(opts.plusMinus) });
+  return cells;
+}
+
 // ─── Public pickers ─────────────────────────────────────────────────────────
 
 /**
@@ -139,6 +182,13 @@ export function pickPlayerOfGame(rows: GameInput[], _league: SpotlightLeague): S
     headshotUrl: best.headshotUrl,
     statLine: statLineOf(best.goals, best.assists, best.blocks, best.yards),
     sub: signed(best.plusMinus) + ' +/-',
+    stats: statCellsOf({
+      goals: best.goals,
+      assists: best.assists,
+      blocks: best.blocks,
+      yards: best.yards,
+      plusMinus: best.plusMinus,
+    }),
   };
 }
 
@@ -164,5 +214,13 @@ export function pickPlayerToWatch(roster: SeasonInput[], _league: SpotlightLeagu
     headshotUrl: best.headshotUrl,
     statLine: statLineOf(best.goals, best.assists, best.blocks, best.yards),
     sub: `${best.gamesPlayed} GP · ${signed(best.plusMinus)}`,
+    stats: statCellsOf({
+      goals: best.goals,
+      assists: best.assists,
+      blocks: best.blocks,
+      yards: best.yards,
+      plusMinus: best.plusMinus,
+      gamesPlayed: best.gamesPlayed,
+    }),
   };
 }

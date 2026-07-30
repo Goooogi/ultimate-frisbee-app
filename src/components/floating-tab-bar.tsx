@@ -82,10 +82,23 @@ export function FloatingTabBar({
         // ::before gloss — using `relative` here would override the `fixed`
         // above (same CSS `position` property) and un-pin the bar.
         'isolate rounded-[24px] p-1',
-        // Tint matches the mobile app's GlassTabBar exactly: rgba(8,9,11,0.72)
-        // over the blur (a touch lower with backdrop-filter so the frost reads).
-        'bg-[rgb(8_9_11/0.72)] supports-[backdrop-filter]:bg-[rgb(8_9_11/0.62)]',
-        'backdrop-blur-2xl backdrop-saturate-[1.8] backdrop-brightness-110',
+        // Tint matches the mobile app's GlassTabBar EXACTLY — rgba(8,9,11,0.72),
+        // the same GLASS_FILL constant in src/components/nav/GlassTabBar.tsx.
+        //
+        // Do NOT re-add a lower opacity behind `supports-[backdrop-filter]` and
+        // do NOT re-add `backdrop-brightness-*`: together they were dropping the
+        // fill to 0.62 and then lifting the blurred page behind it, so the bar
+        // read washed-out GREY on web while mobile stayed near-black. Mobile's
+        // BlurView (intensity 78, dark tint) applies no brightness lift, so the
+        // web side shouldn't either.
+        'bg-[rgb(8_9_11/0.72)]',
+        // `backdrop-brightness-[0.55]` stands in for the `tint="dark"` on
+        // mobile's <BlurView>. Expo's dark tint DARKENS the sampled backdrop;
+        // CSS backdrop-blur does not, so without this the same 0.72 fill reads
+        // noticeably lighter/greyer on web over a pale page. This darkens the
+        // backdrop rather than lightening it — the opposite of the
+        // `backdrop-brightness-110` that was here before.
+        'backdrop-blur-2xl backdrop-saturate-[1.8] backdrop-brightness-[0.55]',
         'border border-white/15 shadow-[0_10px_50px_-10px_rgba(0,0,0,0.6)]',
         'ring-1 ring-inset ring-white/[0.12]',
         // Glossy top sheen — a subtle white gradient over the top third.

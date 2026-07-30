@@ -125,10 +125,30 @@ function SpotlightCard({
             <div className="text-[13px] md:text-[15px] font-bold text-ink font-tight truncate mt-0.5 group-hover:text-accent transition-colors">
               {p.name}
             </div>
-            <div className="text-[10.5px] md:text-[12px] font-semibold text-muted font-tight tabular mt-0.5 leading-snug break-words">
-              {p.statLine}
-              {p.sub && <span className="text-faint font-medium"> · {p.sub}</span>}
-            </div>
+            {/* ESPN-style stat strip: each number sits above its own label in an
+                evenly-spaced column. Replaces the old single "11G · 32A · 1Blk ·
+                3472 yds · 7 GP · +31" sentence, which wrapped to three ragged
+                lines in a ~180px mobile column and was hard to scan.
+                Falls back to the compact string if `stats` is somehow empty. */}
+            {p.stats && p.stats.length > 0 ? (
+              <div className="mt-1.5 flex items-end gap-x-3 md:gap-x-4 gap-y-1 flex-wrap">
+                {p.stats.map((s) => (
+                  <div key={s.label} className="flex flex-col leading-none">
+                    <span className="text-[13px] md:text-[15px] font-bold text-ink font-tight tabular">
+                      {s.value}
+                    </span>
+                    <span className="mt-1 text-[9px] font-bold tracking-[0.08em] md:tracking-[0.1em] uppercase text-faint font-tight">
+                      {s.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[10.5px] md:text-[12px] font-semibold text-muted font-tight tabular mt-0.5 leading-snug break-words">
+                {p.statLine}
+                {p.sub && <span className="text-faint font-medium"> · {p.sub}</span>}
+              </div>
+            )}
           </>
         ) : (
           <div className="text-[11px] md:text-[13px] text-faint italic font-tight mt-1">No data</div>
