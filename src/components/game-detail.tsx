@@ -546,8 +546,10 @@ function FieldSeasonComparison(p: SeasonCmpProps) {
         ))}
       </ul>
 
-      {/* Roster CTAs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-6">
+      {/* Roster CTAs — away/home sit left-to-right at EVERY width, matching the
+          score block and the players-to-watch cards above (one column per team
+          all the way down the page). */}
+      <div className="grid grid-cols-2 gap-2 md:gap-3 mt-6">
         <RosterCta team={p.away} city={p.awayCity} name={p.awayName} side="Away" />
         <RosterCta team={p.home} city={p.homeCity} name={p.homeName} side="Home" />
       </div>
@@ -569,9 +571,9 @@ function RosterCta({
   return (
     <Link
       href={`/teams/${team.id}`}
-      className="group flex items-center justify-between gap-3 px-4 py-3.5 bg-bg rounded-card-sm hover:bg-surface-hi transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className="group flex items-center justify-between gap-2 md:gap-3 px-2.5 py-3 md:px-4 md:py-3.5 bg-bg rounded-card-sm hover:bg-surface-hi transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
     >
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-2 md:gap-3 min-w-0">
         <span
           className="w-2.5 h-8 rounded-[2px] flex-shrink-0"
           style={{ background: team.primary }}
@@ -586,8 +588,11 @@ function RosterCta({
           </span>
         </div>
       </div>
-      <span className="inline-flex items-center gap-1.5 text-[10px] font-bold tracking-[0.18em] uppercase text-muted group-hover:text-accent transition-colors duration-150 font-tight whitespace-nowrap">
-        View
+      {/* The word "View" is dropped below md: — at two columns on a phone the
+          card is ~180px wide and the label would squeeze the team name out.
+          The arrow still signals affordance, and the whole card is the link. */}
+      <span className="inline-flex items-center gap-1.5 shrink-0 text-[10px] font-bold tracking-[0.18em] uppercase text-muted group-hover:text-accent transition-colors duration-150 font-tight whitespace-nowrap">
+        <span className="hidden md:inline">View</span>
         <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M3 7h8M7 3l4 4-4 4" />
         </svg>
