@@ -39,9 +39,69 @@ const FLAGSHIP_LEVELS = [
 // it as dispatched.
 const DISPATCH_ACCEPT_TIMEOUT_MS = 4000;
 
+/**
+ * Max sync-event-details children in flight at once.
+ *
+ * WHY THIS EXISTS: this function used to `Promise.all` over the WHOLE event
+ * list, so every matching event became a concurrent child. The window is wide
+ * (7 days ahead + 2 days trailing), and on a busy June weekend that measured
+ * **46 events** — i.e. ~46 parallel streams of USAU page fetches. Each child
+ * fetches 3 divisions with a 5s floor between requests (_shared/http.ts).
+ *
+ * That burst pattern is exactly what has rate-limited our egress IP before:
+ *  - _shared/http.ts raised its floor 2s → 5s because "USAU started
+ *    rate-limiting our cloud IP";
+ *  - scripts/backfill-college-rosters.sh exists specifically because "the
+ *    deployed dispatcher fans out per-team IN PARALLEL — that's the exact burst
+ *    pattern that got our Deno egress IP rate-limited";
+ *  - 2026-07-29/30: a *serial* 12s backfill still got tarpitted at ~275
+ *    requests, and a 20s run hit transient 500/504s.
+ *
+ * Capping concurrency is what makes a SHORTER cron interval safe: it bounds the
+ * instantaneous request rate no matter how many events are in the window.
+ * Events beyond the cap are not dropped — they roll to the next firing via the
+ * rotating offset below, and every write is an idempotent upsert.
+ */
+const MAX_CONCURRENT_CHILDREN = 8;
+
+/**
+ * Events per firing. With a rotating start offset this walks the full list
+ * across successive runs, so a 45-event weekend is fully covered in ~3 firings
+ * instead of one 45-wide burst.
+ */
+const EVENTS_PER_RUN = 16;
+
 interface RequestBody {
   dryRun?: boolean;
   divisions?: ('Men' | 'Women' | 'Mixed')[];
+  /** Override the per-run slice size (defaults to EVENTS_PER_RUN). */
+  limit?: number;
+  /** Override concurrency (defaults to MAX_CONCURRENT_CHILDREN). */
+  concurrency?: number;
+}
+
+/**
+ * Run `tasks` with at most `limit` in flight. Plain worker-pool: N workers each
+ * pull the next index until the list is exhausted. Preserves result order.
+ */
+async function pooled<T>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<{ slug: string; dispatched: boolean; note?: string }>,
+): Promise<{ slug: string; dispatched: boolean; note?: string }[]> {
+  const out: { slug: string; dispatched: boolean; note?: string }[] = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker),
+  );
+  return out;
 }
 
 function stringifyErr(err: unknown): string {
@@ -130,17 +190,48 @@ async function run(body: RequestBody) {
   if (error) throw new Error(`load live events: ${stringifyErr(error)}`);
 
   const eventList = events ?? [];
+
+  // ── Slice this firing's share of the window ──────────────────────────────
+  // Rather than dispatching the whole list at once (see MAX_CONCURRENT_CHILDREN
+  // for why that burst is dangerous), take a rotating window of `perRun` events.
+  // The offset advances with wall-clock time so successive cron firings cover
+  // different slices and the full list is walked every ceil(total/perRun) runs.
+  // Ordering is stable (start_date asc from the query), so the rotation is
+  // deterministic and no event can be starved.
+  const perRun = Math.max(1, body.limit ?? EVENTS_PER_RUN);
+  const concurrency = Math.max(1, body.concurrency ?? MAX_CONCURRENT_CHILDREN);
+
+  let slice = eventList;
+  let offset = 0;
+  if (eventList.length > perRun) {
+    const slots = Math.ceil(eventList.length / perRun);
+    // One slot per firing; 15-min cron → the tick index rotates every 15 min.
+    // Using epoch-minutes keeps this stateless (no cursor table to maintain).
+    const tick = Math.floor(Date.now() / 60_000 / 15);
+    offset = (tick % slots) * perRun;
+    slice = [...eventList.slice(offset), ...eventList.slice(0, offset)].slice(0, perRun);
+  }
+
   if (body.dryRun) {
     return {
       rowsProcessed: 0,
-      result: { dryRun: true, count: eventList.length, events: eventList.map((e) => e.usau_slug) },
+      result: {
+        dryRun: true,
+        windowCount: eventList.length,
+        perRun,
+        concurrency,
+        offset,
+        dispatching: slice.length,
+        events: slice.map((e) => e.usau_slug),
+      },
     };
   }
 
-  // Dispatch all children concurrently. Each runs in its own invocation with
-  // its own walltime budget — the orchestrator never does the heavy work.
-  const dispatches = await Promise.all(
-    eventList.map((e) => dispatchEventDetails(e.usau_slug, divisions)),
+  // Dispatch this slice with BOUNDED concurrency. Each child runs in its own
+  // invocation with its own walltime budget — the orchestrator never does the
+  // heavy work, it just paces how many children exist at once.
+  const dispatches = await pooled(slice, concurrency, (e) =>
+    dispatchEventDetails(e.usau_slug, divisions),
   );
 
   const launched = dispatches.filter((d) => d.dispatched);
@@ -150,6 +241,10 @@ async function run(body: RequestBody) {
     rowsProcessed: 0, // orchestrator writes nothing itself — children do
     result: {
       liveEvents: eventList.length,
+      windowCount: eventList.length,
+      perRun,
+      concurrency,
+      offset,
       dispatched: launched.length,
       failedToDispatch: failed.length,
       details: dispatches,

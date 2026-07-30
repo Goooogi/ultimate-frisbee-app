@@ -25,7 +25,8 @@ import {
   getPlayerGameLog,
   getUfaChampionsByYear,
 } from '@/lib/ufa/client';
-import { teamMetaByAbbr, type TeamMeta } from '@/lib/ufa/teams';
+import { teamMetaByAbbr, teamBySlugOrAbbr as teamMeta, type TeamMeta } from '@/lib/ufa/teams';
+import { getUfaPlayerFromDb, findUfaSlugByNameFromDb } from '@/lib/ufa/db-player';
 import { ufaTeamState } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow, UfaPlayerSeasonRow } from '@/lib/ufa/types';
 import {
@@ -57,6 +58,9 @@ import {
 import { getWfdfPlayerStints, type WfdfPlayerStint } from '@/lib/wfdf/data';
 import { namesMatch } from '@/lib/name-match';
 import type { PlayerKind } from '@/lib/player-content/types';
+// RPC fast path. This module imports our TYPES only (`import type`), so the
+// cycle is erased at compile time and there's no runtime init-order hazard.
+import { getProfileViaRpc } from './unified-player-rpc';
 
 // ── Output shape ─────────────────────────────────────────────────────────
 
@@ -320,12 +324,21 @@ async function _getUnifiedPlayerProfile(
     // image transform) over the live watchufa scrape. getPlayerInfo still
     // provides the display name; only fall back to ITS headshot if we have none
     // stored (rare — a brand-new player the sync hasn't self-hosted yet).
-    const [info, stored] = await Promise.all([
-      getPlayerInfo(anchorId).catch(() => null),
-      getStoredHeadshotUrl(anchorId).catch(() => null),
-    ]);
-    anchorName = info?.name ?? null;
-    headshotUrl = stored ?? info?.headshotUrl ?? null;
+    // Name + stored headshot come from our own ufa_players row — one query, no
+    // HTML scrape. getPlayerInfo() (which fetches and parses a watchufa.com
+    // profile page) is only reached when the DB has neither, i.e. a player the
+    // sync hasn't seen yet.
+    const fromDb = await getUfaPlayerFromDb(anchorId).catch(() => null);
+    anchorName = fromDb?.name ?? null;
+    headshotUrl = fromDb?.headshotUrl ?? null;
+    if (!anchorName || !headshotUrl) {
+      const [info, stored] = await Promise.all([
+        anchorName ? Promise.resolve(null) : getPlayerInfo(anchorId).catch(() => null),
+        headshotUrl ? Promise.resolve(null) : getStoredHeadshotUrl(anchorId).catch(() => null),
+      ]);
+      anchorName = anchorName ?? info?.name ?? null;
+      headshotUrl = headshotUrl ?? stored ?? info?.headshotUrl ?? null;
+    }
   } else {
     // ── UUID anchor — try USAU first, then PUL ─────────────────────────
     // Both USAU and PUL use v4 UUIDs. We check USAU first (existing
@@ -700,12 +713,40 @@ async function _getUnifiedPlayerProfile(
 }
 
 /**
+ * The multi-query assembler, exported so the RPC path can be diffed against it
+ * (and so a future caller can force the slow path deliberately).
+ */
+export const getUnifiedPlayerProfileMultiQuery = _getUnifiedPlayerProfile;
+
+/**
+ * Resolve a unified profile, preferring the shared `get_player_profile` RPC.
+ *
+ * The RPC (co-owned with the mobile app) does the whole cross-league merge in
+ * one round trip — ~2ms warm off its cache-aside table vs. the double-digit
+ * fan-out of upstream calls the multi-query path above makes. Any RPC error, a
+ * null return, or a payload we can't map faithfully falls through to
+ * `_getUnifiedPlayerProfile`, so this is additive: worst case we do the work we
+ * were already doing.
+ *
+ * The RPC path re-applies web's location-based UFA attribution itself, and
+ * refuses payloads affected by the known upstream defects — see the header of
+ * ./unified-player-rpc.ts.
+ */
+async function _getProfilePreferRpc(
+  anchorId: string,
+): Promise<UnifiedPlayerProfile | null> {
+  const viaRpc = await getProfileViaRpc(anchorId);
+  if (viaRpc) return viaRpc;
+  return _getUnifiedPlayerProfile(anchorId);
+}
+
+/**
  * Request-memoized wrapper. `/players/[id]` resolves the same profile in both
  * `generateMetadata` and the page body; `cache()` dedupes those two calls
  * within a single request so the expensive UFA/USAU fan-out runs once, not
  * twice. Cross-request caching still comes from the underlying library TTLs.
  */
-export const getUnifiedPlayerProfile = cache(_getUnifiedPlayerProfile);
+export const getUnifiedPlayerProfile = cache(_getProfilePreferRpc);
 
 // ── Reverse lookup: USAU → UFA via name ────────────────────────────────
 
@@ -719,6 +760,17 @@ export const getUnifiedPlayerProfile = cache(_getUnifiedPlayerProfile);
  * for 1h upstream so the cost is amortized across requests.
  */
 async function findUfaSlugByName(name: string): Promise<string | null> {
+  // DB first — one surname-narrowed query against ufa_players (all 3.6k players,
+  // all seasons) instead of walking up to 3 full API leaderboards. Also strictly
+  // better coverage: the API walk only saw the last 3 seasons, so a player who
+  // retired before then was invisible to it.
+  try {
+    const hit = await findUfaSlugByNameFromDb(name, namesMatch);
+    if (hit) return hit;
+  } catch {
+    // fall through to the API walk
+  }
+
   const years = [currentSeasonYear(), currentSeasonYear() - 1, currentSeasonYear() - 2];
   for (const year of years) {
     try {
@@ -749,6 +801,56 @@ interface UfaSide {
 }
 
 async function buildUfaSide(playerID: string): Promise<UfaSide | null> {
+  // ── DB fast path ────────────────────────────────────────────────────────
+  // Everything this function needs lives in our own tables (synced by
+  // scripts/sync-ufa.ts, backfilled to 2014). Reading them costs 3 queries
+  // regardless of career length, versus the API path below which makes one
+  // game-log call PER SEASON plus a champion-detection fetch per season plus an
+  // HTML scrape — the dominant cost of a profile load.
+  //
+  // Falls through to the API path on any error, or when the player resolves but
+  // has no stat rows in the DB (a brand-new player the sync hasn't picked up
+  // yet — the live API will still have them).
+  try {
+    const fromDb = await getUfaPlayerFromDb(playerID);
+    if (fromDb && fromDb.stints.length > 0) {
+      const stints: UfaSideStint[] = [];
+      for (const s of fromDb.stints) {
+        const tm = teamMeta(s.teamId);
+        // Unknown slug → our TEAM_META is behind the DB; skip the stint rather
+        // than render a broken card (mirrors the API path's teamMetaByAbbr miss).
+        if (!tm) continue;
+        stints.push({
+          year: s.year,
+          stint: {
+            league: 'ufa',
+            teamId: tm.id,
+            teamMeta: tm,
+            totals: s.totals,
+            games: s.games,
+            isChampion: fromDb.championYears.includes(s.year),
+          },
+        });
+      }
+      // Stored headshot first; only scrape when we genuinely have none.
+      const headshot =
+        fromDb.headshotUrl ??
+        (await getPlayerInfo(playerID)
+          .then((i) => i?.headshotUrl ?? null)
+          .catch(() => null));
+      return {
+        stints,
+        championYears: fromDb.championYears.filter((y) =>
+          stints.some((s) => s.year === y && s.stint.isChampion),
+        ),
+        headshotUrl: headshot,
+      };
+    }
+  } catch {
+    // fall through to the live-API path
+  }
+
+  // ── Live-API fallback ───────────────────────────────────────────────────
   // Resolve the headshot for this slug up front so it's available regardless of
   // how many seasons/stints the player has (even a UFA player with no season
   // rows can still have a headshot). Stored (self-hosted) first, live scrape

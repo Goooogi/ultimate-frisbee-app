@@ -69,7 +69,7 @@ export function PlayerSpotlightSection({ isFinal, away, home, variant = 'section
         </span>
       </h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2 md:gap-3">
         <SpotlightCard side={away} label="Away" variant={variant} />
         <SpotlightCard side={home} label="Home" variant={variant} />
       </div>
@@ -94,8 +94,8 @@ function SpotlightCard({
   const showImg = !!p?.headshotUrl && !imgFailed;
 
   const inner = (
-    <div className="flex items-center gap-3.5 min-w-0">
-      <span className="shrink-0 w-12 h-12 rounded-full overflow-hidden bg-ink/5 ring-1 ring-hairline flex items-center justify-center">
+    <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3.5 min-w-0">
+      <span className="shrink-0 w-9 h-9 md:w-12 md:h-12 rounded-full overflow-hidden bg-ink/5 ring-1 ring-hairline flex items-center justify-center">
         {showImg ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -106,32 +106,55 @@ function SpotlightCard({
             onError={() => setImgFailed(true)}
           />
         ) : (
-          <span className="font-display italic font-bold text-[15px] text-muted" aria-hidden="true">
+          <span className="font-display italic font-bold text-[12px] md:text-[15px] text-muted" aria-hidden="true">
             {p ? initials(p.name) : '—'}
           </span>
         )}
       </span>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="inline-flex items-center gap-1.5 shrink-0">
-            <span className="w-4 h-4 inline-flex items-center justify-center">{side.logo}</span>
-            <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+          <span className="inline-flex items-center gap-1.5 shrink-0 min-w-0">
+            <span className="w-3.5 h-3.5 md:w-4 md:h-4 inline-flex items-center justify-center shrink-0">{side.logo}</span>
+            <span className="text-[9px] font-bold tracking-[0.08em] md:tracking-[0.18em] uppercase text-faint font-tight truncate">
               {label} · {side.abbr}
             </span>
           </span>
         </div>
         {p ? (
           <>
-            <div className="text-[15px] font-bold text-ink font-tight truncate mt-0.5 group-hover:text-accent transition-colors">
+            <div className="text-[13px] md:text-[15px] font-bold text-ink font-tight truncate mt-0.5 group-hover:text-accent transition-colors">
               {p.name}
             </div>
-            <div className="text-[12px] font-semibold text-muted font-tight tabular mt-0.5 truncate">
-              {p.statLine}
-              {p.sub && <span className="text-faint font-medium"> · {p.sub}</span>}
-            </div>
+            {/* ESPN-style stat strip: each number sits above its own label in an
+                evenly-spaced column. Replaces the old single "11G · 32A · 1Blk ·
+                3472 yds · 7 GP · +31" sentence, which wrapped to three ragged
+                lines in a ~180px mobile column and was hard to scan.
+                Falls back to the compact string if `stats` is somehow empty. */}
+            {/* Fixed 3-up grid so the cells line up in tidy columns and rows
+                (G/A/BLK then YDS/GP/+/-) instead of flex-wrapping into ragged
+                rows whose widths shift with the value lengths. */}
+            {p.stats && p.stats.length > 0 ? (
+              <div className="mt-1.5 grid grid-cols-3 gap-x-2 md:gap-x-3 gap-y-2">
+                {p.stats.map((s) => (
+                  <div key={s.label} className="flex flex-col leading-none min-w-0">
+                    <span className="text-[13px] md:text-[15px] font-bold text-ink font-tight tabular truncate">
+                      {s.value}
+                    </span>
+                    <span className="mt-1 text-[9px] font-bold tracking-[0.08em] md:tracking-[0.1em] uppercase text-faint font-tight truncate">
+                      {s.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[10.5px] md:text-[12px] font-semibold text-muted font-tight tabular mt-0.5 leading-snug break-words">
+                {p.statLine}
+                {p.sub && <span className="text-faint font-medium"> · {p.sub}</span>}
+              </div>
+            )}
           </>
         ) : (
-          <div className="text-[13px] text-faint italic font-tight mt-1">No data</div>
+          <div className="text-[11px] md:text-[13px] text-faint italic font-tight mt-1">No data</div>
         )}
       </div>
     </div>
@@ -143,8 +166,8 @@ function SpotlightCard({
   //  • bare (PUL/WUL) → elevated straight on the warm page canvas: bg-surface +
   //    shadow-card + rounded-card (mirrors those pages' LeaderCard).
   const base = bare
-    ? 'group block bg-surface rounded-card shadow-card px-4 py-3.5'
-    : 'group block bg-bg rounded-card-sm px-4 py-3.5';
+    ? 'group block bg-surface rounded-card shadow-card px-2.5 py-3 md:px-4 md:py-3.5'
+    : 'group block bg-bg rounded-card-sm px-2.5 py-3 md:px-4 md:py-3.5';
 
   // Link to the unified profile when we resolved an id; otherwise a plain card.
   if (p?.profileId) {

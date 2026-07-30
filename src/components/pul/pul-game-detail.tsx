@@ -248,7 +248,7 @@ interface ScoreBlockProps {
 
 function ScoreBlock({ away, home, awayWin, homeWin, showScore }: ScoreBlockProps) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 flex-1">
+    <div className="grid grid-cols-2 flex-1">
       <ScoreHalf
         side={away}
         label="Away"
@@ -287,9 +287,9 @@ function ScoreHalf({
   return (
     <div
       className={[
-        'relative overflow-hidden bg-surface flex flex-col justify-between gap-5',
-        'px-6 py-7 md:px-10 md:py-10 min-h-[260px] md:min-h-[320px]',
-        bordered ? 'border-t md:border-t-0 md:border-l border-hairline' : '',
+        'relative overflow-hidden bg-surface flex flex-col justify-between gap-2.5 md:gap-5 min-w-0',
+        'px-3 py-4 md:px-10 md:py-10 min-h-[160px] md:min-h-[320px]',
+        bordered ? 'border-l border-hairline' : '',
       ].join(' ')}
     >
       {/* Tinted gradient from top — uses team color at low opacity */}
@@ -303,11 +303,8 @@ function ScoreHalf({
 
       {/* Stencil abbr — outlined text floats behind the score */}
       <div
-        className="absolute font-display font-bold leading-none pointer-events-none select-none"
+        className="score-stencil-fs absolute font-display font-bold leading-none pointer-events-none select-none"
         style={{
-          bottom: -30,
-          right: -10,
-          fontSize: 'clamp(110px, 18vw, 240px)',
           fontWeight: 700,
           letterSpacing: '-0.02em',
           color: 'transparent',
@@ -320,20 +317,22 @@ function ScoreHalf({
       </div>
 
       {/* Identity row: logo + Away/Home label + city + mascot */}
-      <div className="relative flex items-center gap-4 min-w-0">
-        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
-          <PulTeamLogo team={logoTeam} size={64} />
+      <div className="relative flex flex-col md:flex-row md:items-center gap-2 md:gap-4 min-w-0">
+        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0 w-8 h-8 md:w-16 md:h-16">
+          <span className="block origin-top-left scale-[0.5] md:scale-100">
+            <PulTeamLogo team={logoTeam} size={64} />
+          </span>
         </span>
         <div className="min-w-0">
-          <div className="font-sans text-[10px] font-bold tracking-[0.22em] uppercase text-muted">
+          <div className="font-sans text-[10px] font-bold tracking-[0.06em] md:tracking-[0.22em] uppercase text-muted">
             {label} · {side.abbrev}
           </div>
           {side.city && (
-            <div className="font-sans text-[12px] md:text-[14px] text-muted font-medium truncate">
+            <div className="hidden md:block font-sans text-[14px] text-muted font-medium truncate">
               {side.city}
             </div>
           )}
-          <div className="font-display text-[28px] md:text-[44px] font-bold text-ink tracking-[0.01em] leading-none uppercase truncate">
+          <div className="font-display text-[16px] md:text-[44px] font-bold text-ink tracking-[0.01em] leading-[1.05] md:leading-none uppercase truncate">
             {side.mascot ?? side.abbrev}
           </div>
         </div>
@@ -341,9 +340,8 @@ function ScoreHalf({
 
       {/* Big score */}
       <span
-        className="relative font-display font-bold tabular leading-[0.85] tracking-[-0.04em]"
+        className="score-value-fs relative font-display font-bold tabular leading-[0.85] tracking-[-0.02em] md:tracking-[-0.04em]"
         style={{
-          fontSize: 'clamp(80px, 12vw, 168px)',
           color: showScore
             ? win
               ? 'rgb(var(--accent))'

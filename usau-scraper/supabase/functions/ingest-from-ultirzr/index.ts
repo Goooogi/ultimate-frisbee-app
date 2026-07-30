@@ -429,7 +429,7 @@ async function ingestEvent(
       : mastersLevels.has('GRAND_MASTERS')
         ? 'GRAND_MASTERS'
         : 'GREAT_GRAND_MASTERS'
-    : levelFromGroup(wantedGroupName);
+    : levelFromGroup(wantedGroupName, eventName);
 
   const eventRow = {
     usau_slug: slug,
@@ -556,7 +556,13 @@ async function ingestEvent(
           name: info.name,
           // Masters teams carry the level+gender of the GROUP they were seen
           // in (MASTERS vs GRAND_MASTERS), not the event's single level.
-          competition_level: info.meta?.level ?? 'CLUB',
+          //
+          // For every other division fall back to the level implied by the
+          // GROUP we filtered on — NOT a hardcoded 'CLUB'. The old 'CLUB'
+          // default silently mislabeled any non-club, non-masters ingest: a
+          // college run would have written College teams as CLUB, and
+          // `levelFromGroup` is what splits COLLEGE_D1 vs COLLEGE_D3.
+          competition_level: info.meta?.level ?? levelFromGroup(wantedGroupName, eventName),
           gender_division: info.meta?.gender ?? genderFromGroup(wantedGroupName),
           last_scraped_at: new Date().toISOString(),
         })
@@ -686,6 +692,16 @@ function divisionLabel(div: string): string | null {
     case 'mens-club': return 'Club - Men';
     case 'womens-club': return 'Club - Women';
     case 'mixed-club': return 'Club - Mixed';
+    // College. ultirzr's `division=*-college` SEARCH filter is unreliable —
+    // a 2022 mens-college query returns High School, League and Club groups
+    // mixed in (same class of upstream bug as the 2015 club divisions). These
+    // labels are what actually protects us: the per-group filter below keeps
+    // ONLY the matching EventGroupName, so the junk hits are quietly skipped.
+    // Without a label, `wantedNorm` is undefined and the filter passes
+    // EVERYTHING through — which would ingest HS/Club groups as college.
+    case 'mens-college': return 'College - Men';
+    case 'womens-college': return 'College - Women';
+    case 'mixed-college': return 'College - Mixed';
     default: return null;
   }
 }
@@ -751,11 +767,32 @@ function genderFromGroup(group: string | null): 'Men' | 'Women' | 'Mixed' | null
   return null;
 }
 
-function levelFromGroup(group: string | null): string {
+/** True when a string names the College Division III series.
+ *  Matches "D-III", "D3" (as a whole word, so "D30" doesn't hit) and the spelled
+ *  out "Division III". */
+function mentionsD3(s: string | null | undefined): boolean {
+  if (!s) return false;
+  return /d-iii|division\s+iii|\bd3\b/i.test(s);
+}
+
+/**
+ * Map an ultirzr EventGroupName to our competition_level.
+ *
+ * `eventName` is a SECONDARY signal for the D-I/D-III split and is required for
+ * older seasons: ultirzr's 2021 group names are only ever "College - Men" /
+ * "College - Women" (occasionally "College - Men D-I Men") and NEVER say D-III,
+ * even for events plainly titled "Ohio Valley D-III College Men's Regionals".
+ * Classifying on the group alone put all 42 of 2021's D-III events into
+ * COLLEGE_D1. The event title does carry it, so we fall back to that.
+ *
+ * Group wins when it's explicit — it's the more precise source for 2023+, where
+ * the group name itself distinguishes the divisions.
+ */
+function levelFromGroup(group: string | null, eventName?: string | null): string {
   if (!group) return 'OTHER';
   if (group.startsWith('Club')) return 'CLUB';
   if (group.startsWith('College')) {
-    return group.includes('D-III') || group.includes('D3') ? 'COLLEGE_D3' : 'COLLEGE_D1';
+    return mentionsD3(group) || mentionsD3(eventName) ? 'COLLEGE_D3' : 'COLLEGE_D1';
   }
   if (group.includes('Masters')) return 'MASTERS';
   if (group.includes('High School')) return 'HS';
