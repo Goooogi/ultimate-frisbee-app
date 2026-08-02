@@ -161,6 +161,101 @@ export async function getPullHeadshots(playerIds: string[]): Promise<Map<string,
  * Note: the client's own scoreSquad() is only for the instant preview; this
  * result is the source of truth for coins and should be reconciled into the UI.
  */
+/** Coins staked per PvP entry. Winner takes both stakes. Mirrors the `stake`
+ *  constant inside utcg_pvp_enter — keep the two in sync. */
+export const PVP_STAKE = 100;
+
+export interface PvpQueued extends WalletState {
+  status: 'queued';
+  /** Our own squad's numbers, so the UI can show what's defending. */
+  chem: number;
+  strength: number;
+  stake: number;
+}
+
+export interface PvpResolved extends WalletState {
+  status: 'resolved';
+  matchId: string;
+  /** Whose squad won, from THIS caller's perspective. */
+  outcome: 'challenger' | 'defender' | 'draw';
+  /** Which rule settled it: strength, then chem, then mean, else a true draw. */
+  decidedBy: 'strength' | 'chem' | 'mean' | 'draw';
+  chem: number;
+  strength: number;
+  opponentChem: number;
+  opponentStrength: number;
+  pot: number;
+  /** Coins credited back to us: full pot on a win, our stake on a draw, 0 loss. */
+  payout: number;
+  stake: number;
+}
+
+export type PvpOutcome = PvpQueued | PvpResolved;
+
+/**
+ * Enter PvP: stake PVP_STAKE coins and either resolve immediately against
+ * another user's stored squad, or park ours as the open challenge when there's
+ * nobody waiting.
+ *
+ * Scoring reuses the SAME server evaluator as Squad Battle (utcg_eval_lineup),
+ * so chemistry and overall both decide the match. Everything — the stake, the
+ * matchmaking, the payout — happens inside one SECURITY DEFINER transaction;
+ * the client cannot pick its opponent or its winner.
+ */
+export async function enterPvp(
+  formation: FormationKey,
+  cards: SquadCardRef[],
+): Promise<PvpOutcome> {
+  const payload = cards.map((c) => ({ player_id: c.playerId, team_slug: c.teamSlug, year: c.year }));
+  const { data, error } = await rpcClient().rpc('utcg_pvp_enter', {
+    p_formation: formation,
+    p_cards: payload,
+  });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+
+  if (row.status === 'queued') {
+    return {
+      ...mapWallet(row),
+      status: 'queued',
+      chem: Number(row.chem),
+      strength: Number(row.strength),
+      stake: Number(row.stake),
+    };
+  }
+  return {
+    ...mapWallet(row),
+    status: 'resolved',
+    matchId: String(row.match_id),
+    outcome: row.outcome as PvpResolved['outcome'],
+    decidedBy: row.decided_by as PvpResolved['decidedBy'],
+    chem: Number(row.chem),
+    strength: Number(row.strength),
+    opponentChem: Number(row.opponent_chem),
+    opponentStrength: Number(row.opponent_strength),
+    pot: Number(row.pot),
+    payout: Number(row.payout),
+    stake: Number(row.stake),
+  };
+}
+
+/**
+ * Withdraw our open PvP challenge and get the escrowed stake back.
+ *
+ * Needed because a parked squad only resolves when someone else enters — with a
+ * small player pool a challenge can sit indefinitely, and the one-open-squad
+ * rule would otherwise lock both the coins AND the ability to re-enter. Races
+ * safely against a challenger mid-resolve: the RPC waits on the row lock and
+ * then refuses if the squad was just played, so a squad can never both pay out
+ * and refund.
+ */
+export async function cancelPvp(): Promise<WalletState & { refunded: number }> {
+  const { data, error } = await rpcClient().rpc('utcg_pvp_cancel');
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  return { ...mapWallet(row), refunded: Number(row.refunded) };
+}
+
 export async function recordMatch(
   formation: FormationKey,
   cards: SquadCardRef[],

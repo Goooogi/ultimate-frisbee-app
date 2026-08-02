@@ -70,7 +70,7 @@ const AuthModal = dynamic(() => import('@/components/auth/auth-modal').then((m) 
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-type SubApp = 'games' | 'playbook' | 'fantasy' | 'twelve-oh' | 'for-you';
+type SubApp = 'games' | 'playbook' | 'fantasy' | 'twelve-oh' | 'for-you' | 'jerseys';
 
 type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf';
 
@@ -1788,6 +1788,18 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             label="Fantasy"
             badge="BETA"
             active={activeApp === 'fantasy'}
+            onClose={onClose}
+          />
+
+          {/* ── JERSEY EXCHANGE ──────────────────────────────────────────
+              Community board for trading/selling real jerseys. Public to
+              browse; posting and messaging need an account. */}
+          <SubAppRow
+            app="jerseys"
+            href="/jerseys"
+            label="Jersey Exchange"
+            badge="NEW"
+            active={pathname === '/jerseys' || pathname.startsWith('/jerseys/')}
             onClose={onClose}
           />
 
