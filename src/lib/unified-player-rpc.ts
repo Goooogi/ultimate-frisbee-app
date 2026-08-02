@@ -48,7 +48,7 @@ import 'server-only';
 import { createClient } from '@/lib/supabase/server';
 import { getPlayerInfo } from '@/lib/ufa/client';
 import { teamBySlugOrAbbr } from '@/lib/ufa/teams';
-import { ufaTeamState, statesForEventName } from '@/lib/usau/regions';
+import { ufaTeamState, statesForEventName, isUsStateCode } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PlayerKind } from '@/lib/player-content/types';
 import type {
@@ -146,6 +146,11 @@ interface RpcProfile {
   displayName?: string | null;
   ufaSlug?: string | null;
   usauId?: string | null;
+  /** EVERY usau_players id in the resolved cluster, not just the anchor's.
+   *  The scraper mints one id per event registration, so one human routinely has
+   *  many; content is keyed per-id, so all of them are needed to build a
+   *  complete gallery. Absent on pre-20260801120000 payloads — treat as empty. */
+  usauClusterIds?: string[] | null;
   pulAnchorId?: string | null;
   wulAnchorId?: string | null;
   headshotUrl?: string | null;
@@ -341,9 +346,13 @@ function shouldAttachUfa(
   if (homeStates.length === 0) return true;
 
   const usauStates = new Set(homeStates);
+  // Non-US codes are dropped, not compared. Canadian franchises map to
+  // provinces (royal→QC, rush/lions→ON), which can never appear in homeStates
+  // (US codes only) — comparing them would guarantee a miss and drop the whole
+  // real UFA career. A non-US team is no signal, so we keep, per the doc above.
   const ufaStates = ufaStints
     .map((st) => (st.teamId ? ufaTeamState(st.teamId) : null))
-    .filter((s): s is string => s != null);
+    .filter((s): s is string => s != null && isUsStateCode(s));
   if (ufaStates.length === 0) return true;
   return ufaStates.some((s) => usauStates.has(s));
 }
@@ -641,6 +650,10 @@ export async function mapRpcProfile(
   };
   pushRef('ufa', payload.ufaSlug);
   pushRef('usau', payload.usauId);
+  // Every id in the USAU cluster, not just the anchor's. Without these the
+  // gallery's contents depend on WHICH cluster id you navigated in through —
+  // content uploaded under a sibling registration id would silently vanish.
+  for (const id of payload.usauClusterIds ?? []) pushRef('usau', id);
   pushRef('pul', payload.pulAnchorId);
   pushRef('wul', payload.wulAnchorId);
   pushRef(anchorLeague, anchorId);

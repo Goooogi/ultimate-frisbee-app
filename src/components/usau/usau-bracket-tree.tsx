@@ -242,8 +242,21 @@ function MatchCard({
     >
       <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
         <StatusPill tone={tone} label={statusLabel(game)} />
-        <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular">
-          {formatGameTime(game.scheduledAt, venueState)}
+        {/* Field + time. The bracket previously showed time only, so the field
+            number was unavailable on exactly the games spectators travel for.
+            `location` is usually a bare number ("7") but occasionally a full
+            venue string, so only prefix "Field" for the bare-number form. */}
+        <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular truncate">
+          {[
+            game.location
+              ? /^\d+[A-Za-z]?$/.test(game.location.trim())
+                ? `Field ${game.location.trim()}`
+                : game.location.trim()
+              : null,
+            formatGameTime(game.scheduledAt, venueState) || null,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
       </div>
       <TeamLine
@@ -420,25 +433,43 @@ export function isChampionshipBracket(g: Game): boolean {
 }
 
 function buildColumns(games: Game[]): RoundColumn[] {
-  // Split round='quarter' into R1 (earlier date) vs QF (later date).
-  const quarters = games.filter((g) => g.round === 'quarter');
+  // PRE-QUARTERS are a real round in the data (`usau_game_round` has an explicit
+  // 'prequarter' value — 1,347 club games across 245 events carry it), but this
+  // builder used to look only at quarter/semi/final and so dropped every one of
+  // them from the tree. A 16-team bracket rendered as if it started at the QFs.
+  //
+  // Prefer the explicit round. The old behavior — splitting round='quarter' by
+  // scheduled DATE and calling the earlier day "Round 1" — is kept ONLY as a
+  // fallback for events whose scraper run predates the prequarter tagging, so
+  // those brackets don't regress to a single collapsed column.
+  const prequarters = games.filter((g) => g.round === 'prequarter');
   const semis = games.filter((g) => g.round === 'semi');
   const finals = games.filter((g) => g.round === 'final');
+  const quarters = games.filter((g) => g.round === 'quarter');
 
-  const quarterDates = Array.from(
-    new Set(
-      quarters
-        .map((g) => g.scheduledAt?.slice(0, 10))
-        .filter((d): d is string => !!d),
-    ),
-  ).sort();
-
-  let r1: Game[] = [];
-  let qf: Game[] = quarters;
-  if (quarterDates.length >= 2) {
-    const earliest = quarterDates[0];
-    r1 = quarters.filter((g) => g.scheduledAt?.slice(0, 10) === earliest);
-    qf = quarters.filter((g) => g.scheduledAt?.slice(0, 10) !== earliest);
+  let r1: Game[];
+  let qf: Game[];
+  if (prequarters.length > 0) {
+    // Explicitly tagged: pre-quarters are their own column, quarters stay whole.
+    r1 = prequarters;
+    qf = quarters;
+  } else {
+    // Legacy fallback: infer an opening round from a two-date quarter split.
+    const quarterDates = Array.from(
+      new Set(
+        quarters
+          .map((g) => g.scheduledAt?.slice(0, 10))
+          .filter((d): d is string => !!d),
+      ),
+    ).sort();
+    if (quarterDates.length >= 2) {
+      const earliest = quarterDates[0];
+      r1 = quarters.filter((g) => g.scheduledAt?.slice(0, 10) === earliest);
+      qf = quarters.filter((g) => g.scheduledAt?.slice(0, 10) !== earliest);
+    } else {
+      r1 = [];
+      qf = quarters;
+    }
   }
 
   // Initial sort: R1 by lower seed first (1-vs-16, 2-vs-15... feels right
@@ -448,7 +479,13 @@ function buildColumns(games: Game[]): RoundColumn[] {
     (a.seedA ?? a.seedB ?? 99) - (b.seedA ?? b.seedB ?? 99);
 
   return [
-    { key: 'r1', label: 'Round 1', games: r1.slice().sort(sortBySeed) },
+    {
+      key: 'r1',
+      // Name the column for what it actually is when the round is tagged;
+      // the date-split fallback can't know, so it stays the generic "Round 1".
+      label: prequarters.length > 0 ? 'Pre-Quarters' : 'Round 1',
+      games: r1.slice().sort(sortBySeed),
+    },
     { key: 'qf', label: 'Quarterfinals', games: qf.slice().sort(sortBySeed) },
     { key: 'sf', label: 'Semifinals', games: semis.slice().sort(sortBySeed) },
     { key: 'final', label: 'Final', games: finals.slice().sort(sortBySeed) },

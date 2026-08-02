@@ -130,9 +130,23 @@ function signed(n: number): string {
   return n > 0 ? `+${n}` : String(n);
 }
 
-/** Build the ESPN-style stat cells. Mirrors statLineOf()/sub exactly — same
- *  numbers, just split so the UI can column them. Yards are omitted when absent
- *  or zero (PUL supplies none), matching statLineOf's behavior. */
+/**
+ * Build the ESPN-style stat cells. Mirrors statLineOf()/sub exactly — same
+ * numbers, just split so the UI can column them. Yards are omitted when absent
+ * or zero (PUL supplies none), matching statLineOf's behavior.
+ *
+ * ORDER MATTERS. `GP` leads (when present) so the season line reads
+ * `GP · G · A` / `BLK · YDS · +/-` in the 3-up grid — the conventional
+ * stat-line order.
+ *
+ * Previously GP sat 5th, which put goals in the grid's top-left and GP in the
+ * middle of row two. In a 3-across layout that made the goals number look like
+ * a games count (Kyle Henke's 2026 line read as "22 games" when 22 was goals
+ * and GP was 12). Leading with GP removes the ambiguity.
+ *
+ * Player-of-the-game lines pass no gamesPlayed (a single game), so they simply
+ * start at G — no empty leading cell.
+ */
 function statCellsOf(opts: {
   goals: number;
   assists: number;
@@ -141,16 +155,17 @@ function statCellsOf(opts: {
   plusMinus: number;
   gamesPlayed?: number | null;
 }): SpotlightStat[] {
-  const cells: SpotlightStat[] = [
+  const cells: SpotlightStat[] = [];
+  if (opts.gamesPlayed != null && opts.gamesPlayed > 0) {
+    cells.push({ label: 'GP', value: String(opts.gamesPlayed) });
+  }
+  cells.push(
     { label: 'G', value: String(opts.goals) },
     { label: 'A', value: String(opts.assists) },
     { label: 'BLK', value: String(opts.blocks) },
-  ];
+  );
   if (opts.yards != null && opts.yards > 0) {
     cells.push({ label: 'YDS', value: String(Math.round(opts.yards)) });
-  }
-  if (opts.gamesPlayed != null && opts.gamesPlayed > 0) {
-    cells.push({ label: 'GP', value: String(opts.gamesPlayed) });
   }
   cells.push({ label: '+/-', value: signed(opts.plusMinus) });
   return cells;

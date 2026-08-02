@@ -691,9 +691,32 @@ export async function getCurrentEvent(opts?: {
     .filter((e) => !preferredIds.has(e.id))
     .sort(byWeekendThenFlight(!lookForward));
 
+  // IN-PROGRESS FIRST. A tournament happening RIGHT NOW (start ≤ today ≤ end)
+  // always headlines Scores, ahead of both the weekend rule and flight rank.
+  //
+  // Without this, the weekend/flight sort could bury a live event: on a Sunday
+  // the look-back bucket sorts by flight WITHIN the weekend, so a higher-flight
+  // tournament that already ended Saturday out-ranked one still being played
+  // today. Scores is the "what's on now" surface — a live event is the answer
+  // whenever there is one.
+  //
+  // Ties among several in-progress events fall back to the same
+  // weekend-then-flight comparator, so the marquee one still wins.
+  const isInProgress = (e: EventRow) => {
+    const start = e.start_date ?? '';
+    const end = endOf(e);
+    return start !== '' && start <= today && end >= today;
+  };
+  const inProgress = events.filter(isInProgress).sort(byWeekendThenFlight(true));
+  const inProgressIds = new Set(inProgress.map((e) => e.id));
+
   // Preferred side first, then the other side as a graceful fallback (e.g. early
   // in a season there is no "last weekend"; at season's end no "next weekend").
-  const ordered = [...preferred, ...rest];
+  const ordered = [
+    ...inProgress,
+    ...preferred.filter((e) => !inProgressIds.has(e.id)),
+    ...rest.filter((e) => !inProgressIds.has(e.id)),
+  ];
 
   // Prefer an in-window event that actually has games. Only if NONE do (e.g. the
   // upcoming weekend's brackets aren't scraped yet) fall through to the best
@@ -985,10 +1008,24 @@ export async function findUsauPlayerByName(name: string): Promise<string | null>
   const surname = surnameForPrefilter(name);
   if (!surname) return null;
   const db = await supabase();
-  // Cheap SQL prefilter: anyone whose display_name *contains* the
-  // surname. We then apply the strict token-subset match in JS. The
-  // surname filter is conservative — Postgres only returns the small
-  // surname-cluster (typically < 30 rows for any given surname).
+
+  // Prefer the shared RPC: it runs the same surname-prefilter → names_match →
+  // most-rosters ordering in SQL, but normalizes BOTH sides of the prefilter so
+  // accented names resolve. The client-side path below compares a normalized
+  // token against the RAW display_name, so "Daan De Marree" never finds
+  // "Daan De Marrée" and the whole USAU side goes missing.
+  // A null result is authoritative ("no such player"), NOT a reason to fall
+  // through — the fallback is strictly weaker, so re-running it on a miss would
+  // spend queries only to maybe resurrect a match the RPC correctly rejected.
+  // Only a transport/missing-function error degrades to the client-side path.
+  const { data: rpcId, error: rpcError } = await db.rpc('find_usau_player_by_name', {
+    p_name: name,
+  });
+  if (!rpcError) return (rpcId as string | null) ?? null;
+
+  // Fallback (RPC missing/errored): cheap SQL prefilter on anyone whose
+  // display_name *contains* the surname, then the strict token-subset match in
+  // JS. Accent-sensitive — see above.
   const { data: matches } = await db
     .from('usau_players')
     .select('id, display_name')

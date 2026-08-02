@@ -27,7 +27,7 @@ import {
 } from '@/lib/ufa/client';
 import { teamMetaByAbbr, teamBySlugOrAbbr as teamMeta, type TeamMeta } from '@/lib/ufa/teams';
 import { getUfaPlayerFromDb, findUfaSlugByNameFromDb } from '@/lib/ufa/db-player';
-import { ufaTeamState } from '@/lib/usau/regions';
+import { ufaTeamState, isUsStateCode } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow, UfaPlayerSeasonRow } from '@/lib/ufa/types';
 import {
   findUsauPlayerByName,
@@ -449,9 +449,12 @@ async function _getUnifiedPlayerProfile(
     const usauStates = new Set(sideUsau.homeStates);
     const ufaStates = sideUfa.stints
       .map(({ stint }) => ufaTeamState(stint.teamId))
-      .filter((s): s is string => s != null);
+      .filter((s): s is string => s != null && isUsStateCode(s));
     // Non-US UFA teams (e.g. Montreal/Toronto) have no US state → can't
-    // contradict; keep them attached rather than drop on a null.
+    // contradict; keep them attached rather than drop on a null. They map to
+    // PROVINCES (QC/ON), not null, so they must be filtered explicitly — a
+    // province can never appear in homeStates, so comparing one would always
+    // miss and drop the entire real UFA career.
     if (ufaStates.length > 0) {
       attachUfa = ufaStates.some((s) => usauStates.has(s));
     }

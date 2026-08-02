@@ -174,9 +174,17 @@ interface CardTileProps {
    *  contexts (the squad field's 92x120 slots) where the default sizing
    *  would overflow its box. Collection grid / slot picker use the default. */
   compact?: boolean;
+  /**
+   * Show a "flip for stats" affordance: an info button that rotates the card
+   * 180deg to a back face with the full stat line (beta request: "maybe
+   * flipable cards? like stats on the back"). Opt-in so dense contexts (squad
+   * field slots, draft candidates) stay tap-to-select.
+   */
+  flippable?: boolean;
 }
 
-export function CardTile({ card, copies, onClick, selected = false, disabled = false, className = '', offRole = false, compact = false }: CardTileProps) {
+export function CardTile({ card, copies, onClick, selected = false, disabled = false, className = '', offRole = false, compact = false, flippable = false }: CardTileProps) {
+  const [flipped, setFlipped] = useState(false);
   const interactive = typeof onClick === 'function';
   const rarity = RARITY[card.tier];
   const gold = card.tier === 'greatest';
@@ -258,6 +266,52 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
     <span className="absolute inset-0 pointer-events-none" style={{ background: GOLD_FACE }} aria-hidden="true" />
   ) : null;
 
+  // ── Flippable wrapper ───────────────────────────────────────────────────
+  // Beta request: "maybe flipable cards? like stats on the back". A 3D Y-axis
+  // rotation swaps the face for a stat sheet. The flip toggle is its OWN button
+  // so it never competes with the card's select/tap gesture, and the whole
+  // thing is skipped under prefers-reduced-motion (the back face still opens,
+  // it just cross-fades instead of rotating).
+  if (flippable) {
+    return (
+      <div className={['relative w-full', className].join(' ')} style={{ perspective: 1000 }}>
+        <div
+          className="relative w-full motion-safe:transition-transform motion-safe:duration-500 [transform-style:preserve-3d]"
+          style={{ transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+        >
+          {/* FRONT */}
+          <div className="[backface-visibility:hidden]">
+            <div className={sharedClasses} style={rarityShadow}>
+              {goldFace}
+              <span className="relative z-10 flex h-full">{inner}</span>
+            </div>
+          </div>
+          {/* BACK — absolutely positioned over the front, pre-rotated. */}
+          <div className="absolute inset-0 [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)' }}>
+            <CardBack card={card} gold={gold} rarityColor={rarity.c} compact={compact} />
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setFlipped((f) => !f); }}
+          aria-label={flipped ? `Show ${card.name} card front` : `Show ${card.name} stats`}
+          aria-pressed={flipped}
+          className={[
+            'absolute top-1.5 right-1.5 z-20 w-6 h-6 rounded-full grid place-items-center',
+            'bg-ink/10 hover:bg-ink/20 text-ink/70 hover:text-ink',
+            'motion-safe:transition-colors cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
+        >
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M2 8a6 6 0 0 1 10-4.5M14 8a6 6 0 0 1-10 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            <path d="M12 1.5v2.5h-2.5M4 14.5V12h2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
   if (!interactive) {
     return (
       <div className={sharedClasses} style={rarityShadow}>
@@ -284,5 +338,79 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
       {goldFace}
       <span className="relative z-10 flex h-full">{inner}</span>
     </button>
+  );
+}
+
+
+// ── Card back — the stat sheet ────────────────────────────────────────────
+// Shown when a `flippable` CardTile is flipped. Deliberately plain: the front
+// carries all the rarity theatre, so the back is a clean, scannable stat list.
+
+function CardBack({
+  card,
+  gold,
+  rarityColor,
+  compact,
+}: {
+  card: UtcgCard;
+  gold: boolean;
+  rarityColor: string;
+  compact: boolean;
+}) {
+  const rows: [string, string][] = [
+    ['Goals', String(card.goals)],
+    ['Assists', String(card.assists)],
+    ['Blocks', String(card.blocks)],
+    ['+/-', card.plusMinus > 0 ? `+${card.plusMinus}` : String(card.plusMinus)],
+  ];
+  return (
+    <div
+      className={[
+        'utcg-card-face relative rounded-card w-full h-full overflow-hidden shadow-card',
+        gold ? '' : 'bg-surface',
+      ].join(' ')}
+      style={{ boxShadow: `inset 0 0 0 1.5px ${rarityColor}` }}
+    >
+      {gold && <span className="absolute inset-0 pointer-events-none" style={{ background: GOLD_FACE }} aria-hidden="true" />}
+      <div className={['relative z-10 flex flex-col h-full justify-between', compact ? 'p-1.5 gap-1' : 'p-2.5 gap-1.5'].join(' ')}>
+        <p
+          className={['font-display italic font-bold leading-none truncate', compact ? 'text-[12px]' : 'text-[14px]'].join(' ')}
+          style={{ color: gold ? GOLD_TEXT : undefined }}
+        >
+          <span className={gold ? '' : 'text-ink'}>{card.name}</span>
+        </p>
+        <p
+          className="text-[7px] font-bold tracking-[0.1em] uppercase leading-none"
+          style={{ color: gold ? 'rgba(36,26,4,0.7)' : undefined }}
+        >
+          <span className={gold ? '' : 'text-faint'}>{card.teamAbbr} · {card.year} · {positionLabel(card.position)}</span>
+        </p>
+
+        <div className={['flex flex-col justify-center', compact ? 'gap-[3px]' : 'gap-1.5'].join(' ')}>
+          {rows.map(([label, value]) => (
+            <div key={label} className="flex items-baseline justify-between gap-1">
+              <span
+                className={['font-bold tracking-[0.08em] uppercase leading-none', compact ? 'text-[6.5px]' : 'text-[7.5px]'].join(' ')}
+                style={{ color: gold ? 'rgba(36,26,4,0.65)' : undefined }}
+              >
+                <span className={gold ? '' : 'text-faint'}>{label}</span>
+              </span>
+              <span
+                className={['font-bold tabular leading-none', compact ? 'text-[11px]' : 'text-[13px]'].join(' ')}
+                style={{ color: gold ? GOLD_TEXT : undefined }}
+              >
+                <span className={gold ? '' : 'text-ink'}>{value}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <span
+          className={['w-full rounded-full flex-shrink-0', compact ? 'h-[3px]' : 'h-1'].join(' ')}
+          style={{ background: gold ? GOLD_BAR : rarityColor }}
+          aria-hidden="true"
+        />
+      </div>
+    </div>
   );
 }

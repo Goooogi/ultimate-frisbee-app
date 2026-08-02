@@ -141,6 +141,10 @@ export function CollectionGrid({ owned, onListCard }: CollectionGridProps) {
               card={o.card}
               copies={o.copies}
               onClick={onListCard ? () => onListCard(o.card) : undefined}
+              // Collection is the natural home for flip-to-stats: you're
+              // browsing cards you already own, and there's no competing
+              // tap-to-select gesture to fight (beta ask: stats on the back).
+              flippable
             />
           ))}
         </div>

@@ -2,9 +2,17 @@
 
 // Marketplace — MARKET tab. Browse active listings (buy/make offer) and
 // manage your own market activity (Selling / Offers Received / Offers Made)
-// under a "My Market" sub-tab. Mirrors CollectionGrid's filter-row idioms
-// (FilterPill for small option sets, PillSelect for tier) and the app's
-// bottom-sheet modal idiom for ListCardModal/MakeOfferModal.
+// under a "My Market" sub-tab. Uses the app's bottom-sheet modal idiom for
+// ListCardModal / MakeOfferModal / ConfirmPurchaseModal.
+//
+// FILTERS: browse filters (listing type, tier, sort) live behind a single
+// "Filters" button rather than an always-visible control row — the row wrapped
+// to 2-3 lines on mobile and pushed listings below the fold. The trigger badges
+// the count of applied filters so the collapsed state stays informative.
+//
+// BUYING: the Buy button opens ConfirmPurchaseModal instead of purchasing
+// directly. Spending coins is irreversible and a mis-tap on an expensive
+// listing had no undo.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { OwnedCard } from '@/lib/utcg/server';
@@ -13,6 +21,7 @@ import { TIERS } from '@/lib/utcg/packs';
 import { CardTile, tierDotStyle } from '@/components/utcg/card-tile';
 import { CoinGlyph } from '@/components/utcg/coin-glyph';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
+import { ConfirmPurchaseModal } from '@/components/utcg/marketplace/ConfirmPurchaseModal';
 import { MakeOfferModal } from '@/components/utcg/marketplace/MakeOfferModal';
 import {
   getActiveListings,
@@ -34,10 +43,10 @@ const TIER_OPTIONS: PillSelectOption<CardTier | 'all'>[] = [
 ];
 
 type KindFilter = 'all' | 'sell' | 'trade';
-const KIND_FILTERS: { key: KindFilter; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'sell', label: 'Sell' },
-  { key: 'trade', label: 'Trade' },
+const KIND_OPTIONS: PillSelectOption<KindFilter>[] = [
+  { value: 'all', label: 'All Listings' },
+  { value: 'sell', label: 'Sell Only' },
+  { value: 'trade', label: 'Trade Only' },
 ];
 
 type SortMode = 'newest' | 'price';
@@ -162,6 +171,21 @@ function BrowseTab({
   const [buyingId, setBuyingId] = useState<string | null>(null);
   const [buyErrors, setBuyErrors] = useState<Map<string, string>>(new Map());
   const [offeringListing, setOfferingListing] = useState<Listing | null>(null);
+  // Listing awaiting purchase confirmation. Buying is irreversible and spends
+  // real balance, so the Buy button opens this instead of firing immediately.
+  const [confirmingListing, setConfirmingListing] = useState<Listing | null>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Non-default filters currently applied (sort is a preference, not a filter,
+  // so it doesn't count toward the badge).
+  const activeFilterCount =
+    (kindFilter !== 'all' ? 1 : 0) + (tierFilter !== 'all' ? 1 : 0);
+
+  function resetFilters() {
+    setKindFilter('all');
+    setTierFilter('all');
+    setSort('newest');
+  }
 
   const filtered = useMemo(() => {
     if (!listings) return [];
@@ -190,6 +214,7 @@ function BrowseTab({
     try {
       const newBalance = await buyListing(listing.id);
       onCoinsChange(newBalance);
+      setConfirmingListing(null);
       onMutated();
     } catch (err) {
       setBuyErrors((prev) => {
@@ -217,13 +242,63 @@ function BrowseTab({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-center gap-2">
-        {KIND_FILTERS.map((f) => (
-          <FilterPill key={f.key} active={kindFilter === f.key} onClick={() => setKindFilter(f.key)} label={f.label} />
-        ))}
-        <PillSelect value={tierFilter} options={TIER_OPTIONS} onChange={setTierFilter} ariaLabel="Filter by tier" />
-        <PillSelect value={sort} options={SORT_OPTIONS} onChange={setSort} ariaLabel="Sort listings" />
+      {/* All filters live behind ONE "Filters" button rather than a row of
+          controls that wrapped to 2-3 lines on mobile and pushed listings below
+          the fold. The trigger shows a count of non-default filters so the
+          collapsed state still tells you whether anything is applied. */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setFiltersOpen((o) => !o)}
+          aria-expanded={filtersOpen}
+          aria-controls="market-filters"
+          className={[
+            'inline-flex items-center gap-2 px-3.5 min-h-[36px] rounded-full',
+            'text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
+            'motion-safe:transition-colors motion-safe:duration-150 cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            activeFilterCount > 0 || filtersOpen
+              ? 'bg-ink text-bg'
+              : 'bg-ink/5 text-muted hover:bg-ink/10 hover:text-ink',
+          ].join(' ')}
+        >
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+            <path d="M1.5 3h11M3.5 7h7M5.5 11h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+          Filters
+          {activeFilterCount > 0 && (
+            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-accent text-accent-ink text-[9px] font-extrabold tabular">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            onClick={resetFilters}
+            className="text-[11px] font-semibold text-faint hover:text-ink font-tight cursor-pointer motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full px-2 py-1"
+          >
+            Clear
+          </button>
+        )}
       </div>
+
+      {filtersOpen && (
+        <div
+          id="market-filters"
+          className="flex flex-col gap-3 p-3.5 rounded-card bg-surface shadow-card motion-safe:animate-fade-in"
+        >
+          <FilterRow label="Listing type">
+            <PillSelect value={kindFilter} options={KIND_OPTIONS} onChange={setKindFilter} ariaLabel="Filter by listing type" />
+          </FilterRow>
+          <FilterRow label="Tier">
+            <PillSelect value={tierFilter} options={TIER_OPTIONS} onChange={setTierFilter} ariaLabel="Filter by tier" />
+          </FilterRow>
+          <FilterRow label="Sort">
+            <PillSelect value={sort} options={SORT_OPTIONS} onChange={setSort} ariaLabel="Sort listings" />
+          </FilterRow>
+        </div>
+      )}
 
       {filtered.length === 0 ? (
         <EmptyState
@@ -240,7 +315,7 @@ function BrowseTab({
               coins={coins}
               buying={buyingId === listing.id}
               buyError={buyErrors.get(listing.id) ?? null}
-              onBuy={() => handleBuy(listing)}
+              onBuy={() => setConfirmingListing(listing)}
               onMakeOffer={() => setOfferingListing(listing)}
             />
           ))}
@@ -256,6 +331,25 @@ function BrowseTab({
           onOffered={() => {
             setOfferingListing(null);
             onMutated();
+          }}
+        />
+      )}
+
+      {confirmingListing && (
+        <ConfirmPurchaseModal
+          listing={confirmingListing}
+          coins={coins}
+          buying={buyingId === confirmingListing.id}
+          error={buyErrors.get(confirmingListing.id) ?? null}
+          onConfirm={() => handleBuy(confirmingListing)}
+          onCancel={() => {
+            // Clear any stale error so reopening starts clean.
+            setBuyErrors((prev) => {
+              const next = new Map(prev);
+              next.delete(confirmingListing.id);
+              return next;
+            });
+            setConfirmingListing(null);
           }}
         />
       )}
@@ -771,6 +865,19 @@ function OfferMadeRow({
 }
 
 // ─── Shared bits ────────────────────────────────────────────────────────────
+
+/** One labelled row inside the Filters panel: caption on the left, control on
+ *  the right. Keeps the three dropdowns visually aligned. */
+function FilterRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="text-[10.5px] font-bold tracking-[0.1em] uppercase text-muted font-tight flex-shrink-0">
+        {label}
+      </span>
+      {children}
+    </div>
+  );
+}
 
 function FilterPill({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (

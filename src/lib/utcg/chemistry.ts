@@ -111,3 +111,68 @@ export function teamChemistry(cards: ChemCard[]): TeamChemResult {
   const total = perCard.reduce((s, r) => s + r.chem, 0);
   return { total, perCard };
 }
+
+// ── Draft-time projection ────────────────────────────────────────────────
+
+/** What one candidate would do to team chemistry if picked into a slot. */
+export interface ChemProjection {
+  /** Team chem total AFTER adding this candidate (partial lineup). */
+  total: number;
+  /** Change vs the current partial lineup — the headline number. */
+  delta: number;
+  /** This card's own chem in the projected lineup (0-3). */
+  cardChem: number;
+  /** Why this card links: which dimension earned its chem. */
+  reason: CardChemResult['reason'];
+  /** How many ALREADY-PICKED cards share this card's team / division. */
+  sharedTeam: number;
+  sharedDivision: number;
+}
+
+/**
+ * Project chemistry for a draft candidate against the picks made so far.
+ *
+ * Beta feedback: "not ever seeing chem go up in both squad builder challenges"
+ * — the draft dealt 5 blind candidates with no indication which one linked with
+ * the squad, so chemistry felt invisible/broken. This computes the projected
+ * team-chem delta for each candidate so the UI can surface it at pick time.
+ *
+ * NOTE this is a PARTIAL-lineup projection: links strengthen as more cards land,
+ * so a card showing +1 now may end up worth more once the squad fills. The delta
+ * is the honest "what changes if I pick this right now" number, which is what a
+ * drafter is actually choosing between.
+ *
+ * @param picked   Cards already drafted, in slot order.
+ * @param candidate The card being considered.
+ * @param slot     The slot the candidate would fill.
+ * @param pickedSlots Slot types for the already-picked cards (same order).
+ */
+export function projectChem(
+  picked: Omit<ChemCard, 'slot'>[],
+  candidate: Omit<ChemCard, 'slot'>,
+  slot: 'handler' | 'cutter',
+  pickedSlots: ('handler' | 'cutter')[],
+): ChemProjection {
+  const before = teamChemistry(
+    picked.map((c, i) => ({ ...c, slot: pickedSlots[i] ?? null })),
+  );
+  const after = teamChemistry([
+    ...picked.map((c, i) => ({ ...c, slot: pickedSlots[i] ?? null })),
+    { ...candidate, slot },
+  ]);
+
+  const sharedTeam = picked.filter((c) => c.teamSlug === candidate.teamSlug).length;
+  const sharedDivision = candidate.division
+    ? picked.filter((c) => c.division === candidate.division).length
+    : 0;
+
+  const own = after.perCard[after.perCard.length - 1];
+  return {
+    total: after.total,
+    delta: after.total - before.total,
+    cardChem: own?.chem ?? 0,
+    reason: own?.reason ?? 'none',
+    sharedTeam,
+    sharedDivision,
+  };
+}

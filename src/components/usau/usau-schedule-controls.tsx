@@ -51,6 +51,13 @@ export function UsauScheduleControls({ level }: { level?: CompetitionLevel } = {
   // Flight is a Triple Crown Tour (Club) concept — only offer it for Club.
   const showFlight = level === 'CLUB';
 
+  // Division is hidden for CLUB. Club tournaments are overwhelmingly
+  // single-division (measured on 2025+: 120 of 159 events field exactly one
+  // gender division), so the picker mostly filtered nothing while taking a
+  // slot in the control row. Other levels (College/Masters) still get it —
+  // those events routinely run several divisions at once.
+  const showDivision = level !== 'CLUB';
+
   return (
     // Season on its OWN row above the other filters (its own line on mobile);
     // on desktop it flows inline to the left of them. The remaining three
@@ -59,12 +66,14 @@ export function UsauScheduleControls({ level }: { level?: CompetitionLevel } = {
       <UsauSeasonSelect />
       <div className="flex items-center gap-2 flex-wrap">
         <UsauLevelSelect />
-        <PillSelect
-          value={currentDiv}
-          onChange={(next) => setParam('div', next === 'all' ? null : next.toLowerCase())}
-          ariaLabel="Select division"
-          options={DIV_OPTIONS}
-        />
+        {showDivision && (
+          <PillSelect
+            value={currentDiv}
+            onChange={(next) => setParam('div', next === 'all' ? null : next.toLowerCase())}
+            ariaLabel="Select division"
+            options={DIV_OPTIONS}
+          />
+        )}
         {showFlight && <UsauFlightSelect />}
       </div>
     </div>

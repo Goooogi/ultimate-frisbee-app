@@ -123,6 +123,29 @@ export function ufaTeamState(slug: string): string | null {
 }
 
 /**
+ * Canadian province codes appearing in UFA_TEAM_STATE (Montreal, Toronto).
+ *
+ * Deliberately a province DENY-list rather than a US-state allow-list: the
+ * allow-list would have to be USAU_REGION_STATES, which omits real states no
+ * section phrase happens to name (UT among them), and excluding those would
+ * silently disable the geography gate for their teams.
+ */
+const NON_US_STATE_CODES: ReadonlySet<string> = new Set(['QC', 'ON', 'BC', 'AB', 'MB', 'NS', 'NB', 'SK', 'NL', 'PE']);
+
+/**
+ * True when a state code is one USAU home-state derivation could ever emit.
+ *
+ * Canadian franchises (royal→QC, rush/lions→ON) map to PROVINCES, which can
+ * never appear in homeStates (US codes only). Callers comparing a UFA team's
+ * state against USAU home states must treat a non-US code as NO SIGNAL rather
+ * than as a contradiction — otherwise the comparison can only ever fail and the
+ * geography gate drops the entire real UFA career.
+ */
+export function isUsStateCode(code: string): boolean {
+  return !NON_US_STATE_CODES.has(code);
+}
+
+/**
  * Curated USAU team home-state overrides — the source of truth for corrections
  * to the venue-modal-derived usau_teams.state (which mislabels teams in
  * multi-state sections whose sectionals rotate venues, e.g. PoNY→MA instead of

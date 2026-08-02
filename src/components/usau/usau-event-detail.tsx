@@ -1037,13 +1037,23 @@ function GameRow({
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
 
-  const label = showBracket && game.bracketName
+  // Bracket name and field are NOT mutually exclusive. This used to be an
+  // either/or — bracket views showed the round and silently dropped the field
+  // number, so "where is this game being played" was unavailable on exactly the
+  // games people travel to watch. Show both when we have both.
+  const bracket = showBracket && game.bracketName
     ? (bracketLabel ? bracketLabel(game.bracketName) : game.bracketName)
-    : game.location
-      ? `Field ${game.location}`
-      : null;
+    : null;
+  // `location` is usually a bare field number ("7") but sometimes a full venue
+  // string ("Devens - Rogers Field - 12"). Only prefix "Field" when it's the
+  // bare-number form, so we don't render "Field Devens - Rogers Field - 12".
+  const fieldLabel = game.location
+    ? /^\d+[A-Za-z]?$/.test(game.location.trim())
+      ? `Field ${game.location.trim()}`
+      : game.location.trim()
+    : null;
   const time = formatGameTime(game.scheduledAt, venueState ?? null);
-  const meta = [label, time || null].filter(Boolean).join(' · ') || null;
+  const meta = [bracket, fieldLabel, time || null].filter(Boolean).join(' · ') || null;
 
   return (
     <li className="bg-surface rounded-card-sm shadow-soft p-3">
