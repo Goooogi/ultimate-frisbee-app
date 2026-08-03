@@ -241,13 +241,25 @@ async function run(body: RequestBody) {
     // angel-city-shootout-2022 vs a stored variant). Since discovery only
     // writes stubs, simply DROP any incoming event already present case-
     // insensitively — the existing row stands.
-    const { data: existing } = await db
-      .from('usau_events')
-      .select('usau_slug')
-      .limit(100000);
-    const seenLower = new Set(
-      (existing ?? []).map((r) => (r.usau_slug as string).toLowerCase()),
-    );
+    // ⚠️ MUST PAGE. PostgREST caps a single response at 1000 rows REGARDLESS of
+    // .limit() — `.limit(100000)` silently returned only the first 1000 slugs,
+    // so this guard missed every event alphabetically past ~'m'. That's how
+    // `NY-Minute-2022` (row ~2195) slipped through and aborted the whole page-32
+    // batch on the lower(usau_slug) index, permanently blocking the 2022 D-I +
+    // D-III College Championships from ever being discovered.
+    const seenLower = new Set<string>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: chunk, error: readErr } = await db
+        .from('usau_events')
+        .select('usau_slug')
+        .order('usau_slug', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (readErr) throw readErr;
+      const got = chunk ?? [];
+      for (const r of got) seenLower.add((r.usau_slug as string).toLowerCase());
+      if (got.length < PAGE) break;
+    }
     const fresh = events.filter((e) => !seenLower.has(e.usau_slug.toLowerCase()));
 
     if (fresh.length > 0) {
@@ -293,6 +305,23 @@ async function run(body: RequestBody) {
   };
 }
 
+/** Turn any thrown value into something readable. Supabase errors are plain
+ *  objects, so `String(err)` silently produces "[object Object]". */
+function stringifyErr(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const o = err as Record<string, unknown>;
+    const parts = [
+      o.message,
+      o.code ? `(${o.code})` : null,
+      o.details ? `— ${o.details}` : null,
+      o.hint ? `hint: ${o.hint}` : null,
+    ].filter(Boolean);
+    return parts.length > 0 ? parts.join(' ') : JSON.stringify(err);
+  }
+  return String(err);
+}
+
 Deno.serve(async (req) => {
   let body: RequestBody = {};
   try {
@@ -310,7 +339,12 @@ Deno.serve(async (req) => {
     );
     return Response.json({ ok: true, ...res });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // NOT String(err): a Supabase/PostgREST error is a PLAIN OBJECT, and
+    // String({}) is "[object Object]" — which is exactly what this function
+    // logged for every failure, making page-level errors undiagnosable. Unwrap
+    // the {message, code, details, hint} shape instead. Same approach as
+    // stringifyErr() in sync-event-everything.
+    const message = stringifyErr(err);
     console.error('[discover-college-events] failed:', message);
     return Response.json({ ok: false, error: message }, { status: 500 });
   }

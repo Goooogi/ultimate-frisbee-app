@@ -68,10 +68,11 @@ function ModeCard({
   children,
 }: {
   eyebrow: string;
-  /** Small pill next to the eyebrow marking who you're playing against
-   *  ("Solo" vs "vs Player"). Beta ask: it wasn't obvious Squad Battle is
-   *  single-player. */
-  tag?: { label: string; tone: 'solo' | 'pvp' };
+  /** Small pill next to the eyebrow marking a mode as single-player. Beta ask:
+   *  it wasn't obvious Squad Battle is solo. PvP needs no counterpart tag — its
+   *  "PvP" eyebrow and "Head to Head" title already say it. (A 'vs Player' tag
+   *  existed briefly; its two-slashed-circles icon read as a "%" at 9px.) */
+  tag?: { label: string; tone: 'solo' };
   title: string;
   tagline: string;
   onSelect: () => void;
@@ -98,21 +99,13 @@ function ModeCard({
               className={[
                 'inline-flex items-center gap-1 px-2 py-[3px] rounded-full',
                 'text-[9px] font-extrabold tracking-[0.1em] uppercase font-tight leading-none',
-                tag.tone === 'pvp' ? 'bg-accent text-accent-ink' : 'bg-ink/8 text-muted',
+                'bg-ink/8 text-muted',
               ].join(' ')}
             >
-              {tag.tone === 'pvp' ? (
-                <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <circle cx="3.5" cy="3.5" r="2" stroke="currentColor" strokeWidth="1.4" />
-                  <circle cx="8.5" cy="8.5" r="2" stroke="currentColor" strokeWidth="1.4" />
-                  <path d="M2 10L10 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              ) : (
-                <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
-                  <circle cx="6" cy="4" r="2.2" stroke="currentColor" strokeWidth="1.4" />
-                  <path d="M2.5 10c0-1.9 1.6-3 3.5-3s3.5 1.1 3.5 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                </svg>
-              )}
+              <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <circle cx="6" cy="4" r="2.2" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M2.5 10c0-1.9 1.6-3 3.5-3s3.5 1.1 3.5 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
               {tag.label}
             </span>
           )}
@@ -183,7 +176,6 @@ function PvpModeCard({ onSelect }: { onSelect: () => void }) {
   return (
     <ModeCard
       eyebrow="PvP"
-      tag={{ label: 'vs Player', tone: 'pvp' }}
       title="Head to Head"
       tagline="Stake coins and face another player's squad. Chemistry and overall both decide it — winner takes the pot."
       onSelect={onSelect}

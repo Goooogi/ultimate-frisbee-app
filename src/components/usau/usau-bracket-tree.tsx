@@ -17,6 +17,12 @@
 // had a bye).
 
 import { useMemo } from 'react';
+import {
+  bracketBucket,
+  type BracketBucket,
+  assignPositions as sharedAssignPositions,
+  ROW_PITCH_PX,
+} from '@/lib/bracket-tree';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { formatGameTime } from '@/lib/usau/venue-tz';
@@ -46,7 +52,25 @@ interface RoundColumn {
 // Vertical pitch (height per "row slot") on desktop. R1 sets the base unit;
 // every later column anchors to row slots in R1 so cards line up. Card
 // height ≈ 88px; we leave a bit of breathing room.
-const ROW_PITCH_PX = 104;
+// Layout math is shared across every league's bracket tree — see
+// src/lib/bracket-tree.ts. USAU games name their teams teamAId/teamBId, so we
+// adapt to the engine's homeId/awayId shape at this boundary rather than
+// renaming fields through a shipped component.
+function assignPositions(columns: RoundColumn[]): Map<string, number> {
+  const adapted = columns.map((c) => ({
+    key: c.key,
+    label: c.label,
+    games: c.games.map((g) => ({ id: g.id, homeId: g.teamAId, awayId: g.teamBId })),
+  }));
+  const positions = sharedAssignPositions(adapted);
+  // The engine re-sorts each column into vertical order; mirror that ordering
+  // back onto the real game arrays so render order matches the layout.
+  columns.forEach((col, i) => {
+    const order = new Map(adapted[i].games.map((g, idx) => [g.id, idx]));
+    col.games.sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0));
+  });
+  return positions;
+}
 
 /** The group prefix of a combined-event bracket name ("GM Women · 1st
  *  Place" → "GM Women"); '' when unprefixed. Combined masters championships
@@ -61,25 +85,33 @@ export function bracketGroupPrefix(name: string | null | undefined): string {
 }
 
 export function UsauBracketTree({ games, venueState }: Props) {
-  // ── Pull championship-bracket games, split by group prefix ─────────────
-  // One tree per independent championship bracket. Single-group events
-  // (nearly all) render exactly as before; combined masters championships
-  // render one labeled tree per group instead of merging unrelated
-  // brackets into overlapping cards.
+  // ── Every bracket, not just the championship ──────────────────────────
+  // Tournaments run parallel placement brackets (5th, 9th, 13th …) that decide
+  // real finishes. This used to render ONLY the championship, hiding ~14.9k
+  // placement games across ~1.3k events. Now we bucket EVERY bracket game by
+  // (group prefix, placement bucket) and render a labeled tree for each,
+  // championship first then ascending by place.
+  //
+  // Group prefix still splits combined-masters events (Masters Mixed vs Grand
+  // Masters Open) so unrelated brackets never share a tree.
   const groups = useMemo(() => {
-    const champGames = games.filter((g) => isChampionshipBracket(g));
-    const byPrefix = new Map<string, Game[]>();
-    for (const g of champGames) {
-      const k = bracketGroupPrefix(g.bracketName);
-      if (!byPrefix.has(k)) byPrefix.set(k, []);
-      byPrefix.get(k)!.push(g);
+    const bracketGames = games.filter((g) => isBracketGame(g));
+    const byKey = new Map<string, { prefix: string; bucket: BracketBucket; games: Game[] }>();
+    for (const g of bracketGames) {
+      const prefix = bracketGroupPrefix(g.bracketName);
+      const bucket = bracketBucket(g.bracketName);
+      const k = `${prefix}|${bucket.key}`;
+      if (!byKey.has(k)) byKey.set(k, { prefix, bucket, games: [] });
+      byKey.get(k)!.games.push(g);
     }
-    return Array.from(byPrefix.entries())
-      .map(([label, gs]) => ({ label, games: gs }))
-      .sort((a, b) => a.label.localeCompare(b.label));
+    return Array.from(byKey.values()).sort(
+      (a, b) => a.prefix.localeCompare(b.prefix) || a.bucket.order - b.bucket.order,
+    );
   }, [games]);
 
   if (groups.length === 0) return null;
+
+  const multiPrefix = new Set(groups.map((g) => g.prefix)).size > 1;
 
   return (
     <section className="mb-10" aria-labelledby="bracket-heading">
@@ -87,14 +119,20 @@ export function UsauBracketTree({ games, venueState }: Props) {
         id="bracket-heading"
         className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-4"
       >
-        Championship bracket
+        {groups.length > 1 ? 'Brackets' : 'Championship bracket'}
       </h2>
       <div className="flex flex-col gap-8">
         {groups.map((group) => (
           <BracketTreeGroup
-            key={group.label || 'main'}
+            key={`${group.prefix}|${group.bucket.key}`}
             games={group.games}
-            label={groups.length > 1 ? group.label : null}
+            label={
+              groups.length > 1
+                ? [multiPrefix ? group.prefix : '', group.bucket.label]
+                    .filter(Boolean)
+                    .join(' · ')
+                : null
+            }
             venueState={venueState ?? null}
           />
         ))}
@@ -176,11 +214,15 @@ function DesktopBracket({
   // A de-overlap pass can push a later-round card below the base-column count
   // (two collided semis get spread to 156/260 while the QF column ends at 312),
   // so also honor the lowest positioned card + one card-height so nothing clips.
+  // Height = whichever is taller: the base column's rows, or the lowest card a
+  // de-overlap pass pushed down (two collided semis get spread to 156/260 while
+  // the QF column ends at 312), plus breathing room.
+  //
+  // NOTE: no minimum-2-rows floor. Placement brackets are often a SINGLE game
+  // (a lone 3rd-place final), and forcing two rows left a full empty row of
+  // dead space under every one of them once side brackets started rendering.
   const maxTop = Math.max(0, ...Array.from(positions.values()));
-  const totalHeight = Math.max(
-    Math.max(baseCount, 2) * ROW_PITCH_PX,
-    maxTop + ROW_PITCH_PX,
-  ) + 32;
+  const totalHeight = Math.max(baseCount * ROW_PITCH_PX, maxTop + ROW_PITCH_PX) + 32;
 
   // Column count drives grid template.
   const renderedColumns = columns.filter((c) => c.games.length > 0);
@@ -393,6 +435,30 @@ function statusLabel(game: Game): string {
  * "{division} Championship" form), or (c) lacks a bracket_name but has a
  * tree-round (legacy fallback).
  */
+/**
+ * Is this game part of ANY single-elimination bracket (championship or a
+ * placement bracket)?
+ *
+ * isChampionshipBracket() below answers a narrower question — "is this the MAIN
+ * bracket" — and is still used by the event page for its champion/medal logic.
+ * The TREE uses this wider predicate so 5th/9th/13th-place brackets render too.
+ *
+ * A game qualifies when it has a tree-shaped round (prequarter/quarter/semi/
+ * final) and its bracket name isn't a pool. Pool-play rows carry pool names and
+ * non-tree rounds, so they're excluded; "Pool E"-style second-phase pools are
+ * excluded here as well because they're round-robins, not trees.
+ */
+export function isBracketGame(g: Game): boolean {
+  const TREE_ROUNDS = ['prequarter', 'quarter', 'semi', 'final'];
+  if (!TREE_ROUNDS.includes(g.round)) return false;
+  const raw = (g.bracketName ?? '').trim();
+  if (!raw) return true; // untagged but tree-rounded — legacy events
+  const lastDot = raw.lastIndexOf('\u00b7');
+  const tail = (lastDot >= 0 ? raw.slice(lastDot + 1) : raw).trim().toLowerCase();
+  if (/^pool\b/.test(tail)) return false;
+  return true;
+}
+
 export function isChampionshipBracket(g: Game): boolean {
   const raw = g.bracketName ?? '';
   // Combined masters events prefix every bracket with a group ("Masters Mixed ·
@@ -507,89 +573,9 @@ function buildColumns(games: Game[]): RoundColumn[] {
  * (We re-sort the array, not just compute positions, so the column lays
  * out without depending on insertion order.)
  */
-function assignPositions(columns: RoundColumn[]): Map<string, number> {
-  const positions = new Map<string, number>();
-
-  // The base "row scale" is the FIRST NON-EMPTY column (r1 → qf → sf →
-  // final) so column height matches the longest column. Small brackets
-  // (regionals: 2 semis + a final, no quarters) previously bailed here and
-  // left every card at top=0 — the semis rendered stacked on each other.
-  const baseColumn = columns.find((c) => c.games.length > 0);
-  if (!baseColumn) return positions;
-
-  // Assign R1 positions: 0, pitch, 2*pitch, ...
-  baseColumn.games.forEach((g, i) => {
-    positions.set(g.id, i * ROW_PITCH_PX);
-  });
-
-  // For each subsequent column, position each game at the midpoint of its
-  // source-game positions. Process in order: r1 → qf → sf → final.
-  const orderedKeys: RoundColumn['key'][] = ['r1', 'qf', 'sf', 'final'];
-  let prevCol: RoundColumn | null = baseColumn;
-  for (const k of orderedKeys) {
-    if (k === baseColumn.key) continue;
-    const col = columns.find((c) => c.key === k);
-    if (!col || col.games.length === 0) continue;
-
-    for (const g of col.games) {
-      const sources = findSources(g, prevCol);
-      if (sources.length === 0) {
-        // No matched source — fall back to even distribution across
-        // baseColumn's total height.
-        const idx = col.games.indexOf(g);
-        const totalSlots = baseColumn.games.length;
-        const step = (totalSlots * ROW_PITCH_PX) / Math.max(col.games.length, 1);
-        positions.set(g.id, idx * step + step / 2 - ROW_PITCH_PX / 2);
-      } else {
-        const tops = sources.map((s) => positions.get(s.id) ?? 0);
-        const avg = tops.reduce((a, b) => a + b, 0) / tops.length;
-        positions.set(g.id, avg);
-      }
-    }
-
-    // Re-sort the column array so render order matches vertical order.
-    col.games.sort(
-      (a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0),
-    );
-
-    // De-overlap: two games in the same column can resolve to the SAME
-    // midpoint and paint on top of each other (e.g. Heavyweights' two men's
-    // semis both averaged to the column center because the QF column is
-    // seed-ordered 1,2,3,4 — interleaving the two bracket halves — so each
-    // semi straddled the full column and both midpoints collapsed to 156px).
-    // Walk the now-sorted column top→down and push any card that sits closer
-    // than one row-pitch below its predecessor down to clear it. This keeps
-    // the tree readable regardless of how the base column was ordered.
-    for (let i = 1; i < col.games.length; i++) {
-      const prevTop = positions.get(col.games[i - 1].id) ?? 0;
-      const curTop = positions.get(col.games[i].id) ?? 0;
-      const minTop = prevTop + ROW_PITCH_PX;
-      if (curTop < minTop) positions.set(col.games[i].id, minTop);
-    }
-
-    prevCol = col;
-  }
-
-  return positions;
-}
 
 /**
  * Find the games in `prevCol` that fed into `game`. A prev-col game is a
  * source if it contains either of `game`'s participating team ids. (A team
  * with a bye won't have a prev-col game — that participant gets ignored.)
  */
-function findSources(game: Game, prevCol: RoundColumn | null): Game[] {
-  if (!prevCol) return [];
-  const ids = [game.teamAId, game.teamBId].filter((x): x is string => !!x);
-  if (ids.length === 0) return [];
-  const sources: Game[] = [];
-  for (const candidate of prevCol.games) {
-    if (
-      (candidate.teamAId && ids.includes(candidate.teamAId)) ||
-      (candidate.teamBId && ids.includes(candidate.teamBId))
-    ) {
-      sources.push(candidate);
-    }
-  }
-  return sources;
-}

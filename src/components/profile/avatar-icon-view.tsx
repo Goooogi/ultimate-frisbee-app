@@ -40,6 +40,22 @@ export function AvatarIconView({
     );
   }
 
+  // EUF: a pre-resolved flag glyph (its clubs have no crests, and the country is
+  // keyed by NAME so there's no code for <WfdfFlag> to look up).
+  if (resolved.kind === 'emoji') {
+    return (
+      <span
+        role="img"
+        aria-label={resolved.name}
+        title={resolved.name}
+        className="inline-flex items-center justify-center select-none leading-none"
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.62) }}
+      >
+        {resolved.emoji}
+      </span>
+    );
+  }
+
   // Logo on a white tile, contained with a little padding so square crests and
   // wide wordmarks both sit comfortably inside the circle.
   return (

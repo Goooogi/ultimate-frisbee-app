@@ -66,6 +66,15 @@ const LEAGUE_ROWS: LeagueRow[] = [
     href: '/wfdf/events',
     img: '/WFDF_Logo.webp',
   },
+  {
+    id: 'euf',
+    label: 'EUCS',
+    abbr: 'EUF',
+    subtitle: 'European Ultimate Club Season',
+    // Event-based like WFDF — lands on the event browser, not /scores.
+    href: '/euf/events',
+    img: '/EUF_Logo.webp',
+  },
 ];
 
 export function LeaguesStrip() {
@@ -107,11 +116,16 @@ function LeagueTile({ row }: { row: LeagueRow }) {
     <>
       <LeagueMark abbr={row.abbr} img={row.img} disabled={!row.href} />
       <div className="min-w-0">
-        <div className={['text-[14px] font-bold font-tight leading-tight truncate', row.href ? 'text-ink' : 'text-faint'].join(' ')}>
+        <div className={['text-[14px] font-bold font-tight leading-tight', row.href ? 'text-ink' : 'text-faint'].join(' ')}>
           {row.abbr}
         </div>
+        {/* Full league name, NOT truncated. These are the leagues' actual
+            names ("World Flying Disc Federation") — clipping them to
+            "World Flying D…" makes the row unreadable, which is what happened
+            once a sixth league pushed six tiles onto one line. The tile is
+            sized to fit the text and the container wraps instead. */}
         {row.subtitle && (
-          <div className="text-[11px] text-muted font-tight truncate mt-0.5">{row.subtitle}</div>
+          <div className="text-[11px] text-muted font-tight leading-tight mt-0.5">{row.subtitle}</div>
         )}
       </div>
       {!row.href && <SoonBadge />}
@@ -119,7 +133,7 @@ function LeagueTile({ row }: { row: LeagueRow }) {
   );
 
   const className = [
-    'flex items-center gap-3 flex-1 min-w-[150px] px-3.5 py-3 rounded-card-sm text-ink',
+    'flex items-center gap-3 min-w-[210px] px-3.5 py-3 rounded-card-sm text-ink',
     // White fill (bg-surface = #FFF in light, theme-aware in broadcast) with a
     // subtle grey hairline border at rest — calmer than the orange outline it
     // replaced. Orange is reserved for the hover cue below, so the resting
@@ -157,7 +171,7 @@ function LeagueRowMobile({ row, isLast }: { row: LeagueRow; isLast: boolean }) {
           {row.label}
         </div>
         {row.subtitle && (
-          <div className="text-[11.5px] text-muted font-tight truncate mt-0.5">{row.subtitle}</div>
+          <div className="text-[11.5px] text-muted font-tight leading-tight mt-0.5">{row.subtitle}</div>
         )}
       </div>
       {row.href ? <ChevronRight /> : <SoonBadge />}

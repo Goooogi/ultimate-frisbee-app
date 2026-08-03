@@ -18,6 +18,7 @@ import type {
   UnifiedYear,
   UsauSeasonStint,
   WfdfSeasonStint,
+  EufSeasonStint,
 } from '@/lib/unified-player';
 import { teamMetaByAbbr } from '@/lib/ufa/teams';
 import { PageShell } from '@/components/page-shell';
@@ -25,6 +26,7 @@ import { TeamLogo } from '@/components/team-logo';
 import { STICKY_NAMEONLY_HEAD, STICKY_NAMEONLY_BODY } from '@/components/sticky-cols';
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
+import { EufFlag } from '@/components/euf/euf-flag';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PulPlayerGameRow } from '@/lib/pul/data';
 import type { WulPlayerGameRow } from '@/lib/wul/data';
@@ -281,6 +283,7 @@ function StintRow({ stint }: { stint: SeasonStint }) {
   if (stint.league === 'pul') return <PulStintRow stint={stint} />;
   if (stint.league === 'wul') return <WulStintRow stint={stint} />;
   if (stint.league === 'wfdf') return <WfdfStintRow stint={stint} />;
+  if (stint.league === 'euf') return <EufStintRow stint={stint} />;
   // Exhaustive guard — new league union members should add a branch above.
   return null;
 }
@@ -738,6 +741,45 @@ function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
           </span>
           <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
             WFDF · {stint.eventName}
+            {stint.divisionName ? ` · ${stint.divisionName}` : ''}
+            {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
+          </span>
+        </span>
+      </Link>
+      <YearSummaryCells
+        cells={[
+          { label: 'G', value: stint.stats.goals ?? '—' },
+          { label: 'A', value: stint.stats.assists ?? '—' },
+        ]}
+      />
+    </div>
+  );
+}
+
+// ── EUF / EUCS stint ────────────────────────────────────────────────────
+// Event-scoped like WFDF, but CLUB-level: the country is the club's country,
+// not a national team, and the badge is a derived placement (see
+// derive_euf_placements) rather than an official standing.
+
+function EufStintRow({ stint }: { stint: EufSeasonStint }) {
+  return (
+    <div className="px-4 py-3 flex items-center gap-3">
+      <Link
+        href={`/euf/teams/${stint.teamId}`}
+        className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+      >
+        <EufFlag countryName={stint.countryName} size={20} />
+        <span className="flex flex-col min-w-0">
+          <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
+            {stint.teamName}
+            {stint.isChampion && (
+              <span className="ml-1.5 text-[9px] font-bold tracking-[0.12em] uppercase text-[#B8891E]">
+                · Champion
+              </span>
+            )}
+          </span>
+          <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+            EUCS · {stint.eventName}
             {stint.divisionName ? ` · ${stint.divisionName}` : ''}
             {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
           </span>

@@ -60,6 +60,7 @@ import type {
   PulSeasonStint,
   WulSeasonStint,
   WfdfSeasonStint,
+  EufSeasonStint,
 } from './unified-player';
 
 // ── Wire shape ───────────────────────────────────────────────────────────
@@ -140,6 +141,23 @@ interface RpcWfdfStint {
   stats?: { goals?: number | null; assists?: number | null } | null;
 }
 
+interface RpcEufStint {
+  season?: number | null;
+  teamId?: string | null;
+  teamName?: string | null;
+  countryName?: string | null;
+  divisionName?: string | null;
+  eventName?: string | null;
+  eventSlug?: string | null;
+  jerseyNumber?: string | null;
+  finalPlacement?: number | null;
+  isChampion?: boolean | null;
+  stats?: {
+    goals?: number | null; assists?: number | null;
+    games?: number | null; points?: number | null;
+  } | null;
+}
+
 interface RpcProfile {
   anchorId?: string | null;
   anchorLeague?: string | null;
@@ -165,6 +183,8 @@ interface RpcProfile {
   pul?: RpcLeagueBlock<RpcPulStint> | null;
   wul?: RpcLeagueBlock<RpcWulStint> | null;
   wfdfStints?: RpcWfdfStint[] | null;
+  /** Absent on payloads built before the 20260803 EUF patch — treat as empty. */
+  eufStints?: RpcEufStint[] | null;
 }
 
 const num = (v: number | null | undefined): number => (typeof v === 'number' ? v : 0);
@@ -364,6 +384,7 @@ function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
     wul: 2,
     usau: 3,
     wfdf: 4,
+    euf: 5,
   };
   return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }
@@ -554,6 +575,32 @@ export async function mapRpcProfile(
       stats: {
         goals: st.stats?.goals ?? null,
         assists: st.stats?.assists ?? null,
+      },
+    };
+    push(season, stint);
+  }
+
+  // ── EUF / EUCS ─────────────────────────────────────────────────────────
+  for (const st of payload.eufStints ?? []) {
+    const season = st.season;
+    if (typeof season !== 'number') continue;
+    const stint: EufSeasonStint = {
+      league: 'euf',
+      season,
+      teamId: str(st.teamId),
+      teamName: str(st.teamName),
+      countryName: st.countryName ?? null,
+      divisionName: st.divisionName ?? null,
+      eventName: str(st.eventName),
+      eventSlug: str(st.eventSlug),
+      jerseyNumber: st.jerseyNumber ?? null,
+      finalPlacement: st.finalPlacement ?? null,
+      isChampion: st.isChampion === true,
+      stats: {
+        goals: st.stats?.goals ?? null,
+        assists: st.stats?.assists ?? null,
+        games: st.stats?.games ?? null,
+        points: st.stats?.points ?? null,
       },
     };
     push(season, stint);

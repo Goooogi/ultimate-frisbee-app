@@ -67,6 +67,15 @@ const WFDF_NAV_ITEMS: NavItem[] = [
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players', aliases: ['/wfdf/players'] },
 ];
 
+// EUCS — same event-scoped hub treatment as WFDF (pages under /euf/*, no
+// ?league= param). Clubs IS league-wide: euf_teams rows are per-event, but
+// /euf/clubs merges them by name into one club entity. Players remain
+// per-event, so there's still no players hub.
+const EUF_NAV_ITEMS: NavItem[] = [
+  { label: 'Events', href: '/euf/events', match: '/euf/events' },
+  { label: 'Clubs',  href: '/euf/clubs',  match: '/euf/clubs', aliases: ['/euf/clubs'] },
+];
+
 // The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under
 // it — so plain prefix matching would light up BOTH tabs on /fantasy/team.
 // Use exact/segment-aware matching for the fantasy tabs.
@@ -113,6 +122,7 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
 
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
   if (!isFantasy && !isLeaguePage(pathname)) return null;
 
   const activeLeague = searchParams.get('league')
@@ -122,8 +132,8 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
   const activeLevel = parseLevelParam(searchParams.get('level'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
-  const noQs = isFantasy || isWfdf;
-  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
+  const noQs = isFantasy || isWfdf || isEuf;
+  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
 
   const tabs: ResolvedSectionTab[] = items.map((item) => ({
     label: item.label,
@@ -134,7 +144,7 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
 
   return {
     tabs,
-    ariaLabel: isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages',
+    ariaLabel: isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages',
   };
 }
 
@@ -151,6 +161,7 @@ const LEAGUE_PREFIXES = [
   '/wul',
   '/pul',
   '/wfdf', // WFDF Worlds — event-scoped hub
+  '/euf',  // EUCS — event-scoped hub
 ];
 
 function isLeaguePage(pathname: string): boolean {
@@ -167,6 +178,7 @@ function GamesPageSwitcherPillsInner() {
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
   // WFDF: event-scoped hub — own secondary nav, no ?league= qs, no switcher.
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
 
   // The page switcher belongs ONLY to league pages and the fantasy sub-app.
   // On everything else (admin, settings, playbook, 12-0, home, …) render
@@ -184,13 +196,13 @@ function GamesPageSwitcherPillsInner() {
 
   // Sub-app pages (Fantasy, WFDF) carry no league query string; standard
   // league pages get the ?league= qs on every link.
-  const noQs = isFantasy || isWfdf;
-  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
+  const noQs = isFantasy || isWfdf || isEuf;
+  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <nav
       className="flex items-center gap-0.5 bg-ink/5 rounded-full p-0.5"
-      aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages'}
+      aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages'}
     >
       {items.map((item) => {
         // "Coming soon" placeholder — greyed out, non-navigable.
@@ -291,10 +303,11 @@ function GamesLeagueSlotInner({ leagueSlot }: GamesLeagueSlotInnerProps) {
 
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
 
   // Same gate as the pills: only league pages (not Fantasy/WFDF, not admin/
   // settings/playbook/etc.) show a league slot at all.
-  if (!isLeaguePage(pathname) || isFantasy || isWfdf) return null;
+  if (!isLeaguePage(pathname) || isFantasy || isWfdf || isEuf) return null;
   if (!leagueSlot) return null;
 
   return <div className="flex items-center">{leagueSlot}</div>;

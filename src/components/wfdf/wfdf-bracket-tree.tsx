@@ -23,6 +23,7 @@
 //   vertical midpoint of its source cards, so the feed reads without connectors.
 
 import { useMemo } from 'react';
+import { assignPositions as sharedAssignPositions } from '@/lib/bracket-tree';
 import Link from 'next/link';
 import type { WfdfEventDetail } from '@/lib/wfdf/data';
 import { WfdfFlag } from './wfdf-flag';
@@ -620,36 +621,11 @@ function bracketMinRank(b: Bracket): number {
 
 // ── Vertical positioning (midpoint-of-sources, same as USAU tree) ──────────
 
-function assignPositions(columns: RoundColumn[]): Map<string, number> {
-  const positions = new Map<string, number>();
-  const present = columns.filter((c) => c.games.length > 0);
-  if (present.length === 0) return positions;
-
-  // The FIRST present column is the base (deepest round) — position evenly.
-  const base = present[0];
-  base.games.forEach((g, i) => positions.set(g.id, i * ROW_PITCH_PX));
-
-  // Each subsequent column: position each game at the midpoint of its sources
-  // in the previous column.
-  let prev: RoundColumn = base;
-  for (let i = 1; i < present.length; i++) {
-    const col = present[i];
-    for (const g of col.games) {
-      const sources = sourcesFor(g, prev.games);
-      if (sources.length === 0) {
-        const idx = col.games.indexOf(g);
-        const step = (base.games.length * ROW_PITCH_PX) / Math.max(col.games.length, 1);
-        positions.set(g.id, idx * step + step / 2 - ROW_PITCH_PX / 2);
-      } else {
-        const tops = sources.map((s) => positions.get(s.id) ?? 0);
-        positions.set(g.id, tops.reduce((a, b) => a + b, 0) / tops.length);
-      }
-    }
-    col.games.sort((a, b) => (positions.get(a.id) ?? 0) - (positions.get(b.id) ?? 0));
-    prev = col;
-  }
-  return positions;
-}
+// Layout math lives in src/lib/bracket-tree.ts, shared with the USAU and EUF
+// trees. WFDF's BracketGame already uses homeId/awayId, so it feeds the engine
+// directly. (This local copy also lacked USAU's de-overlap pass; the shared
+// engine has it, so co-located WFDF cards no longer paint on top of each other.)
+const assignPositions = sharedAssignPositions;
 
 function ordinal(n: number): string {
   const s = ['th', 'st', 'nd', 'rd'];

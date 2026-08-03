@@ -12,19 +12,19 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
+import { AuthModal } from '@/components/auth/auth-modal';
 import { JerseyCard } from '@/components/jerseys/jersey-card';
 import { WantCard } from '@/components/jerseys/want-card';
 import { jerseyTargetLine, type JerseyListing, type JerseyWant } from '@/lib/jerseys/types';
 
-type Tab = 'listings' | 'wants';
-type KindFilter = 'all' | 'trade' | 'sell';
-type SortMode = 'newest' | 'price-low' | 'price-high';
+const POST_CTA_CLASS =
+  'inline-flex items-center gap-1.5 px-4 min-h-[38px] rounded-full bg-accent text-accent-ink ' +
+  'text-[11.5px] font-bold tracking-[0.06em] uppercase font-tight hover:opacity-90 cursor-pointer ' +
+  'motion-safe:transition-opacity focus-visible:outline-none focus-visible:ring-2 ' +
+  'focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg';
 
-const KIND_OPTIONS: PillSelectOption<KindFilter>[] = [
-  { value: 'all', label: 'Trade or sale' },
-  { value: 'trade', label: 'Trade only' },
-  { value: 'sell', label: 'For sale' },
-];
+type Tab = 'listings' | 'wants';
+type SortMode = 'newest' | 'price-low' | 'price-high';
 
 const SORT_OPTIONS: PillSelectOption<SortMode>[] = [
   { value: 'newest', label: 'Newest' },
@@ -43,11 +43,11 @@ export function JerseyBrowse({
 }) {
   const [tab, setTab] = useState<Tab>('listings');
   const [q, setQ] = useState('');
-  const [kind, setKind] = useState<KindFilter>('all');
   const [size, setSize] = useState<string>('all');
   const [place, setPlace] = useState<string>('all');
   const [sort, setSort] = useState<SortMode>('newest');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
 
   // Options are derived from what's actually on the board, so we never offer a
   // filter that would return nothing.
@@ -71,11 +71,9 @@ export function JerseyBrowse({
     ];
   }, [listings, wants]);
 
-  const activeFilterCount =
-    (kind !== 'all' ? 1 : 0) + (size !== 'all' ? 1 : 0) + (place !== 'all' ? 1 : 0);
+  const activeFilterCount = (size !== 'all' ? 1 : 0) + (place !== 'all' ? 1 : 0);
 
   function resetFilters() {
-    setKind('all');
     setSize('all');
     setPlace('all');
     setSort('newest');
@@ -84,8 +82,6 @@ export function JerseyBrowse({
   const visibleListings = useMemo(() => {
     const needle = q.trim().toLowerCase();
     let out = listings.filter((l) => {
-      if (kind === 'trade' && l.kind === 'sell') return false;
-      if (kind === 'sell' && l.kind === 'trade') return false;
       if (size !== 'all' && l.size !== size) return false;
       if (place !== 'all' && l.country !== place && l.state !== place) return false;
       if (needle) {
@@ -110,7 +106,7 @@ export function JerseyBrowse({
       });
     }
     return out;
-  }, [listings, q, kind, size, place, sort]);
+  }, [listings, q, size, place, sort]);
 
   const visibleWants = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -139,13 +135,22 @@ export function JerseyBrowse({
           </TabPill>
         </div>
 
-        <Link
-          href={tab === 'wants' ? '/jerseys/wanted/new' : '/jerseys/new'}
-          className="inline-flex items-center gap-1.5 px-4 min-h-[38px] rounded-full bg-accent text-accent-ink text-[11.5px] font-bold tracking-[0.06em] uppercase font-tight hover:opacity-90 motion-safe:transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
-        >
-          <PlusGlyph />
-          {tab === 'wants' ? 'Post a want' : 'List a jersey'}
-        </Link>
+        {/* Signed-out users get the auth modal rather than a trip to
+            /jerseys/new, which server-redirects them straight back here. */}
+        {signedIn ? (
+          <Link
+            href={tab === 'wants' ? '/jerseys/wanted/new' : '/jerseys/new'}
+            className={POST_CTA_CLASS}
+          >
+            <PlusGlyph />
+            {tab === 'wants' ? 'Post a want' : 'List a jersey'}
+          </Link>
+        ) : (
+          <button type="button" onClick={() => setAuthOpen(true)} className={POST_CTA_CLASS}>
+            <PlusGlyph />
+            {tab === 'wants' ? 'Post a want' : 'List a jersey'}
+          </button>
+        )}
       </div>
 
       {/* Search + filters */}
@@ -204,9 +209,6 @@ export function JerseyBrowse({
         >
           {tab === 'listings' && (
             <>
-              <FilterRow label="Type">
-                <PillSelect value={kind} options={KIND_OPTIONS} onChange={setKind} ariaLabel="Filter by type" />
-              </FilterRow>
               <FilterRow label="Size">
                 <PillSelect value={size} options={sizeOptions} onChange={setSize} ariaLabel="Filter by size" />
               </FilterRow>
@@ -224,12 +226,23 @@ export function JerseyBrowse({
       {!signedIn && (
         <p className="text-[12px] text-muted font-tight rounded-card bg-surface shadow-card px-4 py-3">
           Browsing as a guest.{' '}
-          <Link href="/jerseys" className="font-bold text-accent underline underline-offset-2">
+          <button
+            type="button"
+            onClick={() => setAuthOpen(true)}
+            className="font-bold text-accent underline underline-offset-2 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+          >
             Sign in
-          </Link>{' '}
+          </button>{' '}
           to post a jersey or message someone.
         </p>
       )}
+
+      <AuthModal
+        open={authOpen}
+        dismissible
+        initialMode="signin"
+        onDismiss={() => setAuthOpen(false)}
+      />
 
       {/* Results */}
       {tab === 'listings' ? (

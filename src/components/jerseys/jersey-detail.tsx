@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { PosterByline } from '@/components/jerseys/poster-byline';
 import { ReportButton } from '@/components/jerseys/report-button';
 import { BlockButton } from '@/components/jerseys/block-button';
+import { AuthModal } from '@/components/auth/auth-modal';
 import { openThread } from '@/lib/jerseys/messages';
 import { setListingStatus, deleteListing } from '@/lib/jerseys/data';
 import {
@@ -36,6 +37,7 @@ export function JerseyDetail({
   const [active, setActive] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
 
   const isOwner = viewerId != null && viewerId === listing.ownerId;
   const where = jerseyLocationLine(listing);
@@ -44,7 +46,9 @@ export function JerseyDetail({
 
   const handleMessage = useCallback(async () => {
     if (!viewerId) {
-      router.push('/jerseys');
+      // Was router.push('/jerseys') — a no-op from the listing page. Open the
+      // same auth modal the rest of the app uses.
+      setAuthOpen(true);
       return;
     }
     setBusy(true);
@@ -252,6 +256,13 @@ export function JerseyDetail({
             />
           </div>
         )}
+
+        <AuthModal
+          open={authOpen}
+          dismissible
+          initialMode="signin"
+          onDismiss={() => setAuthOpen(false)}
+        />
 
         {/* Safety note — these are strangers arranging to meet in person. */}
         {!isOwner && listing.status === 'active' && (

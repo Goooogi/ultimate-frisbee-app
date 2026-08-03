@@ -72,7 +72,7 @@ const AuthModal = dynamic(() => import('@/components/auth/auth-modal').then((m) 
 
 type SubApp = 'games' | 'playbook' | 'fantasy' | 'twelve-oh' | 'for-you' | 'jerseys';
 
-type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf';
+type MegaLeagueId = 'ufa' | 'usau' | 'wul' | 'pul' | 'wfdf' | 'euf';
 
 interface MegaLeague {
   id: MegaLeagueId;
@@ -90,6 +90,7 @@ const MEGA_LEAGUES: MegaLeague[] = [
   { id: 'pul',  label: 'PUL',  fullName: 'Premier Ultimate League',        img: '/PUL.webp',        real: true }, // real=true: expandable with 4 sub-page links
   { id: 'wul',  label: 'WUL',  fullName: 'Western Ultimate League',        img: '/WUL-logo.jpeg',   real: true }, // real=true: expandable, but Teams-only (no scores/schedule/players yet)
   { id: 'wfdf', label: 'WFDF', fullName: 'World Flying Disc Federation',   img: '/WFDF_Logo.webp',  real: true }, // event-scoped hub (Events/Scores/Teams/Players under /wfdf/*)
+  { id: 'euf',  label: 'EUCS', fullName: 'European Ultimate Club Season',  img: '/EUF_Logo.webp',   real: true }, // event-scoped hub (Events under /euf/*)
 ];
 
 // ─── League fly-out preview data (ported from the old desktop mega-menu) ──────
@@ -137,6 +138,14 @@ const WFDF_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
   { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams' },
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players' },
+];
+
+// EUCS — event-scoped hub, no ?league= qs. Clubs merges the per-event
+// euf_teams rows by name into one league-wide club entity; players stay
+// per-event, so there's no players hub.
+const EUF_NAV_ITEMS: GamesNavItem[] = [
+  { label: 'Events', href: '/euf/events', match: '/euf/events' },
+  { label: 'Clubs',  href: '/euf/clubs',  match: '/euf/clubs' },
 ];
 
 interface GamesNavItem {
@@ -189,6 +198,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/pul',      'games'],
   ['/wul',      'games'],
   ['/wfdf',     'games'],
+  ['/euf',      'games'],
 ];
 
 function detectSubApp(pathname: string): SubApp | null {
@@ -433,6 +443,7 @@ interface FlyoutLeagueData {
   usauCollege: { teams: UsauCollegeTeamsByDivision | null; loading: boolean; error: boolean };
   pul: { teams: TopPulTeam[] | null; loading: boolean; error: boolean };
   wfdf: { events: WfdfMenuEvent[] | null; loading: boolean; error: boolean };
+  euf: { events: WfdfMenuEvent[] | null; loading: boolean; error: boolean };
 }
 
 const gridLinkClass =
@@ -485,8 +496,11 @@ function LeagueFlyoutBody({
 }) {
   // Sub-page link set: WUL + WFDF use their own routes (no ?league= qs).
   const navItems =
-    league === 'wul' ? WUL_NAV_ITEMS : league === 'wfdf' ? WFDF_NAV_ITEMS : GAMES_NAV_ITEMS;
-  const noQs = league === 'wul' || league === 'wfdf';
+    league === 'wul' ? WUL_NAV_ITEMS
+    : league === 'wfdf' ? WFDF_NAV_ITEMS
+    : league === 'euf' ? EUF_NAV_ITEMS
+    : GAMES_NAV_ITEMS;
+  const noQs = league === 'wul' || league === 'wfdf' || league === 'euf';
 
   // Pill mode (tabLinkBase passed by the caller — the league fly-out/dropdown
   // treatment) gets a FILLED accent active state, matching the reference's
@@ -742,6 +756,7 @@ function LeagueFlyout({
   onClose,
   pul,
   wfdf,
+  euf,
   usau,
   usauCollege,
   expandedLevel,
@@ -818,7 +833,7 @@ function LeagueFlyout({
           />
         )}
 
-        <LeagueTeamGrid league={league} onClose={onClose} pul={pul} wfdf={wfdf} />
+        <LeagueTeamGrid league={league} onClose={onClose} pul={pul} wfdf={wfdf} euf={euf} />
       </div>
     </div>
   );
@@ -834,10 +849,11 @@ function LeagueTeamGrid({
   onClose,
   pul,
   wfdf,
+  euf,
 }: {
   league: MegaLeagueId;
   onClose: () => void;
-} & Pick<FlyoutLeagueData, 'pul' | 'wfdf'>) {
+} & Pick<FlyoutLeagueData, 'pul' | 'wfdf' | 'euf'>) {
   if (league === 'ufa') {
     return (
       <div className="grid grid-cols-2 gap-x-3 gap-y-3">
@@ -908,6 +924,26 @@ function LeagueTeamGrid({
           <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
             {wfdf.events.map((e) => (
               <Link key={e.slug} href={`/wfdf/events/${e.slug}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
+                <span className="text-[10px] font-bold text-faint tabular w-8 text-right flex-shrink-0">{e.year}</span>
+                <span className="truncate">{e.name}</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (league === 'euf') {
+    return (
+      <div>
+        <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint mb-1.5">Recent Events</p>
+        {euf.loading && <GridSkeleton />}
+        {!euf.loading && euf.error && <LoadError href="/euf/events" onClose={onClose} />}
+        {!euf.loading && !euf.error && euf.events && (
+          <div className="grid grid-cols-2 gap-x-3 gap-y-0.5">
+            {euf.events.map((e) => (
+              <Link key={e.slug} href={`/euf/events/${e.slug}`} role="menuitem" onClick={onClose} className={gridLinkClass}>
                 <span className="text-[10px] font-bold text-faint tabular w-8 text-right flex-shrink-0">{e.year}</span>
                 <span className="truncate">{e.name}</span>
               </Link>
@@ -1217,6 +1253,10 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   const [wfdfLoading, setWfdfLoading] = useState(false);
   const [wfdfError, setWfdfError] = useState(false);
   const wfdfFetchedRef = useRef(false);
+  const [eufEvents, setEufEvents] = useState<WfdfMenuEvent[] | null>(null);
+  const [eufLoading, setEufLoading] = useState(false);
+  const [eufError, setEufError] = useState(false);
+  const eufFetchedRef = useRef(false);
 
   const fetchUsauTeams = useCallback(async () => {
     if (usauFetchedRef.current) return;
@@ -1291,6 +1331,22 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
     }
   }, []);
 
+  const fetchEufEvents = useCallback(async () => {
+    if (eufFetchedRef.current) return;
+    eufFetchedRef.current = true;
+    setEufLoading(true);
+    try {
+      const { listEvents } = await import('@/lib/euf/data');
+      const events = await listEvents();
+      const trimmed = events.slice(0, 8).map((e) => ({ slug: e.slug, name: e.name, year: e.year }));
+      if (flyoutMountedRef.current) setEufEvents(trimmed);
+    } catch {
+      if (flyoutMountedRef.current) setEufError(true);
+    } finally {
+      if (flyoutMountedRef.current) setEufLoading(false);
+    }
+  }, []);
+
   // isDesktopViewport still gates the hover/focus auto-open behavior below
   // (touch taps synthesize hover events that would otherwise fight the tap
   // handler) — but the team-grid data fetches themselves are NOT gated by
@@ -1316,7 +1372,8 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
       else if (usauLevel === 'CLUB') fetchUsauTeams();
     } else if (id === 'pul') fetchPulTeams();
     else if (id === 'wfdf') fetchWfdfEvents();
-  }, [usauLevel, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents]);
+    else if (id === 'euf') fetchEufEvents();
+  }, [usauLevel, fetchUsauTeams, fetchUsauCollegeTeams, fetchPulTeams, fetchWfdfEvents, fetchEufEvents]);
 
   // Retained: usauLevel/setUsauLevel is no longer changed by any desktop UI
   // interaction (the desktop accordion below has its own expand/collapse
@@ -1406,6 +1463,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
   function leagueHomeHrefFor(lid: MegaLeagueId): string {
     if (lid === 'wul') return '/wul/scores';
     if (lid === 'wfdf') return '/wfdf/events';
+    if (lid === 'euf') return '/euf/events';
     return `/scores${leagueQsFor(lid)}`;
   }
 
@@ -1711,6 +1769,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
                               onClose={onClose}
                               pul={{ teams: pulTeams, loading: pulLoading, error: pulError }}
                               wfdf={{ events: wfdfEvents, loading: wfdfLoading, error: wfdfError }}
+                              euf={{ events: eufEvents, loading: eufLoading, error: eufError }}
                             />
                           </>
                         )}
@@ -1847,6 +1906,7 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             usauCollege={{ teams: usauCollegeTeams, loading: usauCollegeLoading, error: usauCollegeError }}
             pul={{ teams: pulTeams, loading: pulLoading, error: pulError }}
             wfdf={{ events: wfdfEvents, loading: wfdfLoading, error: wfdfError }}
+                              euf={{ events: eufEvents, loading: eufLoading, error: eufError }}
             expandedLevel={usauDesktopExpandedLevel}
             onToggleLevel={handleUsauDesktopLevelToggle}
           />

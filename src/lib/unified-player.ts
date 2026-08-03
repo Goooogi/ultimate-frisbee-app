@@ -190,12 +190,35 @@ export interface WfdfSeasonStint {
   };
 }
 
+/** EUF/EUCS appearance. Event-scoped like WFDF, but club (not national) and it
+ *  carries a derived final placement rather than a standing. */
+export interface EufSeasonStint {
+  league: 'euf';
+  season: number;
+  teamId: string;
+  teamName: string;
+  countryName: string | null;
+  divisionName: string | null;
+  eventName: string;
+  eventSlug: string;
+  jerseyNumber: string | null;
+  finalPlacement: number | null;
+  isChampion: boolean;
+  stats: {
+    goals: number | null;
+    assists: number | null;
+    games: number | null;
+    points: number | null;
+  };
+}
+
 export type SeasonStint =
   | UfaSeasonStint
   | UsauSeasonStint
   | PulSeasonStint
   | WulSeasonStint
-  | WfdfSeasonStint;
+  | WfdfSeasonStint
+  | EufSeasonStint;
 
 export interface UnifiedYear {
   year: number;
@@ -984,6 +1007,7 @@ function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
     wul: 2,
     usau: 3,
     wfdf: 4,
+    euf: 5,
   };
   return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }

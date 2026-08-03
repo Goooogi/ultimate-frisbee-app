@@ -66,6 +66,7 @@ import {
   getCurrentWfdfEvent,
   getEvent as getWfdfEvent,
 } from '@/lib/wfdf/data';
+import { getTeam as getEufTeam, listTeamGames as listEufTeamGames } from '@/lib/euf/data';
 
 // ─── Output shapes (mirror preview-data, isPreview:false) ───────────────────
 
@@ -790,6 +791,46 @@ async function wfdfSnapshot(team: FavoriteTeam): Promise<TeamSnapshot> {
   return { team, record, standing, rankContext: null, form: [], stats, leaders: [], roster: [], accolades: [], isPreview: false };
 }
 
+/** EUF: a per-event club entry. Record is derived from its games (EUCS publishes
+ *  none), and the standing is the derived final placement + event name. */
+async function eufSnapshot(team: FavoriteTeam): Promise<TeamSnapshot> {
+  const [t, games] = await Promise.all([
+    getEufTeam(team.teamId).catch(() => null),
+    listEufTeamGames(team.teamId).catch(() => []),
+  ]);
+  let w = 0;
+  let l = 0;
+  let pf = 0;
+  let pa = 0;
+  for (const g of games) {
+    const home = g.homeTeamId === team.teamId;
+    const us = home ? g.homeScore : g.awayScore;
+    const them = home ? g.awayScore : g.homeScore;
+    if (us == null || them == null) continue;
+    pf += us;
+    pa += them;
+    if (us > them) w++;
+    else if (us < them) l++;
+  }
+  const stats: TeamStat[] = [];
+  if (games.length > 0) {
+    stats.push({ label: 'PF', value: String(pf) });
+    stats.push({ label: 'PA', value: String(pa) });
+  }
+  return {
+    team,
+    record: games.length > 0 ? `${w}-${l}` : null,
+    standing: t ? [t.division, t.eventName].filter(Boolean).join(' · ') : null,
+    rankContext: null,
+    form: [],
+    stats,
+    leaders: [],
+    roster: [],
+    accolades: [],
+    isPreview: false,
+  };
+}
+
 // ─── League standings teasers ───────────────────────────────────────────────
 // LEAGUE_DISPLAY lives in ./leagues (a plain module) — this file is 'use server'
 // and can only export async functions, so display constants can't live here.
@@ -907,6 +948,10 @@ async function playerSnapshotFor(p: FavoritePlayer, year: number): Promise<FeedP
         // WFDF players are name-routed with no id-keyed stat source here — the
         // card is a link-out with whatever we stored at favorite time.
         return { ...base, headshotUrl: null, season: null, stats: [], contextLine: 'View WFDF profile' };
+      case 'euf':
+        // Same as WFDF: EUF player ids are per-event, so favorites are keyed by
+        // NAME and there's no id-based stat source to hydrate from here.
+        return { ...base, headshotUrl: null, season: null, stats: [], contextLine: 'View EUCS profile' };
     }
   } catch {
     return { ...base, headshotUrl: null, season: null, stats: [], contextLine: null };
@@ -1293,6 +1338,7 @@ export async function getForYouFeed(
         case 'wul': return proSnapshot(t, 'wul', wulPlaces, allGames, selectedYear);
         case 'usau': return usauSnapshot(t, selectedYear);
         case 'wfdf': return wfdfSnapshot(t);
+        case 'euf': return eufSnapshot(t);
       }
     }),
   );
