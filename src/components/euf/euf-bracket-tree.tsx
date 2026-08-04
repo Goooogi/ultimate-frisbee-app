@@ -48,14 +48,19 @@ function bracketOf(roundName: string | null): string | null {
   return null;
 }
 
-/** Column index within a bracket. EUCF 2023 adds an explicit Quarterfinals
- *  round, so the tree is up to 3 columns of play plus the placement finals. */
+/** Column index within a bracket. A BARE bracket round name ("Bracket 1-8",
+ *  "1-16 Bracket" — no round word) is the bracket's OPENING round: quarters in
+ *  an 8-team bracket, the round of 16 in EUCF 2023's 16-team one, where it
+ *  coexists with an explicit Quarterfinals round and must NOT share its depth
+ *  (they used to collide at 1 and stack into one column). Labels are assigned
+ *  per tree from the right — Final, Semifinals, Quarterfinals, Round of 16 —
+ *  so a bare opening round still reads "Quarterfinals" when it is one. */
 function depthOf(roundName: string | null): number {
-  if (!roundName) return 1;
+  if (!roundName) return 0;
   if (/Quarterfinals$/.test(roundName)) return 1;
   if (/Semifinals$/.test(roundName)) return 2;
   if (/Finals$/.test(roundName)) return 3;
-  return 1;
+  return 0;
 }
 
 const ORDINAL = sharedOrdinal;
@@ -77,44 +82,6 @@ export function EufBracketTree({
   const bracketGames = games.filter((g) => bracketOf(g.roundName));
   if (!bracketGames.length) return null;
 
-  // Group into brackets ("Bracket 1-8", "Bracket 9-16"), each with its rounds.
-  const brackets = new Map<string, EufGameCard[]>();
-  for (const g of bracketGames) {
-    const b = bracketOf(g.roundName)!;
-    if (!brackets.has(b)) brackets.set(b, []);
-    brackets.get(b)!.push(g);
-  }
-
-  const ordered = [...brackets.entries()].sort((a, b) => {
-    const la = Number(a[0].match(/(\d+)-/)?.[1] ?? 99);
-    const lb = Number(b[0].match(/(\d+)-/)?.[1] ?? 99);
-    return la - lb;
-  });
-
-  return (
-    <div className="flex flex-col gap-8">
-      {ordered.map(([name, list]) => (
-        <BracketGroup key={name} name={name} games={list} placements={placements} />
-      ))}
-    </div>
-  );
-}
-
-interface RoundColumn {
-  key: 'qf' | 'sf' | 'final';
-  label: string;
-  games: EufGameCard[];
-}
-
-function BracketGroup({
-  name,
-  games,
-  placements,
-}: {
-  name: string;
-  games: EufGameCard[];
-  placements: PlacementMap;
-}) {
   // A placement game's places ARE its two teams' stored placements. Sorting the
   // finals by the better of the two puts the gold game first, 3rd/4th next, and
   // so on — no re-derivation, and it stays correct if the SQL rule ever changes.
@@ -125,21 +92,177 @@ function BracketGroup({
     return h < a ? [h, a] : [a, h];
   };
 
-  const columns = useMemo<RoundColumn[]>(() => {
-    const qf = games.filter((g) => depthOf(g.roundName) === 1);
-    const sf = games.filter((g) => depthOf(g.roundName) === 2);
-    const finals = games
-      .filter((g) => depthOf(g.roundName) === 3)
-      .slice()
-      .sort((a, b) => (placesOf(a)?.[0] ?? 99) - (placesOf(b)?.[0] ?? 99));
-    return [
-      { key: 'qf', label: 'Quarterfinals', games: qf },
-      { key: 'sf', label: 'Semifinals', games: sf },
-      { key: 'final', label: 'Placement', games: finals },
-    ];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [games, placements]);
+  // Group into source brackets ("Bracket 1-8", "Bracket 9-16"), then split each
+  // into placement chains — one rendered tree per chain.
+  const brackets = new Map<string, EufGameCard[]>();
+  for (const g of bracketGames) {
+    const b = bracketOf(g.roundName)!;
+    if (!brackets.has(b)) brackets.set(b, []);
+    brackets.get(b)!.push(g);
+  }
 
+  const trees = [...brackets.entries()]
+    .flatMap(([name, list]) => splitBracketGroup(name, list, placesOf))
+    .sort((a, b) => a.order - b.order);
+
+  return (
+    <div className="flex flex-col gap-8">
+      {trees.map((tree) => (
+        <TreeSection key={tree.id} tree={tree} placesOf={placesOf} />
+      ))}
+    </div>
+  );
+}
+
+interface RoundColumn {
+  key: string;
+  label: string;
+  games: EufGameCard[];
+}
+
+interface SubTree {
+  id: string;
+  label: string;
+  order: number;
+  columns: RoundColumn[];
+}
+
+function sharesTeam(a: EufGameCard, b: EufGameCard): boolean {
+  const ids = [a.homeTeamId, a.awayTeamId].filter((x): x is string => !!x);
+  return (b.homeTeamId != null && ids.includes(b.homeTeamId)) ||
+    (b.awayTeamId != null && ids.includes(b.awayTeamId));
+}
+
+/**
+ * Split one source bracket group into separately-rendered placement chains.
+ *
+ * EUCS publishes an ENTIRE placement structure as one bracket ("Bracket 1-8"):
+ * its Semifinals round mixes winner semis with the losers' 5th–8th semis, and
+ * its Finals round is four simultaneous games deciding 1st/3rd/5th/7th. Drawn
+ * as one tree, the loser games share sources with the winner games, land on the
+ * same midpoints, and interleave into an unreadable mesh.
+ *
+ * So: walk the finals in placement order, each claiming its transitive sources
+ * by team overlap (a final's semis are the games its teams came from; those
+ * semis' quarters likewise). A final that claims play games roots a NEW tree —
+ * "Championship" (1st), "5th–8th Place" (5th) — while a final whose sources are
+ * already claimed (3rd/4th rides the winner semis, 7th/8th the loser semis)
+ * attaches to the tree that owns them, stacking under that tree's title game.
+ * The result reads like USAU club: Quarterfinals → Semifinals → Final.
+ */
+/** Labels assigned from the FINAL leftwards, so a bare opening round still
+ *  reads "Quarterfinals" when the bracket has no deeper rounds. */
+const ROUND_LABELS_FROM_FINAL = ['Final', 'Semifinals', 'Quarterfinals', 'Round of 16'];
+
+function toColumns(rounds: EufGameCard[][], finals: EufGameCard[]): RoundColumn[] {
+  const present = rounds.filter((r) => r.length > 0);
+  const cols: RoundColumn[] = present.map((games, i) => ({
+    key: `d${i}`,
+    // Distance from the final slot — identical with or without a finals round,
+    // since the deepest play round always sits one step left of it.
+    label: ROUND_LABELS_FROM_FINAL[present.length - i] ?? 'Early Round',
+    games,
+  }));
+  if (finals.length) cols.push({ key: 'final', label: 'Final', games: finals });
+  return cols;
+}
+
+function splitBracketGroup(
+  name: string,
+  games: EufGameCard[],
+  placesOf: (g: EufGameCard) => [number, number] | null,
+): SubTree[] {
+  const byDepth = (d: number) => games.filter((g) => depthOf(g.roundName) === d);
+  const r0All = byDepth(0);
+  const qfAll = byDepth(1);
+  const sfAll = byDepth(2);
+  const finals = byDepth(3)
+    .slice()
+    .sort((a, b) => (placesOf(a)?.[0] ?? 99) - (placesOf(b)?.[0] ?? 99));
+
+  const fallbackLabel = bracketBucket(name).label;
+  const bucketLo = Number(name.match(/(\d+)-/)?.[1] ?? 99);
+
+  // No finals round (mid-tournament scrape or odd shape): render as one tree.
+  if (finals.length === 0) {
+    return [
+      { id: name, label: fallbackLabel, order: bucketLo * 100, columns: toColumns([r0All, qfAll, sfAll], []) },
+    ];
+  }
+
+  const claimed = new Set<string>();
+  const trees: { finals: EufGameCard[]; rounds: EufGameCard[][] }[] = [];
+
+  for (const f of finals) {
+    // Claim this final's transitive sources, latest round first: its semis are
+    // the games its teams came from, those semis' quarters likewise, and so on.
+    const chain: EufGameCard[][] = [];
+    let seed: EufGameCard[] = [f];
+    for (const pool of [sfAll, qfAll, r0All]) {
+      const claimedHere = pool.filter(
+        (g) => !claimed.has(g.id) && seed.some((s) => sharesTeam(s, g)),
+      );
+      claimedHere.forEach((g) => claimed.add(g.id));
+      chain.unshift(claimedHere);
+      if (claimedHere.length) seed = claimedHere;
+    }
+
+    const claimedAny = chain.some((r) => r.length > 0);
+    if (claimedAny || trees.length === 0) {
+      trees.push({ finals: [f], rounds: chain });
+    } else {
+      // A final whose sources are all claimed (3rd/4th rides the winner semis,
+      // 7th/8th the losers') attaches to the tree that owns its DIRECT feeders.
+      // Prefer later rounds: matching on quarters alone would glue the 7th/8th
+      // game to the championship tree, whose quarters its teams fell out of.
+      let host: { finals: EufGameCard[]; rounds: EufGameCard[][] } | undefined;
+      for (let r = 2; r >= 0 && !host; r--) {
+        host = trees.find((t) => t.rounds[r]?.some((g) => sharesTeam(f, g)));
+      }
+      if (host) host.finals.push(f);
+      else trees.push({ finals: [f], rounds: [[], [], []] });
+    }
+  }
+
+  // Never drop a game: play games nothing claimed (TBD teams, forfeits with a
+  // null side) ride along with the first tree.
+  if (trees.length) {
+    [r0All, qfAll, sfAll].forEach((pool, i) => {
+      const orphans = pool.filter((g) => !claimed.has(g.id));
+      trees[0].rounds[i].push(...orphans);
+    });
+  }
+
+  return trees.map((t, i) => {
+    const places = t.finals
+      .flatMap((f) => placesOf(f) ?? [])
+      .sort((a, b) => a - b);
+    const lo = places[0];
+    const hi = places[places.length - 1];
+    const label =
+      lo === 1
+        ? 'Championship'
+        : lo != null && hi != null
+          ? `${ORDINAL(lo)}–${ORDINAL(hi)} Place`
+          : fallbackLabel;
+    return {
+      id: `${name}-${i}`,
+      label,
+      order: bucketLo * 100 + (lo ?? 99),
+      columns: toColumns(t.rounds, t.finals),
+    };
+  });
+}
+
+function TreeSection({
+  tree,
+  placesOf,
+}: {
+  tree: SubTree;
+  placesOf: (g: EufGameCard) => [number, number] | null;
+}) {
+  const { columns } = tree;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const positions = useMemo(() => assignPositions(columns), [columns]);
 
   if (columns.every((c) => c.games.length === 0)) return null;
@@ -147,7 +270,7 @@ function BracketGroup({
   return (
     <div>
       <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline mb-4">
-        {bracketBucket(name).label}
+        {tree.label}
       </h3>
 
       {/* Mobile: vertical stack by round, latest round FIRST (placement finals

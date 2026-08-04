@@ -826,7 +826,12 @@ export async function getEventSchedule(eventSlug: string): Promise<EufScheduleDa
 /** Events that actually have dated games, newest first — the /euf/schedule
  *  picker. Excludes the dateless registered-but-unplayed stops (e.g. 2026
  *  Summer Tour Bordeaux: 12 teams, 0 games) so the picker can't land on an
- *  event with nothing to show. */
+ *  event with nothing to show.
+ *
+ *  Sorts by start_date DESC here rather than inheriting listEvents(), which
+ *  orders by (year, NAME) — alphabetical within a year. That made the picker
+ *  default to whichever event sorted first by name ("2026 Bad Skid Invite",
+ *  a June stop) instead of the most recent one. */
 export async function listScheduleEvents(): Promise<EufScheduleEventOption[]> {
   const events = await listEvents();
   return events
@@ -837,7 +842,8 @@ export async function listScheduleEvents(): Promise<EufScheduleEventOption[]> {
       year: e.year,
       startDate: e.startDate,
       endDate: e.endDate,
-    }));
+    }))
+    .sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''));
 }
 
 // ─── Per-game box scores ─────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
 import { getTeam } from '@/lib/wfdf/data';
+import { wfdfGameTime } from '@/lib/wfdf/format-date';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 
 export const revalidate = 120;
@@ -157,7 +158,7 @@ export default async function WfdfTeamPage({ params }: Props) {
               const done = g.status === 'completed' && us != null && them != null;
               const won = done && (us ?? 0) > (them ?? 0);
               const sotg = g.awaySotg ?? g.homeSotg;
-              const timeLabel = formatGameTime(g.scheduledAt);
+              const timeLabel = wfdfGameTime(g.scheduledAt);
               const hasFooter = timeLabel != null || sotg != null;
               return (
                 <div
@@ -229,21 +230,6 @@ function Stat({ label, value }: { label: string; value: string | number }) {
 
 function Divider() {
   return <span className="w-px self-stretch bg-hairline mx-3 lg:mx-4" aria-hidden="true" />;
-}
-
-// Compact "Mon 28 · 10:30" label (UTC) for a game's scheduled time; null if absent.
-function formatGameTime(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const day = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
-  const time = d.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-  });
-  return `${day} · ${time}`;
 }
 
 function ordinal(n: number): string {

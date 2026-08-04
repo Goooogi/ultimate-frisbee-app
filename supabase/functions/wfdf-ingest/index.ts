@@ -420,7 +420,13 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
       inprogress: 'in_progress',
       scheduled: 'scheduled',
     };
-    const t = g.time_utc || g.time || null;
+    // VENUE-LOCAL WALL CLOCK, stored as UTC — same convention as EUCS/USAU
+    // masters (see src/lib/euf/format-date.ts). Prefer `time`, NOT `time_utc`:
+    // `time` is what the schedule site prints (13:00 = the 1:00 PM slot), while
+    // `time_utc` is that instant shifted to real UTC (12:00 at a UTC+1 venue).
+    // Since readers render this back in UTC unshifted, taking `time_utc` showed
+    // every WUCC game an hour early. `time_utc` is also absent on ~46% of rows.
+    const t = g.time || g.time_utc || null;
     return {
       event_id: eventId,
       wfdf_game_id: g.game_id,

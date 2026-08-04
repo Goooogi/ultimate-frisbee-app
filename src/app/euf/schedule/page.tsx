@@ -48,9 +48,16 @@ export default async function EufSchedulePage({ searchParams }: Props) {
     );
   }
 
-  // listScheduleEvents() is newest-first, so the default is the most recent
-  // dated event. An unknown ?event= falls back to it rather than 404ing.
-  const active = events.find((e) => e.slug === searchParams.event) ?? events[0];
+  // Default to the event in progress or next up; in the offseason (every event
+  // in the past) fall back to the most recent. listScheduleEvents() is
+  // start_date DESC, so the last entry still ending today-or-later is the
+  // soonest upcoming one. An unknown ?event= falls back rather than 404ing.
+  const today = new Date().toISOString().slice(0, 10);
+  const currentOrNext = [...events]
+    .reverse()
+    .find((e) => (e.endDate ?? e.startDate ?? '') >= today);
+  const active =
+    events.find((e) => e.slug === searchParams.event) ?? currentOrNext ?? events[0];
   const days = await getEventSchedule(active.slug).catch(() => []);
   const range = eufDateRange(active.startDate, active.endDate);
 
