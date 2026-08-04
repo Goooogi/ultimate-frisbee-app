@@ -48,7 +48,12 @@ import 'server-only';
 import { createClient } from '@/lib/supabase/server';
 import { getPlayerInfo } from '@/lib/ufa/client';
 import { teamBySlugOrAbbr } from '@/lib/ufa/teams';
-import { ufaTeamState, statesForEventName, isUsStateCode } from '@/lib/usau/regions';
+import {
+  ufaTeamState,
+  statesForEventName,
+  isUsStateCode,
+  isStateCoveredByRegionMap,
+} from '@/lib/usau/regions';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PlayerKind } from '@/lib/player-content/types';
 import type {
@@ -374,6 +379,12 @@ function shouldAttachUfa(
     .map((st) => (st.teamId ? ufaTeamState(st.teamId) : null))
     .filter((s): s is string => s != null && isUsStateCode(s));
   if (ufaStates.length === 0) return true;
+  // A state the region map never lists can't be CONTRADICTED by it — the
+  // absence is our gap, not evidence of a different person. Abstain (keep the
+  // career) unless every UFA state is one the map actually covers. Without
+  // this, one missing state in USAU_REGION_STATES silently deletes a whole
+  // real UFA career (it deleted every Salt Lake Shred player's).
+  if (!ufaStates.every((s) => isStateCoveredByRegionMap(s))) return true;
   return ufaStates.some((s) => usauStates.has(s));
 }
 

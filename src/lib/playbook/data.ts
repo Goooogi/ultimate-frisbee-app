@@ -191,6 +191,12 @@ export async function leaveTeam(teamID: string): Promise<void> {
 
 export async function listTeamMembers(teamID: string): Promise<TeamMember[]> {
   const supabase = createClient();
+  // `email` can NOT be joined off `profiles` any more: the mobile repo's
+  // 20260802000100_profiles_restrict_pii migration REVOKEd column-level SELECT
+  // on profiles.email/phone from `authenticated`, and PostgREST fails the whole
+  // request with 42501 when a revoked column is requested — this threw for every
+  // team. It moved to the `profile_contact` view, which exposes email to you,
+  // to admins, and to your TEAMMATES (via pb_team_members) — exactly this case.
   const { data, error } = await supabase
     .from('pb_team_members')
     .select(
@@ -199,21 +205,37 @@ export async function listTeamMembers(teamID: string): Promise<TeamMember[]> {
       joined_at,
       user_id,
       profiles:user_id (
-        display_name,
-        email
+        display_name
       )
     `,
     )
     .eq('team_id', teamID);
   if (error) throw error;
 
-  return (data ?? []).map((row) => {
-    const profile = row.profiles as { display_name: string | null; email: string } | null;
+  const rows = data ?? [];
+  // Second read rather than a join — profile_contact is a view, so PostgREST
+  // has no FK to embed it through.
+  const emails = new Map<string, string>();
+  if (rows.length > 0) {
+    const { data: contacts } = await supabase
+      .from('profile_contact')
+      .select('id, email')
+      .in(
+        'id',
+        rows.map((r) => r.user_id),
+      );
+    for (const c of contacts ?? []) {
+      if (c.email) emails.set(c.id as string, c.email as string);
+    }
+  }
+
+  return rows.map((row) => {
+    const profile = row.profiles as { display_name: string | null } | null;
     return {
       userID: row.user_id,
       role: row.role as TeamRole,
       displayName: profile?.display_name ?? null,
-      email: profile?.email ?? '',
+      email: emails.get(row.user_id) ?? '',
       joinedAt: new Date(row.joined_at).getTime(),
     };
   });

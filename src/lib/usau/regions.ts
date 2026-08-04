@@ -23,7 +23,11 @@
 export const USAU_REGION_STATES: Record<string, string[]> = {
   // ── Sections (granular) ──
   'rocky mountain': ['CO', 'WY', 'MT'],
-  'big sky': ['MT', 'ID', 'WY'],
+  // UT is the LARGEST state in Big Sky by team count (58 distinct teams vs
+  // Montana's 50), not a minor member — it was missing here, which silently
+  // dropped the whole UFA career of every Salt Lake player whose USAU history
+  // runs through this section (Jordan Kerr / Salt Lake Shred).
+  'big sky': ['UT', 'MT', 'ID', 'WY'],
   'east plains': ['OH', 'MI', 'IN', 'KY'],
   'west plains': ['IL', 'WI', 'MN', 'IA'],
   'northwest plains': ['MN', 'ND', 'SD'],
@@ -55,7 +59,9 @@ export const USAU_REGION_STATES: Record<string, string[]> = {
 
   // ── Regions (coarse fallback) ──
   'rocky mountain region': ['CO', 'WY', 'MT', 'ID'],
-  northwest: ['WA', 'OR', 'AK', 'MT', 'ID'],
+  // Utah plays UP into the Northwest region from Big Sky — 66 distinct UT teams
+  // in Northwest regionals, third only to WA and OR. Same omission as 'big sky'.
+  northwest: ['WA', 'OR', 'UT', 'AK', 'MT', 'ID'],
   southwest: ['CA', 'NV', 'AZ', 'HI'],
   'north central': ['MN', 'WI', 'IA', 'ND', 'SD', 'NE'],
   'south central': ['TX', 'CO', 'OK', 'AR', 'LA', 'NM', 'KS', 'MO'],
@@ -116,6 +122,29 @@ export const UFA_TEAM_STATE: Record<string, string> = {
   rampage: 'MA',
   hammerheads: 'NJ',
 };
+
+/**
+ * Does a UFA team's state belong to a region/section whose mapping we consider
+ * COMPLETE enough to argue from?
+ *
+ * The attribution gate treats "no overlap" as proof of two different people and
+ * drops an entire UFA career. That inference is only sound when the state-set
+ * on both sides is complete. USAU_REGION_STATES is explicitly "not exhaustive
+ * of every micro-section" (see its doc), so a state we simply never listed
+ * looks identical to a genuine contradiction — that's how every Salt Lake
+ * player lost their Shred career when 'big sky' omitted UT.
+ *
+ * This is the safety valve: a UFA state that appears NOWHERE in the map cannot
+ * be contradicted by it, so the gate must abstain rather than drop. Adding a
+ * state to a region above automatically makes it "coverable" here.
+ */
+export function isStateCoveredByRegionMap(state: string): boolean {
+  const s = state.trim().toUpperCase();
+  for (const states of Object.values(USAU_REGION_STATES)) {
+    if (states.includes(s)) return true;
+  }
+  return false;
+}
 
 /** UFA team's home state (postal code), or null if unknown/non-US. */
 export function ufaTeamState(slug: string): string | null {

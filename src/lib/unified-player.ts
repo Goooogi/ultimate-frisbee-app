@@ -27,7 +27,7 @@ import {
 } from '@/lib/ufa/client';
 import { teamMetaByAbbr, teamBySlugOrAbbr as teamMeta, type TeamMeta } from '@/lib/ufa/teams';
 import { getUfaPlayerFromDb, findUfaSlugByNameFromDb } from '@/lib/ufa/db-player';
-import { ufaTeamState, isUsStateCode } from '@/lib/usau/regions';
+import { ufaTeamState, isUsStateCode, isStateCoveredByRegionMap } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow, UfaPlayerSeasonRow } from '@/lib/ufa/types';
 import {
   findUsauPlayerByName,
@@ -478,7 +478,11 @@ async function _getUnifiedPlayerProfile(
     // PROVINCES (QC/ON), not null, so they must be filtered explicitly — a
     // province can never appear in homeStates, so comparing one would always
     // miss and drop the entire real UFA career.
-    if (ufaStates.length > 0) {
+    // A state the region map never lists can't be CONTRADICTED by it — the
+    // absence is our gap, not evidence of a different person. Abstain unless
+    // every UFA state is one the map actually covers. (Kept identical to the
+    // RPC path's shouldAttachUfa; the two must not disagree on one player.)
+    if (ufaStates.length > 0 && ufaStates.every((s) => isStateCoveredByRegionMap(s))) {
       attachUfa = ufaStates.some((s) => usauStates.has(s));
     }
   }

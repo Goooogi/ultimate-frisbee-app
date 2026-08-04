@@ -8,6 +8,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { getTeam, getTeamRoster, listTeamGames } from '@/lib/euf/data';
+import { eufGameDate } from '@/lib/euf/format-date';
 import { EufFlag } from '@/components/euf/euf-flag';
 
 export const revalidate = 300;
@@ -102,9 +103,11 @@ export default async function EufTeamPage({ params }: Props) {
                         <span className="truncate">{oppName}</span>
                       )}
                     </span>
-                    {g.roundName && (
+                    {/* Round + date, desktop only — the phone row is already
+                        full with result/score/opponent. */}
+                    {(g.roundName || g.scheduledAt) && (
                       <span className="text-[10px] text-muted font-tight flex-shrink-0 hidden sm:inline">
-                        {g.roundName}
+                        {[g.roundName, eufGameDate(g.scheduledAt)].filter(Boolean).join(' · ')}
                       </span>
                     )}
                     <Link

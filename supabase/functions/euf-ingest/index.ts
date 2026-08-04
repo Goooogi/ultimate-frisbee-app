@@ -70,6 +70,57 @@ async function pooled<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[
   return out;
 }
 
+/**
+ * Season ids + names from the Ultiorganizer season selector.
+ *
+ * Every page renders it, and it is the ONLY index the site exposes — there is
+ * no ?view=seasons/tournaments listing (checked). Shape:
+ *   <select class='seasondropdown' name='selseason'>
+ *     <option class='dropdown' value='26SUMBORD'>2026 Summer Tour Bordeaux</option>
+ *
+ * Scoped to the <select name='selseason'> block specifically so unrelated
+ * dropdowns on the page (division/pool pickers) can't leak in as seasons.
+ */
+function parseSeasonOptions(html: string): Array<{ season: string; name: string }> {
+  const block = html.match(/<select[^>]*name=['"]selseason['"][\s\S]*?<\/select>/i);
+  if (!block) return [];
+  const out: Array<{ season: string; name: string }> = [];
+  const seen = new Set<string>();
+  for (const m of block[0].matchAll(
+    /<option[^>]*value=['"]([^'"]+)['"][^>]*>([\s\S]*?)<\/option>/gi,
+  )) {
+    const season = m[1].trim();
+    // Strip tags/entities from the label and collapse whitespace.
+    const name = m[2]
+      .replace(/<[^>]*>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&nbsp;/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    // Season ids are short alphanumeric slugs; reject anything else so a
+    // placeholder option ("", "Select a season…") can't become a season.
+    if (!season || !/^[A-Za-z0-9_-]{2,40}$/.test(season)) continue;
+    if (seen.has(season)) continue;
+    seen.add(season);
+    out.push({ season, name: name || season });
+  }
+  return out;
+}
+
+/** Event kind from its display name, matching the vocabulary already in
+ *  euf_events (eucf/e2cf/elite_invite/spring_tour/summer_tour/regional/other). */
+function kindFromName(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes('e2cf')) return 'e2cf';
+  if (n.includes('eucf')) return 'eucf';
+  if (n.includes('eucr')) return 'regional';
+  if (n.includes('elite invite')) return 'elite_invite';
+  if (n.includes('spring tour')) return 'spring_tour';
+  if (n.includes('summer tour')) return 'summer_tour';
+  if (n.includes('invite')) return 'regional';
+  return 'other';
+}
+
 interface IngestBody {
   season: string;
   name?: string;
@@ -319,7 +370,178 @@ Deno.serve(async (req) => {
     });
   }
   try {
-    const body = (await req.json()) as IngestBody;
+    const body = (await req.json()) as IngestBody & {
+      dispatch?: string;
+      lookaheadDays?: number;
+      trailingDays?: number;
+      stats?: boolean;
+    };
+
+    // ── Discovery dispatch (cron) ────────────────────────────────────────────
+    // { "dispatch": "discover" } → find EUCS seasons we don't have yet.
+    //
+    // Every Ultiorganizer page renders a SEASON SELECTOR listing every season
+    // the site knows about:
+    //   <select name='selseason'><option value='26SUMBORD'>2026 Summer Tour
+    //   Bordeaux</option>…</select>
+    // That's an authoritative index (32 options today = exactly our 32 events),
+    // and it carries the display NAME too, so a discovered event gets real
+    // metadata rather than a bare id.
+    //
+    // Unknown seasons are ingested; known ones are left to the refresh job.
+    if (body?.dispatch === 'discover') {
+      const supabase = db();
+      const MAX_NEW = 12; // bound the work in one run; the rest come next tick
+
+      // Any event page renders the full selector — use a season we already have,
+      // else the bare index.
+      const { data: seed } = await supabase
+        .from('euf_events')
+        .select('season_id')
+        .order('year', { ascending: false })
+        .limit(1);
+      const seedSeason = seed?.[0]?.season_id as string | undefined;
+      const indexUrl = seedSeason
+        ? `${BASE}/?view=games&season=${encodeURIComponent(seedSeason)}`
+        : `${BASE}/?view=index`;
+
+      const html = await fetchHtml(indexUrl);
+      if (!html) {
+        return new Response(
+          JSON.stringify({ ok: false, mode: 'dispatch-discover', error: 'index fetch failed' }),
+          { status: 502, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      const options = parseSeasonOptions(html);
+      if (options.length === 0) {
+        // Never silently report "all clear" when the parse broke — an empty
+        // list is indistinguishable from "nothing new" to a caller.
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            mode: 'dispatch-discover',
+            error: 'season selector not found or empty — markup may have changed',
+          }),
+          { status: 502, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+
+      const { data: known } = await supabase.from('euf_events').select('season_id');
+      const knownIds = new Set(
+        (known ?? []).map((e: any) => String(e.season_id ?? '').toLowerCase()),
+      );
+
+      const fresh = options.filter((o) => !knownIds.has(o.season.toLowerCase()));
+      const discovered: any[] = [];
+      const failed: any[] = [];
+
+      for (const o of fresh.slice(0, MAX_NEW)) {
+        try {
+          const r = await ingest(supabase, {
+            season: o.season,
+            name: o.name,
+            slug: o.season.toLowerCase(),
+            kind: kindFromName(o.name),
+            // year/dates are derived from the schedule's day headers by ingest().
+            stats: body.stats === true,
+          } as IngestBody);
+          discovered.push({ season: o.season, name: o.name, teams: r.teams, games: r.games });
+          console.log(`[euf-ingest] discovered ${o.name} (${r.teams} teams, ${r.games} games)`);
+        } catch (err) {
+          failed.push({
+            season: o.season,
+            name: o.name,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          console.error(`[euf-ingest] discovery failed for ${o.season}:`, err);
+        }
+      }
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          mode: 'dispatch-discover',
+          seasonsListed: options.length,
+          newFound: fresh.length,
+          ingested: discovered.length,
+          skipped: fresh.length - Math.min(fresh.length, MAX_NEW),
+          discovered,
+          failed,
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    // ── Refresh dispatch (cron) ──────────────────────────────────────────────
+    // { "dispatch": "refresh" } → re-ingest every event in or near its date
+    // window, so a LIVE EUCS season stays current without manual invocation.
+    //
+    // EUCS has no season index (the site exposes no list of season ids — see
+    // the vault note), so this can only refresh events we already know about.
+    // NEW events still have to be added once by hand; after that this keeps
+    // them fresh automatically.
+    //
+    // Re-ingest ECHOES BACK the stored name/kind/slug/location. That matters:
+    // ingest() defaults those fields, so NOT echoing them would rewrite good
+    // metadata with defaults (documented gotcha in the vault's re-ingest recipe).
+    //
+    // stats:false by default — the per-game box-score refetch is the expensive
+    // part and rarely changes for a played game. Pass {stats:true} to include it.
+    if (body?.dispatch === 'refresh') {
+      const supabase = db();
+      const LOOKAHEAD = Number(body.lookaheadDays ?? 21);
+      const TRAILING = Number(body.trailingDays ?? 3);
+      const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+
+      // In-window events, PLUS any dateless event for the current/next year —
+      // a registered-but-unplayed stop (e.g. 26SUMBORD) has no dates yet and
+      // would otherwise never be picked up once its schedule is published.
+      const thisYear = new Date().getUTCFullYear();
+      const { data: rows, error } = await supabase
+        .from('euf_events')
+        .select('season_id, slug, name, year, kind, location, start_date, end_date')
+        .or(
+          `and(start_date.lte.${day(LOOKAHEAD)},end_date.gte.${day(-TRAILING)}),` +
+            `and(start_date.is.null,year.gte.${thisYear})`,
+        );
+      if (error) {
+        return new Response(JSON.stringify({ ok: false, error: error.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      const results: any[] = [];
+      for (const e of rows ?? []) {
+        try {
+          const r = await ingest(supabase, {
+            season: e.season_id as string,
+            // Echo stored metadata back so defaults can't overwrite it.
+            slug: e.slug as string,
+            name: e.name as string,
+            year: e.year as number,
+            kind: e.kind as string,
+            location: (e.location as string) ?? undefined,
+            stats: body.stats === true,
+          } as IngestBody);
+          results.push({ season: e.season_id, ok: true, teams: r.teams, games: r.games });
+        } catch (err) {
+          results.push({
+            season: e.season_id,
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          console.error(`[euf-ingest] refresh failed for ${e.season_id}:`, err);
+        }
+      }
+      const failed = results.filter((r) => !r.ok).length;
+      return new Response(
+        JSON.stringify({ ok: true, mode: 'dispatch-refresh', events: results.length, failed, results }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
     const result = await ingest(db(), body);
     return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },

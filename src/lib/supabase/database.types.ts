@@ -3018,6 +3018,24 @@ export type Database = {
       }
     }
     Views: {
+      profile_contact: {
+        Row: {
+          email: string | null
+          id: string | null
+          phone: string | null
+        }
+        Insert: {
+          email?: string | null
+          id?: string | null
+          phone?: string | null
+        }
+        Update: {
+          email?: string | null
+          id?: string | null
+          phone?: string | null
+        }
+        Relationships: []
+      }
       profiles_public: {
         Row: {
           avatar_url: string | null

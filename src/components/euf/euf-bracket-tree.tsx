@@ -20,14 +20,29 @@ import type { EufGameCard } from '@/lib/euf/data';
 import { bracketBucket, ordinal as sharedOrdinal } from '@/lib/bracket-tree';
 import { EufFlag } from './euf-flag';
 
-/** "Bracket 1-8 Semifinals" → "Bracket 1-8" */
+/** "Bracket 1-8 Semifinals" → "Bracket 1-8"
+ *
+ *  Upstream writes the bracket range on EITHER side of the word: the tour stops
+ *  use "Bracket 1-8 Finals" while EUCF 2023 uses "1-16 Bracket Finals". Only the
+ *  prefix form was matched before, so EUCF 2023's 44 bracket games — the whole
+ *  championship — fell through to the flat round lists and never drew a tree.
+ *  Both shapes normalize to the same "Bracket {lo}-{hi}" key so bracketBucket()
+ *  labels them identically. */
 function bracketOf(roundName: string | null): string | null {
-  if (!roundName || !/^Bracket \d+-\d+/.test(roundName)) return null;
-  return roundName.replace(/\s+(Semifinals|Finals)$/, '');
+  if (!roundName) return null;
+  const stripped = roundName.replace(/\s+(Quarterfinals|Semifinals|Finals)$/, '');
+  const prefix = stripped.match(/^Bracket (\d+)-(\d+)$/);
+  if (prefix) return `Bracket ${prefix[1]}-${prefix[2]}`;
+  const suffix = stripped.match(/^(\d+)-(\d+) Bracket$/);
+  if (suffix) return `Bracket ${suffix[1]}-${suffix[2]}`;
+  return null;
 }
 
+/** Column index within a bracket. EUCF 2023 adds an explicit Quarterfinals
+ *  round, so the tree is up to 3 columns of play plus the placement finals. */
 function depthOf(roundName: string | null): number {
   if (!roundName) return 1;
+  if (/Quarterfinals$/.test(roundName)) return 1;
   if (/Semifinals$/.test(roundName)) return 2;
   if (/Finals$/.test(roundName)) return 3;
   return 1;

@@ -140,15 +140,16 @@ const WFDF_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players' },
 ];
 
-// EUCS — event-scoped hub, no ?league= qs. Same four surfaces as WFDF. "Clubs"
-// is EUF's Teams (euf_teams rows are per-event; /euf/clubs merges them by
-// name+division). No Schedule: the source has no game DATES, only a
-// time-of-day, and every game is already played. See lib/euf/data.ts.
+// EUCS — event-scoped hub, no ?league= qs. Carries the full USAU surface set.
+// "Clubs" is EUF's Teams (euf_teams rows are per-event; /euf/clubs merges them
+// by name+division). Schedule is event-scoped and reads scheduled_at, which the
+// date backfill populated for all 1,632 games. See lib/euf/data.ts.
 const EUF_NAV_ITEMS: GamesNavItem[] = [
-  { label: 'Events',  href: '/euf/events',  match: '/euf/events' },
-  { label: 'Scores',  href: '/euf/scores',  match: '/euf/scores' },
-  { label: 'Clubs',   href: '/euf/clubs',   match: '/euf/clubs', aliases: ['/euf/teams'] },
-  { label: 'Players', href: '/euf/players', match: '/euf/players' },
+  { label: 'Events',   href: '/euf/events',   match: '/euf/events' },
+  { label: 'Scores',   href: '/euf/scores',   match: '/euf/scores' },
+  { label: 'Schedule', href: '/euf/schedule', match: '/euf/schedule' },
+  { label: 'Clubs',    href: '/euf/clubs',    match: '/euf/clubs', aliases: ['/euf/teams'] },
+  { label: 'Players',  href: '/euf/players',  match: '/euf/players' },
 ];
 
 interface GamesNavItem {

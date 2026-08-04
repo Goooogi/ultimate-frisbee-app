@@ -81,6 +81,10 @@ export interface EufGameCard {
   awayScore: number | null;
   field: string | null;
   startTime: string | null;
+  /** Full date+time of the game. Venue-local wall clock stored as UTC (the
+   *  source publishes no offset), so it must be READ in UTC — same convention
+   *  as the USAU masters ingest. Use `eufGameDate`/`eufGameTime` to format. */
+  scheduledAt: string | null;
   status: string;
 }
 
@@ -215,7 +219,7 @@ export async function getStandings(eventSlug: string): Promise<EufStandingRow[]>
 
 const GAME_SELECT =
   'id, division, round_name, stage, is_bracket, home_team_id, away_team_id, ' +
-  'home_score, away_score, field, start_time, status, ' +
+  'home_score, away_score, field, start_time, scheduled_at, status, ' +
   'home:home_team_id(name, country_name), away:away_team_id(name, country_name)';
 
 function toGameCard(g: Row): EufGameCard {
@@ -237,6 +241,7 @@ function toGameCard(g: Row): EufGameCard {
     awayScore: (g.away_score as number) ?? null,
     field: (g.field as string) ?? null,
     startTime: (g.start_time as string) ?? null,
+    scheduledAt: (g.scheduled_at as string) ?? null,
     status: (g.status as string) ?? 'completed',
   };
 }
@@ -247,7 +252,12 @@ export async function listEventGames(
 ): Promise<EufGameCard[]> {
   let q = supabase().from('euf_games').select(GAME_SELECT).eq('event_id', eventId);
   if (division) q = q.eq('division', division);
-  const { data, error } = await q.order('start_time', { nullsFirst: false }).limit(1000);
+  // Order by the full instant, not start_time — start_time is a bare
+  // time-of-day, so ordering on it interleaves Sunday's 9am with Saturday's.
+  const { data, error } = await q
+    .order('scheduled_at', { nullsFirst: false })
+    .order('start_time', { nullsFirst: false })
+    .limit(1000);
   if (error || !data) return [];
   return (data as Row[]).map(toGameCard);
 }
@@ -259,10 +269,15 @@ export async function listTeamGames(teamId: string): Promise<EufGameCard[]> {
   // PostgREST filter string where "," and "." are grammar — so anything but a
   // well-formed uuid could inject extra filter clauses. Guard before building it.
   if (!UUID_RE.test(teamId)) return [];
+  // Chronological — this list had no ORDER BY at all, so a team's results came
+  // back in arbitrary storage order (a Sunday final could sit above Saturday's
+  // pool games).
   const { data, error } = await supabase()
     .from('euf_games')
     .select(GAME_SELECT)
     .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
+    .order('scheduled_at', { nullsFirst: false })
+    .order('start_time', { nullsFirst: false })
     .limit(200);
   if (error || !data) return [];
   return (data as Row[]).map(toGameCard);
@@ -632,6 +647,8 @@ export interface EufEventScoreSummary {
   year: number;
   kind: string;
   location: string | null;
+  startDate: string | null;
+  endDate: string | null;
   gameCount: number;
   teamCount: number;
   divisions: EufDivision[];
@@ -662,6 +679,8 @@ export async function listEventScoreSummaries(): Promise<EufEventScoreSummary[]>
     year: e.year,
     kind: e.kind,
     location: e.location,
+    startDate: e.startDate,
+    endDate: e.endDate,
     gameCount: counts.get(e.id) ?? 0,
     teamCount: e.teamCount,
     divisions: e.divisions,
@@ -695,6 +714,77 @@ export async function listTopPlayers(limit = 200): Promise<EufPlayerHubRow[]> {
     assists: (p.assists as number) ?? 0,
     points: (p.points as number) ?? 0,
   }));
+}
+
+// ─── Schedule (date-grouped games) ───────────────────────────────────────────
+
+export interface EufScheduleGame extends EufGameCard {
+  eventSlug: string;
+  eventName: string;
+}
+
+export interface EufScheduleDay {
+  /** YYYY-MM-DD, the UTC-derived day key (see lib/euf/format-date). */
+  date: string;
+  games: EufScheduleGame[];
+}
+
+export interface EufScheduleEventOption {
+  slug: string;
+  name: string;
+  year: number;
+  startDate: string | null;
+  endDate: string | null;
+}
+
+/**
+ * Every game for one event, grouped by day. Event-scoped rather than
+ * league-wide-by-date: EUCS runs several tour stops on the SAME weekend, so a
+ * flat date feed interleaves unrelated tournaments into one unreadable list.
+ * The picker on /euf/schedule chooses which event this reads.
+ */
+export async function getEventSchedule(eventSlug: string): Promise<EufScheduleDay[]> {
+  const ev = await getEvent(eventSlug);
+  if (!ev) return [];
+
+  const { data, error } = await supabase()
+    .from('euf_games')
+    .select(GAME_SELECT)
+    .eq('event_id', ev.id)
+    .order('scheduled_at', { nullsFirst: false })
+    .order('start_time', { nullsFirst: false })
+    .limit(1000);
+  if (error || !data) return [];
+
+  const byDay = new Map<string, EufScheduleGame[]>();
+  for (const row of data as Row[]) {
+    const g = toGameCard(row);
+    // Bucket in UTC to match how the time renders — see format-date.ts.
+    const key = g.scheduledAt ? g.scheduledAt.slice(0, 10) : 'undated';
+    if (!byDay.has(key)) byDay.set(key, []);
+    byDay.get(key)!.push({ ...g, eventSlug: ev.slug, eventName: ev.name });
+  }
+
+  return [...byDay.entries()]
+    .sort((a, b) => (a[0] === 'undated' ? 1 : b[0] === 'undated' ? -1 : a[0].localeCompare(b[0])))
+    .map(([date, games]) => ({ date, games }));
+}
+
+/** Events that actually have dated games, newest first — the /euf/schedule
+ *  picker. Excludes the dateless registered-but-unplayed stops (e.g. 2026
+ *  Summer Tour Bordeaux: 12 teams, 0 games) so the picker can't land on an
+ *  event with nothing to show. */
+export async function listScheduleEvents(): Promise<EufScheduleEventOption[]> {
+  const events = await listEvents();
+  return events
+    .filter((e) => e.startDate)
+    .map((e) => ({
+      slug: e.slug,
+      name: e.name,
+      year: e.year,
+      startDate: e.startDate,
+      endDate: e.endDate,
+    }));
 }
 
 // ─── Per-game box scores ─────────────────────────────────────────────────────

@@ -68,18 +68,19 @@ const WFDF_NAV_ITEMS: NavItem[] = [
 ];
 
 // EUCS — same event-scoped hub treatment as WFDF (pages under /euf/*, no
-// ?league= param), and the same four surfaces. "Clubs" is EUF's Teams: the
-// euf_teams rows are per-event, so /euf/clubs merges them by (name, division)
-// into the league-wide entity. Players likewise merge by name.
+// ?league= param), carrying the full USAU surface set. "Clubs" is EUF's Teams:
+// the euf_teams rows are per-event, so /euf/clubs merges them by (name,
+// division) into the league-wide entity. Players likewise merge by name.
 //
-// No Schedule item: euf_games.scheduled_at is entirely NULL and euf_events has
-// no start_date, so the source gives a time-of-day with no date to hang it on —
-// and every game already has a result. See lib/euf/data.ts.
+// Schedule became possible once the dates were backfilled — all 1,632 games now
+// carry scheduled_at (the parser had been discarding the day headers). It is
+// event-scoped, since EUCS runs several tour stops on the same weekend.
 const EUF_NAV_ITEMS: NavItem[] = [
-  { label: 'Events',  href: '/euf/events',  match: '/euf/events' },
-  { label: 'Scores',  href: '/euf/scores',  match: '/euf/scores' },
-  { label: 'Clubs',   href: '/euf/clubs',   match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
-  { label: 'Players', href: '/euf/players', match: '/euf/players', aliases: ['/euf/players'] },
+  { label: 'Events',   href: '/euf/events',   match: '/euf/events' },
+  { label: 'Scores',   href: '/euf/scores',   match: '/euf/scores' },
+  { label: 'Schedule', href: '/euf/schedule', match: '/euf/schedule' },
+  { label: 'Clubs',    href: '/euf/clubs',    match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
+  { label: 'Players',  href: '/euf/players',  match: '/euf/players', aliases: ['/euf/players'] },
 ];
 
 // The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under

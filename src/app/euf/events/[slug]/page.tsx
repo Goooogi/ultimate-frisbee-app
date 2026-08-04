@@ -4,7 +4,8 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
-import { getEvent, getStandings, listEventGames } from '@/lib/euf/data';
+import { getEvent, getStandings, listEventGames, type EufEventCard } from '@/lib/euf/data';
+import { eufDateRange } from '@/lib/euf/format-date';
 import { EufEventDetail } from '@/components/euf/euf-event-detail';
 
 export const revalidate = 120;
@@ -32,22 +33,36 @@ export default async function EufEventPage({ params }: Props) {
     <PageShell
       title={ev.name}
       eyebrow="EUF · EUCS"
-      subtitle={ev.location ?? undefined}
+      subtitle={formatSubtitle(ev) ?? undefined}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'EUCS', href: '/euf/events' },
         { label: ev.name },
       ]}
     >
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <Link
           href={`/euf/events/${ev.slug}/leaders`}
           className="text-[11px] font-bold tracking-[0.06em] uppercase font-tight text-accent no-underline hover:underline"
         >
           Scoring leaders →
         </Link>
+        <Link
+          href={`/euf/schedule?event=${ev.slug}`}
+          className="text-[11px] font-bold tracking-[0.06em] uppercase font-tight text-accent no-underline hover:underline"
+        >
+          Full schedule →
+        </Link>
       </div>
       <EufEventDetail divisions={ev.divisions} standings={standings} games={games} />
     </PageShell>
   );
+}
+
+/** "Sep 19 – 21, 2025 · Wroclaw, Poland" — dates lead, same as the USAU event
+ *  page. Falls back to location alone for the one dateless event (2026 Summer
+ *  Tour Bordeaux: registered, not yet played). */
+function formatSubtitle(ev: EufEventCard): string | null {
+  const parts = [eufDateRange(ev.startDate, ev.endDate), ev.location].filter(Boolean) as string[];
+  return parts.length > 0 ? parts.join(' · ') : null;
 }

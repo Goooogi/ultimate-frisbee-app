@@ -23,14 +23,12 @@ export function canUseUtcg(role: UserRole | null | undefined): boolean {
 
 export interface Profile {
   id: string;
-  email: string;
   display_name: string | null;
   username: string | null;
   avatar_url: string | null;
   /** Picked team-logo/flag icon as a "league:teamId" reference. Takes render
    *  precedence over avatar_url; mutually exclusive with it at the app layer. */
   avatar_icon: string | null;
-  phone: string | null;
   role: UserRole;
 }
 

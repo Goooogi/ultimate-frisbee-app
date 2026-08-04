@@ -10,6 +10,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { getGame, getGameStats, type EufGameStatLine } from '@/lib/euf/data';
+import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
 import { EufFlag } from '@/components/euf/euf-flag';
 
 export const revalidate = 300;
@@ -49,7 +50,12 @@ export default async function EufGamePage({ params }: Props) {
     <PageShell
       title={`${game.homeName} vs ${game.awayName}`}
       eyebrow={`EUCS · ${game.division}`}
-      subtitle={[game.eventName, game.roundName, game.field ? `Field ${game.field}` : null]
+      subtitle={[
+        game.eventName,
+        eufGameDate(game.scheduledAt, true) || null,
+        game.roundName,
+        game.field ? `Field ${game.field}` : null,
+      ]
         .filter(Boolean)
         .join(' · ')}
       breadcrumbs={[
@@ -64,7 +70,13 @@ export default async function EufGamePage({ params }: Props) {
         <section className="rounded-card-lg bg-surface shadow-card p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-3">
             <span>{game.status === 'forfeit' ? 'Forfeit' : 'Final'}</span>
-            {game.startTime && <span className="tabular-nums">{game.startTime}</span>}
+            {/* Prefer the full instant; start_time is a bare time-of-day and
+                would read as a floating "9:05" with no day attached. */}
+            {(eufGameTime(game.scheduledAt) || game.startTime) && (
+              <span className="tabular-nums">
+                {eufGameTime(game.scheduledAt) || game.startTime}
+              </span>
+            )}
           </div>
           <ScoreRow
             teamId={game.homeTeamId}
