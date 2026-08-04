@@ -765,7 +765,9 @@ function EufStintRow({ stint }: { stint: EufSeasonStint }) {
   return (
     <div className="px-4 py-3 flex items-center gap-3">
       <Link
-        href={`/euf/teams/${stint.teamId}`}
+        href={`/euf/clubs/${encodeURIComponent(stint.teamName)}${
+          stint.divisionName ? `?div=${encodeURIComponent(stint.divisionName)}` : ''
+        }`}
         className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
       >
         <EufFlag countryName={stint.countryName} size={20} />

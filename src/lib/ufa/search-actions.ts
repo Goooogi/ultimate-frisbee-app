@@ -132,6 +132,13 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     }
   }
 
+  // Names covered by an ANCHOR-league row (USAU or UFA) — both route to the
+  // unified /players/[id] profile, which already merges every league's stints
+  // by name, so a PUL/WUL/WFDF/EUCS row for the same human is redundant. UFA
+  // matters for European pros with no USAU record (Miglioretto, Gasperini, …)
+  // who would otherwise double-list next to their EUCS entry.
+  const coveredNames = [...usauPlayerNames, ...ufaResults.map((r) => r.name)];
+
   // ── UFA teams (synchronous, in-memory) ────────────────────────────────
   // ALL teams (not just currently-active) so folded/historical franchises are
   // still findable. Match on team name OR city — "Boston" should surface
@@ -184,7 +191,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   const pulPlayerResults: SearchResult[] = [];
   for (const p of pulPlayers) {
     if (pulPlayerResults.length >= cap) break;
-    if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+    if (coveredNames.some((n) => namesMatch(n, p.playerName))) continue;
     pulPlayerResults.push({
       kind: 'player',
       id: p.id,
@@ -216,7 +223,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   const wulPlayerResults: SearchResult[] = [];
   for (const p of wulPlayers) {
     if (wulPlayerResults.length >= cap) break;
-    if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+    if (coveredNames.some((n) => namesMatch(n, p.playerName))) continue;
     wulPlayerResults.push({
       kind: 'player',
       id: p.id,
@@ -237,8 +244,9 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   }));
 
   // WFDF players — route via the by-name resolver (no anchor id). `id` carries
-  // the full name. Dedupe against USAU rows so a US player already shown from
-  // USAU (whose unified profile merges their WFDF stints) isn't listed twice.
+  // the full name. Dedupe against anchor-league rows (coveredNames) so a player
+  // already shown from USAU/UFA — whose unified profile merges their WFDF
+  // stints — isn't listed twice.
   const wfdfPlayerResults: SearchResult[] = [];
   {
     const seen = new Set<string>();
@@ -247,7 +255,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       const key = p.fullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName))) continue;
+      if (coveredNames.some((n) => namesMatch(n, p.fullName))) continue;
       wfdfPlayerResults.push({
         kind: 'player',
         id: p.fullName, // by-name resolver route uses the name, not a UUID
@@ -290,8 +298,8 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     }
   }
 
-  // EUF players — by-name route (ids are per-event). Same USAU dedupe as WFDF
-  // so a player already surfaced from an anchor league isn't listed twice.
+  // EUF players — by-name route (ids are per-event). Same anchor-league dedupe
+  // as WFDF so a player already surfaced from USAU/UFA isn't listed twice.
   const eufPlayerResults: SearchResult[] = [];
   {
     const seen = new Set<string>();
@@ -300,7 +308,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       const key = p.fullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName))) continue;
+      if (coveredNames.some((n) => namesMatch(n, p.fullName))) continue;
       eufPlayerResults.push({
         kind: 'player',
         id: p.fullName,

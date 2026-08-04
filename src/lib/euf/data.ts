@@ -422,8 +422,11 @@ export async function searchEufEvents(q: string, limit = 8): Promise<EufSearchEv
 
 // ─── Merged player profile (by name) ─────────────────────────────────────────
 // EUF player ids are PER-EVENT, so a "player" here is one NAME and the profile
-// is every roster appearance under it. See get_euf_player_profile's comment for
-// why name-merge is safe enough on this dataset, and its known limit.
+// is every roster appearance under it. Identity = the COMPACT normalized name
+// (compact_name_key in SQL), so accent/spacing variants merge: the source spells
+// the same human "Daan DeMarree" in 2025 and "Daan De Marrée" in 2026. See
+// get_euf_player_profile's comment for why name-merge is safe enough on this
+// dataset, and its known limit. fullName comes back in the most recent spelling.
 
 export interface EufPlayerAppearance {
   eventId: string;
@@ -486,9 +489,11 @@ export async function getPlayerProfileByName(name: string): Promise<EufPlayerPro
 // ─── Clubs (the identity layer over per-event team rows) ─────────────────────
 // A EUF team row is per-EVENT, so a club is the set of rows sharing a name AND
 // a division: Grut and SMOG each field Open, Women's and Mixed teams, which are
-// different rosters that merely share a club name. 578 rows → 196 club-divisions.
-// Matching is EXACT: "Mooncatchers Master" stays its own club, it does not fold
-// into Mooncatchers.
+// different rosters that merely share a club name. 578 rows → 193 club-divisions.
+// Matching is on the COMPACT normalized name (unaccent, strip punctuation and
+// spaces) — the source free-types "BFD La Fotta"/"BFD LaFotta" across events —
+// but never looser: "Mooncatchers Master" stays its own club, it does not fold
+// into Mooncatchers. Display spelling = the most recent appearance.
 
 export interface EufClubCard {
   key: string;

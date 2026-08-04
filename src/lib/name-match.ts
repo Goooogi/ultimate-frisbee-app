@@ -5,9 +5,16 @@
 // should match USAU's "Robert Mitchell McCarthy".
 //
 // Rule (token-subset):
-//   1. Last token (surname) must match exactly after normalization.
+//   1. Last token (surname) must match exactly after normalization — OR one
+//      side's surname must equal the other side's trailing tokens joined
+//      ("DeMarree" = "De" + "Marrée"), the compound-surname fallback.
 //   2. The shorter name's other tokens (first + middles) must ALL appear
 //      somewhere in the longer name's other tokens.
+//
+// MIRROR: public.names_match in Postgres implements the same rule (minus the
+// nickname table) and is what _build_player_profile uses to attach stints.
+// Keep the two in sync — a name that matches here but not in SQL shows up in
+// search dedup but never attaches to the unified profile, and vice versa.
 //
 // It handles a curated set of common nicknames (Bob ↔ Robert, Abby ↔
 // Abigail) via the NICKNAME_GROUPS table below, plus prefix abbreviations
@@ -63,18 +70,54 @@ export function namesMatch(a: string, b: string): boolean {
   const ta = tokenize(a);
   const tb = tokenize(b);
   if (!ta || !tb) return false;
-  if (ta.surname !== tb.surname) return false;
+  if (ta.surname === tb.surname) return givensCompatible(ta.givens, tb.givens);
 
-  // Pick shorter side; each of its givens must match SOME given on the longer
-  // side, where "match" = exact OR an abbreviation prefix (Ben ⊂ Benjamin,
-  // Dan ⊂ Daniel, Matt ⊂ Matthew). Each longer-side given can be claimed once.
-  const [shorter, longer] = ta.givens.length <= tb.givens.length ? [ta, tb] : [tb, ta];
-  const used = new Array(longer.givens.length).fill(false);
-  for (const g of shorter.givens) {
+  // Compound-surname fallback: one source joins a particle surname that the
+  // other splits — EUCS "Daan DeMarree" vs USAU "Daan De Marrée". If one
+  // side's surname equals the other side's trailing tokens concatenated,
+  // absorb those tokens into the surname and compare the remaining givens.
+  // Requires an exact letter-sequence match of ≥2 absorbed tokens with ≥1
+  // given left over, so a bare "De Marrée" can never claim every "Daan".
+  const absorbedB = absorbTrailing(ta.surname, tb);
+  if (absorbedB) return givensCompatible(ta.givens, absorbedB);
+  const absorbedA = absorbTrailing(tb.surname, ta);
+  if (absorbedA) return givensCompatible(absorbedA, tb.givens);
+  return false;
+}
+
+/**
+ * If `joinedSurname` equals the concatenation of `split`'s trailing tokens
+ * (surname + one or more particles: "demarree" = "de" + "marree"), return the
+ * tokens left over as givens. At least 2 tokens must be absorbed and at least
+ * 1 given must remain; otherwise null.
+ */
+function absorbTrailing(
+  joinedSurname: string,
+  split: { givens: string[]; surname: string },
+): string[] | null {
+  const tokens = [...split.givens, split.surname];
+  let suffix = '';
+  for (let i = tokens.length - 1; i >= 1; i--) {
+    suffix = tokens[i] + suffix;
+    if (i <= tokens.length - 2 && suffix === joinedSurname) return tokens.slice(0, i);
+  }
+  return null;
+}
+
+/**
+ * Token-subset check over given names. Pick the shorter side; each of its
+ * givens must match SOME given on the longer side, where "match" = exact OR a
+ * curated nickname OR an abbreviation prefix (Ben ⊂ Benjamin, Dan ⊂ Daniel).
+ * Each longer-side given can be claimed once.
+ */
+function givensCompatible(a: string[], b: string[]): boolean {
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  const used = new Array(longer.length).fill(false);
+  for (const g of shorter) {
     let matched = false;
-    for (let i = 0; i < longer.givens.length; i++) {
+    for (let i = 0; i < longer.length; i++) {
       if (used[i]) continue;
-      if (givenMatches(g, longer.givens[i])) {
+      if (givenMatches(g, longer[i])) {
         used[i] = true;
         matched = true;
         break;
