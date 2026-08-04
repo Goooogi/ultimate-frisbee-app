@@ -27,6 +27,7 @@ import { STICKY_NAMEONLY_HEAD, STICKY_NAMEONLY_BODY } from '@/components/sticky-
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 import { EufFlag } from '@/components/euf/euf-flag';
+import { normalizeName } from '@/lib/name-match';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PulPlayerGameRow } from '@/lib/pul/data';
 import type { WulPlayerGameRow } from '@/lib/wul/data';
@@ -257,7 +258,37 @@ function buildEyebrow(profile: UnifiedPlayerProfile): string {
 
 // ── Year accordion ──────────────────────────────────────────────────────
 
+type YearRow =
+  | { kind: 'stint'; stint: SeasonStint }
+  | { kind: 'eufClub'; stints: EufSeasonStint[] };
+
+// Collapse per-event EUCS stints into ONE row per club-division: a club plays
+// several tour stops a season, and one row per stop reads as separate teams.
+// Grouped at render time (compact name key, mirroring the DB's club identity)
+// so the underlying stint data stays per-event.
+function buildYearRows(stints: SeasonStint[]): YearRow[] {
+  const rows: YearRow[] = [];
+  const eufGroups = new Map<string, EufSeasonStint[]>();
+  for (const stint of stints) {
+    if (stint.league !== 'euf') {
+      rows.push({ kind: 'stint', stint });
+      continue;
+    }
+    const key = `${normalizeName(stint.teamName).replace(/ /g, '')}|${stint.divisionName ?? ''}`;
+    const group = eufGroups.get(key);
+    if (group) {
+      group.push(stint);
+    } else {
+      const created: EufSeasonStint[] = [stint];
+      eufGroups.set(key, created);
+      rows.push({ kind: 'eufClub', stints: created });
+    }
+  }
+  return rows;
+}
+
 function YearGroup({ year }: { year: UnifiedYear }) {
+  const rows = buildYearRows(year.stints);
   return (
     <div className="bg-surface rounded-card shadow-card overflow-hidden">
       <div className="px-4 py-3 flex items-center gap-3 border-b border-hairline">
@@ -265,13 +296,17 @@ function YearGroup({ year }: { year: UnifiedYear }) {
           {year.year}
         </span>
         <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
-          {year.stints.length} {year.stints.length === 1 ? 'team' : 'teams'}
+          {rows.length} {rows.length === 1 ? 'team' : 'teams'}
         </span>
       </div>
       <div className="flex flex-col divide-y divide-hairline">
-        {year.stints.map((stint, i) => (
-          <StintRow key={`${stint.league}-${stint.teamId}-${i}`} stint={stint} />
-        ))}
+        {rows.map((row, i) =>
+          row.kind === 'stint' ? (
+            <StintRow key={`${row.stint.league}-${row.stint.teamId}-${i}`} stint={row.stint} />
+          ) : (
+            <EufClubRow key={`euf-${row.stints[0].teamId}-${i}`} stints={row.stints} />
+          ),
+        )}
       </div>
     </div>
   );
@@ -283,7 +318,7 @@ function StintRow({ stint }: { stint: SeasonStint }) {
   if (stint.league === 'pul') return <PulStintRow stint={stint} />;
   if (stint.league === 'wul') return <WulStintRow stint={stint} />;
   if (stint.league === 'wfdf') return <WfdfStintRow stint={stint} />;
-  if (stint.league === 'euf') return <EufStintRow stint={stint} />;
+  if (stint.league === 'euf') return <EufClubRow stints={[stint]} />;
   // Exhaustive guard — new league union members should add a branch above.
   return null;
 }
@@ -756,44 +791,106 @@ function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
   );
 }
 
-// ── EUF / EUCS stint ────────────────────────────────────────────────────
-// Event-scoped like WFDF, but CLUB-level: the country is the club's country,
-// not a national team, and the badge is a derived placement (see
-// derive_euf_placements) rather than an official standing.
+// ── EUF / EUCS club row ─────────────────────────────────────────────────
+// One accordion row per club-division per season (the USAU shape), expanding
+// to that season's events. Club-level like USAU, event-scoped underneath:
+// the badge is a derived placement (see derive_euf_placements) rather than
+// an official standing.
 
-function EufStintRow({ stint }: { stint: EufSeasonStint }) {
+function EufClubRow({ stints }: { stints: EufSeasonStint[] }) {
+  const first = stints[0];
+  const isChampion = stints.some((s) => s.isChampion);
+  const hasStats = stints.some((s) => s.stats.goals != null || s.stats.assists != null);
+  const totalGoals = stints.reduce((sum, s) => sum + (s.stats.goals ?? 0), 0);
+  const totalAssists = stints.reduce((sum, s) => sum + (s.stats.assists ?? 0), 0);
+  // Jersey shown only when it's consistent across the season's events.
+  const jersey = stints.every((s) => s.jerseyNumber === first.jerseyNumber)
+    ? first.jerseyNumber
+    : null;
   return (
-    <div className="px-4 py-3 flex items-center gap-3">
+    <details className="group [&[open]>summary]:bg-surface-hi">
+      <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
+        <Caret />
+        <Link
+          href={`/euf/clubs/${encodeURIComponent(first.teamName)}${
+            first.divisionName ? `?div=${encodeURIComponent(first.divisionName)}` : ''
+          }`}
+          className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+        >
+          <EufFlag countryName={first.countryName} size={20} />
+          <span className="flex flex-col min-w-0">
+            <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
+              {first.teamName}
+            </span>
+            <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
+              EUCS
+              {first.divisionName && ` · ${first.divisionName}`}
+              {jersey && ` · #${jersey}`}
+              {isChampion && ' · Champion'}
+            </span>
+          </span>
+        </Link>
+        {isChampion && <TrophyBadge title="EUCS Champion" />}
+        {hasStats ? (
+          <YearSummaryCells
+            cells={[
+              { label: stints.length === 1 ? 'EVT' : 'EVTS', value: stints.length },
+              { label: 'G', value: totalGoals },
+              { label: 'A', value: totalAssists },
+            ]}
+          />
+        ) : (
+          <YearSummaryCells
+            cells={[{ label: stints.length === 1 ? 'EVT' : 'EVTS', value: stints.length }]}
+          />
+        )}
+      </summary>
+      <div className="px-4 pt-2 pb-4 border-t border-hairline">
+        <ul className="flex flex-col gap-1.5">
+          {stints.map((s) => (
+            <EufEventRow key={`${s.teamId}-${s.eventSlug}`} stint={s} />
+          ))}
+        </ul>
+      </div>
+    </details>
+  );
+}
+
+function EufEventRow({ stint }: { stint: EufSeasonStint }) {
+  return (
+    <li className="flex items-center gap-3 px-2 py-1.5 hover:bg-surface transition-colors rounded">
       <Link
-        href={`/euf/clubs/${encodeURIComponent(stint.teamName)}${
-          stint.divisionName ? `?div=${encodeURIComponent(stint.divisionName)}` : ''
-        }`}
-        className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
+        href={`/euf/events/${stint.eventSlug}`}
+        className="flex-1 min-w-0 text-[13px] text-ink font-tight hover:text-accent transition-colors truncate"
       >
-        <EufFlag countryName={stint.countryName} size={20} />
-        <span className="flex flex-col min-w-0">
-          <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
-            {stint.teamName}
-            {stint.isChampion && (
-              <span className="ml-1.5 text-[9px] font-bold tracking-[0.12em] uppercase text-[#B8891E]">
-                · Champion
-              </span>
-            )}
-          </span>
-          <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
-            EUCS · {stint.eventName}
-            {stint.divisionName ? ` · ${stint.divisionName}` : ''}
-            {stint.jerseyNumber ? ` · #${stint.jerseyNumber}` : ''}
-          </span>
-        </span>
+        {stint.eventName}
       </Link>
-      <YearSummaryCells
-        cells={[
-          { label: 'G', value: stint.stats.goals ?? '—' },
-          { label: 'A', value: stint.stats.assists ?? '—' },
-        ]}
-      />
-    </div>
+      {stint.isChampion ? (
+        <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-[#B8891E] font-tight whitespace-nowrap">
+          Champion
+        </span>
+      ) : (
+        stint.finalPlacement != null && (
+          <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight whitespace-nowrap">
+            #{stint.finalPlacement}
+          </span>
+        )
+      )}
+      {(stint.stats.goals != null || stint.stats.assists != null) && (
+        <span className="flex items-center gap-2 flex-shrink-0">
+          {stint.stats.goals != null && (
+            <span className="tabular text-[12px] font-bold text-ink font-tight">
+              {stint.stats.goals}G
+            </span>
+          )}
+          {stint.stats.assists != null && (
+            <span className="tabular text-[12px] font-bold text-ink font-tight">
+              {stint.stats.assists}A
+            </span>
+          )}
+        </span>
+      )}
+    </li>
   );
 }
 

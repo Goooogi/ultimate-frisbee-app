@@ -5,25 +5,31 @@
 // query param because clubs like Grut field Open, Women's AND Mixed squads —
 // different rosters that share a name, so they get separate pages. This is the
 // identity layer over /euf/teams/[id], which stays the single-event view.
+//
+// Structure mirrors /usau/teams/[id]: identity card with EUF flag + season/
+// event stats, a "European Championships" medal shelf (EUCF finishes), then a
+// season-picker history (tournaments + merged roster) via EufClubHistory.
 
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
-import { getClubProfile, getClubCrossLeague, EUF_DIVISIONS } from '@/lib/euf/data';
+import {
+  getClubProfile,
+  getClubCrossLeague,
+  getClubSeasonRosters,
+  EUF_DIVISIONS,
+  type EufClubAppearance,
+} from '@/lib/euf/data';
 import { EufFlag } from '@/components/euf/euf-flag';
+import { EufClubHistory, type EufClubSeason } from '@/components/euf/euf-club-history';
+import { TeamMedals, type TeamMedal } from '@/components/team-medals';
 
 export const revalidate = 300;
 
 interface Props {
   params: { name: string };
   searchParams: { div?: string };
-}
-
-function ordinal(n: number): string {
-  const s = ['th', 'st', 'nd', 'rd'];
-  const v = n % 100;
-  return `${n}${s[(v - 20) % 10] ?? s[v] ?? s[0]}`;
 }
 
 /** Resolve ?div= against the known division list; defaults to Open. */
@@ -45,6 +51,34 @@ export default async function EufClubPage({ params, searchParams }: Props) {
 
   const cross = await getClubCrossLeague(club.name, club.division).catch(() => []);
   const { totals, appearances } = club;
+
+  // Group appearances by season (year), oldest event first within each season
+  // so getClubSeasonRosters's "most recent spelling wins" merge lands on the
+  // right one. `appearances` itself is newest-event-first (RPC order).
+  const byYear = new Map<number, EufClubAppearance[]>();
+  for (const a of appearances) {
+    if (!byYear.has(a.year)) byYear.set(a.year, []);
+    byYear.get(a.year)!.push(a);
+  }
+  const years = [...byYear.keys()].sort((a, b) => b - a);
+
+  const seasons: EufClubSeason[] = await Promise.all(
+    years.map(async (year) => {
+      const yearAppearances = [...byYear.get(year)!].sort((a, b) => a.eventName.localeCompare(b.eventName));
+      const oldestFirst = [...yearAppearances].reverse();
+      const roster = await getClubSeasonRosters(oldestFirst.map((a) => a.teamId)).catch(() => []);
+      return { year, appearances: yearAppearances, roster };
+    }),
+  );
+
+  // European Championships (EUCF) medals — the continent's top tier. Other
+  // kinds (e2cf, tour stops, invites) don't carry the same prestige, so only
+  // EUCF finishes get the trophy shelf, keyed on `kind` not name parsing.
+  const medals: TeamMedal[] = appearances
+    .filter((a) => a.kind === 'eucf' && a.finalPlacement != null && a.finalPlacement <= 3)
+    .map((a) => ({ year: a.year, place: a.finalPlacement as 1 | 2 | 3 }));
+
+  const seasonsCount = years.length;
 
   return (
     <PageShell
@@ -83,72 +117,38 @@ export default async function EufClubPage({ params, searchParams }: Props) {
             ))}
           </div>
         )}
-        {/* Career totals */}
-        <section className="grid grid-cols-4 gap-2">
-          {[
-            ['Events', totals.events],
-            ['Games', totals.games],
-            ['Record', `${totals.wins}–${totals.losses}`],
-            ['Titles', totals.titles],
-          ].map(([label, value]) => (
-            <div key={label as string} className="rounded-card bg-surface shadow-card p-3 min-w-0">
-              <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
-                {label}
-              </p>
-              {/* Record ("14–15") is the widest value and wraps at 390px in a
-                  quarter-width tile, so step the size up only once there's room. */}
-              <p className="text-[17px] sm:text-[20px] font-semibold text-ink font-tight tabular-nums whitespace-nowrap">
-                {value}
-              </p>
-            </div>
-          ))}
-        </section>
 
-        {/* Event-by-event */}
-        <section>
-          <h2 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline">
-            Event History
-          </h2>
-          <div className="overflow-x-auto">
-            {/* Only 4 columns (vs the player page's 7), so this fits a 390px
-                screen — no min-width, or Fin/W–L/Diff scroll off-screen. */}
-            <table className="w-full min-w-[300px] border-collapse">
-              <thead>
-                <tr className="text-[10px] font-bold tracking-[0.12em] uppercase text-muted font-tight">
-                  <th className="text-left py-2 pr-2 font-bold">Event</th>
-                  <th className="text-right py-2 px-2 font-bold">Fin</th>
-                  <th className="text-right py-2 px-2 font-bold">W–L</th>
-                  <th className="text-right py-2 pl-2 font-bold">Diff</th>
-                </tr>
-              </thead>
-              <tbody>
-                {appearances.map((a) => (
-                  <tr key={a.teamId} className="border-t border-hairline">
-                    <td className="py-2 pr-2 text-[13px] font-tight">
-                      {/* Links to the per-event team row: roster + results live there. */}
-                      <Link
-                        href={`/euf/teams/${a.teamId}`}
-                        className="no-underline hover:underline text-ink"
-                      >
-                        {a.eventName}
-                      </Link>
-                    </td>
-                    <td className="text-right py-2 px-2 text-[13px] font-tight tabular-nums text-ink">
-                      {a.finalPlacement ? ordinal(a.finalPlacement) : '–'}
-                    </td>
-                    <td className="text-right py-2 px-2 text-[13px] font-tight tabular-nums text-muted">
-                      {a.wins}–{a.losses}
-                    </td>
-                    <td className="text-right py-2 pl-2 text-[13px] font-tight tabular-nums text-muted">
-                      {a.scoresFor - a.scoresAgainst > 0 ? '+' : ''}
-                      {a.scoresFor - a.scoresAgainst}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Team-profile card — EufFlag anchors it (EUCS has no logo assets),
+            stats sit opposite, matching the USAU team-page card exactly. */}
+        <div className="rounded-card-lg shadow-card bg-surface overflow-hidden">
+          <div className="flex items-center gap-4 p-4 lg:p-5">
+            <span className="flex-shrink-0 flex items-center justify-center w-[52px] h-[52px] rounded-full bg-ink/[0.04]">
+              <EufFlag countryName={club.countryName} size={30} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
+                Club Profile
+              </div>
+              <div className="text-[13px] font-bold text-ink font-tight mt-1 truncate tracking-[-0.01em]">
+                {[club.division, club.countryName].filter(Boolean).join(' · ')}
+              </div>
+            </div>
+            <div className="flex items-stretch shrink-0">
+              <SummaryStat label="Seasons" value={seasonsCount} />
+              <span className="w-px self-stretch bg-hairline mx-3 lg:mx-4" aria-hidden="true" />
+              <SummaryStat label="Events" value={totals.events} />
+            </div>
           </div>
-        </section>
+
+          {/* Honors row — only when the club has EUCF podium finishes. */}
+          {medals.length > 0 && (
+            <div className="border-t border-hairline bg-bg px-4 py-3.5 lg:px-5">
+              <TeamMedals medals={medals} heading="European Championships" showPlace />
+            </div>
+          )}
+        </div>
+
+        <EufClubHistory seasons={seasons} />
 
         {/* Appearances outside EUCS. Matched on exact name + country (WFDF) or
             U.S.-Open-only participation (USAU) — see get_euf_club_cross_league. */}
@@ -199,5 +199,20 @@ export default async function EufClubPage({ params, searchParams }: Props) {
         )}
       </div>
     </PageShell>
+  );
+}
+
+/** A single vertical stat (number over label) for the club hero panel. Mirrors
+ *  the USAU team page's SummaryStat exactly. */
+function SummaryStat({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex flex-col items-center justify-center text-center px-1">
+      <span className="tabular text-[22px] font-bold font-tight leading-none tracking-[-0.03em] text-ink">
+        {value}
+      </span>
+      <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight mt-1">
+        {label}
+      </span>
+    </div>
   );
 }

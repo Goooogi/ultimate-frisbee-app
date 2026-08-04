@@ -18,6 +18,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { normalizeName } from '@/lib/name-match';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -513,6 +514,9 @@ export interface EufClubAppearance {
   eventSlug: string;
   year: number;
   kind: string;
+  /** Event start date (YYYY-MM-DD), backfilled from euf_events — the RPC that
+   *  sources this row doesn't select it. Null for the few dateless stops. */
+  startDate: string | null;
   teamId: string;
   finalPlacement: number | null;
   games: number;
@@ -572,12 +576,25 @@ export async function getClubProfile(
   if (error || !data || (data as Row[]).length === 0) return null;
 
   const rows = data as Row[];
+
+  // The RPC doesn't select start_date; one extra .in() fetch beats extending
+  // the SQL function (out of scope — see the rebuild's data notes).
+  const eventIds = [...new Set(rows.map((r) => r.event_id as string))];
+  const { data: eventRows } = await supabase()
+    .from('euf_events')
+    .select('id, start_date')
+    .in('id', eventIds);
+  const startDateByEvent = new Map(
+    ((eventRows ?? []) as Row[]).map((e) => [e.id as string, (e.start_date as string) ?? null]),
+  );
+
   const appearances: EufClubAppearance[] = rows.map((r) => ({
     eventId: r.event_id as string,
     eventName: r.event_name as string,
     eventSlug: r.event_slug as string,
     year: (r.year as number) ?? 0,
     kind: (r.kind as string) ?? '',
+    startDate: startDateByEvent.get(r.event_id as string) ?? null,
     teamId: r.team_id as string,
     finalPlacement: (r.final_placement as number) ?? null,
     games: (r.games as number) ?? 0,
@@ -636,6 +653,71 @@ export async function getClubCrossLeague(
     division: (r.division as string) ?? null,
     placement: (r.placement as number) ?? null,
   }));
+}
+
+export interface EufClubSeasonPlayer {
+  /** Compact name key — dedupe/link identity, not for display. */
+  key: string;
+  fullName: string;
+  jerseyNumber: string | null;
+  goals: number;
+  assists: number;
+  total: number;
+}
+
+/**
+ * Merge rosters across a club's events within ONE season. A club fields the
+ * same squad across several EUCS stops in a season (e.g. Elite Invite +
+ * EUCF), and the source spells the same human differently between them
+ * ("Daan DeMarree" vs "Daan De Marrée") — merge by compact name key
+ * (normalizeName with spaces stripped, matching the SQL side's
+ * compact_name_key) and keep the most-recently-seen spelling + jersey. Stats
+ * sum across the merged events. `teamIds` should be the season's own
+ * euf_teams ids (few rows per season — well under the PostgREST cap).
+ */
+export async function getClubSeasonRosters(teamIds: string[]): Promise<EufClubSeasonPlayer[]> {
+  if (teamIds.length === 0) return [];
+  const { data, error } = await supabase()
+    .from('euf_rosters')
+    .select('team_id, full_name, jersey_number, goals, assists, total')
+    .in('team_id', teamIds);
+  if (error || !data) return [];
+
+  // Merge in teamIds order (caller passes oldest→newest event) so a later
+  // row's spelling/jersey wins — matches "display spelling = most recent".
+  const order = new Map(teamIds.map((id, i) => [id, i]));
+  const sorted = [...(data as Row[])].sort(
+    (a, b) => (order.get(a.team_id as string) ?? 0) - (order.get(b.team_id as string) ?? 0),
+  );
+
+  const byKey = new Map<string, EufClubSeasonPlayer>();
+  for (const r of sorted) {
+    const fullName = r.full_name as string;
+    const key = normalizeName(fullName).replace(/ /g, '');
+    if (!key) continue;
+    const goals = (r.goals as number) ?? 0;
+    const assists = (r.assists as number) ?? 0;
+    const total = (r.total as number) ?? goals + assists;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.fullName = fullName;
+      existing.jerseyNumber = (r.jersey_number as string) ?? existing.jerseyNumber;
+      existing.goals += goals;
+      existing.assists += assists;
+      existing.total += total;
+    } else {
+      byKey.set(key, {
+        key,
+        fullName,
+        jerseyNumber: (r.jersey_number as string) ?? null,
+        goals,
+        assists,
+        total,
+      });
+    }
+  }
+
+  return [...byKey.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
 // ─── Hub pages (/euf/scores, /euf/players) ───────────────────────────────────
