@@ -77,9 +77,8 @@ const WFDF_NAV_ITEMS: NavItem[] = [
 // event-scoped, since EUCS runs several tour stops on the same weekend.
 const EUF_NAV_ITEMS: NavItem[] = [
   { label: 'Events',   href: '/euf/events',   match: '/euf/events' },
-  { label: 'Scores',   href: '/euf/scores',   match: '/euf/scores' },
   { label: 'Schedule', href: '/euf/schedule', match: '/euf/schedule' },
-  { label: 'Clubs',    href: '/euf/clubs',    match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
+  { label: 'Teams',    href: '/euf/clubs',    match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
   { label: 'Players',  href: '/euf/players',  match: '/euf/players', aliases: ['/euf/players'] },
 ];
 

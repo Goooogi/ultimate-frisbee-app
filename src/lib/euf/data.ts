@@ -48,6 +48,12 @@ export interface EufEventCard {
   endDate: string | null;
   teamCount: number;
   divisions: EufDivision[];
+  /** Ultiorganizer schedule site base URL — always
+   *  'https://eucs-schedule.ultimatefederation.eu' today, but read from the row
+   *  rather than hardcoded. Combines with seasonId for the "View on EUCS" link. */
+  sourceOrigin: string | null;
+  /** The source's season key (?season=), needed to deep-link back to this event. */
+  seasonId: string | null;
 }
 
 export interface EufStandingRow {
@@ -72,6 +78,9 @@ export interface EufGameCard {
   roundName: string | null;
   stage: string;
   isBracket: boolean;
+  /** Upstream Ultiorganizer game id. Null on 128 forfeit rows the source
+   *  never assigned one to — those games have no "View on EUCS" link. */
+  eufGameId: number | null;
   homeTeamId: string | null;
   awayTeamId: string | null;
   homeName: string;
@@ -128,7 +137,7 @@ export interface EufLeaderRow {
 export async function listEvents(): Promise<EufEventCard[]> {
   const { data, error } = await supabase()
     .from('euf_events')
-    .select('id, slug, name, year, kind, location, start_date, end_date')
+    .select('id, slug, name, year, kind, location, start_date, end_date, source_origin, season_id')
     .order('year', { ascending: false })
     .order('name');
   if (error || !data) return [];
@@ -162,13 +171,15 @@ export async function listEvents(): Promise<EufEventCard[]> {
     endDate: (e.end_date as string) ?? null,
     teamCount: counts.get(e.id as string) ?? 0,
     divisions: EUF_DIVISIONS.filter((d) => divs.get(e.id as string)?.has(d)),
+    sourceOrigin: (e.source_origin as string) ?? null,
+    seasonId: (e.season_id as string) ?? null,
   }));
 }
 
 export async function getEvent(slug: string): Promise<EufEventCard | null> {
   const { data, error } = await supabase()
     .from('euf_events')
-    .select('id, slug, name, year, kind, location, start_date, end_date')
+    .select('id, slug, name, year, kind, location, start_date, end_date, source_origin, season_id')
     .eq('slug', slug)
     .maybeSingle();
   if (error || !data) return null;
@@ -191,6 +202,8 @@ export async function getEvent(slug: string): Promise<EufEventCard | null> {
     endDate: (e.end_date as string) ?? null,
     teamCount: (teams ?? []).length,
     divisions: EUF_DIVISIONS.filter((d) => seen.has(d)),
+    sourceOrigin: (e.source_origin as string) ?? null,
+    seasonId: (e.season_id as string) ?? null,
   };
 }
 
@@ -219,7 +232,7 @@ export async function getStandings(eventSlug: string): Promise<EufStandingRow[]>
 // ─── Games ───────────────────────────────────────────────────────────────────
 
 const GAME_SELECT =
-  'id, division, round_name, stage, is_bracket, home_team_id, away_team_id, ' +
+  'id, division, round_name, stage, is_bracket, euf_game_id, home_team_id, away_team_id, ' +
   'home_score, away_score, field, start_time, scheduled_at, status, ' +
   'home:home_team_id(name, country_name), away:away_team_id(name, country_name)';
 
@@ -232,6 +245,7 @@ function toGameCard(g: Row): EufGameCard {
     roundName: (g.round_name as string) ?? null,
     stage: (g.stage as string) ?? 'other',
     isBracket: Boolean(g.is_bracket),
+    eufGameId: (g.euf_game_id as number) ?? null,
     homeTeamId: (g.home_team_id as string) ?? null,
     awayTeamId: (g.away_team_id as string) ?? null,
     homeName: (home.name as string) ?? 'TBD',
@@ -720,59 +734,11 @@ export async function getClubSeasonRosters(teamIds: string[]): Promise<EufClubSe
   return [...byKey.values()].sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
 
-// ─── Hub pages (/euf/scores, /euf/players) ───────────────────────────────────
+// ─── Hub pages (/euf/players) ────────────────────────────────────────────────
 // EUF mirrors WFDF's event-scoped hub shape rather than the shared ?league=
 // routes: a EUCS stop is a self-contained tournament, not a rolling fixture
-// list. NOTE there is deliberately no /euf/schedule — euf_games.scheduled_at is
-// entirely NULL and euf_events has no start_date, so the source gives us a
-// time-of-day ("08:30") with no date to hang it on. Every game is already
-// completed, so there'd be nothing upcoming to show even if we had dates.
-
-export interface EufEventScoreSummary {
-  slug: string;
-  name: string;
-  year: number;
-  kind: string;
-  location: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  gameCount: number;
-  teamCount: number;
-  divisions: EufDivision[];
-}
-
-export async function listEventScoreSummaries(): Promise<EufEventScoreSummary[]> {
-  const events = await listEvents();
-  if (!events.length) return [];
-
-  const { data: games } = await supabase()
-    .from('euf_games')
-    .select('event_id')
-    .in(
-      'event_id',
-      events.map((e) => e.id),
-    )
-    .limit(5000);
-
-  const counts = new Map<string, number>();
-  for (const g of ((games ?? []) as Row[])) {
-    const k = g.event_id as string;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
-
-  return events.map((e) => ({
-    slug: e.slug,
-    name: e.name,
-    year: e.year,
-    kind: e.kind,
-    location: e.location,
-    startDate: e.startDate,
-    endDate: e.endDate,
-    gameCount: counts.get(e.id) ?? 0,
-    teamCount: e.teamCount,
-    divisions: e.divisions,
-  }));
-}
+// list. (/euf/scores was deleted 2026-08-04 — it duplicated /euf/events, which
+// now redirects there; its listEventScoreSummaries helper went with it.)
 
 export interface EufPlayerHubRow {
   fullName: string;
@@ -890,6 +856,9 @@ export interface EufGameDetail extends EufGameCard {
   eventName: string;
   eventSlug: string;
   eventYear: number;
+  /** Ultiorganizer schedule site base URL, from the parent event — pairs with
+   *  eufGameId for the "View on EUCS" link. */
+  sourceOrigin: string | null;
 }
 
 /** One game plus its event context, for /euf/g/[id]. */
@@ -897,7 +866,7 @@ export async function getGame(gameId: string): Promise<EufGameDetail | null> {
   if (!UUID_RE.test(gameId)) return null;
   const { data, error } = await supabase()
     .from('euf_games')
-    .select(`${GAME_SELECT}, event_id, event:event_id(name, slug, year)`)
+    .select(`${GAME_SELECT}, event_id, event:event_id(name, slug, year, source_origin)`)
     .eq('id', gameId)
     .maybeSingle();
   if (error || !data) return null;
@@ -909,6 +878,7 @@ export async function getGame(gameId: string): Promise<EufGameDetail | null> {
     eventName: (ev.name as string) ?? '',
     eventSlug: (ev.slug as string) ?? '',
     eventYear: (ev.year as number) ?? 0,
+    sourceOrigin: (ev.source_origin as string) ?? null,
   };
 }
 

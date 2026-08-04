@@ -12,6 +12,7 @@ import { PageShell } from '@/components/page-shell';
 import { getGame, getGameStats, type EufGameStatLine } from '@/lib/euf/data';
 import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
 import { EufFlag } from '@/components/euf/euf-flag';
+import { EufExternalLink } from '@/components/euf/euf-event-detail';
 
 export const revalidate = 300;
 
@@ -66,6 +67,16 @@ export default async function EufGamePage({ params }: Props) {
       ]}
     >
       <div className="flex flex-col gap-6">
+        {/* "View on EUCS" — mirrors USAU's event-page link. Only 128 forfeit
+            rows lack a euf_game_id and get no link. */}
+        {game.eufGameId != null && game.sourceOrigin && (
+          <div className="flex justify-end">
+            <EufExternalLink
+              url={`${game.sourceOrigin}/?view=gameplay&game=${game.eufGameId}`}
+            />
+          </div>
+        )}
+
         {/* Scoreline */}
         <section className="rounded-card-lg bg-surface shadow-card p-4 sm:p-5">
           <div className="flex items-center justify-between gap-3 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-3">

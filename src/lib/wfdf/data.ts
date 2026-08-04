@@ -138,6 +138,34 @@ export interface WfdfPlayerStint {
 
 // ─── Event list + detail ──────────────────────────────────────────────────────
 
+/**
+ * Find the WFDF-ingested twin of a WFDF-hosted event that leaked into
+ * usau_events (USAU lists WUCC/WJUC/WMUCC so US clubs can register, but our
+ * real data for those events comes from the WFDF pipeline — the USAU rows are
+ * stubs that will never grow games). Keyed on the acronym in the USAU name's
+ * parenthetical — "… (WUCC)" → WFDF slug/name lookup for that year — with a
+ * /world/ guard so USAU-run events with parentheticals ("U.S. Open (ICC)")
+ * never match. Returns null when we haven't ingested the twin yet, and the
+ * caller keeps the USAU stub; auto-heals once the WFDF event lands.
+ */
+export async function findWorldsTwinSlug(
+  usauName: string,
+  year: number,
+): Promise<string | null> {
+  if (!/world/i.test(usauName)) return null;
+  const m = usauName.match(/\(([A-Z]{3,6})\)/);
+  if (!m) return null;
+  const acronym = m[1];
+  const { data } = await supabase()
+    .from('wfdf_events')
+    .select('slug')
+    .eq('year', year)
+    .or(`slug.ilike.${acronym}%,name.ilike.${acronym}%`)
+    .limit(1)
+    .maybeSingle();
+  return ((data as Row | null)?.slug as string) ?? null;
+}
+
 export async function listEvents(): Promise<WfdfEventCard[]> {
   const db = supabase();
   const { data: events } = await db

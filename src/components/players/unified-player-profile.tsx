@@ -302,7 +302,11 @@ function YearGroup({ year }: { year: UnifiedYear }) {
       <div className="flex flex-col divide-y divide-hairline">
         {rows.map((row, i) =>
           row.kind === 'stint' ? (
-            <StintRow key={`${row.stint.league}-${row.stint.teamId}-${i}`} stint={row.stint} />
+            <StintRow
+              key={`${row.stint.league}-${row.stint.teamId}-${i}`}
+              stint={row.stint}
+              year={year.year}
+            />
           ) : (
             <EufClubRow key={`euf-${row.stints[0].teamId}-${i}`} stints={row.stints} />
           ),
@@ -312,9 +316,9 @@ function YearGroup({ year }: { year: UnifiedYear }) {
   );
 }
 
-function StintRow({ stint }: { stint: SeasonStint }) {
-  if (stint.league === 'ufa') return <UfaStintRow stint={stint} />;
-  if (stint.league === 'usau') return <UsauStintRow stint={stint} />;
+function StintRow({ stint, year }: { stint: SeasonStint; year: number }) {
+  if (stint.league === 'ufa') return <UfaStintRow stint={stint} year={year} />;
+  if (stint.league === 'usau') return <UsauStintRow stint={stint} year={year} />;
   if (stint.league === 'pul') return <PulStintRow stint={stint} />;
   if (stint.league === 'wul') return <WulStintRow stint={stint} />;
   if (stint.league === 'wfdf') return <WfdfStintRow stint={stint} />;
@@ -325,7 +329,7 @@ function StintRow({ stint }: { stint: SeasonStint }) {
 
 // ── UFA stint ───────────────────────────────────────────────────────────
 
-function UfaStintRow({ stint }: { stint: UfaSeasonStint }) {
+function UfaStintRow({ stint, year }: { stint: UfaSeasonStint; year: number }) {
   const cmpPct = stint.totals.throwsAttempted
     ? (stint.totals.completions / stint.totals.throwsAttempted) * 100
     : 0;
@@ -337,7 +341,7 @@ function UfaStintRow({ stint }: { stint: UfaSeasonStint }) {
       <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
         <Caret />
         <Link
-          href={`/teams/${stint.teamMeta.id}`}
+          href={`/teams/${stint.teamMeta.id}?year=${year}`}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <TeamLogo team={stint.teamMeta} size={26} />
@@ -385,7 +389,7 @@ function UfaStintRow({ stint }: { stint: UfaSeasonStint }) {
 
 // ── USAU stint ──────────────────────────────────────────────────────────
 
-function UsauStintRow({ stint }: { stint: UsauSeasonStint }) {
+function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number }) {
   const totalGoals = stint.events.reduce((s, e) => s + (e.goals ?? 0), 0);
   const totalAssists = stint.events.reduce((s, e) => s + (e.assists ?? 0), 0);
   const hasStats = stint.events.some((e) => e.goals != null || e.assists != null);
@@ -395,7 +399,7 @@ function UsauStintRow({ stint }: { stint: UsauSeasonStint }) {
       <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
         <Caret />
         <Link
-          href={`/usau/teams/${stint.teamId}`}
+          href={`/usau/teams/${stint.teamId}?season=${year}`}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <UsauTeamLogo
@@ -799,7 +803,9 @@ function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
 
 function EufClubRow({ stints }: { stints: EufSeasonStint[] }) {
   const first = stints[0];
-  const isChampion = stints.some((s) => s.isChampion);
+  // Gold "Champion" treatment is EUCF-only (Hunter's call): winning a tour
+  // stop or invite is a 1st-place finish, not a European title.
+  const isChampion = stints.some((s) => s.isChampion && s.eventKind === 'eucf');
   const hasStats = stints.some((s) => s.stats.goals != null || s.stats.assists != null);
   const totalGoals = stints.reduce((sum, s) => sum + (s.stats.goals ?? 0), 0);
   const totalAssists = stints.reduce((sum, s) => sum + (s.stats.assists ?? 0), 0);
@@ -812,8 +818,8 @@ function EufClubRow({ stints }: { stints: EufSeasonStint[] }) {
       <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
         <Caret />
         <Link
-          href={`/euf/clubs/${encodeURIComponent(first.teamName)}${
-            first.divisionName ? `?div=${encodeURIComponent(first.divisionName)}` : ''
+          href={`/euf/clubs/${encodeURIComponent(first.teamName)}?season=${first.season}${
+            first.divisionName ? `&div=${encodeURIComponent(first.divisionName)}` : ''
           }`}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
@@ -865,7 +871,7 @@ function EufEventRow({ stint }: { stint: EufSeasonStint }) {
       >
         {stint.eventName}
       </Link>
-      {stint.isChampion ? (
+      {stint.isChampion && stint.eventKind === 'eucf' ? (
         <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-[#B8891E] font-tight whitespace-nowrap">
           Champion
         </span>

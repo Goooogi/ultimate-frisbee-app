@@ -154,6 +154,9 @@ interface RpcEufStint {
   divisionName?: string | null;
   eventName?: string | null;
   eventSlug?: string | null;
+  /** euf_events.kind ('eucf' | 'e2cf' | 'elite_invite' | …). Absent on payloads
+   *  built before the 20260804 eventKind patch — treat as null. */
+  eventKind?: string | null;
   jerseyNumber?: string | null;
   finalPlacement?: number | null;
   isChampion?: boolean | null;
@@ -604,6 +607,7 @@ export async function mapRpcProfile(
       divisionName: st.divisionName ?? null,
       eventName: str(st.eventName),
       eventSlug: str(st.eventSlug),
+      eventKind: st.eventKind ?? null,
       jerseyNumber: st.jerseyNumber ?? null,
       finalPlacement: st.finalPlacement ?? null,
       isChampion: st.isChampion === true,

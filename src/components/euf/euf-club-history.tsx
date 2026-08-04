@@ -22,10 +22,16 @@ export interface EufClubSeason {
 
 interface Props {
   seasons: EufClubSeason[];
+  /** Season to open on (?season= deep link); ignored if we have no such season. */
+  initialSeason?: number | null;
 }
 
-export function EufClubHistory({ seasons }: Props) {
-  const [selected, setSelected] = useState<number | null>(() => seasons[0]?.year ?? null);
+export function EufClubHistory({ seasons, initialSeason = null }: Props) {
+  const [selected, setSelected] = useState<number | null>(() =>
+    initialSeason != null && seasons.some((s) => s.year === initialSeason)
+      ? initialSeason
+      : seasons[0]?.year ?? null,
+  );
 
   if (seasons.length === 0) {
     return <div className="text-[12px] text-faint font-tight">No history recorded yet.</div>;
@@ -140,10 +146,12 @@ function ordinal(n: number): string {
 
 /** The club's finish at a tournament. Podium places (1–3) get a medal-tinted
  *  chip; everything else is a clean "Nth place" label. Mirrors USAU's
- *  PlacementBadge exactly. */
-function PlacementBadge({ place }: { place: number }) {
+ *  PlacementBadge — except the gold "Champions" chip is EUCF-ONLY (Hunter's
+ *  call): winning a tour stop or invite is a 1st-place finish, not a
+ *  European title. */
+function PlacementBadge({ place, eucf }: { place: number; eucf: boolean }) {
   const podium =
-    place === 1
+    place === 1 && eucf
       ? { ring: 'bg-[#E8B923]/15 text-[#9A7B0A]', label: 'Champions' }
       : place === 2
         ? { ring: 'bg-[#9AA3AD]/20 text-[#5C6672]', label: `${ordinal(place)} place` }
@@ -200,7 +208,7 @@ function EventCard({ appearance: a }: { appearance: EufClubAppearance }) {
         </div>
         {a.finalPlacement != null && (
           <div className="mt-2">
-            <PlacementBadge place={a.finalPlacement} />
+            <PlacementBadge place={a.finalPlacement} eucf={a.kind === 'eucf'} />
           </div>
         )}
         {a.games > 0 && (

@@ -1,7 +1,9 @@
 'use client';
 
-// EUF bracket tree — renders one bracket group (e.g. "Bracket 1-8") as its
-// rounds, left to right: quarters → semis → finals.
+// EUF bracket tree — renders one bracket group (e.g. "Bracket 1-8") as a
+// USAU-style tree: round columns left to right, cards positioned by the
+// shared bracket-tree layout engine (src/lib/bracket-tree.ts), same card
+// language as usau-bracket-tree.tsx (status row, team lines, box-score link).
 //
 // EUCS brackets are PLACEMENT brackets: the "Finals" round is four simultaneous
 // games deciding 1st/3rd/5th/7th, not a single title game. So we label each
@@ -15,9 +17,17 @@
 // means a not-yet-derived event renders an unlabelled card instead of a
 // confidently wrong one.
 
+import { useMemo } from 'react';
 import Link from 'next/link';
 import type { EufGameCard } from '@/lib/euf/data';
-import { bracketBucket, ordinal as sharedOrdinal } from '@/lib/bracket-tree';
+import {
+  bracketBucket,
+  ordinal as sharedOrdinal,
+  assignPositions as sharedAssignPositions,
+  ROW_PITCH_PX,
+  type BracketColumn,
+} from '@/lib/bracket-tree';
+import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
 import { EufFlag } from './euf-flag';
 
 /** "Bracket 1-8 Semifinals" → "Bracket 1-8"
@@ -82,12 +92,18 @@ export function EufBracketTree({
   });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-8">
       {ordered.map(([name, list]) => (
         <BracketGroup key={name} name={name} games={list} placements={placements} />
       ))}
     </div>
   );
+}
+
+interface RoundColumn {
+  key: 'qf' | 'sf' | 'final';
+  label: string;
+  games: EufGameCard[];
 }
 
 function BracketGroup({
@@ -99,10 +115,6 @@ function BracketGroup({
   games: EufGameCard[];
   placements: PlacementMap;
 }) {
-  const rounds = [1, 2, 3]
-    .map((d) => ({ depth: d, games: games.filter((g) => depthOf(g.roundName) === d) }))
-    .filter((r) => r.games.length > 0);
-
   // A placement game's places ARE its two teams' stored placements. Sorting the
   // finals by the better of the two puts the gold game first, 3rd/4th next, and
   // so on — no re-derivation, and it stays correct if the SQL rule ever changes.
@@ -113,97 +125,254 @@ function BracketGroup({
     return h < a ? [h, a] : [a, h];
   };
 
+  const columns = useMemo<RoundColumn[]>(() => {
+    const qf = games.filter((g) => depthOf(g.roundName) === 1);
+    const sf = games.filter((g) => depthOf(g.roundName) === 2);
+    const finals = games
+      .filter((g) => depthOf(g.roundName) === 3)
+      .slice()
+      .sort((a, b) => (placesOf(a)?.[0] ?? 99) - (placesOf(b)?.[0] ?? 99));
+    return [
+      { key: 'qf', label: 'Quarterfinals', games: qf },
+      { key: 'sf', label: 'Semifinals', games: sf },
+      { key: 'final', label: 'Placement', games: finals },
+    ];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [games, placements]);
+
+  const positions = useMemo(() => assignPositions(columns), [columns]);
+
+  if (columns.every((c) => c.games.length === 0)) return null;
+
   return (
-    <section>
-      <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline">
+    <div>
+      <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline mb-4">
         {bracketBucket(name).label}
       </h3>
-      <div className="flex gap-4 overflow-x-auto pt-3">
-        {rounds.map((r) => {
-          const isFinals = r.depth === 3;
-          const list = isFinals
-            ? [...r.games].sort(
-                (a, b) => (placesOf(a)?.[0] ?? 99) - (placesOf(b)?.[0] ?? 99),
-              )
-            : r.games;
 
-          return (
-            <div key={r.depth} className="flex flex-col gap-2 min-w-[220px] flex-1">
-              <p className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
-                {r.depth === 1 ? 'Quarterfinals' : r.depth === 2 ? 'Semifinals' : 'Placement'}
-              </p>
-              {list.map((g) => {
-                const places = placesOf(g);
-                return (
-                  <div key={g.id} className="rounded-card bg-surface shadow-card p-2.5">
-                    {isFinals && places && (
-                      <p className="text-[9px] font-bold tracking-[0.1em] uppercase text-accent font-tight mb-1">
-                        {ORDINAL(places[0])} / {ORDINAL(places[1])} place
-                      </p>
-                    )}
-                    <BracketSide
-                      id={g.homeTeamId}
-                      name={g.homeName}
-                      country={g.homeCountry}
-                      score={g.homeScore}
-                      won={(g.homeScore ?? 0) > (g.awayScore ?? 0)}
+      {/* Mobile: vertical stack by round, latest round FIRST (placement finals
+          lead, same rationale as the USAU tree — the result you care about
+          leads on a phone). */}
+      <div className="lg:hidden flex flex-col gap-5">
+        {[...columns].reverse().map(
+          (col) =>
+            col.games.length > 0 && (
+              <div key={col.key}>
+                <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
+                  {col.label}
+                </div>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {col.games.map((g) => (
+                    <MatchCard
+                      key={g.id}
+                      game={g}
+                      places={col.key === 'final' ? placesOf(g) : null}
+                      compact
                     />
-                    <BracketSide
-                      id={g.awayTeamId}
-                      name={g.awayName}
-                      country={g.awayCountry}
-                      score={g.awayScore}
-                      won={(g.awayScore ?? 0) > (g.homeScore ?? 0)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+                  ))}
+                </ul>
+              </div>
+            ),
+        )}
       </div>
-    </section>
+
+      {/* Desktop: horizontal columns with absolute-positioned cards */}
+      <div className="hidden lg:block overflow-x-auto pb-2">
+        <DesktopBracket columns={columns} positions={positions} placesOf={placesOf} />
+      </div>
+    </div>
   );
 }
 
-function BracketSide({
-  id,
+// ── Desktop bracket layout ────────────────────────────────────────────────
+
+function DesktopBracket({
+  columns,
+  positions,
+  placesOf,
+}: {
+  columns: RoundColumn[];
+  positions: Map<string, number>;
+  placesOf: (g: EufGameCard) => [number, number] | null;
+}) {
+  const baseCount = Math.max(0, ...columns.map((c) => c.games.length));
+  const maxTop = Math.max(0, ...Array.from(positions.values()));
+  const totalHeight = Math.max(baseCount * ROW_PITCH_PX, maxTop + ROW_PITCH_PX) + 32;
+
+  const renderedColumns = columns.filter((c) => c.games.length > 0);
+
+  return (
+    <div
+      className="grid gap-x-6 min-w-[700px] relative"
+      style={{
+        gridTemplateColumns: `repeat(${renderedColumns.length}, minmax(200px, 1fr))`,
+        height: `${totalHeight}px`,
+      }}
+    >
+      {renderedColumns.map((col) => (
+        <div key={col.key} className="relative h-full">
+          <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
+            {col.label}
+          </div>
+          {col.games.map((g) => {
+            const top = positions.get(g.id) ?? 0;
+            return (
+              <div
+                key={g.id}
+                className="absolute left-0 right-0"
+                style={{ top: `${top + 32}px` }}
+              >
+                <MatchCard game={g} places={col.key === 'final' ? placesOf(g) : null} />
+              </div>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Match card ────────────────────────────────────────────────────────────
+
+function MatchCard({
+  game,
+  places,
+  compact = false,
+}: {
+  game: EufGameCard;
+  places: [number, number] | null;
+  compact?: boolean;
+}) {
+  const homeWon =
+    game.homeScore != null && game.awayScore != null && game.homeScore > game.awayScore;
+  const awayWon =
+    game.homeScore != null && game.awayScore != null && game.awayScore > game.homeScore;
+  const isForfeit = game.status === 'forfeit';
+
+  const fieldLabel = game.field
+    ? /^\d+[A-Za-z]?$/.test(game.field.trim())
+      ? `Field ${game.field.trim()}`
+      : game.field.trim()
+    : null;
+  const meta = [
+    places ? `${ORDINAL(places[0])} / ${ORDINAL(places[1])} place` : null,
+    fieldLabel,
+    eufGameDate(game.scheduledAt) || null,
+    eufGameTime(game.scheduledAt) || null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <article className="bg-surface rounded-card-sm shadow-card overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline gap-2">
+        <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight truncate">
+          {meta || (isForfeit ? 'Forfeit' : '')}
+        </span>
+        {isForfeit && (
+          <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight flex-shrink-0">
+            FF
+          </span>
+        )}
+        {/* Box score lives on the game page. Team names below are their own
+            links, so this is a separate affordance rather than wrapping the
+            whole node — same rule as the flat game rows elsewhere in EUF. */}
+        {game.eufGameId != null && (
+          <Link
+            href={`/euf/g/${game.id}`}
+            aria-label={`Box score: ${game.homeName} vs ${game.awayName}`}
+            className="text-muted no-underline hover:text-accent transition-colors flex-shrink-0 text-[9px] font-bold tracking-[0.16em] uppercase font-tight"
+          >
+            Box
+          </Link>
+        )}
+      </div>
+      <TeamLine
+        teamId={game.homeTeamId}
+        name={game.homeName}
+        country={game.homeCountry}
+        score={game.homeScore}
+        won={homeWon}
+        lost={awayWon}
+        compact={compact}
+      />
+      <div className="h-px bg-hairline" />
+      <TeamLine
+        teamId={game.awayTeamId}
+        name={game.awayName}
+        country={game.awayCountry}
+        score={game.awayScore}
+        won={awayWon}
+        lost={homeWon}
+        compact={compact}
+      />
+    </article>
+  );
+}
+
+function TeamLine({
+  teamId,
   name,
   country,
   score,
   won,
+  lost,
+  compact,
 }: {
-  id: string | null;
+  teamId: string | null;
   name: string;
   country: string | null;
   score: number | null;
   won: boolean;
+  lost: boolean;
+  compact?: boolean;
 }) {
-  const body = (
-    <>
-      <EufFlag countryName={country} size={12} />
-      <span className={['truncate', won ? 'text-ink font-semibold' : 'text-muted'].join(' ')}>
-        {name}
-      </span>
-    </>
+  const labelColor = won ? 'text-ink' : lost ? 'text-faint' : 'text-muted';
+  const scoreColor = won ? 'text-accent' : lost ? 'text-faint' : 'text-muted';
+  const fontWeight = won ? 'font-bold' : 'font-semibold';
+
+  const inner = (
+    <span className={`flex items-center gap-2 flex-1 min-w-0 ${labelColor}`}>
+      <EufFlag countryName={country} size={13} />
+      <span className={`text-[13px] font-tight truncate ${fontWeight}`}>{name}</span>
+    </span>
   );
+
   return (
-    <div className="flex items-center gap-1.5 text-[12px] font-tight py-0.5">
-      {id ? (
+    <div className={`flex items-center gap-3 px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
+      {teamId ? (
         <Link
-          href={`/euf/teams/${id}`}
-          className="flex items-center gap-1.5 min-w-0 flex-1 no-underline hover:underline"
+          href={`/euf/teams/${teamId}`}
+          className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
         >
-          {body}
+          {inner}
         </Link>
       ) : (
-        <span className="flex items-center gap-1.5 min-w-0 flex-1">{body}</span>
+        <span className="flex-1 min-w-0">{inner}</span>
       )}
       <span
-        className={['tabular-nums flex-shrink-0', won ? 'text-ink font-bold' : 'text-muted'].join(' ')}
+        className={`tabular text-[15px] font-bold font-tight leading-none w-7 text-right ${scoreColor}`}
       >
         {score ?? '–'}
       </span>
     </div>
   );
+}
+
+// ── Layout adapter ───────────────────────────────────────────────────────
+// EUF games name their teams homeTeamId/awayTeamId; the shared engine wants
+// homeId/awayId. Adapt at this boundary rather than renaming fields through a
+// shipped component (same pattern as usau-bracket-tree.tsx's assignPositions).
+function assignPositions(columns: RoundColumn[]): Map<string, number> {
+  const adapted: BracketColumn[] = columns.map((c) => ({
+    key: c.key,
+    label: c.label,
+    games: c.games.map((g) => ({ id: g.id, homeId: g.homeTeamId, awayId: g.awayTeamId })),
+  }));
+  const positions = sharedAssignPositions(adapted);
+  columns.forEach((col, i) => {
+    const order = new Map(adapted[i].games.map((g, idx) => [g.id, idx]));
+    col.games.sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0));
+  });
+  return positions;
 }

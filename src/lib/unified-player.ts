@@ -201,6 +201,10 @@ export interface EufSeasonStint {
   divisionName: string | null;
   eventName: string;
   eventSlug: string;
+  /** euf_events.kind — 'eucf' marks the season-ending European championship.
+   *  Gold "Champion" treatment is reserved for EUCF wins (Hunter, 2026-08-04);
+   *  wins at other kinds render as a plain 1st. Null on stale cached payloads. */
+  eventKind: string | null;
   jerseyNumber: string | null;
   finalPlacement: number | null;
   isChampion: boolean;

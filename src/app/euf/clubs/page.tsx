@@ -11,7 +11,7 @@ import { EufClubBrowse } from '@/components/euf/euf-club-browse';
 export const revalidate = 300;
 
 export const metadata: Metadata = {
-  title: 'EUCS Clubs · European Ultimate · The Layout',
+  title: 'EUCS Teams · European Ultimate · The Layout',
   description:
     'Every club in the European Ultimate Club Season, with event history, records, and finishes.',
 };
@@ -21,13 +21,13 @@ export default async function EufClubsPage() {
 
   return (
     <PageShell
-      title="EUCS Clubs"
+      title="EUCS Teams"
       eyebrow="EUF · Club Season"
       subtitle="Every club across the European Ultimate Club Season."
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'EUCS', href: '/euf/events' },
-        { label: 'Clubs' },
+        { label: 'Teams' },
       ]}
     >
       {clubs.length === 0 ? (

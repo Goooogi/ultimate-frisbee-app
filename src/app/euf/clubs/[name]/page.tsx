@@ -29,7 +29,7 @@ export const revalidate = 300;
 
 interface Props {
   params: { name: string };
-  searchParams: { div?: string };
+  searchParams: { div?: string; season?: string };
 }
 
 /** Resolve ?div= against the known division list; defaults to Open. */
@@ -48,6 +48,11 @@ export default async function EufClubPage({ params, searchParams }: Props) {
   const division = divisionOf(searchParams.div);
   const club = await getClubProfile(name, division);
   if (!club) notFound();
+
+  // ?season= deep link (player profiles pass the stint's year). Bad values
+  // fall through to the newest season inside EufClubHistory.
+  const seasonParam = Number.parseInt(searchParams.season ?? '', 10);
+  const initialSeason = Number.isFinite(seasonParam) ? seasonParam : null;
 
   const cross = await getClubCrossLeague(club.name, club.division).catch(() => []);
   const { totals, appearances } = club;
@@ -94,7 +99,7 @@ export default async function EufClubPage({ params, searchParams }: Props) {
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'EUCS', href: '/euf/events' },
-        { label: 'Clubs', href: '/euf/clubs' },
+        { label: 'Teams', href: '/euf/clubs' },
         { label: `${club.name} · ${club.division}` },
       ]}
     >
@@ -148,7 +153,7 @@ export default async function EufClubPage({ params, searchParams }: Props) {
           )}
         </div>
 
-        <EufClubHistory seasons={seasons} />
+        <EufClubHistory seasons={seasons} initialSeason={initialSeason} />
 
         {/* Appearances outside EUCS. Matched on exact name + country (WFDF) or
             U.S.-Open-only participation (USAU) — see get_euf_club_cross_league. */}

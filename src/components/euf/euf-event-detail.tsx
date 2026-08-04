@@ -29,6 +29,9 @@ interface Props {
   divisions: EufDivision[];
   standings: EufStandingRow[];
   games: EufGameCard[];
+  /** Outbound link back to the Ultiorganizer schedule site, mirroring USAU's
+   *  "View on USAU". Null when the event's source_origin/season_id aren't set. */
+  sourceUrl: string | null;
 }
 
 type ViewTab = 'standings' | 'pools' | 'crossovers' | 'bracket';
@@ -51,7 +54,7 @@ const STAGE_ORDER: Record<string, number> = {
  *  and EUCF 2023's "1-16 Bracket Finals"). */
 const TREE_ROUND_RE = /^(?:Bracket \d+-\d+|\d+-\d+ Bracket)(?:\s+(?:Quarterfinals|Semifinals|Finals))?$/;
 
-export function EufEventDetail({ divisions, standings, games }: Props) {
+export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props) {
   const [activeDiv, setActiveDiv] = useState<EufDivision>(divisions[0] ?? 'Open');
 
   const divStandings = useMemo(
@@ -126,33 +129,40 @@ export function EufEventDetail({ divisions, standings, games }: Props) {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Row 1 — "View on EUCS" link (left) + division tabs (right), one
+          compact header row on mobile — mirrors the USAU event page's
+          link + Level/Division row. */}
+      {(sourceUrl || divisions.length > 1) && (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          {sourceUrl ? <EufExternalLink url={sourceUrl} /> : <span />}
+          {divisions.length > 1 && (
+            <div className="flex flex-wrap gap-1.5">
+              {divisions.map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setActiveDiv(d)}
+                  aria-pressed={d === activeDiv}
+                  className={[
+                    'px-3 py-1.5 rounded-full text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
+                    'transition-colors cursor-pointer border',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    d === activeDiv
+                      ? 'bg-ink text-surface border-ink'
+                      : 'bg-transparent text-muted border-hairline hover:text-ink',
+                  ].join(' ')}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Champion — leads the page so the headline result is the first thing
           seen, even though the bracket tree scrolls horizontally on mobile. */}
       {champion && <ChampionBanner row={champion.row} derived={champion.derived} />}
-
-      {/* Division tabs */}
-      {divisions.length > 1 && (
-        <div className="flex flex-wrap gap-1.5">
-          {divisions.map((d) => (
-            <button
-              key={d}
-              type="button"
-              onClick={() => setActiveDiv(d)}
-              aria-pressed={d === activeDiv}
-              className={[
-                'px-3 py-1.5 rounded-full text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
-                'transition-colors cursor-pointer border',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                d === activeDiv
-                  ? 'bg-ink text-surface border-ink'
-                  : 'bg-transparent text-muted border-hairline hover:text-ink',
-              ].join(' ')}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
-      )}
 
       {/* View tabs — edge-bleed horizontal scroll on mobile so nothing clips
           (same treatment as the USAU event page). */}
@@ -391,6 +401,28 @@ function GameRow({ game: g }: { game: EufGameCard }) {
         won={awayWon}
       />
     </li>
+  );
+}
+
+/** External link back to the Ultiorganizer schedule site — mirrors USAU's
+ *  UsauExternalLink (same markup/placement, "View on EUCS" instead). Exported
+ *  so the game page (/euf/g/[id]) can reuse the identical affordance. */
+export function EufExternalLink({ url }: { url: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label="View on EUCS"
+      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-ink hover:bg-ink/10 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
+    >
+      View on EUCS
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 1.5h5.5V7" />
+        <path d="M8.5 1.5L3.5 6.5" />
+        <path d="M7 8.5H1.5V3" />
+      </svg>
+    </a>
   );
 }
 

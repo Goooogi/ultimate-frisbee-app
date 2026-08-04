@@ -8,10 +8,11 @@
 // schedule page. We don't have W-L records aggregated yet — that's a
 // future enhancement (compute from usau_games rows).
 
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { getEvent, type UsauEventSummary } from '@/lib/usau/data';
+import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { USAU_LEVELS, buildLeagueQs, type UsauLevel } from '@/lib/league';
@@ -31,6 +32,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function UsauEventPage({ params }: Props) {
   const event = await getEvent(params.slug);
   if (!event) notFound();
+
+  // WFDF-hosted events (WUCC/WJUC/WMUCC) leak into usau_events as stubs that
+  // never grow games — the real data comes from the WFDF pipeline. When we've
+  // ingested the WFDF twin, every USAU-side link lands there instead.
+  const worldsTwin = await findWorldsTwinSlug(event.name, Number(event.season));
+  if (worldsTwin) redirect(`/wfdf/events/${worldsTwin}`);
 
   const subtitle = formatSubtitle(event);
   const eyebrowParts = [

@@ -54,7 +54,12 @@ export default async function EufEventPage({ params }: Props) {
           Full schedule →
         </Link>
       </div>
-      <EufEventDetail divisions={ev.divisions} standings={standings} games={games} />
+      <EufEventDetail
+        divisions={ev.divisions}
+        standings={standings}
+        games={games}
+        sourceUrl={eufSourceUrl(ev)}
+      />
     </PageShell>
   );
 }
@@ -65,4 +70,11 @@ export default async function EufEventPage({ params }: Props) {
 function formatSubtitle(ev: EufEventCard): string | null {
   const parts = [eufDateRange(ev.startDate, ev.endDate), ev.location].filter(Boolean) as string[];
   return parts.length > 0 ? parts.join(' · ') : null;
+}
+
+/** Outbound link back to the Ultiorganizer schedule site for this event —
+ *  mirrors USAU's "View on USAU". Null when either column is missing. */
+function eufSourceUrl(ev: EufEventCard): string | null {
+  if (!ev.sourceOrigin || !ev.seasonId) return null;
+  return `${ev.sourceOrigin}/?view=games&season=${ev.seasonId}&filter=tournaments&group=all`;
 }

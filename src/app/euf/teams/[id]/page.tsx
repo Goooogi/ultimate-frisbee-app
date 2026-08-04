@@ -40,7 +40,7 @@ export default async function EufTeamPage({ params }: Props) {
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'EUCS', href: '/euf/events' },
-        { label: 'Clubs', href: '/euf/clubs' },
+        { label: 'Teams', href: '/euf/clubs' },
         {
           label: `${team.name} · ${team.division}`,
           href: `/euf/clubs/${encodeURIComponent(team.name)}?div=${encodeURIComponent(team.division)}`,

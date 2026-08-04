@@ -98,7 +98,7 @@ export default async function EufPlayerPage({ params }: Props) {
                     </td>
                     <td className="py-2 px-2 text-[13px] font-tight">
                       <Link
-                        href={`/euf/clubs/${encodeURIComponent(a.teamName)}?div=${encodeURIComponent(a.division)}`}
+                        href={`/euf/clubs/${encodeURIComponent(a.teamName)}?div=${encodeURIComponent(a.division)}&season=${a.year}`}
                         className="inline-flex items-center gap-1.5 no-underline hover:underline text-muted min-w-0"
                       >
                         <EufFlag countryName={a.countryName} size={13} />

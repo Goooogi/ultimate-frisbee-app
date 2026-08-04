@@ -53,7 +53,42 @@ export function sourcesFor<T extends BracketNode>(game: T, prev: readonly T[]): 
 }
 
 /**
+ * Reorder every column so each round's games sit ADJACENT to — and in the same
+ * vertical order as — the game they feed. The standard bracket rule: a reader
+ * follows a team straight across, connectors never cross.
+ *
+ * Order propagates from the LAST column BACKWARDS (the final fixes the semis'
+ * order, the semis fix the quarters', …): each parent claims its source games
+ * (team-id overlap via sourcesFor) in parent order. Forward order — what the
+ * adapters supply — is usually schedule order, which happily aligns round 1→2
+ * and then crosses at the semis (QF1's winner meeting QF3's).
+ *
+ * Games no parent claims (consolation rows sharing the column, TBD teams on an
+ * unplayed round) keep their relative order after the claimed ones — with no
+ * team ids there is nothing to align, and stored order is the honest fallback.
+ */
+function orderColumnsByFeeders<T extends BracketNode>(present: BracketColumn<T>[]): void {
+  for (let i = present.length - 1; i >= 1; i--) {
+    const child = present[i - 1];
+    const claimed = new Set<string>();
+    const ordered: T[] = [];
+    for (const parent of present[i].games) {
+      for (const s of sourcesFor(parent, child.games)) {
+        if (claimed.has(s.id)) continue;
+        claimed.add(s.id);
+        ordered.push(s);
+      }
+    }
+    for (const g of child.games) if (!claimed.has(g.id)) ordered.push(g);
+    child.games.length = 0;
+    child.games.push(...ordered);
+  }
+}
+
+/**
  * Assign every game a vertical pixel offset so the bracket reads as a tree:
+ *   - columns are first reordered so feeders sit adjacent to the game they
+ *     feed (orderColumnsByFeeders — no crossing connectors)
  *   - the first non-empty column lays out evenly, top to bottom
  *   - each later game sits at the midpoint of the games that fed it
  *   - a game with one identifiable source (opponent had a bye) sits on it
@@ -61,8 +96,8 @@ export function sourcesFor<T extends BracketNode>(game: T, prev: readonly T[]): 
  *
  * Returns Map<game.id, top-px>.
  *
- * SIDE EFFECT: each column's `games` array is re-sorted into vertical order, so
- * render order matches visual order.
+ * SIDE EFFECT: each column's `games` array is reordered/re-sorted into vertical
+ * order, so render order matches visual order.
  *
  * The de-overlap pass matters: two games in one column can resolve to the SAME
  * midpoint and paint on top of each other (it happened with seed-ordered USAU
@@ -76,6 +111,8 @@ export function assignPositions<T extends BracketNode>(
   const positions = new Map<string, number>();
   const present = columns.filter((c) => c.games.length > 0);
   if (present.length === 0) return positions;
+
+  orderColumnsByFeeders(present);
 
   const base = present[0];
   base.games.forEach((g, i) => positions.set(g.id, i * ROW_PITCH_PX));

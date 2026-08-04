@@ -25,6 +25,7 @@ export const revalidate = 60;
 
 interface Props {
   params: { id: string };
+  searchParams: { season?: string };
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -33,9 +34,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: `${team.name} · USAU · The Layout` };
 }
 
-export default async function UsauTeamPage({ params }: Props) {
+export default async function UsauTeamPage({ params, searchParams }: Props) {
   const team = await getTeam(params.id);
   if (!team) notFound();
+
+  // ?season= deep link (player profiles pass the stint's year). Bad values
+  // fall through to the newest season inside UsauTeamHistory.
+  const seasonParam = Number.parseInt(searchParams.season ?? '', 10);
+  const initialSeason = Number.isFinite(seasonParam) ? seasonParam : null;
 
   // National Championship medals (year + placement). Non-fatal on failure.
   const medals = await getTeamNationalsMedals(
@@ -102,7 +108,11 @@ export default async function UsauTeamPage({ params }: Props) {
         )}
       </div>
 
-      <UsauTeamHistory seasons={team.seasons} genderDivision={team.genderDivision} />
+      <UsauTeamHistory
+        seasons={team.seasons}
+        genderDivision={team.genderDivision}
+        initialSeason={initialSeason}
+      />
     </PageShell>
   );
 }
