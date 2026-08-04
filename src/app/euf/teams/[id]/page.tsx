@@ -107,6 +107,13 @@ export default async function EufTeamPage({ params }: Props) {
                         {g.roundName}
                       </span>
                     )}
+                    <Link
+                      href={`/euf/g/${g.id}`}
+                      aria-label={`Box score vs ${oppName}`}
+                      className="text-[10px] font-bold tracking-[0.1em] uppercase text-muted font-tight flex-shrink-0 no-underline hover:text-accent transition-colors"
+                    >
+                      Box
+                    </Link>
                   </li>
                 );
               })}
@@ -139,7 +146,14 @@ export default async function EufTeamPage({ params }: Props) {
                         {p.jerseyNumber && (
                           <span className="text-muted tabular-nums mr-2">{p.jerseyNumber}</span>
                         )}
-                        {p.fullName}
+                        {/* EUF player ids are per-event, so the profile is keyed
+                            by NAME — same routing the leaders table uses. */}
+                        <Link
+                          href={`/euf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                          className="no-underline hover:underline text-ink"
+                        >
+                          {p.fullName}
+                        </Link>
                       </td>
                       <td className="text-right py-2 px-2 text-[13px] font-tight tabular-nums text-ink">
                         {p.goals ?? 0}

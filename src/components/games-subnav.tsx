@@ -68,12 +68,18 @@ const WFDF_NAV_ITEMS: NavItem[] = [
 ];
 
 // EUCS — same event-scoped hub treatment as WFDF (pages under /euf/*, no
-// ?league= param). Clubs IS league-wide: euf_teams rows are per-event, but
-// /euf/clubs merges them by name into one club entity. Players remain
-// per-event, so there's still no players hub.
+// ?league= param), and the same four surfaces. "Clubs" is EUF's Teams: the
+// euf_teams rows are per-event, so /euf/clubs merges them by (name, division)
+// into the league-wide entity. Players likewise merge by name.
+//
+// No Schedule item: euf_games.scheduled_at is entirely NULL and euf_events has
+// no start_date, so the source gives a time-of-day with no date to hang it on —
+// and every game already has a result. See lib/euf/data.ts.
 const EUF_NAV_ITEMS: NavItem[] = [
-  { label: 'Events', href: '/euf/events', match: '/euf/events' },
-  { label: 'Clubs',  href: '/euf/clubs',  match: '/euf/clubs', aliases: ['/euf/clubs'] },
+  { label: 'Events',  href: '/euf/events',  match: '/euf/events' },
+  { label: 'Scores',  href: '/euf/scores',  match: '/euf/scores' },
+  { label: 'Clubs',   href: '/euf/clubs',   match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
+  { label: 'Players', href: '/euf/players', match: '/euf/players', aliases: ['/euf/players'] },
 ];
 
 // The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under

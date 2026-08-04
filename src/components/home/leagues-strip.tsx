@@ -80,16 +80,18 @@ const LEAGUE_ROWS: LeagueRow[] = [
 export function LeaguesStrip() {
   return (
     <>
-      {/* ── Desktop: LeaguesStripA — single horizontal card ── */}
-      <div className="hidden lg:flex items-center gap-6 bg-surface rounded-card-lg shadow-soft px-7 py-[22px]">
-        <div className="flex-shrink-0 pr-6 border-r border-hairline">
-          <h2 className="font-display italic font-bold text-[22px] leading-none tracking-[-0.02em] text-ink m-0">
-            Every league,
-            <br />
-            one place.
-          </h2>
-        </div>
-        <div className="flex flex-1 gap-2.5 flex-wrap">
+      {/* ── Desktop: LeaguesStripA — headline stacked ABOVE one row of tiles ──
+          The headline used to sit inline to the left behind a hairline divider.
+          That left ~1150px for the tiles, but six of them need ~1350px, so the
+          sixth (EUF) wrapped onto a second line and the row looked broken.
+          Stacking the headline gives the tiles the card's full width, and the
+          6-col grid makes every tile share it equally instead of each sizing to
+          its own text — so they stay on one row at every desktop width. */}
+      <div className="hidden lg:block bg-surface rounded-card-lg shadow-soft px-7 py-[22px]">
+        <h2 className="font-display italic font-bold text-[22px] leading-none tracking-[-0.02em] text-ink m-0 pb-4 mb-4 border-b border-hairline">
+          Every league, one place.
+        </h2>
+        <div className="grid grid-cols-6 gap-2.5">
           {LEAGUE_ROWS.map((row) => (
             <LeagueTile key={row.id} row={row} />
           ))}
@@ -114,16 +116,21 @@ export function LeaguesStrip() {
 function LeagueTile({ row }: { row: LeagueRow }) {
   const inner = (
     <>
-      <LeagueMark abbr={row.abbr} img={row.img} disabled={!row.href} />
+      {/* Nudged down so the mark optically centres on the abbr line rather than
+          sitting flush with the tile's top padding. */}
+      <span className="mt-0.5 flex-shrink-0">
+        <LeagueMark abbr={row.abbr} img={row.img} disabled={!row.href} />
+      </span>
       <div className="min-w-0">
         <div className={['text-[14px] font-bold font-tight leading-tight', row.href ? 'text-ink' : 'text-faint'].join(' ')}>
           {row.abbr}
         </div>
-        {/* Full league name, NOT truncated. These are the leagues' actual
-            names ("World Flying Disc Federation") — clipping them to
-            "World Flying D…" makes the row unreadable, which is what happened
-            once a sixth league pushed six tiles onto one line. The tile is
-            sized to fit the text and the container wraps instead. */}
+        {/* Full league name, NOT truncated — clipping "World Flying Disc
+            Federation" to "World Flying D…" makes the tile unreadable. In the
+            6-col grid a tile is ~190-250px, which is narrower than the longest
+            name, so the name WRAPS to a second line instead. The tile is
+            items-start + fixed min-height so a one-line and a two-line tile
+            still line up. */}
         {row.subtitle && (
           <div className="text-[11px] text-muted font-tight leading-tight mt-0.5">{row.subtitle}</div>
         )}
@@ -133,7 +140,10 @@ function LeagueTile({ row }: { row: LeagueRow }) {
   );
 
   const className = [
-    'flex items-center gap-3 min-w-[210px] px-3.5 py-3 rounded-card-sm text-ink',
+    // No min-width: the grid sets the track width, and a min-w here would
+    // overflow the row at narrower desktop sizes. items-start + min-h keeps
+    // one-line and two-line tiles aligned.
+    'flex items-start gap-3 min-h-[62px] px-3.5 py-3 rounded-card-sm text-ink',
     // White fill (bg-surface = #FFF in light, theme-aware in broadcast) with a
     // subtle grey hairline border at rest — calmer than the orange outline it
     // replaced. Orange is reserved for the hover cue below, so the resting

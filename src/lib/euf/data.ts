@@ -618,6 +618,85 @@ export async function getClubCrossLeague(
   }));
 }
 
+// ─── Hub pages (/euf/scores, /euf/players) ───────────────────────────────────
+// EUF mirrors WFDF's event-scoped hub shape rather than the shared ?league=
+// routes: a EUCS stop is a self-contained tournament, not a rolling fixture
+// list. NOTE there is deliberately no /euf/schedule — euf_games.scheduled_at is
+// entirely NULL and euf_events has no start_date, so the source gives us a
+// time-of-day ("08:30") with no date to hang it on. Every game is already
+// completed, so there'd be nothing upcoming to show even if we had dates.
+
+export interface EufEventScoreSummary {
+  slug: string;
+  name: string;
+  year: number;
+  kind: string;
+  location: string | null;
+  gameCount: number;
+  teamCount: number;
+  divisions: EufDivision[];
+}
+
+export async function listEventScoreSummaries(): Promise<EufEventScoreSummary[]> {
+  const events = await listEvents();
+  if (!events.length) return [];
+
+  const { data: games } = await supabase()
+    .from('euf_games')
+    .select('event_id')
+    .in(
+      'event_id',
+      events.map((e) => e.id),
+    )
+    .limit(5000);
+
+  const counts = new Map<string, number>();
+  for (const g of ((games ?? []) as Row[])) {
+    const k = g.event_id as string;
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+
+  return events.map((e) => ({
+    slug: e.slug,
+    name: e.name,
+    year: e.year,
+    kind: e.kind,
+    location: e.location,
+    gameCount: counts.get(e.id) ?? 0,
+    teamCount: e.teamCount,
+    divisions: e.divisions,
+  }));
+}
+
+export interface EufPlayerHubRow {
+  fullName: string;
+  teamName: string | null;
+  countryName: string | null;
+  division: EufDivision | null;
+  events: number;
+  goals: number;
+  assists: number;
+  points: number;
+}
+
+/** Career leaderboard across every EUCS event, one row per NAME (ids are
+ *  per-event). Backed by an RPC because the roster corpus is 12k+ rows — well
+ *  past PostgREST's 1000-row response cap. */
+export async function listTopPlayers(limit = 200): Promise<EufPlayerHubRow[]> {
+  const { data, error } = await supabase().rpc('list_euf_top_players', { lim: limit });
+  if (error || !data) return [];
+  return (data as Row[]).map((p) => ({
+    fullName: p.full_name as string,
+    teamName: (p.team_name as string) ?? null,
+    countryName: (p.country_name as string) ?? null,
+    division: (p.division as EufDivision) ?? null,
+    events: (p.events as number) ?? 0,
+    goals: (p.goals as number) ?? 0,
+    assists: (p.assists as number) ?? 0,
+    points: (p.points as number) ?? 0,
+  }));
+}
+
 // ─── Per-game box scores ─────────────────────────────────────────────────────
 
 export interface EufGameStatLine {
@@ -629,7 +708,35 @@ export interface EufGameStatLine {
   total: number;
 }
 
+export interface EufGameDetail extends EufGameCard {
+  eventId: string;
+  eventName: string;
+  eventSlug: string;
+  eventYear: number;
+}
+
+/** One game plus its event context, for /euf/g/[id]. */
+export async function getGame(gameId: string): Promise<EufGameDetail | null> {
+  if (!UUID_RE.test(gameId)) return null;
+  const { data, error } = await supabase()
+    .from('euf_games')
+    .select(`${GAME_SELECT}, event_id, event:event_id(name, slug, year)`)
+    .eq('id', gameId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const g = data as Row;
+  const ev = (g.event ?? {}) as Row;
+  return {
+    ...toGameCard(g),
+    eventId: g.event_id as string,
+    eventName: (ev.name as string) ?? '',
+    eventSlug: (ev.slug as string) ?? '',
+    eventYear: (ev.year as number) ?? 0,
+  };
+}
+
 export async function getGameStats(gameId: string): Promise<EufGameStatLine[]> {
+  if (!UUID_RE.test(gameId)) return [];
   const { data, error } = await supabase()
     .from('euf_game_player_stats')
     .select('full_name, jersey_number, team_id, goals, assists, total')

@@ -39,6 +39,10 @@ interface Props {
   /** The event's US state — game times are shown as the VENUE's wall clock
    *  (scheduled_at is a true UTC instant; see lib/usau/venue-tz). */
   venueState?: string | null;
+  /** Render placement brackets (5th/9th/13th …) as extra trees alongside the
+   *  championship. Off by default: the event page surfaces placement through
+   *  its own dropdown filter, and rendering both duplicates every game. */
+  includePlacement?: boolean;
 }
 
 interface RoundColumn {
@@ -84,18 +88,25 @@ export function bracketGroupPrefix(name: string | null | undefined): string {
   return i >= 0 ? name.slice(0, i).trim() : '';
 }
 
-export function UsauBracketTree({ games, venueState }: Props) {
-  // ── Every bracket, not just the championship ──────────────────────────
+export function UsauBracketTree({ games, venueState, includePlacement = false }: Props) {
+  // ── Which brackets this tree renders ──────────────────────────────────
   // Tournaments run parallel placement brackets (5th, 9th, 13th …) that decide
-  // real finishes. This used to render ONLY the championship, hiding ~14.9k
-  // placement games across ~1.3k events. Now we bucket EVERY bracket game by
-  // (group prefix, placement bucket) and render a labeled tree for each,
-  // championship first then ascending by place.
+  // real finishes, and this component can bucket EVERY bracket game by
+  // (group prefix, placement bucket) into its own labeled tree.
+  //
+  // But the event page already routes placement brackets to their own "5th
+  // Place" / "9th Place" dropdown filter, so rendering them here too showed the
+  // SAME games twice — and the duplicate read as a stray, final-less
+  // "SEMIFINALS" column hanging off the championship tree (the 5th-place
+  // bracket at the 2026 U.S. Open is 6 semis with no final). Default to
+  // championship-only; callers with no placement UI of their own opt in.
   //
   // Group prefix still splits combined-masters events (Masters Mixed vs Grand
   // Masters Open) so unrelated brackets never share a tree.
   const groups = useMemo(() => {
-    const bracketGames = games.filter((g) => isBracketGame(g));
+    const bracketGames = games.filter(
+      (g) => isBracketGame(g) && (includePlacement || isChampionshipBracket(g)),
+    );
     const byKey = new Map<string, { prefix: string; bucket: BracketBucket; games: Game[] }>();
     for (const g of bracketGames) {
       const prefix = bracketGroupPrefix(g.bracketName);
@@ -107,7 +118,7 @@ export function UsauBracketTree({ games, venueState }: Props) {
     return Array.from(byKey.values()).sort(
       (a, b) => a.prefix.localeCompare(b.prefix) || a.bucket.order - b.bucket.order,
     );
-  }, [games]);
+  }, [games, includePlacement]);
 
   if (groups.length === 0) return null;
 

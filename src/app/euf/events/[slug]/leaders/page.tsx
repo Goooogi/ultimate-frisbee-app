@@ -59,7 +59,12 @@ export default async function EufLeadersPage({ params }: Props) {
               {leaders.map((p, i) => (
                 <tr key={`${p.teamId}-${p.fullName}-${i}`} className="border-t border-hairline">
                   <td className="py-2 pr-2 text-[13px] font-tight text-ink whitespace-nowrap">
-                    {p.fullName}
+                    <Link
+                      href={`/euf/players/by-name/${encodeURIComponent(p.fullName)}`}
+                      className="no-underline hover:underline text-ink"
+                    >
+                      {p.fullName}
+                    </Link>
                   </td>
                   <td className="py-2 px-2 text-[13px] font-tight text-muted">
                     <span className="inline-flex items-center gap-1.5 min-w-0">

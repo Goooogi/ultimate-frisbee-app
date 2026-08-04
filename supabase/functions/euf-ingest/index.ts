@@ -78,6 +78,17 @@ interface IngestBody {
   location?: string;
   slug?: string;
   stats?: boolean;
+  /** Override the dates derived from the schedule's day headers (YYYY-MM-DD).
+   *  Only needed when an event's schedule page omits them. */
+  startDate?: string;
+  endDate?: string;
+}
+
+/** "9:05" → "09:05". The source emits single-digit hours, which are not a
+ *  valid ISO timestamp component. */
+function padTime(t: string): string {
+  const [h, m] = t.split(':');
+  return `${h.padStart(2, '0')}:${m}`;
 }
 
 async function ingest(supabase: SupabaseClient, body: IngestBody) {
@@ -99,7 +110,25 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
   });
 
   // ── 3. Upsert event ───────────────────────────────────────────────────────
-  const year = body.year ?? Number(body.name?.match(/(20\d{2})/)?.[1]) ?? new Date().getFullYear();
+  // Games are fetched HERE (not at step 6) because the event's start/end dates
+  // are DERIVED from the games' day headers ("<h3>Sat 20.9.2025</h3>") — the
+  // source has no event-level date field, and these columns were left NULL
+  // before, which made any schedule surface impossible.
+  const gamesHtml = await fetchHtml(url('games', '&filter=tournaments&group=all'));
+  if (!gamesHtml) throw new Error(`games view empty for season ${season}`);
+  const games = parseGames(gamesHtml);
+
+  const gameDates = games.map((g) => g.date).filter((d): d is string => Boolean(d)).sort();
+  const startDate = body.startDate ?? gameDates[0] ?? null;
+  const endDate = body.endDate ?? gameDates[gameDates.length - 1] ?? null;
+
+  // Prefer a year we can prove from the schedule over one guessed from the name.
+  const year =
+    body.year ??
+    (startDate ? Number(startDate.slice(0, 4)) : null) ??
+    Number(body.name?.match(/(20\d{2})/)?.[1]) ??
+    new Date().getFullYear();
+
   const { data: eventRow, error: evErr } = await supabase
     .from('euf_events')
     .upsert(
@@ -110,6 +139,8 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
         year,
         kind: body.kind ?? 'other',
         location: body.location ?? null,
+        start_date: startDate,
+        end_date: endDate,
         source_origin: BASE,
         last_scraped_at: new Date().toISOString(),
         last_scraped_status: 'ok',
@@ -178,10 +209,7 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
   }
 
   // ── 6. Games ──────────────────────────────────────────────────────────────
-  const gamesHtml = await fetchHtml(url('games', '&filter=tournaments&group=all'));
-  if (!gamesHtml) throw new Error(`games view empty for season ${season}`);
-  const games = parseGames(gamesHtml);
-
+  // (fetched + parsed at step 3 — the event's dates are derived from them)
   let unresolved = 0;
   const gameRows = games.map((g) => {
     const home = byDivName.get(teamKey(g.division, g.home)) ?? null;
@@ -200,6 +228,12 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
       away_score: g.awayScore,
       field: g.field,
       start_time: g.time,
+      // start_time alone is a bare "10:15" with no day. Combining it with the
+      // day header gives a real instant so games can be ordered and scheduled
+      // across an event. Times are VENUE-LOCAL and the source publishes no
+      // offset, so this is stored as UTC — treat it as wall-clock, the same
+      // convention the USAU masters ingest uses.
+      scheduled_at: g.date && g.time ? `${g.date}T${padTime(g.time)}:00Z` : null,
       status: g.forfeit ? 'forfeit' : 'completed',
       updated_at: new Date().toISOString(),
     };

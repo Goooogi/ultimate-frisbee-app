@@ -140,12 +140,15 @@ const WFDF_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players' },
 ];
 
-// EUCS — event-scoped hub, no ?league= qs. Clubs merges the per-event
-// euf_teams rows by name into one league-wide club entity; players stay
-// per-event, so there's no players hub.
+// EUCS — event-scoped hub, no ?league= qs. Same four surfaces as WFDF. "Clubs"
+// is EUF's Teams (euf_teams rows are per-event; /euf/clubs merges them by
+// name+division). No Schedule: the source has no game DATES, only a
+// time-of-day, and every game is already played. See lib/euf/data.ts.
 const EUF_NAV_ITEMS: GamesNavItem[] = [
-  { label: 'Events', href: '/euf/events', match: '/euf/events' },
-  { label: 'Clubs',  href: '/euf/clubs',  match: '/euf/clubs' },
+  { label: 'Events',  href: '/euf/events',  match: '/euf/events' },
+  { label: 'Scores',  href: '/euf/scores',  match: '/euf/scores' },
+  { label: 'Clubs',   href: '/euf/clubs',   match: '/euf/clubs', aliases: ['/euf/teams'] },
+  { label: 'Players', href: '/euf/players', match: '/euf/players' },
 ];
 
 interface GamesNavItem {

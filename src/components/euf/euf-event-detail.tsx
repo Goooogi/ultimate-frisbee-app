@@ -186,6 +186,16 @@ export function EufEventDetail({ divisions, standings, games }: Props) {
                       FF
                     </span>
                   )}
+                  {/* Box score lives on the game page. The team names inside
+                      TeamLine are their own links, so this is a separate
+                      affordance rather than wrapping the whole row. */}
+                  <Link
+                    href={`/euf/g/${g.id}`}
+                    aria-label={`Box score: ${g.homeName} vs ${g.awayName}`}
+                    className="text-[10px] font-bold tracking-[0.1em] uppercase text-muted font-tight flex-shrink-0 no-underline hover:text-accent transition-colors"
+                  >
+                    Box
+                  </Link>
                 </li>
               );
             })}

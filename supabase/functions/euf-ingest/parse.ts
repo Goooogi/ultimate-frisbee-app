@@ -102,11 +102,30 @@ export interface ParsedGame {
   isBracket: boolean;
   time: string | null;
   field: string | null;
+  /** ISO date (YYYY-MM-DD) of the day this game was played, from the
+   *  "<h3>Sat 20.9.2025</h3>" header that precedes each day's rows. */
+  date: string | null;
   home: string;
   away: string;
   homeScore: number;
   awayScore: number;
   forfeit: boolean;
+}
+
+/**
+ * Day headers look like "<h3>Sat 20.9.2025 <a …></a></h3>" — D.M.YYYY, so the
+ * FIRST number is the day and the second the month (not US order). Returns an
+ * ISO date, or null when the header carries no parseable date (some events emit
+ * a bare "<h3>Bracket</h3>").
+ */
+export function parseDayHeader(h3: string): string | null {
+  const m = h3.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (!m) return null;
+  const [, d, mo, y] = m;
+  const day = Number(d);
+  const month = Number(mo);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 /**
@@ -116,9 +135,21 @@ export interface ParsedGame {
 export function parseGames(html: string): ParsedGame[] {
   const out: ParsedGame[] = [];
   let ctx: ReturnType<typeof parseSectionHeader> = null;
+  let day: string | null = null;
 
-  for (const m of html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)) {
-    const tr = m[1];
+  // Walk <h3> day headers and <tr> game rows TOGETHER in document order: the
+  // date lives only in the header that precedes each day's block, so matching
+  // <tr> alone (as this did before) threw the date away. One combined regex
+  // keeps the two interleaved without a second positional pass.
+  for (const m of html.matchAll(/<h3[^>]*>([\s\S]*?)<\/h3>|<tr[^>]*>([\s\S]*?)<\/tr>/g)) {
+    if (m[1] !== undefined) {
+      const parsed = parseDayHeader(stripTags(m[1]));
+      // Keep the previous day when a header carries no date (e.g. "<h3>Bracket</h3>")
+      // rather than blanking it for every row that follows.
+      if (parsed) day = parsed;
+      continue;
+    }
+    const tr = m[2];
     if (isChrome(tr)) continue;
     const cells = cellsOf(tr);
 
@@ -149,6 +180,7 @@ export function parseGames(html: string): ParsedGame[] {
       isBracket: ctx.isBracket,
       time: cells.find((c) => /^\d{1,2}:\d{2}$/.test(c)) ?? null,
       field: cells.find((c) => /^Field\b/i.test(c)) ?? null,
+      date: day,
       home,
       away,
       homeScore: Number(hs[1]),
