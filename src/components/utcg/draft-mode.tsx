@@ -42,7 +42,9 @@ export function PlayModeSelect({
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 max-w-2xl mx-auto w-full">
+      {/* Three modes, three columns on desktop — 2-up left PvP stranded on its
+          own half-width row. Stays 2-up at sm (tablet) and stacks on phones. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-w-2xl lg:max-w-5xl mx-auto w-full">
         <ModeCard
           eyebrow="Squad Battle"
           tag={{ label: 'Solo', tone: 'solo' }}

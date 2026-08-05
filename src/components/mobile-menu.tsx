@@ -133,20 +133,20 @@ const MEGA_LEAGUE_DIRECT_HREFS: Partial<Record<MegaLeagueId, string>> = {};
 
 // WFDF section — event-scoped hub. All pages live under /wfdf/* (no ?league= qs),
 // same no-qs treatment as WUL.
+// No Scores item: /wfdf/scores duplicated the Events grid, deleted 2026-08-05.
 const WFDF_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events' },
-  { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
   { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams' },
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players' },
 ];
 
 // EUCS — event-scoped hub, no ?league= qs. "Teams" routes to /euf/clubs — the
 // club identity layer (euf_teams rows are per-event; /euf/clubs merges them by
-// name+division). No Scores item: it duplicated Events, deleted 2026-08-04.
-// Schedule is event-scoped and reads scheduled_at. See lib/euf/data.ts.
+// name+division). No Scores item (duplicated Events, deleted 2026-08-04) and no
+// Schedule item (same, deleted 2026-08-05 — /euf/events/[slug] already lists
+// every game day-split within each round).
 const EUF_NAV_ITEMS: GamesNavItem[] = [
   { label: 'Events',   href: '/euf/events',   match: '/euf/events' },
-  { label: 'Schedule', href: '/euf/schedule', match: '/euf/schedule' },
   { label: 'Teams',    href: '/euf/clubs',    match: '/euf/clubs', aliases: ['/euf/teams'] },
   { label: 'Players',  href: '/euf/players',  match: '/euf/players' },
 ];

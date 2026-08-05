@@ -58,26 +58,29 @@ const FANTASY_NAV_ITEMS: NavItem[] = [
 ];
 
 // WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
-// it gets its own secondary-nav items (Events/Scores/Teams/Players) and no
-// league switcher, same treatment as the Fantasy sub-app.
+// it gets its own secondary-nav items (Events/Teams/Players) and no league
+// switcher, same treatment as the Fantasy sub-app.
+//
+// No Scores item: /wfdf/scores was a second event grid linking to the same
+// /wfdf/events/[slug] detail pages, so it duplicated Events. Deleted 2026-08-05
+// (same call as EUCS's Scores tab before it). A Worlds event is a fixed bracket,
+// not a rolling fixture list — the event page carries results and schedule both.
 const WFDF_NAV_ITEMS: NavItem[] = [
   { label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events' },
-  { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
   { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams',   aliases: ['/wfdf/teams'] },
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players', aliases: ['/wfdf/players'] },
 ];
 
 // EUCS — same event-scoped hub treatment as WFDF (pages under /euf/*, no
-// ?league= param), carrying the full USAU surface set. "Clubs" is EUF's Teams:
-// the euf_teams rows are per-event, so /euf/clubs merges them by (name,
-// division) into the league-wide entity. Players likewise merge by name.
+// ?league= param). "Clubs" is EUF's Teams: the euf_teams rows are per-event, so
+// /euf/clubs merges them by (name, division) into the league-wide entity.
+// Players likewise merge by name.
 //
-// Schedule became possible once the dates were backfilled — all 1,632 games now
-// carry scheduled_at (the parser had been discarding the day headers). It is
-// event-scoped, since EUCS runs several tour stops on the same weekend.
+// No Scores or Schedule item — both duplicated Events. /euf/schedule showed one
+// event's games grouped by day, which /euf/events/[slug] already does (grouped
+// by round, day-split within each). Deleted 2026-08-05.
 const EUF_NAV_ITEMS: NavItem[] = [
   { label: 'Events',   href: '/euf/events',   match: '/euf/events' },
-  { label: 'Schedule', href: '/euf/schedule', match: '/euf/schedule' },
   { label: 'Teams',    href: '/euf/clubs',    match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
   { label: 'Players',  href: '/euf/players',  match: '/euf/players', aliases: ['/euf/players'] },
 ];

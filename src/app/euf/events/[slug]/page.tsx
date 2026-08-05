@@ -47,12 +47,6 @@ export default async function EufEventPage({ params }: Props) {
         >
           Scoring leaders →
         </Link>
-        <Link
-          href={`/euf/schedule?event=${ev.slug}`}
-          className="text-[11px] font-bold tracking-[0.06em] uppercase font-tight text-accent no-underline hover:underline"
-        >
-          Full schedule →
-        </Link>
       </div>
       <EufEventDetail
         divisions={ev.divisions}

@@ -154,7 +154,13 @@ function sharesTeam(a: EufGameCard, b: EufGameCard): boolean {
  *  reads "Quarterfinals" when the bracket has no deeper rounds. */
 const ROUND_LABELS_FROM_FINAL = ['Final', 'Semifinals', 'Quarterfinals', 'Round of 16'];
 
-function toColumns(rounds: EufGameCard[][], finals: EufGameCard[]): RoundColumn[] {
+function toColumns(
+  rounds: EufGameCard[][],
+  finals: EufGameCard[],
+  /** Standalone consolation tree (a lone 3rd/4th game, no feeder rounds of its
+   *  own). Its single column is the game itself, not a "Final". */
+  isStandalone = false,
+): RoundColumn[] {
   const present = rounds.filter((r) => r.length > 0);
   const cols: RoundColumn[] = present.map((games, i) => ({
     key: `d${i}`,
@@ -163,7 +169,9 @@ function toColumns(rounds: EufGameCard[][], finals: EufGameCard[]): RoundColumn[
     label: ROUND_LABELS_FROM_FINAL[present.length - i] ?? 'Early Round',
     games,
   }));
-  if (finals.length) cols.push({ key: 'final', label: 'Final', games: finals });
+  if (finals.length) {
+    cols.push({ key: 'final', label: isStandalone ? 'Placement Game' : 'Final', games: finals });
+  }
   return cols;
 }
 
@@ -211,16 +219,17 @@ function splitBracketGroup(
     if (claimedAny || trees.length === 0) {
       trees.push({ finals: [f], rounds: chain });
     } else {
-      // A final whose sources are all claimed (3rd/4th rides the winner semis,
-      // 7th/8th the losers') attaches to the tree that owns its DIRECT feeders.
-      // Prefer later rounds: matching on quarters alone would glue the 7th/8th
-      // game to the championship tree, whose quarters its teams fell out of.
-      let host: { finals: EufGameCard[]; rounds: EufGameCard[][] } | undefined;
-      for (let r = 2; r >= 0 && !host; r--) {
-        host = trees.find((t) => t.rounds[r]?.some((g) => sharesTeam(f, g)));
-      }
-      if (host) host.finals.push(f);
-      else trees.push({ finals: [f], rounds: [[], [], []] });
+      // A final whose sources are all claimed — 3rd/4th rides the winner semis,
+      // 7th/8th the losers'. It gets its OWN tree, never stacked into the host's
+      // finals column.
+      //
+      // USAU PARITY: a 3rd-place game is not a round of the championship
+      // bracket. USAU tags it as a separate bracket ("3rd Place" / "3rd Place
+      // Game") that isChampionshipBracket() explicitly rejects, so the
+      // championship tree is strictly Quarterfinals → Semifinals → Final with a
+      // SINGLE title card. Stacking the consolation game under the final made
+      // the Championship column read as two co-equal finals.
+      trees.push({ finals: [f], rounds: [[], [], []] });
     }
   }
 
@@ -234,22 +243,33 @@ function splitBracketGroup(
   }
 
   return trees.map((t, i) => {
-    const places = t.finals
-      .flatMap((f) => placesOf(f) ?? [])
+    // Range across EVERY game in the tree, not just its finals. A 5th–8th
+    // bracket's final decides 5th/6th, so reading the finals alone mislabelled
+    // the whole tree "5th–6th Place" while its semis were deciding 5th–8th.
+    const places = [...t.rounds.flat(), ...t.finals]
+      .flatMap((g) => placesOf(g) ?? [])
       .sort((a, b) => a - b);
     const lo = places[0];
     const hi = places[places.length - 1];
+    // A standalone consolation game reads by the place it awards — "3rd Place",
+    // matching USAU's own bracket_name for it — not as a range spanning both
+    // teams ("3rd–4th Place"), which USAU never uses as a bracket title.
+    const hasPlay = t.rounds.some((r) => r.length > 0);
     const label =
       lo === 1
         ? 'Championship'
-        : lo != null && hi != null
-          ? `${ORDINAL(lo)}–${ORDINAL(hi)} Place`
-          : fallbackLabel;
+        : lo == null
+          ? fallbackLabel
+          : !hasPlay
+            ? `${ORDINAL(lo)} Place`
+            : hi != null
+              ? `${ORDINAL(lo)}–${ORDINAL(hi)} Place`
+              : `${ORDINAL(lo)} Place`;
     return {
       id: `${name}-${i}`,
       label,
       order: bucketLo * 100 + (lo ?? 99),
-      columns: toColumns(t.rounds, t.finals),
+      columns: toColumns(t.rounds, t.finals, !hasPlay),
     };
   });
 }
