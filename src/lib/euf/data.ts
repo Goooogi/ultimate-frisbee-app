@@ -591,15 +591,26 @@ export async function getClubProfile(
 
   const rows = data as Row[];
 
-  // The RPC doesn't select start_date; one extra .in() fetch beats extending
-  // the SQL function (out of scope — see the rebuild's data notes).
+  const clubName = rows[0].club_name as string;
+  const clubDivision = rows[0].division as EufDivision;
+
+  // Both follow-ups depend only on `rows`, never on each other — issue them
+  // together so the page pays one round-trip here instead of two.
+  //
+  // start_date: the RPC doesn't select it; one extra .in() fetch beats
+  // extending the SQL function (out of scope — see the rebuild's data notes).
+  // siblings: the club's other squads, so a visitor on GRUT Women's can reach
+  // GRUT Open.
   const eventIds = [...new Set(rows.map((r) => r.event_id as string))];
-  const { data: eventRows } = await supabase()
-    .from('euf_events')
-    .select('id, start_date')
-    .in('id', eventIds);
+  const [{ data: eventRows }, { data: sibs }] = await Promise.all([
+    supabase().from('euf_events').select('id, start_date').in('id', eventIds),
+    supabase().from('euf_teams').select('division').ilike('name', clubName),
+  ]);
   const startDateByEvent = new Map(
     ((eventRows ?? []) as Row[]).map((e) => [e.id as string, (e.start_date as string) ?? null]),
+  );
+  const siblingDivisions = EUF_DIVISIONS.filter(
+    (d) => d !== clubDivision && ((sibs ?? []) as Row[]).some((s) => s.division === d),
   );
 
   const appearances: EufClubAppearance[] = rows.map((r) => ({
@@ -617,18 +628,6 @@ export async function getClubProfile(
     scoresFor: (r.scores_for as number) ?? 0,
     scoresAgainst: (r.scores_against as number) ?? 0,
   }));
-
-  const clubName = rows[0].club_name as string;
-  const clubDivision = rows[0].division as EufDivision;
-
-  // The club's other squads, so a visitor on GRUT Women's can reach GRUT Open.
-  const { data: sibs } = await supabase()
-    .from('euf_teams')
-    .select('division')
-    .ilike('name', clubName);
-  const siblingDivisions = EUF_DIVISIONS.filter(
-    (d) => d !== clubDivision && ((sibs ?? []) as Row[]).some((s) => s.division === d),
-  );
 
   return {
     key: rows[0].club_key as string,

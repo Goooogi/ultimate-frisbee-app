@@ -574,22 +574,30 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
  * usau_event_team_ids array accumulates every per-event ID we've ever
  * seen so the same physical squad at multiple events maps to one row.
  *
- * For v1 we treat each EventTeamId as its own loose identity unless we
- * have other reason to merge (e.g. a future sync-team-details that finds
- * the persistent TeamId). That means "Revolver" at 2024 Pro Champs and
- * "Revolver" at 2025 Pro Champs will be two rows for now.
+ * IDENTITY GRAIN IS THE TEAM-SEASON — (name, gender, level, season).
  *
- * EXCEPTION — same-event EventTeamId churn. USAU sometimes mints a NEW
- * EventTeamId for a team mid-event (a late re-registration / re-seed), so a
- * later scrape of the SAME event sees an id we've never recorded and would
- * create a duplicate team row (bit DeMo @ Heavyweights 2026: two rows, one
- * orphaned with 0 games). Before inserting, we therefore look for a team
- * ALREADY PARTICIPATING IN THIS EVENT with the same name + gender +
- * competition level; if found, we adopt it and append the new EventTeamId to
- * its usau_event_team_ids. This is scoped to the event on purpose — a shared
- * name across DIFFERENT events is left as separate rows per the v1 identity
- * model above; only a same-event collision (which is unambiguously the same
- * squad — USAU name+division is unique within one event) is merged.
+ * This used to be scoped to a single EVENT: "Revolver at 2024 Pro Champs and
+ * Revolver at 2025 Pro Champs will be two rows for now." That was accepted as a
+ * v1 simplification, but it also meant Revolver at THREE 2025 events became
+ * three rows in the SAME season — splitting one squad's games, roster and
+ * profile. By 2026-08-05 that had produced 1,505 duplicate groups / 2,428
+ * redundant rows, cleaned up by
+ * supabase/migrations/20260805000000_merge_duplicate_usau_teams.sql.
+ *
+ * So the same-name match now spans the event's whole SEASON, not just the
+ * event. Season is the right grain and NOT wider:
+ *   - Wider (all-time) is WRONG: rosters turn over, and one row per team-season
+ *     is deliberate — 96.7% of same-name rows are single-season by design.
+ *   - Narrower (per-event) is what caused the duplicates.
+ *
+ * Safe because USAU name+division is unique within a season's event set, with
+ * one measured exception: A/B squads entering the SAME event (4 pairs in the
+ * whole DB, all 2014 sectionals — KOD, PleasureTown, BirdFruit). Those are
+ * preserved by preferring a same-event match first and only then falling back
+ * to the season, so a genuine A/B pair keeps its two rows.
+ *
+ * Teams ingested via ultirzr carry a persistent usau_team_id (UNIQUE), so they
+ * can never duplicate; only this HTML path, which has no persistent id, can.
  */
 async function resolveTeam(
   db: ReturnType<typeof supabase>,
@@ -607,19 +615,62 @@ async function resolveTeam(
   if (lookupErr && lookupErr.code !== 'PGRST116') throw lookupErr;
   if (existing) return existing.id;
 
-  // Not seen by id — but is the same squad already in THIS event under a
-  // different (churned) EventTeamId? Match name + gender + level among this
-  // event's existing participants. If so, adopt it and record the new id.
-  const { data: sameEvent, error: sameEventErr } = await db
-    .from('usau_event_teams')
-    .select('team_id, usau_teams!inner(id, name, gender_division, competition_level, usau_event_team_ids)')
-    .eq('event_id', eventUUID)
-    .eq('usau_teams.name', team.displayName)
-    .eq('usau_teams.gender_division', genderDivision)
-    .eq('usau_teams.competition_level', competitionLevel)
-    .limit(1)
-    .maybeSingle();
-  if (sameEventErr && sameEventErr.code !== 'PGRST116') throw sameEventErr;
+  // Not seen by id — is this squad already in the DB for this SEASON under a
+  // different EventTeamId? Two ways that happens: USAU churns the id mid-event
+  // (late re-registration / re-seed), or the same club simply entered another
+  // event in the same season.
+  //
+  // Try THIS EVENT first, then the rest of the season. Ordering matters: it
+  // keeps a real A/B pair — two squads sharing a name at ONE event — matching
+  // their own row rather than collapsing into whichever the season query
+  // happened to return first.
+  const TEAM_SELECT =
+    'team_id, usau_teams!inner(id, name, gender_division, competition_level, usau_event_team_ids)';
+  const nameFilters = (q: ReturnType<typeof db.from>) =>
+    q
+      .eq('usau_teams.name', team.displayName)
+      .eq('usau_teams.gender_division', genderDivision)
+      .eq('usau_teams.competition_level', competitionLevel);
+
+  const runMatch = async (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    build: (q: any) => any,
+  ) => {
+    const { data, error } = await build(
+      nameFilters(db.from('usau_event_teams').select(TEAM_SELECT)),
+    )
+      .limit(1)
+      .maybeSingle();
+    if (error && error.code !== 'PGRST116') throw error;
+    return data;
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let sameEvent = await runMatch((q: any) => q.eq('event_id', eventUUID));
+
+  if (!sameEvent) {
+    // Widen to the season. Filter through the JOINED event row rather than
+    // passing a list of event ids — 2026 alone has 511 events, so an .in()
+    // list would both blow up the PostgREST URL and (if capped) silently miss
+    // peers, re-creating the very duplicates this is meant to prevent.
+    const { data: ev } = await db
+      .from('usau_events')
+      .select('season')
+      .eq('id', eventUUID)
+      .maybeSingle();
+    const season = (ev as { season?: number } | null)?.season;
+    if (season != null) {
+      sameEvent = await runMatch(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (q: any) =>
+          q
+            .select(`${TEAM_SELECT}, usau_events!inner(season)`)
+            .eq('usau_events.season', season)
+            .neq('event_id', eventUUID),
+      );
+    }
+  }
+
   if (sameEvent) {
     const matched = sameEvent.usau_teams as unknown as {
       id: string;

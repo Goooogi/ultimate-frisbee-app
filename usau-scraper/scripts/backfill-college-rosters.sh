@@ -25,14 +25,40 @@
 # Reads the work-list live from Postgres so it's always current and RESUMABLE:
 # already-rostered teams are skipped, so you can stop/restart freely.
 #
-# ── RESUME AFTER A WAF COOL-OFF (status as of 2026-06-15) ────────────────────
-# 2023 college rosters are DONE (408 teams / ~9.5k players). 2024 + 2025 remain.
-# USAU tarpitted our Deno egress IP after ~450 sustained requests at 6s pace.
-# Wait a few hours (the source is fine from residential IPs), then resume with:
-#   ANON=$(supabase ... anon key) SEASONS="2024,2025" GAP=12 \
+# ── STATUS: COMPLETE (verified 2026-08-05) — nothing left to run ─────────────
+# Every college season a team can realistically be scraped for is DONE. Coverage
+# of teams that have a roster for the season they played:
+#
+#   2026  D-I 100% (83/83)     D-III 100% (38/38)
+#   2025  D-I  99.3% (292/294) D-III 100% (116/116)
+#   2024  D-I  99.7% (316/317) D-III 100% (121/121)
+#   2023  D-I  16.2% (324/2004) D-III 38.2% (116/304)   <- see below, NOT a gap
+#   2022  D-I  95.4% (495/519) D-III 100% (197/197)
+#   2021  D-I  95.9% (348/363) D-III  99.2% (127/128)
+#
+# 2023's low percentage is an ACCOUNTING ARTIFACT, not missing data:
+#   - 2023 Nationals is 100% complete (40/40 D-I, 32/32 D-III).
+#   - 2023 is the ONLY college season where regular-season tournaments were
+#     ingested (174 of them: Midwest Throwdown, Queen City Tune Up, Stanford
+#     Open…). 2024/2025/2026 ingested ZERO. So 2023's denominator carries the
+#     long tail of small programs no other season counts.
+#   - Of its 1,868 teams with no roster: 0 reached Nationals, none have a roster
+#     in ANY season, and ~1,129 (60%) are duplicate rows of teams already
+#     rostered in 2023 (the usau_team_id-is-NULL split). Only ~176 are genuinely
+#     new programs.
+#   - Only 5 of the 1,868 have a usau_event_team_url_id, so scraping them means a
+#     ~1,900-call RESOLVE pass first — against the WAF that tarpitted our Deno
+#     egress IP at ~450 sustained requests. Not worth it for teams with no
+#     Nationals appearance.
+#
+# The old "2024 + 2025 remain" note was stale — both finished (1 and 2 teams
+# short respectively, i.e. genuinely unscrapable stragglers).
+#
+# If you ever DO resume (e.g. a new season), the WAF rules still apply: wait out
+# any block from a residential IP, then run with a wide gap —
+#   ANON=$(supabase ... anon key) SEASONS="2027" GAP=12 \
 #     bash scripts/backfill-college-rosters.sh
-# It will fast-skip 2023 (0 teams to scrape) and pick up the rest. If it trips
-# again, just wait longer / raise GAP — every completed team stays saved.
+# It fast-skips already-rostered teams, so a re-run is always safe.
 
 set -uo pipefail
 

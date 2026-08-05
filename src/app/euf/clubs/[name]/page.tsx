@@ -54,7 +54,6 @@ export default async function EufClubPage({ params, searchParams }: Props) {
   const seasonParam = Number.parseInt(searchParams.season ?? '', 10);
   const initialSeason = Number.isFinite(seasonParam) ? seasonParam : null;
 
-  const cross = await getClubCrossLeague(club.name, club.division).catch(() => []);
   const { totals, appearances } = club;
 
   // Group appearances by season (year), oldest event first within each season
@@ -67,14 +66,20 @@ export default async function EufClubPage({ params, searchParams }: Props) {
   }
   const years = [...byYear.keys()].sort((a, b) => b - a);
 
-  const seasons: EufClubSeason[] = await Promise.all(
-    years.map(async (year) => {
-      const yearAppearances = [...byYear.get(year)!].sort((a, b) => a.eventName.localeCompare(b.eventName));
-      const oldestFirst = [...yearAppearances].reverse();
-      const roster = await getClubSeasonRosters(oldestFirst.map((a) => a.teamId)).catch(() => []);
-      return { year, appearances: yearAppearances, roster };
-    }),
-  );
+  // Cross-league and the season rosters are independent of each other — both
+  // only need `club`, which we already have. Awaiting them separately cost a
+  // full extra round-trip on a page that already waits on getClubProfile.
+  const [cross, seasons] = await Promise.all([
+    getClubCrossLeague(club.name, club.division).catch(() => []),
+    Promise.all(
+      years.map(async (year): Promise<EufClubSeason> => {
+        const yearAppearances = [...byYear.get(year)!].sort((a, b) => a.eventName.localeCompare(b.eventName));
+        const oldestFirst = [...yearAppearances].reverse();
+        const roster = await getClubSeasonRosters(oldestFirst.map((a) => a.teamId)).catch(() => []);
+        return { year, appearances: yearAppearances, roster };
+      }),
+    ),
+  ]);
 
   // European Championships (EUCF) medals — the continent's top tier. Other
   // kinds (e2cf, tour stops, invites) don't carry the same prestige, so only

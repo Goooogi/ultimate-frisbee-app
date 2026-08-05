@@ -36,7 +36,7 @@ const LEAGUE_ROWS: LeagueRow[] = [
   {
     id: 'usau',
     label: 'USAU',
-    abbr: 'USA',
+    abbr: 'USAU',
     subtitle: 'USA Ultimate',
     href: '/scores?league=usau',
     img: '/USAU-logo.png',
