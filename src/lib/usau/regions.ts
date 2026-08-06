@@ -103,23 +103,26 @@ export const UFA_TEAM_STATE: Record<string, string> = {
   shred: 'UT',
   spiders: 'CA',
   steel: 'OR',
-  // Historical / inactive
+  // Historical / inactive — audited 2026-08-06 against the games API's
+  // historical city field; several were wrong (Riptide = Vancouver, Cannons =
+  // Jacksonville/Tampa Bay, Outlaws = Ottawa, …). Keep in sync with mobile's
+  // UFA_TEAM_STATE in src/lib/ufa/teams.ts.
   aviators: 'CA',
   mechanix: 'MI',
   legion: 'TX',
-  cannons: 'OH',
-  outlaws: 'TN',
-  flamethrowers: 'PA',
-  nightwatch: 'NC',
-  riptide: 'FL',
-  express: 'NY',
-  revolution: 'NY',
-  dragons: 'CA',
-  lions: 'ON',
-  cranes: 'MD',
-  constitution: 'PA',
+  cannons: 'FL', // Jacksonville → Tampa Bay; both Florida
+  outlaws: 'ON', // Ottawa — province, never matches a US section (fine)
+  flamethrowers: 'CA', // San Francisco
+  nightwatch: 'TN', // Nashville
+  riptide: 'BC', // Vancouver — province, never matches a US section (fine)
+  express: 'NC', // Charlotte
+  revolution: 'OH', // Cincinnati
+  dragons: 'NY', // Rochester
+  lions: 'UT', // Salt Lake
+  cranes: 'OH', // Columbus
+  constitution: 'CT',
   spinners: 'PA',
-  rampage: 'MA',
+  rampage: 'RI',
   hammerheads: 'NJ',
 };
 

@@ -11,7 +11,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
-import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
+import { namesMatch, normalizeName, surnameForPrefilter } from '@/lib/name-match';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -387,14 +387,21 @@ export async function getWfdfPlayerStints(displayName: string): Promise<WfdfPlay
   const db = supabase();
 
   // Prefilter by surname (indexed on lower(last_name)) to keep the scan small,
-  // then confirm with the full namesMatch rule.
+  // then confirm with the full namesMatch rule. A CamelCase-joined compound
+  // surname (EUCS "DeMarree") would never ilike-hit the split spelling WFDF
+  // stores ("De Marree"), so prefilter on the tail after the last case
+  // boundary — a suffix of the joined form, so it still hits both spellings.
+  const rawLast = displayName.trim().split(/\s+/).pop() ?? '';
+  const caseParts = rawLast.split(/(?<=[a-z])(?=[A-Z])/);
+  const tail = caseParts.length > 1 ? normalizeName(caseParts[caseParts.length - 1]) : '';
+  const fragment = tail || surname;
   const { data: hits } = await db
     .from('wfdf_rosters')
     .select(
       'full_name, jersey_number, goals, assists, ' +
         'team:team_id(id, name, country_code, final_standing, division:division_id(name), event:event_id(name, slug, year))',
     )
-    .ilike('last_name', `%${surname}%`)
+    .ilike('last_name', `%${fragment}%`)
     .limit(400);
 
   const stints: WfdfPlayerStint[] = [];

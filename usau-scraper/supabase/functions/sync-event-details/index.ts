@@ -265,7 +265,13 @@ function isPlacementLabel(label: string | null): boolean {
   return (
     /placement/.test(t) ||
     /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||
-    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fifteenth|seventeenth)\s+place\b/.test(t)
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fifteenth|seventeenth)\s+place\b/.test(t) ||
+    // A tab that LEADS with a bare ordinal is a placement group even without
+    // the word "Place" — Cooler Classic 37 Men's "21st (3 games each) - times
+    // TBD" tab holds a "Pool B" round-robin deciding 21st. Leading-only so a
+    // hypothetical "1st Round" pool tab can't misfile; USAU spells rounds
+    // "Round 1"/"Sat Round 1".
+    /^\s*\d+(st|nd|rd|th)\b/.test(t)
   );
 }
 
@@ -417,7 +423,17 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           tableRound = 'pool';
           poolName = captionBase;
         } else {
-          return; // unknown table shape — leave it alone
+          // Matchup-round tables with neither a pool nor a placement label —
+          // Cooler Classic 37 Men runs tabs "Sat Round 1/2/3" whose tables are
+          // captioned "Sat 10am Match" etc. These are real games; returning
+          // here (the old behavior) dropped them AND the teams they carry,
+          // which zeroed the whole division (persistSchedulePage skips a page
+          // with no teams). Store as round='other' named by the TAB (the
+          // organizing unit the USAU page shows), caption as fallback. Rows
+          // without both team links still skip below, so a genuinely unknown
+          // table shape contributes nothing.
+          tableRound = 'other';
+          poolName = currentSection?.trim() || captionBase;
         }
 
         $el.find('tbody tr').each((__, tr) => {

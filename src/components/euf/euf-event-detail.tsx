@@ -222,7 +222,7 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
                       </td>
                       <td className="py-2 pr-2">
                         <Link
-                          href={`/euf/teams/${s.teamId}`}
+                          href={`/euf/clubs/${encodeURIComponent(s.teamName)}?div=${encodeURIComponent(s.division)}`}
                           className="inline-flex items-center gap-2 no-underline hover:underline text-ink font-tight text-[13px]"
                         >
                           <EufFlag countryName={s.countryName} size={14} />
@@ -389,6 +389,7 @@ function GameRow({ game: g }: { game: EufGameCard }) {
       <TeamLine
         id={g.homeTeamId}
         name={g.homeName}
+        division={g.division}
         country={g.homeCountry}
         score={g.homeScore}
         won={homeWon}
@@ -396,6 +397,7 @@ function GameRow({ game: g }: { game: EufGameCard }) {
       <TeamLine
         id={g.awayTeamId}
         name={g.awayName}
+        division={g.division}
         country={g.awayCountry}
         score={g.awayScore}
         won={awayWon}
@@ -458,7 +460,7 @@ function ChampionBanner({ row, derived }: { row: EufStandingRow; derived: boolea
       </div>
       <div className="flex items-center justify-between gap-3 px-4 py-4">
         <Link
-          href={`/euf/teams/${row.teamId}`}
+          href={`/euf/clubs/${encodeURIComponent(row.teamName)}?div=${encodeURIComponent(row.division)}`}
           className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
         >
           {Inner}
@@ -492,12 +494,14 @@ function TrophyIcon() {
 function TeamLine({
   id,
   name,
+  division,
   country,
   score,
   won,
 }: {
   id: string | null;
   name: string;
+  division: EufDivision;
   country: string | null;
   score: number | null;
   won: boolean;
@@ -514,7 +518,7 @@ function TeamLine({
     <div className="flex items-center gap-2 text-[13px] font-tight">
       {id ? (
         <Link
-          href={`/euf/teams/${id}`}
+          href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}`}
           className="flex items-center gap-2 min-w-0 flex-1 no-underline hover:underline"
         >
           {inner}

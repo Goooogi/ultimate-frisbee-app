@@ -52,23 +52,23 @@ export const TEAM_META: Record<string, TeamMeta> = {
   steel:        { id: 'steel',        internalID: 38, abbr: 'ORE', primary: '#05384F', accent: '#FF6F00', city: 'Oregon',       name: 'Steel',        division: 'West',    active: true, logo: '/teams/ufa/steel.png' },
 
   // ── Historical / inactive franchises (so older years still resolve) ──
-  aviators:     { id: 'aviators',     internalID: 10, abbr: 'LA',  primary: '#1B365D', accent: '#FBB040', city: 'Los Angeles',  name: 'Aviators',     active: false },
-  mechanix:     { id: 'mechanix',     internalID:  6, abbr: 'DET', primary: '#1A1A1A', accent: '#C8102E', city: 'Detroit',      name: 'Mechanix',     active: false },
-  legion:       { id: 'legion',       internalID:  4, abbr: 'DAL', primary: '#0E1B2E', accent: '#C8102E', city: 'Dallas',       name: 'Legion',       active: false },
-  cannons:      { id: 'cannons',      internalID:  9, abbr: 'JAX', primary: '#1A1A1A', accent: '#A6A29A', city: 'Jacksonville', name: 'Cannons',      active: false },
-  outlaws:      { id: 'outlaws',      internalID: 15, abbr: 'OTT', primary: '#1A1A1A', accent: '#FFB81C', city: 'Ottawa',       name: 'Outlaws',      active: false },
-  flamethrowers:{ id: 'flamethrowers',internalID: 20, abbr: 'SF',  primary: '#7A1A1A', accent: '#FF6F00', city: 'San Francisco',name: 'FlameThrowers',active: false },
-  nightwatch:   { id: 'nightwatch',   internalID:  8, abbr: 'NSH', primary: '#0E0E0C', accent: '#5DADEC', city: 'Nashville',    name: 'Nightwatch',   active: false },
-  riptide:      { id: 'riptide',      internalID: 24, abbr: 'VAN', primary: '#003A5D', accent: '#5DADEC', city: 'Vancouver',    name: 'Riptide',      active: false },
+  aviators:     { id: 'aviators',     internalID: 10, abbr: 'LA',  primary: '#1B365D', accent: '#FBB040', city: 'Los Angeles',  name: 'Aviators',     active: false, logo: '/teams/ufa/aviators.png' },
+  mechanix:     { id: 'mechanix',     internalID:  6, abbr: 'DET', primary: '#1A1A1A', accent: '#C8102E', city: 'Detroit',      name: 'Mechanix',     active: false, logo: '/teams/ufa/mechanix.png' },
+  legion:       { id: 'legion',       internalID:  4, abbr: 'DAL', primary: '#0E1B2E', accent: '#C8102E', city: 'Dallas',       name: 'Legion',       active: false, logo: '/teams/ufa/legion.png' },
+  cannons:      { id: 'cannons',      internalID:  9, abbr: 'TB',  primary: '#1A1A1A', accent: '#A6A29A', city: 'Tampa Bay',    name: 'Cannons',      active: false, logo: '/teams/ufa/cannons.png' },
+  outlaws:      { id: 'outlaws',      internalID: 15, abbr: 'OTT', primary: '#1A1A1A', accent: '#FFB81C', city: 'Ottawa',       name: 'Outlaws',      active: false, logo: '/teams/ufa/outlaws.png' },
+  flamethrowers:{ id: 'flamethrowers',internalID: 20, abbr: 'SF',  primary: '#7A1A1A', accent: '#FF6F00', city: 'San Francisco',name: 'FlameThrowers',active: false, logo: '/teams/ufa/flamethrowers.png' },
+  nightwatch:   { id: 'nightwatch',   internalID:  8, abbr: 'NSH', primary: '#0E0E0C', accent: '#5DADEC', city: 'Nashville',    name: 'Nightwatch',   active: false, logo: '/teams/ufa/nightwatch.png' },
+  riptide:      { id: 'riptide',      internalID: 24, abbr: 'VAN', primary: '#003A5D', accent: '#5DADEC', city: 'Vancouver',    name: 'Riptide',      active: false, logo: '/teams/ufa/riptide.png' },
   express:      { id: 'express',      internalID: 25, abbr: 'CLT', primary: '#003A5D', accent: '#C8102E', city: 'Charlotte',    name: 'Express',      active: false },
-  revolution:   { id: 'revolution',   internalID: 26, abbr: 'LEX', primary: '#0E1B2E', accent: '#FFB81C', city: 'Bluegrass',    name: 'Revolution',   active: false },
-  dragons:      { id: 'dragons',      internalID: 27, abbr: 'ROC', primary: '#3E2C1C', accent: '#FFC72C', city: 'Rochester',    name: 'Dragons',      active: false },
-  lions:        { id: 'lions',        internalID: 28, abbr: 'SL',  primary: '#1A1A1A', accent: '#C8102E', city: 'Salt Lake',    name: 'Lions',        active: false },
+  revolution:   { id: 'revolution',   internalID: 26, abbr: 'CIN', primary: '#0E1B2E', accent: '#FFB81C', city: 'Cincinnati',   name: 'Revolution',   active: false, logo: '/teams/ufa/revolution.png' },
+  dragons:      { id: 'dragons',      internalID: 27, abbr: 'ROC', primary: '#3E2C1C', accent: '#FFC72C', city: 'Rochester',    name: 'Dragons',      active: false, logo: '/teams/ufa/dragons.png' },
+  lions:        { id: 'lions',        internalID: 28, abbr: 'SL',  primary: '#1A1A1A', accent: '#C8102E', city: 'Salt Lake',    name: 'Lions',        active: false, logo: '/teams/ufa/lions.png' },
   cranes:       { id: 'cranes',       internalID: 30, abbr: 'CMH', primary: '#3E2C1C', accent: '#A6A29A', city: 'Columbus',     name: 'Cranes',       active: false },
-  constitution: { id: 'constitution', internalID: 31, abbr: 'CT',  primary: '#0E1B2E', accent: '#FFB81C', city: 'Connecticut',  name: 'Constitution', active: false },
-  spinners:     { id: 'spinners',     internalID: 32, abbr: 'PHL', primary: '#1A1A1A', accent: '#FFB81C', city: 'Philadelphia', name: 'Spinners',     active: false },
+  constitution: { id: 'constitution', internalID: 31, abbr: 'CT',  primary: '#0E1B2E', accent: '#FFB81C', city: 'Connecticut',  name: 'Constitution', active: false, logo: '/teams/ufa/constitution.png' },
+  spinners:     { id: 'spinners',     internalID: 32, abbr: 'PHL', primary: '#1A1A1A', accent: '#FFB81C', city: 'Philadelphia', name: 'Spinners',     active: false, logo: '/teams/ufa/spinners.png' },
   rampage:      { id: 'rampage',      internalID: 33, abbr: 'RI',  primary: '#0E1B2E', accent: '#C8102E', city: 'Rhode Island', name: 'Rampage',      active: false },
-  hammerheads:  { id: 'hammerheads',  internalID: 34, abbr: 'NJ',  primary: '#1A1A1A', accent: '#5DADEC', city: 'New Jersey',   name: 'Hammerheads',  active: false },
+  hammerheads:  { id: 'hammerheads',  internalID: 34, abbr: 'NJ',  primary: '#1A1A1A', accent: '#5DADEC', city: 'New Jersey',   name: 'Hammerheads',  active: false, logo: '/teams/ufa/hammerheads.png' },
 };
 
 const FALLBACK: Omit<TeamMeta, 'id' | 'abbr' | 'internalID'> = {
@@ -92,6 +92,73 @@ export function teamMeta(id: string): TeamMeta {
 }
 
 /** Resolve a teamID to the integer the upstream API expects for ?teamID= filters. */
+// ── Franchise name history ───────────────────────────────────────────────────
+// The API retroactively applies the CURRENT brand to every season (2016 games
+// already say "Legion"), so year-aware surfaces need the name as it actually
+// was. `through` = last season played under that name.
+const NAME_HISTORY: Record<string, ReadonlyArray<{ through: number; name: string }>> = {
+  legion: [{ through: 2021, name: 'Roughnecks' }], // rebranded to Legion for 2022
+  union: [{ through: 2019, name: 'Wildfire' }], // rebranded to Union for 2021 (2020 cancelled)
+  cascades: [{ through: 2014, name: 'Raptors' }], // one season as Seattle Raptors
+};
+
+// Relocations under one slug — the API's per-game city field is HISTORICAL
+// (audited 2026-08-06), these mirror it so a 2016 season doesn't claim the
+// franchise's later home. `through` = last season in that city.
+const CITY_HISTORY: Record<string, ReadonlyArray<{ through: number; city: string }>> = {
+  cannons: [{ through: 2017, city: 'Jacksonville' }], // → Tampa Bay 2018
+  flyers: [{ through: 2021, city: 'Raleigh' }], // → Carolina 2022
+  spiders: [{ through: 2021, city: 'San Jose' }], // → Oakland 2022
+  steel: [{ through: 2022, city: 'Portland' }], // → Oregon 2023
+};
+
+/**
+ * Display nickname for a franchise in a given season — "Roughnecks" for
+ * Dallas 2016–2021, the TEAM_META name otherwise. Year-less surfaces (search,
+ * favorites, nav) should keep using TEAM_META directly: the current brand is
+ * the franchise's identity.
+ */
+export function teamNameForYear(teamID: string, year: number): string | undefined {
+  const meta = TEAM_META[teamID.toLowerCase()];
+  const hist = NAME_HISTORY[teamID.toLowerCase()];
+  if (hist) {
+    for (const h of hist) {
+      if (year <= h.through) return h.name;
+    }
+  }
+  return meta?.name;
+}
+
+/** City counterpart of teamNameForYear — "San Jose" for Spiders ≤2021, etc. */
+export function teamCityForYear(teamID: string, year: number): string | undefined {
+  const meta = TEAM_META[teamID.toLowerCase()];
+  const hist = CITY_HISTORY[teamID.toLowerCase()];
+  if (hist) {
+    for (const h of hist) {
+      if (year <= h.through) return h.city;
+    }
+  }
+  return meta?.city;
+}
+
+// Era logos — rebranded franchises' own marks (recovered from watchufa's CMS
+// and the Wayback Machine, 2026-08-06). Same `through` semantics as above.
+const LOGO_HISTORY: Record<string, ReadonlyArray<{ through: number; logo: string }>> = {
+  legion: [{ through: 2021, logo: '/teams/ufa/roughnecks.png' }],
+  union: [{ through: 2019, logo: '/teams/ufa/wildfire.png' }],
+  cascades: [{ through: 2014, logo: '/teams/ufa/raptors.png' }],
+};
+
+/** Logo path for a franchise in a given season — the era's own mark for
+ *  rebranded years (Roughnecks ≤2021, Wildfire ≤2019), else TEAM_META.logo. */
+export function teamLogoForYear(teamID: string, year: number): string | undefined {
+  const slug = teamID.toLowerCase();
+  for (const e of LOGO_HISTORY[slug] ?? []) {
+    if (year <= e.through) return e.logo;
+  }
+  return TEAM_META[slug]?.logo;
+}
+
 export function teamInternalID(slugOrInt: string | number): number | null {
   if (typeof slugOrInt === 'number') return slugOrInt;
   const meta = TEAM_META[slugOrInt];

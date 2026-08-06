@@ -69,9 +69,9 @@ export default async function EufLeadersPage({ params }: Props) {
                   <td className="py-2 px-2 text-[13px] font-tight text-muted">
                     <span className="inline-flex items-center gap-1.5 min-w-0">
                       <EufFlag countryName={p.countryName} size={13} />
-                      {p.teamId ? (
+                      {p.teamName ? (
                         <Link
-                          href={`/euf/teams/${p.teamId}`}
+                          href={`/euf/clubs/${encodeURIComponent(p.teamName)}?div=${encodeURIComponent(p.division)}`}
                           className="truncate no-underline hover:underline text-muted"
                         >
                           {p.teamName}

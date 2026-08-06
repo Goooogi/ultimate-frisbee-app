@@ -21,14 +21,19 @@ on:
         description: 'Season to scrape: blank = current season, a year (e.g. 2026), or "all" to re-baseline every season'
         required: false
         default: ''
-  # Scheduled in-season refresh. Hourly on game days (Thu–Sun), in-season only.
+  # Scheduled in-season refresh. Hourly on game days (Thu–Sun), Feb–June only.
   # WUL games run on weekends, so an hourly Thu–Sun cadence picks up scores
   # through the weekend without pointless weekday runs. Off-peak minute (:17) to
-  # avoid the top-of-hour cron stampede. The month gate below limits this to the
-  # Feb–June season window. OFF-SEASON: comment out the `schedule:` block or
-  # narrow the months in the gate.
+  # avoid the top-of-hour cron stampede.
+  #
+  # The MONTH FIELD (2-6) matters: it used to be `*`, so GitHub scheduled a run
+  # every game-day hour year-round and the season gate below no-op'd each one in
+  # seconds. Harmless until GitHub itself fails to allocate a hosted runner —
+  # then the run FAILS ("job was not acquired by Runner of type hosted") and
+  # emails a failure for a job that had nothing to do. Bit us 2026-08-05.
+  # The step-level gate stays as a backstop for manual dispatch.
   schedule:
-    - cron: '17 * * * 4,5,6,0'
+    - cron: '17 * * 2-6 4,5,6,0'
 
 # Never run two ingests at once (they'd race on the same rows). Let the in-flight
 # one finish rather than cancelling it mid-DB-write.

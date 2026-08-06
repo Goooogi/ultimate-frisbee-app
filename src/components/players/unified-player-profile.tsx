@@ -20,7 +20,7 @@ import type {
   WfdfSeasonStint,
   EufSeasonStint,
 } from '@/lib/unified-player';
-import { teamMetaByAbbr } from '@/lib/ufa/teams';
+import { teamMetaByAbbr, teamCityForYear, teamLogoForYear, teamNameForYear } from '@/lib/ufa/teams';
 import { PageShell } from '@/components/page-shell';
 import { TeamLogo } from '@/components/team-logo';
 import { STICKY_NAMEONLY_HEAD, STICKY_NAMEONLY_BODY } from '@/components/sticky-cols';
@@ -57,6 +57,7 @@ const PLAYERS_LIST_HREF: Record<string, string> = {
   pul: '/players?league=pul',
   wul: '/players?league=wul',
   wfdf: '/wfdf/players',
+  euf: '/euf/players',
 };
 
 export function UnifiedProfile({ profile, content, connections, fromLeague }: Props) {
@@ -344,10 +345,14 @@ function UfaStintRow({ stint, year }: { stint: UfaSeasonStint; year: number }) {
           href={`/teams/${stint.teamMeta.id}?year=${year}`}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
-          <TeamLogo team={stint.teamMeta} size={26} />
+          <TeamLogo
+            team={{ ...stint.teamMeta, logo: teamLogoForYear(stint.teamMeta.id, year) ?? stint.teamMeta.logo }}
+            size={26}
+          />
           <span className="flex flex-col min-w-0">
             <span className="text-[14px] font-bold font-tight text-ink truncate leading-tight">
-              {stint.teamMeta.city} {stint.teamMeta.name}
+              {teamCityForYear(stint.teamMeta.id, year) ?? stint.teamMeta.city}{' '}
+              {teamNameForYear(stint.teamMeta.id, year) ?? stint.teamMeta.name}
             </span>
             <span className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight">
               UFA

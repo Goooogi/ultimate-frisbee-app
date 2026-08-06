@@ -14,6 +14,8 @@ import { PageShell } from '@/components/page-shell';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 import { getWfdfPlayerStints } from '@/lib/wfdf/data';
 import { resolveWfdfPlayerAnchor } from '@/lib/wfdf/anchor';
+import { getPlayerProfileByName } from '@/lib/euf/data';
+import { EufFlag } from '@/components/euf/euf-flag';
 
 export const revalidate = 300;
 
@@ -42,9 +44,17 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
   const anchor = await resolveWfdfPlayerAnchor(name).catch(() => null);
   if (anchor) redirect(`/players/${anchor.anchorId}?from=wfdf`);
 
-  // 2. No anchor — render a WFDF-only profile from the player's stints.
-  const stints = await getWfdfPlayerStints(name).catch(() => []);
-  if (stints.length === 0) notFound();
+  // 2. No anchor — render a by-name profile from the player's stints, with any
+  //    EUCS career merged in so a Europe-only player still sees full history.
+  const [stints, eufProfile] = await Promise.all([
+    getWfdfPlayerStints(name).catch(() => []),
+    getPlayerProfileByName(name).catch(() => null),
+  ]);
+  if (stints.length === 0) {
+    // Known only to EUCS — its by-name profile is the fuller page for them.
+    if (eufProfile) redirect(`/euf/players/by-name/${encodeURIComponent(name)}`);
+    notFound();
+  }
 
   const totalGoals = stints.reduce((s, x) => s + (x.goals ?? 0), 0);
   const totalAssists = stints.reduce((s, x) => s + (x.assists ?? 0), 0);
@@ -111,6 +121,51 @@ export default async function WfdfPlayerByNamePage({ params }: Props) {
           ))}
         </ul>
       </section>
+
+      {/* EUCS appearances — merged in so the international and European club
+          careers read as one person, mirroring the EUF by-name page. */}
+      {eufProfile && eufProfile.appearances.length > 0 && (
+        <section aria-labelledby="wfdf-eucs-heading" className="mt-8">
+          <h2
+            id="wfdf-eucs-heading"
+            className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3 pb-2 border-b border-hairline"
+          >
+            EUCS Appearances
+          </h2>
+          <ul className="flex flex-col gap-2 list-none p-0 m-0">
+            {eufProfile.appearances.map((a, i) => (
+              <li key={`${a.teamId}-${i}`}>
+                <Link
+                  href={`/euf/clubs/${encodeURIComponent(a.teamName)}?div=${encodeURIComponent(a.division)}&season=${a.year}`}
+                  className={[
+                    'flex items-center gap-3 bg-surface rounded-card px-4 py-3',
+                    'shadow-card transition-shadow hover:shadow-lift cursor-pointer no-underline',
+                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  ].join(' ')}
+                >
+                  <span className="text-[13px] font-bold tabular text-faint w-10 flex-shrink-0">
+                    {a.year}
+                  </span>
+                  <EufFlag countryName={a.countryName} size={18} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[14px] font-semibold text-ink font-tight truncate">
+                      {a.teamName}
+                    </span>
+                    <span className="block text-[11px] text-muted font-tight truncate mt-0.5">
+                      {[a.eventName, a.division].filter(Boolean).join(' · ')}
+                    </span>
+                  </span>
+                  <span className="text-[11px] text-faint font-tight tabular flex-shrink-0">
+                    {a.goals != null || a.assists != null
+                      ? `${a.goals ?? 0}G · ${a.assists ?? 0}A`
+                      : ''}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </PageShell>
   );
 }

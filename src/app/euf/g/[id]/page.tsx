@@ -9,7 +9,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
-import { getGame, getGameStats, type EufGameStatLine } from '@/lib/euf/data';
+import { getGame, getGameStats, type EufDivision, type EufGameStatLine } from '@/lib/euf/data';
 import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
 import { EufFlag } from '@/components/euf/euf-flag';
 import { EufExternalLink } from '@/components/euf/euf-event-detail';
@@ -92,6 +92,7 @@ export default async function EufGamePage({ params }: Props) {
           <ScoreRow
             teamId={game.homeTeamId}
             name={game.homeName}
+            division={game.division}
             country={game.homeCountry}
             score={game.homeScore}
             won={homeWon}
@@ -100,6 +101,7 @@ export default async function EufGamePage({ params }: Props) {
           <ScoreRow
             teamId={game.awayTeamId}
             name={game.awayName}
+            division={game.division}
             country={game.awayCountry}
             score={game.awayScore}
             won={!homeWon}
@@ -126,12 +128,14 @@ export default async function EufGamePage({ params }: Props) {
 function ScoreRow({
   teamId,
   name,
+  division,
   country,
   score,
   won,
 }: {
   teamId: string | null;
   name: string;
+  division: EufDivision;
   country: string | null;
   score: number | null;
   won: boolean;
@@ -142,7 +146,7 @@ function ScoreRow({
       <span className="flex-1 min-w-0">
         {teamId ? (
           <Link
-            href={`/euf/teams/${teamId}`}
+            href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}`}
             className={[
               'no-underline hover:underline text-[15px] font-tight truncate',
               won ? 'text-ink font-semibold' : 'text-muted',

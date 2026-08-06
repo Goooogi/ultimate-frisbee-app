@@ -12,14 +12,17 @@ import { PillSelect } from '@/components/pill-select';
 interface YearSelectorProps {
   currentYear: number;
   count?: number;
+  /** Explicit season list (newest first) — the team page passes the years the
+   *  franchise actually played (see teamSeasons); default recentSeasons. */
+  years?: number[];
 }
 
-export function YearSelector({ currentYear, count = 5 }: YearSelectorProps) {
+export function YearSelector({ currentYear, count = 5, years: yearsProp }: YearSelectorProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const years = recentSeasons(count);
+  const years = yearsProp ?? recentSeasons(count);
 
   function handleChange(year: number) {
     const params = new URLSearchParams(searchParams.toString());

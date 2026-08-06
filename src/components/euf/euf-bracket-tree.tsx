@@ -19,7 +19,7 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
-import type { EufGameCard } from '@/lib/euf/data';
+import type { EufDivision, EufGameCard } from '@/lib/euf/data';
 import {
   bracketBucket,
   ordinal as sharedOrdinal,
@@ -433,6 +433,7 @@ function MatchCard({
       <TeamLine
         teamId={game.homeTeamId}
         name={game.homeName}
+        division={game.division}
         country={game.homeCountry}
         score={game.homeScore}
         won={homeWon}
@@ -443,6 +444,7 @@ function MatchCard({
       <TeamLine
         teamId={game.awayTeamId}
         name={game.awayName}
+        division={game.division}
         country={game.awayCountry}
         score={game.awayScore}
         won={awayWon}
@@ -456,6 +458,7 @@ function MatchCard({
 function TeamLine({
   teamId,
   name,
+  division,
   country,
   score,
   won,
@@ -464,6 +467,7 @@ function TeamLine({
 }: {
   teamId: string | null;
   name: string;
+  division: EufDivision;
   country: string | null;
   score: number | null;
   won: boolean;
@@ -485,7 +489,7 @@ function TeamLine({
     <div className={`flex items-center gap-3 px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       {teamId ? (
         <Link
-          href={`/euf/teams/${teamId}`}
+          href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}`}
           className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
         >
           {inner}
