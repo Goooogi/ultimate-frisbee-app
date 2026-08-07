@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   description: 'How The Layout collects, uses, and protects your information.',
 };
 
-const CONTACT_EMAIL = 'invites@thelayout.app';
+const CONTACT_EMAIL = 'support@thelayout.app';
 
 export default function PrivacyPage() {
   return (

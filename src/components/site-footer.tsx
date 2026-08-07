@@ -109,6 +109,7 @@ export function SiteFooter() {
             {[
               { label: 'Terms', href: '/terms' },
               { label: 'Privacy', href: '/privacy' },
+              { label: 'Support', href: '/support' },
             ].map((l) => (
               <Link
                 key={l.href}
