@@ -10,6 +10,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
+import { wfdfGameTime } from '@/lib/wfdf/format-date';
 import { WfdfFlag } from './wfdf-flag';
 import { WfdfBracketTree, hasWfdfBracket } from './wfdf-bracket-tree';
 
@@ -320,7 +321,7 @@ function GameRow({ game: g }: { game: Game }) {
   // WFDF records a single spirit-of-the-game score per game (in away_sotg);
   // there is no separate home value in the source, so we show it once.
   const sotg = g.awaySotg ?? g.homeSotg;
-  const timeLabel = formatGameTime(g.scheduledAt);
+  const timeLabel = wfdfGameTime(g.scheduledAt);
   const hasFooter = timeLabel != null || sotg != null || (!done && g.status === 'scheduled');
   return (
     <div className="bg-surface rounded-card shadow-card px-3 py-2.5">
@@ -355,22 +356,6 @@ function GameRow({ game: g }: { game: Game }) {
       )}
     </div>
   );
-}
-
-// Format a scheduled_at ISO timestamp as a compact "Mon 28 · 10:30" label in
-// UTC (the source times are venue-local stored as UTC). Returns null if absent.
-function formatGameTime(iso: string | null): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  const day = d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
-  const time = d.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-  });
-  return `${day} · ${time}`;
 }
 
 function TeamLine({

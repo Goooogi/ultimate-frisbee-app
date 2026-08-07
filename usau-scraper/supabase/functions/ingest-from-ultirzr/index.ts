@@ -303,6 +303,49 @@ interface IngestStats {
   errors: Array<{ eventId: number; eventName?: string; error: string }>;
 }
 
+/**
+ * Probe USAU for a synthesized slug, returning the form that actually resolves
+ * (or null if none do). Tries our slug first, then the "usa-ultimate-" prefixed
+ * variant USAU used for some championship events (2018 college is the known
+ * case).
+ *
+ * MUST be GET, not HEAD. USAU's ASP.NET stack answers HEAD with 500 even for
+ * pages that GET returns 200 for — verified against three known-good slugs — so
+ * a HEAD probe would reject every valid slug and "correct" it to nothing. We
+ * discard the body; the status code is all we need.
+ *
+ * Failures to reach USAU return null rather than throwing — a network blip must
+ * not abort an ingest whose real payload (games, standings) comes from ultirzr.
+ */
+async function verifyUsauSlug(slug: string): Promise<string | null> {
+  const candidates = [slug];
+  if (!slug.startsWith('usa-ultimate-')) candidates.push(`usa-ultimate-${slug}`);
+
+  for (const cand of candidates) {
+    try {
+      const res = await fetch(`https://play.usaultimate.org/events/${cand}/`, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 ' +
+            '(KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+          Accept: 'text/html,application/xhtml+xml',
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      // Drain the body so the connection is released promptly.
+      await res.text().catch(() => '');
+      if (res.status === 200) return cand;
+      // 403 = WAF block, not a verdict on the slug. Stop probing and keep ours.
+      if (res.status === 403) return null;
+    } catch {
+      return null;
+    }
+    // Space out the second probe; USAU rate-limits sustained bursts.
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  return null;
+}
+
 async function ingestEvent(
   db: ReturnType<typeof supabase>,
   hit: UltirzrEventSearchHit,
@@ -355,6 +398,7 @@ async function ingestEvent(
       break;
     }
   }
+  let slugWasSynthesized = false;
   if (!slug) {
     // Fall back to a synthesized slug from the event name. Not ideal but
     // some events don't expose a UsauUrl (masters groups, cancelled events).
@@ -365,6 +409,7 @@ async function ingestEvent(
       .replace(/['’]/g, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '');
+    slugWasSynthesized = true;
   }
 
   const start = dateOnly(e.StartDate);
@@ -386,6 +431,36 @@ async function ingestEvent(
   // (e.g. "2025-usa-ultimate-club-nationals"), so they're untouched.
   if (!/\b(19|20)\d{2}\b/.test(slug)) {
     slug = `${slug}-${season}`;
+  }
+
+  // VERIFY a synthesized slug against USAU, because a wrong one fails SILENTLY.
+  // The slug is what resolve-event-team-urls and sync-event-rosters fetch; if it
+  // 404s they return {ok:true, resolved:0} with no error naming the slug, so a
+  // whole season's roster run can walk every event and store nothing.
+  //
+  // 2018 is the case that exposed it — USAU prefixed the championships:
+  //   d-i-college-championships-2018              -> 404 (our synthesis)
+  //   usa-ultimate-d-i-college-championships-2018 -> 200 (USAU's real slug)
+  // 2019's identical synthesis happened to match, which is why it went unnoticed.
+  //
+  // Only runs when the slug was SYNTHESIZED (no UsauUrl from ultirzr) — a slug
+  // parsed from UsauUrl is authoritative. Each probe pays the shared 5s throttle,
+  // so gating on the fallback keeps a page-walk from doubling in wall-clock.
+  if (slugWasSynthesized && !dryRun) {
+    const verified = await verifyUsauSlug(slug);
+    if (verified && verified !== slug) {
+      console.log(`[ingest] slug corrected: ${slug} -> ${verified}`);
+      slug = verified;
+    } else if (!verified) {
+      // Neither form resolves — keep ours so the event still ingests (games and
+      // standings come from ultirzr, not USAU). Rosters for it will no-op until
+      // the slug is corrected, so surface it rather than failing the event.
+      stats.errors.push({
+        eventId: hit.EventId,
+        eventName: e.EventName,
+        error: `usau_slug "${slug}" does not resolve on USAU — rosters for this event will find no teams`,
+      });
+    }
   }
 
   // Year-aware NAME, same reasoning as the slug. ultirzr reuses a year-less

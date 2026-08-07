@@ -16,10 +16,18 @@ interface Props {
   /** The team's gender division — carried onto event links so a Mixed team's
    *  Nationals link opens the Mixed bracket, not the default Men's. */
   genderDivision?: string | null;
+  /** Season to open on (?season= deep link); ignored if we have no such season. */
+  initialSeason?: number | null;
 }
 
-export function UsauTeamHistory({ seasons, genderDivision = null }: Props) {
-  const [selected, setSelected] = useState<number | null>(() => seasons[0]?.season ?? null);
+export function UsauTeamHistory({ seasons, genderDivision = null, initialSeason = null }: Props) {
+  // ?season= deep-link (player-profile team links pass the stint's year) wins
+  // when it names a season we actually have; otherwise newest.
+  const [selected, setSelected] = useState<number | null>(() =>
+    initialSeason != null && seasons.some((s) => s.season === initialSeason)
+      ? initialSeason
+      : seasons[0]?.season ?? null,
+  );
 
   if (seasons.length === 0) {
     return <div className="text-[12px] text-faint font-tight">No history recorded yet.</div>;

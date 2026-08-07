@@ -11,7 +11,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
-import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
+import { namesMatch, normalizeName, surnameForPrefilter } from '@/lib/name-match';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -137,6 +137,34 @@ export interface WfdfPlayerStint {
 }
 
 // ─── Event list + detail ──────────────────────────────────────────────────────
+
+/**
+ * Find the WFDF-ingested twin of a WFDF-hosted event that leaked into
+ * usau_events (USAU lists WUCC/WJUC/WMUCC so US clubs can register, but our
+ * real data for those events comes from the WFDF pipeline — the USAU rows are
+ * stubs that will never grow games). Keyed on the acronym in the USAU name's
+ * parenthetical — "… (WUCC)" → WFDF slug/name lookup for that year — with a
+ * /world/ guard so USAU-run events with parentheticals ("U.S. Open (ICC)")
+ * never match. Returns null when we haven't ingested the twin yet, and the
+ * caller keeps the USAU stub; auto-heals once the WFDF event lands.
+ */
+export async function findWorldsTwinSlug(
+  usauName: string,
+  year: number,
+): Promise<string | null> {
+  if (!/world/i.test(usauName)) return null;
+  const m = usauName.match(/\(([A-Z]{3,6})\)/);
+  if (!m) return null;
+  const acronym = m[1];
+  const { data } = await supabase()
+    .from('wfdf_events')
+    .select('slug')
+    .eq('year', year)
+    .or(`slug.ilike.${acronym}%,name.ilike.${acronym}%`)
+    .limit(1)
+    .maybeSingle();
+  return ((data as Row | null)?.slug as string) ?? null;
+}
 
 export async function listEvents(): Promise<WfdfEventCard[]> {
   const db = supabase();
@@ -359,14 +387,21 @@ export async function getWfdfPlayerStints(displayName: string): Promise<WfdfPlay
   const db = supabase();
 
   // Prefilter by surname (indexed on lower(last_name)) to keep the scan small,
-  // then confirm with the full namesMatch rule.
+  // then confirm with the full namesMatch rule. A CamelCase-joined compound
+  // surname (EUCS "DeMarree") would never ilike-hit the split spelling WFDF
+  // stores ("De Marree"), so prefilter on the tail after the last case
+  // boundary — a suffix of the joined form, so it still hits both spellings.
+  const rawLast = displayName.trim().split(/\s+/).pop() ?? '';
+  const caseParts = rawLast.split(/(?<=[a-z])(?=[A-Z])/);
+  const tail = caseParts.length > 1 ? normalizeName(caseParts[caseParts.length - 1]) : '';
+  const fragment = tail || surname;
   const { data: hits } = await db
     .from('wfdf_rosters')
     .select(
       'full_name, jersey_number, goals, assists, ' +
         'team:team_id(id, name, country_code, final_standing, division:division_id(name), event:event_id(name, slug, year))',
     )
-    .ilike('last_name', `%${surname}%`)
+    .ilike('last_name', `%${fragment}%`)
     .limit(400);
 
   const stints: WfdfPlayerStint[] = [];
@@ -397,10 +432,10 @@ export async function getWfdfPlayerStints(displayName: string): Promise<WfdfPlay
   return stints.sort((a, b) => b.year - a.year);
 }
 
-// ─── League hubs (Teams / Players / Scores across all events) ─────────────────
+// ─── League hubs (Teams / Players across all events) ─────────────────────────
 // WFDF is event-centric, so these hubs group by event rather than presenting a
-// single season-long feed. They power the /wfdf/teams, /wfdf/players and
-// /wfdf/scores nav pages (the event-scoped hub model).
+// single season-long feed. They power the /wfdf/teams and /wfdf/players nav
+// pages (the event-scoped hub model).
 
 export interface WfdfTeamHubRow {
   id: string;
@@ -540,74 +575,6 @@ export async function listEventPlayerTotals(): Promise<
     }),
   );
   return totals.sort((a, b) => b.year - a.year || a.name.localeCompare(b.name));
-}
-
-export interface WfdfScoreEventGroup {
-  eventSlug: string;
-  eventName: string;
-  eventYear: number;
-  location: string | null;
-  startDate: string | null;
-  endDate: string | null;
-  gameCount: number;
-  completedCount: number;
-  divisions: string[];
-}
-
-/**
- * Event-level summary for the Scores/Schedule hub: one card per event with its
- * game counts and division list. Detailed games live on the event page.
- */
-export async function listEventScoreSummaries(): Promise<WfdfScoreEventGroup[]> {
-  const events = await listEvents();
-  if (events.length === 0) return [];
-  const db = supabase();
-
-  // Fetch games (division + status) for all events, paging past the 1000 cap.
-  // MAX_GAME_ROWS is a hard, compile-time ceiling on the page-walk — it must
-  // stay a constant and NEVER be derived from request input (that would let a
-  // request amplify into an unbounded run of DB round-trips).
-  const MAX_GAME_ROWS = 20_000;
-  const gameRows: Row[] = [];
-  const PAGE = 1000;
-  for (let from = 0; from < MAX_GAME_ROWS; from += PAGE) {
-    const { data } = await db
-      .from('wfdf_games')
-      .select('event_id, status, division:division_id(name)')
-      .range(from, from + PAGE - 1);
-    const batch = (data ?? []) as Row[];
-    gameRows.push(...batch);
-    if (batch.length < PAGE) break;
-  }
-
-  const byEvent = new Map<string, { total: number; completed: number; divs: Set<string> }>();
-  for (const g of gameRows) {
-    const eid = g.event_id as string;
-    let bucket = byEvent.get(eid);
-    if (!bucket) {
-      bucket = { total: 0, completed: 0, divs: new Set() };
-      byEvent.set(eid, bucket);
-    }
-    bucket.total += 1;
-    if (g.status === 'completed') bucket.completed += 1;
-    const dn = (g.division as Record<string, unknown> | null)?.name as string | undefined;
-    if (dn) bucket.divs.add(dn);
-  }
-
-  return events.map((e) => {
-    const b = byEvent.get(e.id);
-    return {
-      eventSlug: e.slug,
-      eventName: e.name,
-      eventYear: e.year,
-      location: e.location,
-      startDate: e.startDate,
-      endDate: e.endDate,
-      gameCount: b?.total ?? 0,
-      completedCount: b?.completed ?? 0,
-      divisions: b ? [...b.divs].sort() : [],
-    };
-  });
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────

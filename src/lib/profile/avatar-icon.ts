@@ -24,13 +24,14 @@ import { WUL_TEAMS, allWulTeams } from '@/lib/wul/teams';
 import usauLogoManifest from '@/lib/usau/team-logos.json';
 import { countryCodeToFlagEmoji } from '@/lib/wfdf/country-flags';
 import { WFDF_COUNTRY_NAMES } from '@/lib/wfdf/country-names';
+import { flagEmoji, EUF_COUNTRIES } from '@/lib/euf/country-flags';
 
 // ─── League set (mirrors favorites' five, same order) ─────────────────────────
 
-export type IconLeague = 'ufa' | 'usau' | 'pul' | 'wul' | 'wfdf';
+export type IconLeague = 'ufa' | 'usau' | 'pul' | 'wul' | 'wfdf' | 'euf';
 
 export const ICON_LEAGUES: readonly IconLeague[] = [
-  'ufa', 'usau', 'pul', 'wul', 'wfdf',
+  'ufa', 'usau', 'pul', 'wul', 'wfdf', 'euf',
 ] as const;
 
 const LEAGUE_SET = new Set<string>(ICON_LEAGUES);
@@ -64,6 +65,9 @@ export function formatAvatarIcon(league: IconLeague, teamId: string): string {
 export type ResolvedIcon =
   | { kind: 'logo'; src: string; name: string }
   | { kind: 'flag'; countryCode: string; name: string }
+  /** A pre-resolved flag emoji. EUF clubs are keyed by country NAME, not an IOC
+   *  code, so there's nothing for <WfdfFlag> to look up — we carry the glyph. */
+  | { kind: 'emoji'; emoji: string; name: string }
   | null;
 
 /**
@@ -117,6 +121,12 @@ export function resolveAvatarIcon(
       if (!hit?.logoUrl) return null;
       return { kind: 'logo', src: hit.logoUrl, name: hit.name };
     }
+    case 'euf': {
+      // EUCS clubs have no crest assets anywhere in the source, so the icon is
+      // the club's COUNTRY flag. teamId is the country name ("Great Britain").
+      if (!flagEmoji(ref.teamId)) return null;
+      return { kind: 'emoji', emoji: flagEmoji(ref.teamId)!, name: ref.teamId };
+    }
   }
 }
 
@@ -126,10 +136,12 @@ export interface IconTeam {
   /** The teamId stored in the reference (formatAvatarIcon(league, id)). */
   id: string;
   name: string;
-  /** Logo <img> src for UFA/USAU/PUL/WUL. Null for WFDF (flag from code). */
+  /** Logo <img> src for UFA/USAU/PUL/WUL. Null for WFDF/EUF (flag-based). */
   logoUrl: string | null;
   /** IOC country code for WFDF only (drives the flag emoji). */
   countryCode?: string;
+  /** Pre-resolved flag emoji for EUF (keyed by country name, not a code). */
+  emoji?: string;
 }
 
 /**
@@ -154,9 +166,21 @@ export function listIconTeams(league: IconLeague): IconTeam[] {
       return usauIconTeams();
     case 'wfdf':
       return wfdfIconTeams();
+    case 'euf':
+      return eufIconTeams();
     case 'pul':
       return []; // async — see listPulIconTeams
   }
+}
+
+/** EUF: country flags. EUCS clubs ship no crest images, and a club is a
+ *  per-event row rather than a stable franchise, so the pickable icon is the
+ *  club's country — the same treatment WFDF gets. */
+function eufIconTeams(): IconTeam[] {
+  return EUF_COUNTRIES
+    .filter((name) => !!flagEmoji(name))
+    .map((name) => ({ id: name, name, logoUrl: null, emoji: flagEmoji(name)! }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** PUL teams (DB-backed). Kept separate because it needs an async fetch. */

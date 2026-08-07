@@ -27,7 +27,7 @@ import {
 } from '@/lib/ufa/client';
 import { teamMetaByAbbr, teamBySlugOrAbbr as teamMeta, type TeamMeta } from '@/lib/ufa/teams';
 import { getUfaPlayerFromDb, findUfaSlugByNameFromDb } from '@/lib/ufa/db-player';
-import { ufaTeamState } from '@/lib/usau/regions';
+import { ufaTeamState, isUsStateCode, isStateCoveredByRegionMap } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow, UfaPlayerSeasonRow } from '@/lib/ufa/types';
 import {
   findUsauPlayerByName,
@@ -190,12 +190,39 @@ export interface WfdfSeasonStint {
   };
 }
 
+/** EUF/EUCS appearance. Event-scoped like WFDF, but club (not national) and it
+ *  carries a derived final placement rather than a standing. */
+export interface EufSeasonStint {
+  league: 'euf';
+  season: number;
+  teamId: string;
+  teamName: string;
+  countryName: string | null;
+  divisionName: string | null;
+  eventName: string;
+  eventSlug: string;
+  /** euf_events.kind — 'eucf' marks the season-ending European championship.
+   *  Gold "Champion" treatment is reserved for EUCF wins (Hunter, 2026-08-04);
+   *  wins at other kinds render as a plain 1st. Null on stale cached payloads. */
+  eventKind: string | null;
+  jerseyNumber: string | null;
+  finalPlacement: number | null;
+  isChampion: boolean;
+  stats: {
+    goals: number | null;
+    assists: number | null;
+    games: number | null;
+    points: number | null;
+  };
+}
+
 export type SeasonStint =
   | UfaSeasonStint
   | UsauSeasonStint
   | PulSeasonStint
   | WulSeasonStint
-  | WfdfSeasonStint;
+  | WfdfSeasonStint
+  | EufSeasonStint;
 
 export interface UnifiedYear {
   year: number;
@@ -449,10 +476,17 @@ async function _getUnifiedPlayerProfile(
     const usauStates = new Set(sideUsau.homeStates);
     const ufaStates = sideUfa.stints
       .map(({ stint }) => ufaTeamState(stint.teamId))
-      .filter((s): s is string => s != null);
+      .filter((s): s is string => s != null && isUsStateCode(s));
     // Non-US UFA teams (e.g. Montreal/Toronto) have no US state → can't
-    // contradict; keep them attached rather than drop on a null.
-    if (ufaStates.length > 0) {
+    // contradict; keep them attached rather than drop on a null. They map to
+    // PROVINCES (QC/ON), not null, so they must be filtered explicitly — a
+    // province can never appear in homeStates, so comparing one would always
+    // miss and drop the entire real UFA career.
+    // A state the region map never lists can't be CONTRADICTED by it — the
+    // absence is our gap, not evidence of a different person. Abstain unless
+    // every UFA state is one the map actually covers. (Kept identical to the
+    // RPC path's shouldAttachUfa; the two must not disagree on one player.)
+    if (ufaStates.length > 0 && ufaStates.every((s) => isStateCoveredByRegionMap(s))) {
       attachUfa = ufaStates.some((s) => usauStates.has(s));
     }
   }
@@ -981,6 +1015,7 @@ function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
     wul: 2,
     usau: 3,
     wfdf: 4,
+    euf: 5,
   };
   return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }

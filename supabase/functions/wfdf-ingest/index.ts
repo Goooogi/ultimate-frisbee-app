@@ -1,8 +1,13 @@
-// wfdf-ingest — ingest one WFDF "Worlds" event from the results static cache.
+// wfdf-ingest — ingest WFDF "Worlds" events from the results static cache.
 //
-// Operator-driven (no cron — matches the backfill rule). POST a single event
-// base URL; the function self-discovers everything from the event's heartbeat
-// and upserts the whole event: divisions, teams, named rosters, and games.
+// Three modes:
+//   { "base": "https://…" }        one event, explicit (operator-driven)
+//   { "dispatch": "live" }         refresh events in/near their date window (cron)
+//   { "dispatch": "discover" }     crawl the results index for NEW events (cron)
+//
+// Discovery + live-refresh are BOTH cron-driven (see Cron Schedule.md). That is
+// deliberate and does NOT contradict the no-cron-for-backfill rule: these poll a
+// cheap static JSON cache for CURRENT events, they don't bulk-walk history.
 //
 // Request body: { "base": "https://wmucc.wfdf.sport" }
 //   base = any modern WFDF event root — a subdomain (https://wmucc.wfdf.sport)
@@ -52,6 +57,98 @@ async function getJson(url: string): Promise<any> {
   }
 }
 
+// ── Discovery helpers ────────────────────────────────────────────────────────
+
+/**
+ * Full event base URL for a stored wfdf_events row.
+ *
+ * source_origin holds the ORIGIN only; a path event's segment lives inside
+ * static_base ("/wucc-2026/live/data/" → "/wucc-2026"). Subdomain events have
+ * static_base "/live/data/", which yields no segment and returns the origin.
+ * Both the live-refresh and the discovery dedup depend on this being exact.
+ */
+function eventBase(e: { source_origin?: string | null; static_base?: string | null }): string {
+  const origin = String(e.source_origin ?? '').replace(/\/+$/, '');
+  const sb = String(e.static_base ?? '');
+  const m = sb.match(/^\/([^/]+)\/live\/data\/?$/);
+  return m ? `${origin}/${m[1]}` : origin;
+}
+
+/**
+ * The event base after following any canonical redirect, derived from where the
+ * heartbeat actually resolved (`res.url` reflects the final URL after redirects).
+ * Returns null when the base is already canonical or the probe fails.
+ *
+ * Same host allow-list as candidateEventUrls: a redirect is attacker-influenced
+ * input in the same way a link is, so it must not be able to point the ingest
+ * at an arbitrary host.
+ */
+async function resolveCanonicalBase(base: string): Promise<string | null> {
+  try {
+    const probe = `${base}/live/data/_heartbeat.json`;
+    const res = await fetch(probe, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const finalUrl = new URL(res.url);
+    if (!/(^|\.)wfdf\.sport$/i.test(finalUrl.hostname) && !/(^|\.)sport$/i.test(finalUrl.hostname)) {
+      return null;
+    }
+    // Strip the probe suffix to get back to the event base.
+    const resolved = res.url.replace(/\/live\/data\/_heartbeat\.json.*$/, '');
+    return resolved.replace(/\/$/, '') || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Event base URLs linked from the results index page.
+ *
+ * Accepts two shapes, both present on results.wfdf.sport:
+ *   - relative path events:  href="wucc-2026/"       → {origin}/wucc-2026
+ *   - subdomain events:      href="https://wmucc.wfdf.sport/"
+ *
+ * Everything else is rejected: anchors, mailto/javascript, the bare origin, and
+ * any off-site host (the index also links Google Sheets). Restricting to
+ * *.wfdf.sport / *.sport keeps a compromised or edited index from pointing our
+ * fetcher at an arbitrary host — this value is used to build fetch URLs, so it
+ * must not be attacker-steerable into SSRF against an internal address.
+ */
+function candidateEventUrls(html: string, indexUrl: string): string[] {
+  const origin = new URL(indexUrl).origin;
+  const out = new Set<string>();
+
+  for (const m of html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)) {
+    const raw = m[1].trim();
+    if (!raw || raw.startsWith('#') || /^(mailto|javascript|tel):/i.test(raw)) continue;
+
+    let u: URL;
+    try {
+      u = new URL(raw, indexUrl);
+    } catch {
+      continue;
+    }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') continue;
+    // Only the WFDF results estate — never an arbitrary third-party host.
+    if (!/(^|\.)wfdf\.sport$/i.test(u.hostname) && !/(^|\.)sport$/i.test(u.hostname)) continue;
+    // Drop query/hash; an event base is a bare path.
+    u.search = '';
+    u.hash = '';
+
+    const path = u.pathname.replace(/\/+$/, '');
+    // Same-origin links must be a SINGLE path segment ("/wucc-2026"). The bare
+    // origin (path === '') is the index itself; deeper paths are sub-views.
+    if (u.origin === origin) {
+      if (!path || path.split('/').length !== 2) continue;
+      out.add(`${u.origin}${path}`);
+    } else {
+      // Subdomain event — its base is the origin itself.
+      if (path) continue;
+      out.add(u.origin);
+    }
+  }
+  return [...out];
+}
+
 // ── Classify the event kind from its season id / name / national flag ────────
 function classifyKind(seasonId: string, isNational: boolean): string {
   const s = seasonId.toLowerCase();
@@ -88,7 +185,20 @@ interface IngestResult {
 
 async function ingest(base: string, seasonOverride?: string): Promise<IngestResult> {
   const supabase = db();
-  const cleanBase = base.replace(/\/$/, '');
+  let cleanBase = base.replace(/\/$/, '');
+
+  // Follow a canonical redirect BEFORE deriving anything from the URL.
+  // results.wfdf.sport/pauc 301s to results.pauc.sport — fetch follows that
+  // transparently, so the heartbeat loads, but every subsequent data URL was
+  // still built from the ORIGINAL base and 404'd
+  // (results.wfdf.sport/live/data/pauc2025_reference.json). Resolve to the
+  // final host first. This also stops the same event being stored twice under
+  // two different hosts.
+  const canonical = await resolveCanonicalBase(cleanBase);
+  if (canonical && canonical !== cleanBase) {
+    console.log(`[wfdf-ingest] ${cleanBase} → ${canonical} (redirect)`);
+    cleanBase = canonical;
+  }
   const origin = new URL(cleanBase).origin;
 
   // 1. Heartbeat self-describes season + static path. Join STATIC_CACHE_BASE_URL
@@ -154,7 +264,13 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
         is_national_teams: isNational,
         logo_url: cfg.HOME_LOGO_PATH ? `${origin}${cfg.HOME_LOGO_PATH}` : null,
         source_origin: origin,
-        static_base: cfg.STATIC_CACHE_BASE_URL,
+        // Store the DERIVED static path, not the raw config value. Minimal
+        // heartbeats (app_version 1.8.x, e.g. AOUC 2025) carry no config, so
+        // cfg.STATIC_CACHE_BASE_URL is null — persisting that lost which PATH
+        // event the row was ("https://results.wfdf.sport" + null tells you
+        // nothing about /aouc). The derived form always identifies the event,
+        // which both the live-refresh and discovery-dedup paths depend on.
+        static_base: staticBase.startsWith(origin) ? staticBase.slice(origin.length) : staticBase,
         last_scraped_at: new Date().toISOString(),
         last_scraped_status: 'ok',
         updated_at: new Date().toISOString(),
@@ -304,7 +420,13 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
       inprogress: 'in_progress',
       scheduled: 'scheduled',
     };
-    const t = g.time_utc || g.time || null;
+    // VENUE-LOCAL WALL CLOCK, stored as UTC — same convention as EUCS/USAU
+    // masters (see src/lib/euf/format-date.ts). Prefer `time`, NOT `time_utc`:
+    // `time` is what the schedule site prints (13:00 = the 1:00 PM slot), while
+    // `time_utc` is that instant shifted to real UTC (12:00 at a UTC+1 venue).
+    // Since readers render this back in UTC unshifted, taking `time_utc` showed
+    // every WUCC game an hour early. `time_utc` is also absent on ~46% of rows.
+    const t = g.time || g.time_utc || null;
     return {
       event_id: eventId,
       wfdf_game_id: g.game_id,
@@ -356,21 +478,162 @@ Deno.serve(async (req) => {
     // empty body ok — we'll error on missing base below
   }
 
+  // ── Discovery mode (cron) ────────────────────────────────────────────────
+  // { "dispatch": "discover" } → find WFDF events we don't have yet.
+  //
+  // results.wfdf.sport's ROOT PAGE is a real index: it links every event, both
+  // path-style ("wucc-2026/") and subdomain ("https://wmucc.wfdf.sport/"). That
+  // is authoritative and self-maintaining, so we crawl it rather than probing a
+  // hardcoded slug list — a new Worlds shows up the week WFDF publishes it.
+  //
+  // Each candidate is confirmed by fetching its heartbeat: a real modern event
+  // returns JSON, a bad path returns the SPA's HTML 404 (getJson rejects
+  // non-JSON, so that check is already exact). Anything already in wfdf_events
+  // is skipped — the live-dispatch job owns refreshing those.
+  //
+  // Legacy (Ultiorganizer) events have no heartbeat and are deliberately NOT
+  // auto-ingested: they need a per-event season/name config (see
+  // resolveLegacyConfig) and they're all historical, so there's nothing new to
+  // find. They're reported under `skippedLegacy` for visibility.
+  if (body?.dispatch === 'discover') {
+    const supabase = db();
+    const indexUrl = typeof body?.index === 'string' ? body.index : 'https://results.wfdf.sport/';
+    // Cap the crawl so a source change can't turn this into an unbounded fan-out.
+    const MAX_CANDIDATES = 40;
+
+    let html = '';
+    try {
+      const res = await fetch(indexUrl, { headers: { 'User-Agent': UA, Accept: 'text/html' } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      html = await res.text();
+    } catch (err) {
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          mode: 'dispatch-discover',
+          error: `index fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+        }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+
+    const candidates = candidateEventUrls(html, indexUrl).slice(0, MAX_CANDIDATES);
+
+    // Dedup on SEASON_ID, not on the URL.
+    //
+    // URL-matching is not reliable here, and all three ways it fails are real:
+    //   - AOUC2025 is stored with static_base = null, so there's no path prefix
+    //     to reconstruct "…/aouc" from.
+    //   - pauc2025 is stored under a DIFFERENT HOST (results.pauc.sport) than
+    //     the index link (results.wfdf.sport/pauc) — same event, two URLs.
+    //   - subdomain vs path aliases point at the same season.
+    // The heartbeat's LIVE_SEASON_ID is the event's real identity (it's the
+    // upsert's onConflict key), so read that first and compare on it. One extra
+    // cheap JSON fetch per candidate buys exact dedup.
+    const { data: known } = await supabase
+      .from('wfdf_events')
+      .select('season_id, source_origin, static_base');
+    const knownSeasons = new Set(
+      (known ?? []).map((e: any) => String(e.season_id ?? '').toLowerCase()),
+    );
+    // Fallback identity for MINIMAL heartbeats (app_version 1.8.x, e.g. AOUC
+    // 2025) that ship no `config` block and therefore no LIVE_SEASON_ID — we
+    // can't learn the season without a full ingest, so match on the base URL.
+    const knownUrlKeys = new Set(
+      (known ?? []).map((e: any) => eventBase(e).toLowerCase()).filter(Boolean),
+    );
+
+    const discovered: any[] = [];
+    let skippedKnown = 0;
+    let skippedLegacy = 0;
+    const failed: any[] = [];
+
+    for (const base of candidates) {
+      // Confirm it's a modern event AND learn its season id before ingesting.
+      const hb = await getJson(`${base}/live/data/_heartbeat.json`).catch(() => null);
+      if (!hb) {
+        // No heartbeat → legacy Ultiorganizer event; those need a per-event
+        // config and are all historical, so discovery leaves them alone.
+        skippedLegacy++;
+        continue;
+      }
+      const seasonId = String(hb?.config?.LIVE_SEASON_ID ?? '').trim();
+      if (seasonId) {
+        if (knownSeasons.has(seasonId.toLowerCase())) {
+          skippedKnown++;
+          continue;
+        }
+      } else {
+        // Minimal heartbeat — no season id to compare. Fall back to the URL,
+        // resolved through any canonical redirect so an aliased host still
+        // matches what we stored.
+        const canon = ((await resolveCanonicalBase(base)) ?? base)
+          .replace(/\/+$/, '')
+          .toLowerCase();
+        if (knownUrlKeys.has(canon)) {
+          skippedKnown++;
+          continue;
+        }
+      }
+      try {
+        const r = await ingest(base);
+        discovered.push({ base, ...r });
+        // Guard against two index links resolving to the same season in one run.
+        if (r.season) knownSeasons.add(String(r.season).toLowerCase());
+        console.log(`[wfdf-ingest] discovered ${r.event} (${r.teams} teams, ${r.games} games)`);
+      } catch (err) {
+        failed.push({ base, error: err instanceof Error ? err.message : String(err) });
+        console.error(`[wfdf-ingest] discovery ingest failed for ${base}:`, err);
+      }
+      await sleep(FETCH_DELAY_MS);
+    }
+
+    return new Response(
+      JSON.stringify({
+        ok: true,
+        mode: 'dispatch-discover',
+        candidates: candidates.length,
+        discovered,
+        skippedKnown: skippedKnown.length,
+        skippedLegacy: skippedLegacy.length,
+        failed,
+      }),
+      { headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+
   // ── Live-dispatch mode (cron) ────────────────────────────────────────────
-  // { "dispatch": "live" } → re-ingest every MODERN WFDF event currently in its
-  // date window (start_date ≤ today ≤ end_date). Modern events are the ones the
-  // static-cache path can refresh cheaply (last_scraped_status = 'ok', not the
-  // 'ok-legacy' Ultiorganizer ones). Used by the every-15-min cron so a live
-  // tournament (e.g. WMUCC / WJUC) stays fresh; idle when nothing is on.
+  // { "dispatch": "live" } → re-ingest every MODERN WFDF event in or NEAR its
+  // date window. Modern events are the ones the static-cache path can refresh
+  // cheaply (last_scraped_status = 'ok', not the 'ok-legacy' Ultiorganizer
+  // ones). Used by the every-15-min cron so a live tournament (e.g. WMUCC /
+  // WJUC) stays fresh; idle when nothing is on.
+  //
+  // PRE-EVENT LOOKAHEAD (LOOKAHEAD_DAYS): the window used to be strictly
+  // start_date ≤ today ≤ end_date, which meant pools, schedule and rosters —
+  // published WEEKS before a Worlds — were never refreshed until the day play
+  // began. WUCC 2026 was the case that exposed it. Mirrors USAU's +7-day
+  // lookahead (sync-live-events), but wider: WFDF publishes earlier.
+  //
+  // TRAILING_DAYS keeps polling briefly after the end date so late score
+  // corrections and final placements land.
   if (body?.dispatch === 'live') {
     const supabase = db();
-    const today = new Date().toISOString().slice(0, 10);
+    const LOOKAHEAD_DAYS = Number(body?.lookaheadDays ?? 21);
+    const TRAILING_DAYS = 2;
+    const dayOffset = (n: number) =>
+      new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    // start_date ≤ today+LOOKAHEAD  AND  end_date ≥ today-TRAILING
+    const notAfter = dayOffset(LOOKAHEAD_DAYS);
+    const notBefore = dayOffset(-TRAILING_DAYS);
     const { data: events, error } = await supabase
       .from('wfdf_events')
-      .select('slug, name, source_origin, start_date, end_date, last_scraped_status')
+      // static_base is REQUIRED here — eventBase() needs it to rebuild a path
+      // event's full URL. Without it every path event refreshes the bare origin.
+      .select('slug, name, source_origin, static_base, start_date, end_date, last_scraped_status')
       .eq('last_scraped_status', 'ok') // modern static-cache events only
-      .lte('start_date', today)
-      .gte('end_date', today);
+      .lte('start_date', notAfter)
+      .gte('end_date', notBefore);
     if (error) {
       return new Response(JSON.stringify({ ok: false, error: error.message }), {
         status: 500,
@@ -382,7 +645,10 @@ Deno.serve(async (req) => {
     // Sequential — polite to the source, and each event's ingest is quick.
     for (const e of live) {
       try {
-        const r = await ingest(e.source_origin as string);
+        // source_origin is the ORIGIN only; a path event's segment lives in
+        // static_base ("/wucc-2026/live/data/"). Re-ingesting the bare origin
+        // would hit the wrong event (or the index), so rebuild the full base.
+        const r = await ingest(eventBase(e));
         results.push({ slug: e.slug, ok: true, teams: r.teams, games: r.games });
       } catch (err) {
         results.push({ slug: e.slug, ok: false, error: err instanceof Error ? err.message : String(err) });

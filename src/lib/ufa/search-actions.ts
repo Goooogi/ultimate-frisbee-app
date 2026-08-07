@@ -21,6 +21,7 @@ import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { listPulTeams, searchPulPlayers } from '@/lib/pul/data';
 import { listWulTeams, searchWulPlayers } from '@/lib/wul/data';
 import { searchWfdfTeams, searchWfdfPlayersForSearch, searchWfdfEvents } from '@/lib/wfdf/data';
+import { searchEufTeams, searchEufPlayers, searchEufEvents } from '@/lib/euf/data';
 
 /**
  * DB-side fuzzy UFA player search (pg_trgm) via search_ufa_players_fuzzy.
@@ -95,7 +96,8 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   // Fan out every DB-side search (USAU + all leagues' players) + the UFA API
   // player search in ONE parallel batch. Each is name-filtered server-side —
   // no more "pull the whole roster, filter in Node".
-  const [usau, ufaPlayers, pulPlayers, wulPlayers, pulTeams, wulTeams, wfdfTeams, wfdfPlayers, wfdfEvents] =
+  const [usau, ufaPlayers, pulPlayers, wulPlayers, pulTeams, wulTeams, wfdfTeams, wfdfPlayers, wfdfEvents,
+         eufTeams, eufPlayers, eufEvents] =
     await Promise.all([
       searchUsau(q, limit),
       searchUfaPlayersDb(q, cap).catch(() => []),
@@ -106,6 +108,9 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       searchWfdfTeams(query, cap).catch(() => []),
       searchWfdfPlayersForSearch(query, cap).catch(() => []),
       searchWfdfEvents(query, cap).catch(() => []),
+      searchEufTeams(query, cap).catch(() => []),
+      searchEufPlayers(query, cap).catch(() => []),
+      searchEufEvents(query, cap).catch(() => []),
     ]);
 
   // Names already covered by a USAU player row — used to dedupe same-human
@@ -126,6 +131,13 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       ufaResults.push({ kind: 'player', id: p.id, name: p.fullName, hint: 'UFA', league: 'ufa' });
     }
   }
+
+  // Names covered by an ANCHOR-league row (USAU or UFA) — both route to the
+  // unified /players/[id] profile, which already merges every league's stints
+  // by name, so a PUL/WUL/WFDF/EUCS row for the same human is redundant. UFA
+  // matters for European pros with no USAU record (Miglioretto, Gasperini, …)
+  // who would otherwise double-list next to their EUCS entry.
+  const coveredNames = [...usauPlayerNames, ...ufaResults.map((r) => r.name)];
 
   // ── UFA teams (synchronous, in-memory) ────────────────────────────────
   // ALL teams (not just currently-active) so folded/historical franchises are
@@ -179,7 +191,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   const pulPlayerResults: SearchResult[] = [];
   for (const p of pulPlayers) {
     if (pulPlayerResults.length >= cap) break;
-    if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+    if (coveredNames.some((n) => namesMatch(n, p.playerName))) continue;
     pulPlayerResults.push({
       kind: 'player',
       id: p.id,
@@ -211,7 +223,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   const wulPlayerResults: SearchResult[] = [];
   for (const p of wulPlayers) {
     if (wulPlayerResults.length >= cap) break;
-    if (usauPlayerNames.some((n) => namesMatch(n, p.playerName))) continue;
+    if (coveredNames.some((n) => namesMatch(n, p.playerName))) continue;
     wulPlayerResults.push({
       kind: 'player',
       id: p.id,
@@ -232,8 +244,9 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   }));
 
   // WFDF players — route via the by-name resolver (no anchor id). `id` carries
-  // the full name. Dedupe against USAU rows so a US player already shown from
-  // USAU (whose unified profile merges their WFDF stints) isn't listed twice.
+  // the full name. Dedupe against anchor-league rows (coveredNames) so a player
+  // already shown from USAU/UFA — whose unified profile merges their WFDF
+  // stints — isn't listed twice.
   const wfdfPlayerResults: SearchResult[] = [];
   {
     const seen = new Set<string>();
@@ -242,7 +255,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       const key = p.fullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName))) continue;
+      if (coveredNames.some((n) => namesMatch(n, p.fullName))) continue;
       wfdfPlayerResults.push({
         kind: 'player',
         id: p.fullName, // by-name resolver route uses the name, not a UUID
@@ -262,6 +275,58 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     league: 'wfdf',
   }));
 
+  // EUF teams — the RPC returns one row PER EVENT, so a club that has entered
+  // seven events would otherwise fill the dropdown with seven identical names.
+  // Dedupe to one result per CLUB-DIVISION (Grut's Open and Women's squads are
+  // separate clubs), with `id` carrying "name|division" for resultHref. Label by
+  // country + division rather than whichever event happened to sort first.
+  const eufTeamResults: SearchResult[] = [];
+  {
+    const seen = new Set<string>();
+    for (const t of eufTeams) {
+      const key = `${t.name.trim().toLowerCase()}|${t.division.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      eufTeamResults.push({
+        kind: 'team',
+        id: `${t.name}|${t.division}`,
+        name: t.name,
+        hint: ['EUCS', t.division, t.countryName].filter(Boolean).join(' · '),
+        league: 'euf',
+        prominence: 2,
+      });
+    }
+  }
+
+  // EUF players — by-name route (ids are per-event). Same anchor-league dedupe
+  // as WFDF so a player already surfaced from USAU/UFA isn't listed twice.
+  const eufPlayerResults: SearchResult[] = [];
+  {
+    const seen = new Set<string>();
+    for (const p of eufPlayers) {
+      if (eufPlayerResults.length >= cap) break;
+      const key = p.fullName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (coveredNames.some((n) => namesMatch(n, p.fullName))) continue;
+      eufPlayerResults.push({
+        kind: 'player',
+        id: p.fullName,
+        name: p.fullName,
+        hint: ['EUCS', p.teamName].filter(Boolean).join(' · '),
+        league: 'euf',
+      });
+    }
+  }
+
+  const eufEventResults: SearchResult[] = eufEvents.map((e) => ({
+    kind: 'tournament',
+    id: e.slug,
+    name: e.name,
+    hint: ['EUCS', String(e.year)].filter(Boolean).join(' · '),
+    league: 'euf',
+  }));
+
   const merged = [
     ...usau,
     ...ufaResults,
@@ -273,6 +338,9 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
     ...wfdfTeamResults,
     ...wfdfPlayerResults,
     ...wfdfEventResults,
+    ...eufTeamResults,
+    ...eufPlayerResults,
+    ...eufEventResults,
   ];
 
   // Rank by: (1) match quality via `matchTier` — exact (0) > name-starts-with /

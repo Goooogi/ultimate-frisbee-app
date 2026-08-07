@@ -57,6 +57,7 @@ const LEAGUE_LABEL: Record<IconLeague, string> = {
   pul: 'PUL',
   wul: 'WUL',
   wfdf: 'WFDF',
+  euf: 'EUCS',
 };
 
 function guessExtension(file: File): string {

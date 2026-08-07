@@ -12,6 +12,7 @@ import { createClient } from '@/lib/supabase/server';
 import { getPendingContent, getRecentReviewedContent } from '@/lib/player-content/server';
 import { getAllFeedback } from '@/lib/feedback/server';
 import { getAllUsers } from '@/lib/admin/roles';
+import { getJerseyReports } from '@/lib/jerseys/reports-server';
 import { PageShell } from '@/components/page-shell';
 import { AdminPortal, type AdminTab } from '@/components/admin/admin-tabs';
 
@@ -37,15 +38,23 @@ export default async function AdminPage({
     .maybeSingle();
   if (profile?.role !== 'admin') notFound();
 
-  const [pending, recent, feedback, users] = await Promise.all([
+  const [pending, recent, feedback, users, jerseyReports] = await Promise.all([
     getPendingContent(),
     getRecentReviewedContent(25),
     getAllFeedback(200),
     getAllUsers(),
+    getJerseyReports(100),
   ]);
+  const openJerseyReports = jerseyReports.filter((r) => r.status === 'new').length;
   const newFeedback = feedback.filter((i) => i.status === 'new').length;
   const initialTab: AdminTab =
-    searchParams.tab === 'feedback' ? 'feedback' : searchParams.tab === 'roles' ? 'roles' : 'content';
+    searchParams.tab === 'feedback'
+      ? 'feedback'
+      : searchParams.tab === 'jerseys'
+        ? 'jerseys'
+        : searchParams.tab === 'roles'
+          ? 'roles'
+          : 'content';
 
   return (
     <PageShell
@@ -64,6 +73,8 @@ export default async function AdminPage({
           recent={recent}
           feedback={feedback}
           newFeedback={newFeedback}
+          jerseyReports={jerseyReports}
+          openJerseyReports={openJerseyReports}
           users={users}
           currentUserId={userData.user.id}
           initialTab={initialTab}

@@ -5,7 +5,8 @@
 // The league switcher lives in the AppShell's top bar and is now controlled
 // from here so changing leagues swaps the content (UFA games ↔ USAU events).
 
-import { Suspense } from 'react';
+import { Suspense, useCallback } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame } from '@/lib/ufa/types';
@@ -19,6 +20,7 @@ import { useLeague } from '@/lib/use-league';
 import { buildLeagueQs, levelLabel, type UsauLevel } from '@/lib/league';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { UsauFlightSelect } from '@/components/usau/usau-flight-select';
+import { UsauFilterButton, UsauFilterRow } from '@/components/usau/usau-filter-button';
 
 interface FeedPageProps {
   games: UfaGame[];
@@ -102,6 +104,23 @@ function UfaFeed({
 // replaced the old single-auto-picked-tournament view so we can show winners
 // across every division without choosing just one event.
 function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: UsauLevel }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Non-default filters, for the Filters badge. `level` defaults to CLUB and
+  // `flight` is absent when "all flights" — anything else counts as applied.
+  const usauFilterCount =
+    (searchParams.get('level') ? 1 : 0) + (searchParams.get('flight') ? 1 : 0);
+
+  const clearUsauFilters = useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('level');
+    params.delete('flight');
+    const qs = params.toString();
+    router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
+  }, [router, pathname, searchParams]);
+
   // Carry the active level into the schedule links so the division context
   // survives the hop (buildLeagueQs omits the default CLUB for clean URLs;
   // league=usau is always non-default so the qs is never empty).
@@ -118,11 +137,22 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
         <h1 className="m-0 font-display italic font-bold text-[32px] lg:text-[40px] leading-[0.95] tracking-[-0.02em] text-ink">
           Recent Tournaments
         </h1>
+        {/* Level + Flight live behind one "Filters" button rather than an
+            inline row — the set is expected to grow, and a widening row of
+            dropdowns wrapped on mobile and pushed the tournament grid down. */}
         <div className="flex items-center gap-2 flex-wrap">
-          <UsauLevelSelect />
-          {/* Flight filter — Triple Crown Tour tier, Club only. Same control the
-              /schedule tab uses, so completed games can be filtered by flight too. */}
-          {level === 'CLUB' && <UsauFlightSelect />}
+          <UsauFilterButton activeCount={usauFilterCount} onClear={clearUsauFilters}>
+            <UsauFilterRow label="Level">
+              <UsauLevelSelect />
+            </UsauFilterRow>
+            {/* Flight filter — Triple Crown Tour tier, Club only. Same control the
+                /schedule tab uses, so completed games can be filtered by flight too. */}
+            {level === 'CLUB' && (
+              <UsauFilterRow label="Flight">
+                <UsauFlightSelect />
+              </UsauFilterRow>
+            )}
+          </UsauFilterButton>
         </div>
       </div>
 

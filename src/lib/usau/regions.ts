@@ -23,7 +23,11 @@
 export const USAU_REGION_STATES: Record<string, string[]> = {
   // ── Sections (granular) ──
   'rocky mountain': ['CO', 'WY', 'MT'],
-  'big sky': ['MT', 'ID', 'WY'],
+  // UT is the LARGEST state in Big Sky by team count (58 distinct teams vs
+  // Montana's 50), not a minor member — it was missing here, which silently
+  // dropped the whole UFA career of every Salt Lake player whose USAU history
+  // runs through this section (Jordan Kerr / Salt Lake Shred).
+  'big sky': ['UT', 'MT', 'ID', 'WY'],
   'east plains': ['OH', 'MI', 'IN', 'KY'],
   'west plains': ['IL', 'WI', 'MN', 'IA'],
   'northwest plains': ['MN', 'ND', 'SD'],
@@ -55,7 +59,9 @@ export const USAU_REGION_STATES: Record<string, string[]> = {
 
   // ── Regions (coarse fallback) ──
   'rocky mountain region': ['CO', 'WY', 'MT', 'ID'],
-  northwest: ['WA', 'OR', 'AK', 'MT', 'ID'],
+  // Utah plays UP into the Northwest region from Big Sky — 66 distinct UT teams
+  // in Northwest regionals, third only to WA and OR. Same omission as 'big sky'.
+  northwest: ['WA', 'OR', 'UT', 'AK', 'MT', 'ID'],
   southwest: ['CA', 'NV', 'AZ', 'HI'],
   'north central': ['MN', 'WI', 'IA', 'ND', 'SD', 'NE'],
   'south central': ['TX', 'CO', 'OK', 'AR', 'LA', 'NM', 'KS', 'MO'],
@@ -97,29 +103,78 @@ export const UFA_TEAM_STATE: Record<string, string> = {
   shred: 'UT',
   spiders: 'CA',
   steel: 'OR',
-  // Historical / inactive
+  // Historical / inactive — audited 2026-08-06 against the games API's
+  // historical city field; several were wrong (Riptide = Vancouver, Cannons =
+  // Jacksonville/Tampa Bay, Outlaws = Ottawa, …). Keep in sync with mobile's
+  // UFA_TEAM_STATE in src/lib/ufa/teams.ts.
   aviators: 'CA',
   mechanix: 'MI',
   legion: 'TX',
-  cannons: 'OH',
-  outlaws: 'TN',
-  flamethrowers: 'PA',
-  nightwatch: 'NC',
-  riptide: 'FL',
-  express: 'NY',
-  revolution: 'NY',
-  dragons: 'CA',
-  lions: 'ON',
-  cranes: 'MD',
-  constitution: 'PA',
+  cannons: 'FL', // Jacksonville → Tampa Bay; both Florida
+  outlaws: 'ON', // Ottawa — province, never matches a US section (fine)
+  flamethrowers: 'CA', // San Francisco
+  nightwatch: 'TN', // Nashville
+  riptide: 'BC', // Vancouver — province, never matches a US section (fine)
+  express: 'NC', // Charlotte
+  revolution: 'OH', // Cincinnati
+  dragons: 'NY', // Rochester
+  lions: 'UT', // Salt Lake
+  cranes: 'OH', // Columbus
+  constitution: 'CT',
   spinners: 'PA',
-  rampage: 'MA',
+  rampage: 'RI',
   hammerheads: 'NJ',
 };
+
+/**
+ * Does a UFA team's state belong to a region/section whose mapping we consider
+ * COMPLETE enough to argue from?
+ *
+ * The attribution gate treats "no overlap" as proof of two different people and
+ * drops an entire UFA career. That inference is only sound when the state-set
+ * on both sides is complete. USAU_REGION_STATES is explicitly "not exhaustive
+ * of every micro-section" (see its doc), so a state we simply never listed
+ * looks identical to a genuine contradiction — that's how every Salt Lake
+ * player lost their Shred career when 'big sky' omitted UT.
+ *
+ * This is the safety valve: a UFA state that appears NOWHERE in the map cannot
+ * be contradicted by it, so the gate must abstain rather than drop. Adding a
+ * state to a region above automatically makes it "coverable" here.
+ */
+export function isStateCoveredByRegionMap(state: string): boolean {
+  const s = state.trim().toUpperCase();
+  for (const states of Object.values(USAU_REGION_STATES)) {
+    if (states.includes(s)) return true;
+  }
+  return false;
+}
 
 /** UFA team's home state (postal code), or null if unknown/non-US. */
 export function ufaTeamState(slug: string): string | null {
   return UFA_TEAM_STATE[slug] ?? null;
+}
+
+/**
+ * Canadian province codes appearing in UFA_TEAM_STATE (Montreal, Toronto).
+ *
+ * Deliberately a province DENY-list rather than a US-state allow-list: the
+ * allow-list would have to be USAU_REGION_STATES, which omits real states no
+ * section phrase happens to name (UT among them), and excluding those would
+ * silently disable the geography gate for their teams.
+ */
+const NON_US_STATE_CODES: ReadonlySet<string> = new Set(['QC', 'ON', 'BC', 'AB', 'MB', 'NS', 'NB', 'SK', 'NL', 'PE']);
+
+/**
+ * True when a state code is one USAU home-state derivation could ever emit.
+ *
+ * Canadian franchises (royal→QC, rush/lions→ON) map to PROVINCES, which can
+ * never appear in homeStates (US codes only). Callers comparing a UFA team's
+ * state against USAU home states must treat a non-US code as NO SIGNAL rather
+ * than as a contradiction — otherwise the comparison can only ever fail and the
+ * geography gate drops the entire real UFA career.
+ */
+export function isUsStateCode(code: string): boolean {
+  return !NON_US_STATE_CODES.has(code);
 }
 
 /**

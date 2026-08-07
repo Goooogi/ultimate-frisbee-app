@@ -13,15 +13,19 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { AdminContentQueue } from '@/components/admin/admin-content-queue';
 import { AdminFeedbackList } from '@/components/admin/admin-feedback-list';
 import { AdminRolesList } from '@/components/admin/admin-roles-list';
+import { AdminJerseyReports } from '@/components/admin/admin-jersey-reports';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import type { FeedbackItem } from '@/lib/feedback/server';
 import type { AdminUserRow } from '@/lib/admin/roles';
+import type { JerseyReportItem } from '@/lib/jerseys/reports-server';
 
-export type AdminTab = 'content' | 'feedback' | 'roles';
+export type AdminTab = 'content' | 'feedback' | 'jerseys' | 'roles';
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: 'content', label: 'Content' },
   { id: 'feedback', label: 'Feedback' },
+  // Jersey REPORTS only — listings publish instantly and never queue here.
+  { id: 'jerseys', label: 'Reports' },
   { id: 'roles', label: 'Roles' },
 ];
 
@@ -30,23 +34,26 @@ interface AdminPortalProps {
   recent: PlayerContentItem[];
   feedback: FeedbackItem[];
   newFeedback: number;
+  jerseyReports: JerseyReportItem[];
+  openJerseyReports: number;
   users: AdminUserRow[];
   currentUserId: string;
   initialTab: AdminTab;
 }
 
-export function AdminPortal({ pending, recent, feedback, newFeedback, users, currentUserId, initialTab }: AdminPortalProps) {
+export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyReports, openJerseyReports, users, currentUserId, initialTab }: AdminPortalProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const rawTab = searchParams.get('tab');
   const activeTab: AdminTab =
-    rawTab === 'feedback' ? 'feedback' : rawTab === 'roles' ? 'roles' : rawTab === 'content' ? 'content' : initialTab;
+    rawTab === 'feedback' ? 'feedback' : rawTab === 'jerseys' ? 'jerseys' : rawTab === 'roles' ? 'roles' : rawTab === 'content' ? 'content' : initialTab;
 
   const counts: Record<AdminTab, number> = {
     content: pending.length,
     feedback: newFeedback,
+    jerseys: openJerseyReports,
     roles: users.length,
   };
 
@@ -94,6 +101,13 @@ export function AdminPortal({ pending, recent, feedback, newFeedback, users, cur
             </span>
           </StatusPillRow>
           <AdminFeedbackList items={feedback} />
+        </section>
+      )}
+
+      {activeTab === 'jerseys' && (
+        <section role="tabpanel" id="admin-panel-jerseys" aria-label="Jersey reports">
+          <h2 className="sr-only">Jersey reports</h2>
+          <AdminJerseyReports reports={jerseyReports} />
         </section>
       )}
 

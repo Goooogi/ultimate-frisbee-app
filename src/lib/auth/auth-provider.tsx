@@ -129,11 +129,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     const supabase = await loadClient();
-    const { data } = await supabase
+    // NOTE: `email` and `phone` are deliberately NOT selected. The mobile repo's
+    // 20260802000100_profiles_restrict_pii migration REVOKEd column-level SELECT
+    // on both from `authenticated` (they moved to the profile_contact view), and
+    // PostgREST fails the WHOLE row with 42501 if you ask for a revoked column.
+    // Selecting them silently nulled the profile — which is what broke the
+    // avatar/profile-icon picker: the write succeeded, then this re-read threw
+    // and reverted the UI to initials. Own-email comes from session.user.email
+    // (the JWT), so nothing user-facing needs these columns.
+    const { data, error } = await supabase
       .from('profiles')
-      .select('id, email, display_name, username, avatar_url, avatar_icon, phone, role')
+      .select('id, display_name, username, avatar_url, avatar_icon, role')
       .eq('id', userId)
       .maybeSingle();
+    // Don't blow away a good profile on a transient read failure — that's the
+    // silent-revert behavior this bug presented as.
+    if (error) {
+      console.error('Failed to load profile:', error.message);
+      return;
+    }
     setProfile(data ?? null);
   }, [session?.user.id, loadClient]);
 
@@ -149,12 +163,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       const supabase = await loadClient();
-      const { data } = await supabase
+      // Same column set as fetchProfile above — see the note there on why
+      // email/phone must not be selected. Keep these two in sync.
+      const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, display_name, username, avatar_url, avatar_icon, phone, role')
+        .select('id, display_name, username, avatar_url, avatar_icon, role')
         .eq('id', userId)
         .maybeSingle();
       if (cancelled) return;
+      if (error) {
+        console.error('Failed to load profile:', error.message);
+        return;
+      }
       setProfile(data ?? null);
     })();
     return () => {

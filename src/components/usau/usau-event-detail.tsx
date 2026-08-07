@@ -52,6 +52,27 @@ function isCrossoverBracket(name: string | null | undefined): boolean {
   return bracketTail(name).toLowerCase().includes('crossover');
 }
 
+/** Does a bracket_name read as a placement group? ("9th Place", "Placement",
+ *  "21st (3 games each)"). Mirrors the scraper's isPlacementLabel so a
+ *  placement-ish 'other' game never migrates into the Rounds tab. */
+function isPlacementName(name: string | null | undefined): boolean {
+  if (!name) return false;
+  const t = bracketTail(name).toLowerCase();
+  return /placement/.test(t) || /\b\d+(st|nd|rd|th)\s+place\b/.test(t) || /^\s*\d+(st|nd|rd|th)\b/.test(t);
+}
+
+/** Matchup rounds — pool-less Saturday phases like Cooler Classic 37 Men's
+ *  "Sat Round 1/2/3": stored round='other' with the tab label as bracket_name.
+ *  Not a pool, not a crossover, not placement — they get their own Rounds tab. */
+function isMatchupRound(g: { round: string; bracketName: string | null }): boolean {
+  return (
+    g.round === 'other' &&
+    !isCrossoverBracket(g.bracketName) &&
+    !isPoolBracket(g.bracketName) &&
+    !isPlacementName(g.bracketName)
+  );
+}
+
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
 
@@ -236,6 +257,7 @@ export function UsauEventDetail({ event }: Props) {
     // through and become a placement-bracket group of their own.
     if (isPoolBracket(g.bracketName) && !isSecondPhasePool(g.bracketName)) continue;
     if (isCrossoverBracket(g.bracketName)) continue; // crossovers have their own tab
+    if (isMatchupRound(g)) continue; // Saturday matchup rounds have their own tab
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
     if (!byBracket.has(k)) byBracket.set(k, []);
@@ -253,6 +275,23 @@ export function UsauEventDetail({ event }: Props) {
     .filter((g) => isCrossoverBracket(g.bracketName))
     .slice()
     .sort((a, b) => (a.bracketName ?? '').localeCompare(b.bracketName ?? ''));
+
+  // ── Matchup rounds ("Sat Round 1/2/3") — pool-less Saturday phases. ─────
+  // Grouped by bracket_name; groups sort by name (the labels are ordinal),
+  // games inside by scheduled time.
+  const roundGroupsMap = new Map<string, Game[]>();
+  for (const g of games) {
+    if (!isMatchupRound(g)) continue;
+    const k = g.bracketName ?? 'Rounds';
+    if (!roundGroupsMap.has(k)) roundGroupsMap.set(k, []);
+    roundGroupsMap.get(k)!.push(g);
+  }
+  const roundGroups = Array.from(roundGroupsMap.entries())
+    .map(([name, gs]) => ({
+      name,
+      games: gs.slice().sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
   // ── Pool play games ───────────────────────────────────────────────────
   // Second-phase pools are excluded — they render under Bracket, and their
@@ -389,11 +428,22 @@ export function UsauEventDetail({ event }: Props) {
   const hasPools = pools.length > 0 || poolGames.size > 0;
   const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
     { key: 'pools',      label: 'Pools',      show: hasPools },
+    { key: 'rounds',     label: 'Rounds',     show: roundGroups.length > 0 },
     { key: 'crossovers', label: 'Crossovers', show: crossoverGames.length > 0 },
     { key: 'bracket',    label: 'Bracket',    show: hasBracket },
   ];
   const visibleTabs = TABS.filter((t) => t.show);
-  const defaultTab: ViewTab = hasBracket
+  // Bias to Bracket only once it has real content — a bracket that is all TBD
+  // feeder slots (Cooler Classic Men pre-Sunday: 24 placeholder games) should
+  // not outrank the phase people are actually watching.
+  const bracketStarted =
+    hasBracket &&
+    games.some(
+      (g) =>
+        (isChampionshipBracket(g) || isPlacementName(g.bracketName)) &&
+        (g.teamAId != null || g.teamBId != null),
+    );
+  const defaultTab: ViewTab = bracketStarted
     ? 'bracket'
     : (visibleTabs[0]?.key ?? 'pools');
 
@@ -413,6 +463,7 @@ export function UsauEventDetail({ event }: Props) {
       poolGames={poolGames}
       poolRecords={poolRecords}
       crossoverGames={crossoverGames}
+      roundGroups={roundGroups}
       placementBrackets={placementBrackets}
       bracketLabel={bracketLabel}
       visibleTabs={visibleTabs}
@@ -421,7 +472,7 @@ export function UsauEventDetail({ event }: Props) {
   );
 }
 
-type ViewTab = 'pools' | 'crossovers' | 'bracket';
+type ViewTab = 'pools' | 'rounds' | 'crossovers' | 'bracket';
 
 /**
  * Presentational tabbed body. Split out from UsauEventDetail so it can hold the
@@ -446,6 +497,7 @@ function EventTabsView(props: {
   poolGames: Map<string, Game[]>;
   poolRecords: Map<string, { wins: number; losses: number }>;
   crossoverGames: Game[];
+  roundGroups: Array<{ name: string; games: Game[] }>;
   placementBrackets: Array<{ name: string; games: Game[] }>;
   bracketLabel: (name: string) => string;
   visibleTabs: Array<{ key: ViewTab; label: string; show: boolean }>;
@@ -454,7 +506,7 @@ function EventTabsView(props: {
   const {
     event, champFinals, poolLeader, showGroupPrefixes, level, gender,
     availableLevels, eventDivisions, games, teams, pools, poolGames,
-    poolRecords, crossoverGames, placementBrackets, bracketLabel,
+    poolRecords, crossoverGames, roundGroups, placementBrackets, bracketLabel,
     visibleTabs, defaultTab,
   } = props;
 
@@ -596,6 +648,24 @@ function EventTabsView(props: {
             pools.length > 0 && <PoolGamesEmpty slug={event.slug} />
           )}
         </section>
+      )}
+
+      {/* ── Rounds — pool-less Saturday matchup phases ("Sat Round 1/2/3") ─ */}
+      {active === 'rounds' && roundGroups.length > 0 && (
+        <div className="flex flex-col gap-6">
+          {roundGroups.map((grp) => (
+            <section key={grp.name} aria-label={grp.name}>
+              <h2 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline">
+                {grp.name}
+              </h2>
+              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                {grp.games.map((g) => (
+                  <GameRow key={g.id} game={g} venueState={event.state} />
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
       )}
 
       {/* ── Crossovers ──────────────────────────────────────────────────── */}
@@ -1037,13 +1107,23 @@ function GameRow({
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
 
-  const label = showBracket && game.bracketName
+  // Bracket name and field are NOT mutually exclusive. This used to be an
+  // either/or — bracket views showed the round and silently dropped the field
+  // number, so "where is this game being played" was unavailable on exactly the
+  // games people travel to watch. Show both when we have both.
+  const bracket = showBracket && game.bracketName
     ? (bracketLabel ? bracketLabel(game.bracketName) : game.bracketName)
-    : game.location
-      ? `Field ${game.location}`
-      : null;
+    : null;
+  // `location` is usually a bare field number ("7") but sometimes a full venue
+  // string ("Devens - Rogers Field - 12"). Only prefix "Field" when it's the
+  // bare-number form, so we don't render "Field Devens - Rogers Field - 12".
+  const fieldLabel = game.location
+    ? /^\d+[A-Za-z]?$/.test(game.location.trim())
+      ? `Field ${game.location.trim()}`
+      : game.location.trim()
+    : null;
   const time = formatGameTime(game.scheduledAt, venueState ?? null);
-  const meta = [label, time || null].filter(Boolean).join(' · ') || null;
+  const meta = [bracket, fieldLabel, time || null].filter(Boolean).join(' · ') || null;
 
   return (
     <li className="bg-surface rounded-card-sm shadow-soft p-3">

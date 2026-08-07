@@ -10,7 +10,8 @@ import type { UtcgSnapshot, OwnedCard } from '@/lib/utcg/server';
 import type { PackKind } from '@/lib/utcg/packs';
 import { PACKS, FREE_PACK_INTERVAL_MS } from '@/lib/utcg/packs';
 import type { PackPull, SquadCardRef } from '@/lib/utcg/actions';
-import { openPack, quicksell, recordMatch, getPullHeadshots } from '@/lib/utcg/actions';
+import { openPack, quicksell, recordMatch, getPullHeadshots, enterPvp, cancelPvp, PVP_STAKE } from '@/lib/utcg/actions';
+import type { PvpOutcome } from '@/lib/utcg/actions';
 import type { FormationKey } from '@/lib/utcg/formations';
 import { FORMATIONS, scoreSquad, type SquadScoreResult, type ScoredCard } from '@/lib/utcg/formations';
 import type { DraftRun, DraftRoundResult } from '@/lib/utcg/draft';
@@ -24,6 +25,8 @@ import { CollectionGrid } from '@/components/utcg/collection-grid';
 import { FormationSelect } from '@/components/utcg/formation-select';
 import { SquadBuilder, type SquadAssignment } from '@/components/utcg/squad-builder';
 import { MatchResult } from '@/components/utcg/match-result';
+import { PvpResult } from '@/components/utcg/pvp-result';
+import { PvpHistory } from '@/components/utcg/pvp-history';
 import { CoinGlyph } from '@/components/utcg/coin-glyph';
 import { PlayModeSelect, type PlayMode } from '@/components/utcg/draft-mode';
 import { DraftPick } from '@/components/utcg/draft-pick';
@@ -96,6 +99,10 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
   const [coinsAwarded, setCoinsAwarded] = useState<number | null>(null);
   const [rewardCapped, setRewardCapped] = useState(false);
   const [matchError, setMatchError] = useState<string | null>(null);
+  // PvP result for the squad just submitted — either 'queued' (parked as the
+  // open challenge) or 'resolved' (played an opponent's stored squad).
+  const [pvpOutcome, setPvpOutcome] = useState<PvpOutcome | null>(null);
+  const [pvpCancelling, setPvpCancelling] = useState(false);
 
   // ── Draft mode ────────────────────────────────────────────────────────
   // Seed from the snapshot's activeDraftRun (server-resolved, survives a
@@ -226,6 +233,13 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
     setBuildPhase('formation-select');
   }, []);
 
+  // PvP reuses the ENTIRE squad flow (formation picker → builder). Only the
+  // submit RPC and the result screen differ, so there's no second builder.
+  const handleSelectPvp = useCallback(() => {
+    setPlayMode('pvp');
+    setBuildPhase('formation-select');
+  }, []);
+
   const handleSelectFormation = useCallback((key: FormationKey) => {
     setFormationKey(key);
     setAssignment(new Array(FORMATIONS[key].slots.length).fill(null));
@@ -250,11 +264,10 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
     setBuildPhase('formation-select');
   }, []);
 
-  const handlePlayMatch = useCallback(async () => {
-    if (!formationKey) return;
-    const formation = FORMATIONS[formationKey];
-    // Ordered card refs, one per slot (handlers first). All 7 must be filled —
-    // the Play Match button is only enabled when the squad is complete.
+  /** Ordered cards + refs for the current assignment, one per slot (handlers
+   *  first). Shared by Squad Battle and PvP — both submit the same shape. */
+  const buildSquadPayload = useCallback(() => {
+    const formation = FORMATIONS[formationKey as FormationKey];
     const cards: ScoredCard[] = [];
     const refs: SquadCardRef[] = [];
     for (let i = 0; i < assignment.length; i++) {
@@ -271,6 +284,35 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
       });
       refs.push({ playerId: o.card.playerId, teamSlug: o.card.teamSlug, year: o.card.year });
     }
+    return { cards, refs };
+  }, [formationKey, assignment, ownedByKey]);
+
+  const handlePlayPvp = useCallback(async () => {
+    if (!formationKey) return;
+    const { cards, refs } = buildSquadPayload();
+
+    // Preview the squad's own numbers immediately; the SERVER decides the
+    // match and the coins.
+    setMatchResultData(scoreSquad(cards));
+    setPvpOutcome(null);
+    setCoinsAwarded(null);
+    setRewardCapped(false);
+    setMatchError(null);
+    setBuildPhase('result');
+
+    try {
+      const outcome = await enterPvp(formationKey, refs);
+      setCoins(outcome.coins);
+      setPvpOutcome(outcome);
+      router.refresh();
+    } catch (err) {
+      setMatchError(err instanceof Error ? err.message : 'Could not enter PvP — no coins were staked.');
+    }
+  }, [formationKey, buildSquadPayload, router]);
+
+  const handlePlayMatch = useCallback(async () => {
+    if (!formationKey) return;
+    const { cards, refs } = buildSquadPayload();
 
     // Local scoreSquad() drives the instant preview (record + strength bar);
     // the SERVER recomputes authoritatively and its numbers win for coins.
@@ -297,7 +339,7 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
     } catch (err) {
       setMatchError(err instanceof Error ? err.message : 'Could not record match — coins not awarded.');
     }
-  }, [formationKey, assignment, ownedByKey, router]);
+  }, [formationKey, buildSquadPayload, router]);
 
   const handleBuildAgain = useCallback(() => {
     setFormationKey(null);
@@ -306,8 +348,27 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
     setCoinsAwarded(null);
     setRewardCapped(false);
     setMatchError(null);
+    setPvpOutcome(null);
     setBuildPhase('mode-select');
   }, []);
+
+  // Declared AFTER handleBuildAgain — it calls it, and these are const
+  // bindings, so the reverse order would be a TDZ error.
+  const handleCancelPvp = useCallback(async () => {
+    setPvpCancelling(true);
+    setMatchError(null);
+    try {
+      const res = await cancelPvp();
+      setCoins(res.coins);
+      handleBuildAgain();
+      router.refresh();
+    } catch (err) {
+      // Most likely "squad was just played" — a challenger beat us to it.
+      setMatchError(err instanceof Error ? err.message : 'Could not withdraw.');
+    } finally {
+      setPvpCancelling(false);
+    }
+  }, [handleBuildAgain, router]);
 
   const handleBackToPlay = useCallback(() => {
     handleBuildAgain();
@@ -585,14 +646,18 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
                 />
               ) : (
                 buildPhase === 'mode-select' && (
-                  <PlayModeSelect
-                    activeDraftRun={draftRun}
-                    onSelectSquad={handleSelectSquadBattle}
-                    onSelectDraft={handleSelectDraft}
-                  />
+                  <>
+                    <PlayModeSelect
+                      activeDraftRun={draftRun}
+                      onSelectSquad={handleSelectSquadBattle}
+                      onSelectDraft={handleSelectDraft}
+                      onSelectPvp={handleSelectPvp}
+                    />
+                    <PvpHistory matches={snapshot.pvpMatches} openSquad={snapshot.openPvpSquad} />
+                  </>
                 )
               )}
-              {buildPhase === 'formation-select' && playMode === 'squad' && (
+              {buildPhase === 'formation-select' && (playMode === 'squad' || playMode === 'pvp') && (
                 <FormationSelect onSelect={handleSelectFormation} onBack={handleBackToModeSelect} />
               )}
               {buildPhase === 'formation-select' && playMode === 'draft' && (
@@ -621,11 +686,23 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
                   assignment={assignment}
                   onAssignmentChange={setAssignment}
                   onChangeFormation={handleChangeFormation}
-                  onPlayMatch={handlePlayMatch}
+                  onPlayMatch={playMode === 'pvp' ? handlePlayPvp : handlePlayMatch}
+                  ctaLabel={playMode === 'pvp' ? `Stake ${PVP_STAKE} · Find Match` : undefined}
                   onGoToPacks={goToPacks}
                 />
               )}
-              {buildPhase === 'result' && matchResultData && (
+              {buildPhase === 'result' && playMode === 'pvp' && (
+                <PvpResult
+                  outcome={pvpOutcome}
+                  error={matchError}
+                  onPlayAgain={handleBuildAgain}
+                  onBackToPlay={handleBackToPlay}
+                  onGoToPacks={goToPacks}
+                  onCancel={handleCancelPvp}
+                  cancelling={pvpCancelling}
+                />
+              )}
+              {buildPhase === 'result' && playMode !== 'pvp' && matchResultData && (
                 <MatchResult
                   result={matchResultData}
                   coinsAwarded={coinsAwarded}

@@ -189,7 +189,20 @@ async function run(body: RequestBody) {
     .order('start_date', { ascending: true });
   if (error) throw new Error(`load live events: ${stringifyErr(error)}`);
 
-  const eventList = events ?? [];
+  // ── Pre-start throttle (2026-08-06) ──────────────────────────────────────
+  // "A pre-event details page is a light fetch" stopped being true: children
+  // now average ~60s (per-game dedupe round-trips, bigger pages), and on the
+  // Thursday before a 9-event weekend the full 3-minute cadence piled up ~950
+  // child runs in 6 hours — enough sustained DB load that GoTrue's /token
+  // calls hit "couldn't start a new transaction" / 504s and the mobile app
+  // hung on the boot auth gate. Events that haven't STARTED barely change
+  // (pools/seeds post once), so they join only every fifth firing (~15 min).
+  // Live and trailing events keep the full cadence — game-day freshness is
+  // untouched.
+  const preStartDue = Math.floor(Date.now() / 60_000 / 3) % 5 === 0;
+  const eventList = (events ?? []).filter(
+    (e) => (e.start_date as string) <= today || preStartDue,
+  );
 
   // ── Slice this firing's share of the window ──────────────────────────────
   // Rather than dispatching the whole list at once (see MAX_CONCURRENT_CHILDREN

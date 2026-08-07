@@ -46,7 +46,7 @@ const TABS: StaticTab[] = [
 // (every league's Scores/Schedule/Teams/Players + game/team/player detail).
 const LEAGUE_PREFIXES = [
   '/scores', '/schedule', '/teams', '/players', '/g',
-  '/usau', '/pul', '/wul', '/wfdf',
+  '/usau', '/pul', '/wul', '/wfdf', '/euf',
 ];
 
 function activeTab(pathname: string): TabId | null {

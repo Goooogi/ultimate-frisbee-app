@@ -58,13 +58,31 @@ const FANTASY_NAV_ITEMS: NavItem[] = [
 ];
 
 // WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
-// it gets its own secondary-nav items (Events/Scores/Teams/Players) and no
-// league switcher, same treatment as the Fantasy sub-app.
+// it gets its own secondary-nav items (Events/Teams/Players) and no league
+// switcher, same treatment as the Fantasy sub-app.
+//
+// No Scores item: /wfdf/scores was a second event grid linking to the same
+// /wfdf/events/[slug] detail pages, so it duplicated Events. Deleted 2026-08-05
+// (same call as EUCS's Scores tab before it). A Worlds event is a fixed bracket,
+// not a rolling fixture list — the event page carries results and schedule both.
 const WFDF_NAV_ITEMS: NavItem[] = [
   { label: 'Events',  href: '/wfdf/events',  match: '/wfdf/events' },
-  { label: 'Scores',  href: '/wfdf/scores',  match: '/wfdf/scores' },
   { label: 'Teams',   href: '/wfdf/teams',   match: '/wfdf/teams',   aliases: ['/wfdf/teams'] },
   { label: 'Players', href: '/wfdf/players', match: '/wfdf/players', aliases: ['/wfdf/players'] },
+];
+
+// EUCS — same event-scoped hub treatment as WFDF (pages under /euf/*, no
+// ?league= param). "Clubs" is EUF's Teams: the euf_teams rows are per-event, so
+// /euf/clubs merges them by (name, division) into the league-wide entity.
+// Players likewise merge by name.
+//
+// No Scores or Schedule item — both duplicated Events. /euf/schedule showed one
+// event's games grouped by day, which /euf/events/[slug] already does (grouped
+// by round, day-split within each). Deleted 2026-08-05.
+const EUF_NAV_ITEMS: NavItem[] = [
+  { label: 'Events',   href: '/euf/events',   match: '/euf/events' },
+  { label: 'Teams',    href: '/euf/clubs',    match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
+  { label: 'Players',  href: '/euf/players',  match: '/euf/players', aliases: ['/euf/players'] },
 ];
 
 // The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under
@@ -113,6 +131,7 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
 
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
   if (!isFantasy && !isLeaguePage(pathname)) return null;
 
   const activeLeague = searchParams.get('league')
@@ -122,8 +141,8 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
   const activeLevel = parseLevelParam(searchParams.get('level'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
-  const noQs = isFantasy || isWfdf;
-  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
+  const noQs = isFantasy || isWfdf || isEuf;
+  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
 
   const tabs: ResolvedSectionTab[] = items.map((item) => ({
     label: item.label,
@@ -134,7 +153,7 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
 
   return {
     tabs,
-    ariaLabel: isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages',
+    ariaLabel: isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages',
   };
 }
 
@@ -151,6 +170,7 @@ const LEAGUE_PREFIXES = [
   '/wul',
   '/pul',
   '/wfdf', // WFDF Worlds — event-scoped hub
+  '/euf',  // EUCS — event-scoped hub
 ];
 
 function isLeaguePage(pathname: string): boolean {
@@ -167,6 +187,7 @@ function GamesPageSwitcherPillsInner() {
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
   // WFDF: event-scoped hub — own secondary nav, no ?league= qs, no switcher.
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
 
   // The page switcher belongs ONLY to league pages and the fantasy sub-app.
   // On everything else (admin, settings, playbook, 12-0, home, …) render
@@ -184,13 +205,13 @@ function GamesPageSwitcherPillsInner() {
 
   // Sub-app pages (Fantasy, WFDF) carry no league query string; standard
   // league pages get the ?league= qs on every link.
-  const noQs = isFantasy || isWfdf;
-  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : NAV_ITEMS;
+  const noQs = isFantasy || isWfdf || isEuf;
+  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <nav
       className="flex items-center gap-0.5 bg-ink/5 rounded-full p-0.5"
-      aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : 'Games pages'}
+      aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages'}
     >
       {items.map((item) => {
         // "Coming soon" placeholder — greyed out, non-navigable.
@@ -291,10 +312,11 @@ function GamesLeagueSlotInner({ leagueSlot }: GamesLeagueSlotInnerProps) {
 
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
+  const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
 
   // Same gate as the pills: only league pages (not Fantasy/WFDF, not admin/
   // settings/playbook/etc.) show a league slot at all.
-  if (!isLeaguePage(pathname) || isFantasy || isWfdf) return null;
+  if (!isLeaguePage(pathname) || isFantasy || isWfdf || isEuf) return null;
   if (!leagueSlot) return null;
 
   return <div className="flex items-center">{leagueSlot}</div>;

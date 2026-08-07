@@ -55,6 +55,7 @@ const APP_PREFIX_MAP: Array<[string, SubApp]> = [
   ['/pul',      'games'],
   ['/wul',      'games'],
   ['/wfdf',     'games'],
+  ['/euf',      'games'],
 ];
 
 function detectSubApp(pathname: string): SubApp | null {

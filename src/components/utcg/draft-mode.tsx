@@ -10,17 +10,24 @@
 
 import type { DraftRun } from '@/lib/utcg/draft';
 import { DRAFT_ENTRY_FEE, DRAFT_REWARDS, DRAFT_JACKPOT } from '@/lib/utcg/draft';
+import { PVP_STAKE } from '@/lib/utcg/actions';
 import { CoinGlyph } from '@/components/utcg/coin-glyph';
 
-export type PlayMode = 'squad' | 'draft';
+export type PlayMode = 'squad' | 'draft' | 'pvp';
 
 interface PlayModeSelectProps {
   activeDraftRun: DraftRun | null;
   onSelectSquad: () => void;
   onSelectDraft: () => void;
+  onSelectPvp: () => void;
 }
 
-export function PlayModeSelect({ activeDraftRun, onSelectSquad, onSelectDraft }: PlayModeSelectProps) {
+export function PlayModeSelect({
+  activeDraftRun,
+  onSelectSquad,
+  onSelectDraft,
+  onSelectPvp,
+}: PlayModeSelectProps) {
   return (
     <div className="flex flex-col gap-6 sm:gap-8 py-4 sm:py-8">
       <div className="text-center">
@@ -35,15 +42,19 @@ export function PlayModeSelect({ activeDraftRun, onSelectSquad, onSelectDraft }:
         </p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 max-w-2xl mx-auto w-full">
+      {/* Three modes, three columns on desktop — 2-up left PvP stranded on its
+          own half-width row. Stays 2-up at sm (tablet) and stacks on phones. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 max-w-2xl lg:max-w-5xl mx-auto w-full">
         <ModeCard
           eyebrow="Squad Battle"
+          tag={{ label: 'Solo', tone: 'solo' }}
           title="Build & Play"
           tagline="Field a squad from your collection and simulate one match."
           onSelect={onSelectSquad}
-          ariaLabel="Play Squad Battle"
+          ariaLabel="Play Squad Battle — solo mode"
         />
         <DraftModeCard activeDraftRun={activeDraftRun} onSelect={onSelectDraft} />
+        <PvpModeCard onSelect={onSelectPvp} />
       </div>
     </div>
   );
@@ -51,6 +62,7 @@ export function PlayModeSelect({ activeDraftRun, onSelectSquad, onSelectDraft }:
 
 function ModeCard({
   eyebrow,
+  tag,
   title,
   tagline,
   onSelect,
@@ -58,6 +70,11 @@ function ModeCard({
   children,
 }: {
   eyebrow: string;
+  /** Small pill next to the eyebrow marking a mode as single-player. Beta ask:
+   *  it wasn't obvious Squad Battle is solo. PvP needs no counterpart tag — its
+   *  "PvP" eyebrow and "Head to Head" title already say it. (A 'vs Player' tag
+   *  existed briefly; its two-slashed-circles icon read as a "%" at 9px.) */
+  tag?: { label: string; tone: 'solo' };
   title: string;
   tagline: string;
   onSelect: () => void;
@@ -77,7 +94,24 @@ function ModeCard({
       ].join(' ')}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">{eyebrow}</p>
+        <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          <p className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight">{eyebrow}</p>
+          {tag && (
+            <span
+              className={[
+                'inline-flex items-center gap-1 px-2 py-[3px] rounded-full',
+                'text-[9px] font-extrabold tracking-[0.1em] uppercase font-tight leading-none',
+                'bg-ink/8 text-muted',
+              ].join(' ')}
+            >
+              <svg width="9" height="9" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <circle cx="6" cy="4" r="2.2" stroke="currentColor" strokeWidth="1.4" />
+                <path d="M2.5 10c0-1.9 1.6-3 3.5-3s3.5 1.1 3.5 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              </svg>
+              {tag.label}
+            </span>
+          )}
+        </div>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="flex-shrink-0 text-faint group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150">
           <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -129,6 +163,33 @@ function DraftModeCard({ activeDraftRun, onSelect }: { activeDraftRun: DraftRun 
         </span>
         <span className="text-[10px] font-semibold tracking-[0.04em] text-faint">
           Up to {DRAFT_REWARDS[DRAFT_REWARDS.length - 1].toLocaleString()} + {DRAFT_JACKPOT.toLocaleString()} jackpot
+        </span>
+      </div>
+    </ModeCard>
+  );
+}
+
+/**
+ * PvP — stake coins, play another real user's stored squad, winner takes the pot.
+ * Matchmaking is async: if nobody is waiting your squad becomes the open
+ * challenge and resolves as soon as someone enters, so there's no lobby to sit in.
+ */
+function PvpModeCard({ onSelect }: { onSelect: () => void }) {
+  return (
+    <ModeCard
+      eyebrow="PvP"
+      title="Head to Head"
+      tagline="Stake coins and face another player's squad. Chemistry and overall both decide it — winner takes the pot."
+      onSelect={onSelect}
+      ariaLabel={`Play PvP for a ${PVP_STAKE} coin stake`}
+    >
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="inline-flex items-center gap-1.5 text-[11px] font-bold tabular px-3 py-1.5 rounded-full bg-ink/5 text-ink">
+          <CoinGlyph size={13} className="text-accent" />
+          {PVP_STAKE} stake
+        </span>
+        <span className="text-[10px] font-semibold tracking-[0.04em] text-faint">
+          Winner takes {PVP_STAKE * 2}
         </span>
       </div>
     </ModeCard>

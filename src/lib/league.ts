@@ -7,7 +7,7 @@
 
 import type { LeagueId } from '@/lib/data';
 
-const VALID: LeagueId[] = ['ufa', 'usau', 'pul', 'intl', 'wul', 'wfdf'];
+const VALID: LeagueId[] = ['ufa', 'usau', 'pul', 'intl', 'wul', 'wfdf', 'euf'];
 
 export const DEFAULT_LEAGUE: LeagueId = 'ufa';
 
@@ -130,6 +130,7 @@ export function inferLeagueFromPath(pathname: string | null | undefined): League
   if (pathname.startsWith('/wul/')) return 'wul';
   if (pathname.startsWith('/pul/')) return 'pul';
   if (pathname.startsWith('/wfdf/')) return 'wfdf';
+  if (pathname.startsWith('/euf/')) return 'euf';
   // /players/{id} — UUID shape could be either a USAU player or a PUL player
   // (both leagues use v4 UUIDs as player ids). We return 'usau' here so the
   // nav tab highlights correctly for the common case; the actual anchor

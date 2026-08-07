@@ -160,6 +160,8 @@ interface SquadBuilderProps {
   onAssignmentChange: (next: SquadAssignment) => void;
   onChangeFormation: () => void;
   onPlayMatch: () => void;
+  /** CTA copy override, forwarded to the footer (PvP shows its stake). */
+  ctaLabel?: string;
   onGoToPacks: () => void;
 }
 
@@ -174,6 +176,7 @@ export function SquadBuilder({
   onAssignmentChange,
   onChangeFormation,
   onPlayMatch,
+  ctaLabel,
   onGoToPacks,
 }: SquadBuilderProps) {
   const formation = FORMATIONS[formationKey];
@@ -342,7 +345,7 @@ export function SquadBuilder({
       {/* Spacer so scrolled content never sits under the sticky Play footer. */}
       <div className="h-20" aria-hidden="true" />
 
-      <PlayMatchFooter allFilled={allFilled} remaining={formation.slots.length - filledCount} onPlayMatch={onPlayMatch} />
+      <PlayMatchFooter allFilled={allFilled} remaining={formation.slots.length - filledCount} onPlayMatch={onPlayMatch} ctaLabel={ctaLabel} />
 
       {pickerSlot !== null && (
         <SlotPicker
@@ -547,10 +550,14 @@ function PlayMatchFooter({
   allFilled,
   remaining,
   onPlayMatch,
+  ctaLabel,
 }: {
   allFilled: boolean;
   remaining: number;
   onPlayMatch: () => void;
+  /** Overrides the CTA copy. PvP passes its stake here so the button never
+   *  spends coins behind a generic "Play Match" label. */
+  ctaLabel?: string;
 }) {
   return (
     <div className="fixed inset-x-4 sm:inset-x-6 bottom-[calc(env(safe-area-inset-bottom)+96px)] z-30 max-w-5xl mx-auto flex justify-center">
@@ -569,7 +576,7 @@ function PlayMatchFooter({
             : 'bg-surface text-faint cursor-not-allowed',
         ].join(' ')}
       >
-        {allFilled ? 'Play Match' : `${remaining} slot${remaining === 1 ? '' : 's'} left`}
+        {allFilled ? (ctaLabel ?? 'Play Match') : `${remaining} slot${remaining === 1 ? '' : 's'} left`}
       </button>
     </div>
   );

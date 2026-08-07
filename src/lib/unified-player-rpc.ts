@@ -48,7 +48,12 @@ import 'server-only';
 import { createClient } from '@/lib/supabase/server';
 import { getPlayerInfo } from '@/lib/ufa/client';
 import { teamBySlugOrAbbr } from '@/lib/ufa/teams';
-import { ufaTeamState, statesForEventName } from '@/lib/usau/regions';
+import {
+  ufaTeamState,
+  statesForEventName,
+  isUsStateCode,
+  isStateCoveredByRegionMap,
+} from '@/lib/usau/regions';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
 import type { PlayerKind } from '@/lib/player-content/types';
 import type {
@@ -60,6 +65,7 @@ import type {
   PulSeasonStint,
   WulSeasonStint,
   WfdfSeasonStint,
+  EufSeasonStint,
 } from './unified-player';
 
 // ── Wire shape ───────────────────────────────────────────────────────────
@@ -140,12 +146,37 @@ interface RpcWfdfStint {
   stats?: { goals?: number | null; assists?: number | null } | null;
 }
 
+interface RpcEufStint {
+  season?: number | null;
+  teamId?: string | null;
+  teamName?: string | null;
+  countryName?: string | null;
+  divisionName?: string | null;
+  eventName?: string | null;
+  eventSlug?: string | null;
+  /** euf_events.kind ('eucf' | 'e2cf' | 'elite_invite' | …). Absent on payloads
+   *  built before the 20260804 eventKind patch — treat as null. */
+  eventKind?: string | null;
+  jerseyNumber?: string | null;
+  finalPlacement?: number | null;
+  isChampion?: boolean | null;
+  stats?: {
+    goals?: number | null; assists?: number | null;
+    games?: number | null; points?: number | null;
+  } | null;
+}
+
 interface RpcProfile {
   anchorId?: string | null;
   anchorLeague?: string | null;
   displayName?: string | null;
   ufaSlug?: string | null;
   usauId?: string | null;
+  /** EVERY usau_players id in the resolved cluster, not just the anchor's.
+   *  The scraper mints one id per event registration, so one human routinely has
+   *  many; content is keyed per-id, so all of them are needed to build a
+   *  complete gallery. Absent on pre-20260801120000 payloads — treat as empty. */
+  usauClusterIds?: string[] | null;
   pulAnchorId?: string | null;
   wulAnchorId?: string | null;
   headshotUrl?: string | null;
@@ -160,6 +191,8 @@ interface RpcProfile {
   pul?: RpcLeagueBlock<RpcPulStint> | null;
   wul?: RpcLeagueBlock<RpcWulStint> | null;
   wfdfStints?: RpcWfdfStint[] | null;
+  /** Absent on payloads built before the 20260803 EUF patch — treat as empty. */
+  eufStints?: RpcEufStint[] | null;
 }
 
 const num = (v: number | null | undefined): number => (typeof v === 'number' ? v : 0);
@@ -341,10 +374,20 @@ function shouldAttachUfa(
   if (homeStates.length === 0) return true;
 
   const usauStates = new Set(homeStates);
+  // Non-US codes are dropped, not compared. Canadian franchises map to
+  // provinces (royal→QC, rush/lions→ON), which can never appear in homeStates
+  // (US codes only) — comparing them would guarantee a miss and drop the whole
+  // real UFA career. A non-US team is no signal, so we keep, per the doc above.
   const ufaStates = ufaStints
     .map((st) => (st.teamId ? ufaTeamState(st.teamId) : null))
-    .filter((s): s is string => s != null);
+    .filter((s): s is string => s != null && isUsStateCode(s));
   if (ufaStates.length === 0) return true;
+  // A state the region map never lists can't be CONTRADICTED by it — the
+  // absence is our gap, not evidence of a different person. Abstain (keep the
+  // career) unless every UFA state is one the map actually covers. Without
+  // this, one missing state in USAU_REGION_STATES silently deletes a whole
+  // real UFA career (it deleted every Salt Lake Shred player's).
+  if (!ufaStates.every((s) => isStateCoveredByRegionMap(s))) return true;
   return ufaStates.some((s) => usauStates.has(s));
 }
 
@@ -355,6 +398,7 @@ function sortStintsForYear(stints: SeasonStint[]): SeasonStint[] {
     wul: 2,
     usau: 3,
     wfdf: 4,
+    euf: 5,
   };
   return [...stints].sort((a, b) => leagueOrder[a.league] - leagueOrder[b.league]);
 }
@@ -550,6 +594,33 @@ export async function mapRpcProfile(
     push(season, stint);
   }
 
+  // ── EUF / EUCS ─────────────────────────────────────────────────────────
+  for (const st of payload.eufStints ?? []) {
+    const season = st.season;
+    if (typeof season !== 'number') continue;
+    const stint: EufSeasonStint = {
+      league: 'euf',
+      season,
+      teamId: str(st.teamId),
+      teamName: str(st.teamName),
+      countryName: st.countryName ?? null,
+      divisionName: st.divisionName ?? null,
+      eventName: str(st.eventName),
+      eventSlug: str(st.eventSlug),
+      eventKind: st.eventKind ?? null,
+      jerseyNumber: st.jerseyNumber ?? null,
+      finalPlacement: st.finalPlacement ?? null,
+      isChampion: st.isChampion === true,
+      stats: {
+        goals: st.stats?.goals ?? null,
+        assists: st.stats?.assists ?? null,
+        games: st.stats?.games ?? null,
+        points: st.stats?.points ?? null,
+      },
+    };
+    push(season, stint);
+  }
+
   const years: UnifiedYear[] = Array.from(yearMap.entries())
     .sort((a, b) => b[0] - a[0])
     .map(([year, stints]) => ({ year, stints: sortStintsForYear(stints) }));
@@ -641,6 +712,10 @@ export async function mapRpcProfile(
   };
   pushRef('ufa', payload.ufaSlug);
   pushRef('usau', payload.usauId);
+  // Every id in the USAU cluster, not just the anchor's. Without these the
+  // gallery's contents depend on WHICH cluster id you navigated in through —
+  // content uploaded under a sibling registration id would silently vanish.
+  for (const id of payload.usauClusterIds ?? []) pushRef('usau', id);
   pushRef('pul', payload.pulAnchorId);
   pushRef('wul', payload.wulAnchorId);
   pushRef(anchorLeague, anchorId);

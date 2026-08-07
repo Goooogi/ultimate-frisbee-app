@@ -19,6 +19,7 @@ import type { FormationKey } from '@/lib/utcg/formations';
 import { FORMATIONS } from '@/lib/utcg/formations';
 import { CardTile } from '@/components/utcg/card-tile';
 import { draftCardToUtcgCard } from '@/components/utcg/draft-card';
+import { projectChem, type ChemProjection } from '@/lib/utcg/chemistry';
 
 interface DraftPickProps {
   run: DraftRun;
@@ -54,6 +55,24 @@ export function DraftPick({ run, headshots, onPick, onCashOut, picking, error }:
 
   const { long: slotLong } = slotLabel(run.formation, run.slotIdx);
   const totalSlots = FORMATIONS[run.formation].slots.length;
+
+  // Projected chemistry for each dealt candidate against the squad so far.
+  // Beta feedback: chem was invisible during the draft ("not ever seeing chem
+  // go up"), so a drafter had no way to tell which of the 5 blind cards linked
+  // with their existing picks. Computed client-side from data already on the
+  // deal payload — no extra request.
+  const formationSlots = FORMATIONS[run.formation].slots;
+  const pickedSlots = run.picks.map((_, i) => formationSlots[i]);
+  const thisSlot = formationSlots[run.slotIdx];
+  const projections: ChemProjection[] = run.deals.map((c) =>
+    projectChem(
+      run.picks.map((p) => ({ teamSlug: p.teamSlug, division: p.division, position: p.position })),
+      { teamSlug: c.teamSlug, division: c.division, position: c.position },
+      thisSlot,
+      pickedSlots,
+    ),
+  );
+  const bestDelta = projections.reduce((m, p) => Math.max(m, p.delta), 0);
 
   const handleCardTap = (index: number) => {
     if (picking) return;
@@ -129,6 +148,8 @@ export function DraftPick({ run, headshots, onPick, onCashOut, picking, error }:
               key={`${candidate.playerId}|${candidate.teamSlug}|${candidate.year}|${i}`}
               candidate={candidate}
               headshotUrl={headshots.get(candidate.playerId) ?? null}
+              projection={projections[i]}
+              isBestChem={bestDelta > 0 && projections[i].delta === bestDelta}
               selected={selected === i}
               locking={confirming === i}
               disabled={picking && confirming !== i}
@@ -183,6 +204,8 @@ export function DraftPick({ run, headshots, onPick, onCashOut, picking, error }:
 function DraftCandidate({
   candidate,
   headshotUrl,
+  projection,
+  isBestChem,
   selected,
   locking,
   disabled,
@@ -190,15 +213,57 @@ function DraftCandidate({
 }: {
   candidate: DraftCard;
   headshotUrl: string | null;
+  projection: ChemProjection;
+  /** True when this candidate ties the biggest chem gain in the deal. */
+  isBestChem: boolean;
   selected: boolean;
   locking: boolean;
   disabled: boolean;
   onTap: () => void;
 }) {
   const card = draftCardToUtcgCard(candidate, headshotUrl);
+  // Link label: WHY this card chems, in the drafter's language.
+  const linkLabel =
+    projection.sharedTeam > 0
+      ? `${projection.sharedTeam} teammate${projection.sharedTeam > 1 ? 's' : ''}`
+      : projection.sharedDivision > 0
+        ? `${projection.sharedDivision} in div`
+        : null;
   return (
     <div className="relative min-w-0">
       <CardTile card={card} onClick={disabled ? undefined : onTap} selected={selected} disabled={disabled && !locking} />
+
+      {/* Projected chemistry — the beta-feedback fix. Shows what picking THIS
+          card does to team chem right now, plus why it links. Highlighted when
+          it's the best chem gain on offer so the read is instant. */}
+      <div className="mt-1 flex flex-col items-center gap-0.5" aria-hidden="true">
+        <span
+          className={[
+            'inline-flex items-center gap-0.5 px-1.5 py-[3px] rounded-full',
+            'text-[9px] font-extrabold tabular leading-none',
+            projection.delta > 0
+              ? isBestChem
+                ? 'bg-[#38E08A] text-[#06301B]'
+                : 'bg-[#38E08A]/18 text-[#38E08A]'
+              : 'bg-white/[0.07] text-white/40',
+          ].join(' ')}
+        >
+          {projection.delta > 0 ? `+${projection.delta}` : '+0'} CHEM
+        </span>
+        {linkLabel && (
+          <span className="text-[8px] font-bold tracking-[0.06em] uppercase text-white/40 leading-none truncate max-w-full">
+            {linkLabel}
+          </span>
+        )}
+      </div>
+
+      {/* Screen readers get the same information as a sentence. */}
+      <span className="sr-only">
+        {projection.delta > 0
+          ? `Adds ${projection.delta} team chemistry`
+          : 'Adds no team chemistry'}
+        {linkLabel ? `, links with ${linkLabel}` : ''}
+      </span>
       {selected && !locking && (
         <span
           className="absolute -top-2 left-1/2 -translate-x-1/2 text-[8px] font-extrabold tracking-[0.1em] uppercase text-white bg-accent px-2 py-1 rounded-full whitespace-nowrap shadow-lift"

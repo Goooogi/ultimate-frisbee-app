@@ -3018,6 +3018,24 @@ export type Database = {
       }
     }
     Views: {
+      profile_contact: {
+        Row: {
+          email: string | null
+          id: string | null
+          phone: string | null
+        }
+        Insert: {
+          email?: string | null
+          id?: string | null
+          phone?: string | null
+        }
+        Update: {
+          email?: string | null
+          id?: string | null
+          phone?: string | null
+        }
+        Relationships: []
+      }
       profiles_public: {
         Row: {
           avatar_url: string | null
@@ -3123,6 +3141,7 @@ export type Database = {
         Args: { t_id: string; wk: string }
         Returns: boolean
       }
+      find_usau_player_by_name: { Args: { p_name: string }; Returns: string }
       get_player_connections: {
         Args: { p_limit?: number; p_name: string }
         Returns: {
@@ -3198,6 +3217,7 @@ export type Database = {
         Returns: {
           display_name: string
           id: string
+          prestige: number
           score: number
         }[]
       }
@@ -3272,6 +3292,10 @@ export type Database = {
         }[]
       }
       unaccent_safe: { Args: { p: string }; Returns: string }
+      usau_states_for_event_name: {
+        Args: { p_name: string }
+        Returns: string[]
+      }
       utcg_derive_position: {
         Args: {
           assists: number

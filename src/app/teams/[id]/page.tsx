@@ -12,11 +12,11 @@ import {
   getGameRoster,
   getUfaTeamPodiums,
   currentSeasonYear,
-  recentSeasons,
 } from '@/lib/ufa/client';
+import { teamSeasons } from '@/lib/ufa/season';
 import { TeamMedals } from '@/components/team-medals';
 import { YearSelector } from '@/components/year-selector';
-import { teamMeta } from '@/lib/ufa/teams';
+import { teamMeta, teamCityForYear, teamLogoForYear, teamNameForYear } from '@/lib/ufa/teams';
 import { gameUiState } from '@/lib/ufa/format';
 import type { UfaGame, UfaPlayerStat, UfaStanding } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
@@ -32,13 +32,14 @@ interface Props {
   searchParams: { year?: string };
 }
 
-/** Clamp ?year= to a real UFA season (2021..current); default current. Guards
- *  against a hand-typed or stale year producing an empty page. */
-function resolveYear(raw: string | undefined): number {
-  const current = currentSeasonYear();
+/** Clamp ?year= to a season this FRANCHISE actually played; default its most
+ *  recent one (a folded team like Legion lands on its last real season, not an
+ *  empty current year). Guards against a hand-typed or stale year producing an
+ *  empty page. */
+function resolveYear(raw: string | undefined, seasons: number[]): number {
   const n = raw ? parseInt(raw, 10) : NaN;
-  if (!Number.isFinite(n) || n < 2021 || n > current) return current;
-  return n;
+  if (Number.isFinite(n) && seasons.includes(n)) return n;
+  return seasons[0] ?? currentSeasonYear();
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -53,7 +54,8 @@ export default async function TeamPage({ params, searchParams }: Props) {
 
   if (meta.internalID === 0) notFound();
 
-  const year = resolveYear(searchParams.year);
+  const seasons = teamSeasons(id);
+  const year = resolveYear(searchParams.year, seasons);
   const isCurrentYear = year === currentSeasonYear();
 
   // Fire all fetches in parallel.
@@ -160,16 +162,22 @@ export default async function TeamPage({ params, searchParams }: Props) {
     ? `${record.wins}–${record.losses}${record.ties > 0 ? `–${record.ties}` : ''}`
     : null;
 
+  // Year-aware identity — Dallas ≤2021 reads "Roughnecks", Spiders ≤2021 read
+  // "San Jose", not the current brand. See NAME/CITY_HISTORY in ufa/teams.ts.
+  const displayName = teamNameForYear(id, year) ?? meta.name;
+  const displayCity = teamCityForYear(id, year) ?? meta.city;
+  const displayLogo = teamLogoForYear(id, year) ?? meta.logo;
+
   return (
     <PageShell
-      title={`${meta.city} ${meta.name}`}
+      title={`${displayCity} ${displayName}`}
       eyebrow={`UFA · ${meta.division ?? 'Team'} · ${year}`}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'Teams', href: '/teams' },
-        { label: `${meta.city} ${meta.name}` },
+        { label: `${displayCity} ${displayName}` },
       ]}
-      controls={<YearSelector currentYear={year} />}
+      controls={<YearSelector currentYear={year} years={seasons} />}
     >
       {/* Hero band with team color — floats on shadow, softened corners */}
       <div
@@ -190,10 +198,10 @@ export default async function TeamPage({ params, searchParams }: Props) {
             <div
               className="flex items-center justify-center w-[72px] h-[72px] md:w-[96px] md:h-[96px] relative overflow-hidden flex-shrink-0 rounded-full bg-white"
             >
-              {meta.logo ? (
+              {displayLogo ? (
                 <img
-                  src={meta.logo}
-                  alt={`${meta.city} ${meta.name} logo`}
+                  src={displayLogo}
+                  alt={`${displayCity} ${displayName} logo`}
                   className="w-[72%] h-[72%] object-contain"
                 />
               ) : (
@@ -211,10 +219,10 @@ export default async function TeamPage({ params, searchParams }: Props) {
                 {meta.division ? `${meta.division} Division` : 'UFA'}
               </div>
               <div className="font-display italic text-[32px] md:text-[42px] font-bold uppercase leading-[0.95] tracking-[-0.01em]" style={{ color: '#fff' }}>
-                {meta.name}
+                {displayName}
               </div>
               <div className="text-[13px] font-medium font-sans mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                {locationLine(meta.city, ufaTeamState(meta.id))}
+                {locationLine(displayCity, ufaTeamState(meta.id))}
               </div>
             </div>
           </div>

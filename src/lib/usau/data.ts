@@ -520,6 +520,104 @@ function flightRankForName(name: string | null | undefined): number {
   return f ? FLIGHT_RANK[f] : 0;
 }
 
+/**
+ * Best (lowest) official USAU rank among each event's entrants, keyed by event
+ * id. Events with no ranked entrant are simply absent from the map.
+ *
+ * Matched by NAME + division, not by usau_rankings.team_id: the ranking rows
+ * and usau_event_teams frequently point at different usau_teams rows for the
+ * same real team (the known duplicate-team churn, where USAU issues a new
+ * EventTeamId per scrape), so an id join silently drops real entrants — it lost
+ * Vacationland's #14 Red Tide entirely. Division is part of the key because a
+ * name-only match crosses RankSets (a Men's team matching a Club-Women ranking)
+ * and would decide headlines off a false positive.
+ */
+async function bestOfficialRankByEvent(
+  db: Awaited<ReturnType<typeof supabase>>,
+  eventIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (eventIds.length === 0) return out;
+
+  // Latest (season, week) per RankSet — rankings are scraped weekly, and the
+  // divisions don't always land on the same week.
+  const heads = new Map<string, { season: number; week: number }>();
+  await Promise.all(
+    OFFICIAL_RANK_DIVISIONS.map(async (division) => {
+      const { data } = await db
+        .from('usau_rankings')
+        .select('season, week')
+        .eq('division', division)
+        .order('season', { ascending: false })
+        .order('week', { ascending: false })
+        .limit(1);
+      const head = (data ?? [])[0] as { season: number; week: number } | undefined;
+      if (head) heads.set(division, head);
+    }),
+  );
+  if (heads.size === 0) return out;
+
+  // rankByKey: "division|lowercased team name" → rank.
+  const rankByKey = new Map<string, number>();
+  await Promise.all(
+    Array.from(heads.entries()).map(async ([division, head]) => {
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data: page } = await db
+          .from('usau_rankings')
+          .select('rank, team_name')
+          .eq('division', division)
+          .eq('season', head.season)
+          .eq('week', head.week)
+          .order('rank', { ascending: true })
+          .range(from, from + PAGE - 1);
+        const rows = (page ?? []) as Array<{ rank: number; team_name: string | null }>;
+        for (const r of rows) {
+          if (!r.team_name) continue;
+          const key = `${division}|${r.team_name.toLowerCase()}`;
+          // Rows arrive rank-ascending, so the first write is the best rank.
+          if (!rankByKey.has(key)) rankByKey.set(key, r.rank);
+        }
+        if (rows.length < PAGE) break;
+      }
+    }),
+  );
+  if (rankByKey.size === 0) return out;
+
+  // Entrants for the candidate events, paged past the 1000-row response cap.
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('usau_event_teams')
+      .select('event_id, team_id, usau_teams(name, gender_division, competition_level)')
+      .in('event_id', eventIds)
+      .order('event_id', { ascending: true })
+      .order('team_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    const rows = (page ?? []) as Array<{
+      event_id: string;
+      team_id: string;
+      usau_teams: {
+        name: string | null;
+        gender_division: string | null;
+        competition_level: string | null;
+      } | null;
+    }>;
+    for (const r of rows) {
+      const t = r.usau_teams;
+      if (!t?.name) continue;
+      const division = officialRankSetFor(t.competition_level, t.gender_division);
+      if (!division) continue; // D-III / Masters — USAU publishes no rankings.
+      const rank = rankByKey.get(`${division}|${t.name.toLowerCase()}`);
+      if (rank === undefined) continue;
+      const prev = out.get(r.event_id);
+      if (prev === undefined || rank < prev) out.set(r.event_id, rank);
+    }
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 export async function getCurrentEvent(opts?: {
   /** Filter to events whose participating teams include this division. */
   genderDivision?: 'Men' | 'Women' | 'Mixed';
@@ -630,6 +728,16 @@ export async function getCurrentEvent(opts?: {
     }
   }
 
+  // Best official USAU rank among each event's entrants — the tie-break below
+  // flight. Most summer club tournaments carry no TCT flight, so flight rank is
+  // 0 for every event sharing a weekend; without this the comparator returned 0
+  // and the "winner" was whatever order PostgREST happened to return (web and
+  // mobile picked different events from identical code).
+  const bestRankByEvent = await bestOfficialRankByEvent(
+    db,
+    events.map((e) => e.id),
+  );
+
   // Weekend cadence: before Wednesday we look back at last weekend; from
   // Wednesday on we look forward to the next weekend. We use getUTCDay() so the
   // cutover and the past/upcoming date split below share one clock — `today`
@@ -637,6 +745,8 @@ export async function getCurrentEvent(opts?: {
   const lookForward = now.getUTCDay() >= 3; // Wed(3) → Sat(6)
 
   const endOf = (e: EventRow) => e.end_date ?? e.start_date ?? '';
+
+  const bestRank = (e: EventRow) => bestRankByEvent.get(e.id) ?? Infinity;
 
   // Quantize a start date to its tournament WEEKEND (the Saturday of the
   // Fri–Sun span) so co-scheduled events group together even when their
@@ -665,6 +775,11 @@ export async function getCurrentEvent(opts?: {
     if (wCmp !== 0) return wCmp;
     const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
     if (fCmp !== 0) return fCmp;
+    // Strength of field: the event with the best-ranked entrant headlines.
+    // Lower rank number = better, so this sorts ASCENDING; events with no
+    // ranked team sort last (Infinity) rather than winning by default.
+    const rCmp = bestRank(a) - bestRank(b);
+    if (rCmp !== 0) return rCmp;
     return recentFirst
       ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
       : (a.start_date ?? '').localeCompare(b.start_date ?? '');
@@ -691,9 +806,32 @@ export async function getCurrentEvent(opts?: {
     .filter((e) => !preferredIds.has(e.id))
     .sort(byWeekendThenFlight(!lookForward));
 
+  // IN-PROGRESS FIRST. A tournament happening RIGHT NOW (start ≤ today ≤ end)
+  // always headlines Scores, ahead of both the weekend rule and flight rank.
+  //
+  // Without this, the weekend/flight sort could bury a live event: on a Sunday
+  // the look-back bucket sorts by flight WITHIN the weekend, so a higher-flight
+  // tournament that already ended Saturday out-ranked one still being played
+  // today. Scores is the "what's on now" surface — a live event is the answer
+  // whenever there is one.
+  //
+  // Ties among several in-progress events fall back to the same
+  // weekend-then-flight comparator, so the marquee one still wins.
+  const isInProgress = (e: EventRow) => {
+    const start = e.start_date ?? '';
+    const end = endOf(e);
+    return start !== '' && start <= today && end >= today;
+  };
+  const inProgress = events.filter(isInProgress).sort(byWeekendThenFlight(true));
+  const inProgressIds = new Set(inProgress.map((e) => e.id));
+
   // Preferred side first, then the other side as a graceful fallback (e.g. early
   // in a season there is no "last weekend"; at season's end no "next weekend").
-  const ordered = [...preferred, ...rest];
+  const ordered = [
+    ...inProgress,
+    ...preferred.filter((e) => !inProgressIds.has(e.id)),
+    ...rest.filter((e) => !inProgressIds.has(e.id)),
+  ];
 
   // Prefer an in-window event that actually has games. Only if NONE do (e.g. the
   // upcoming weekend's brackets aren't scraped yet) fall through to the best
@@ -985,10 +1123,24 @@ export async function findUsauPlayerByName(name: string): Promise<string | null>
   const surname = surnameForPrefilter(name);
   if (!surname) return null;
   const db = await supabase();
-  // Cheap SQL prefilter: anyone whose display_name *contains* the
-  // surname. We then apply the strict token-subset match in JS. The
-  // surname filter is conservative — Postgres only returns the small
-  // surname-cluster (typically < 30 rows for any given surname).
+
+  // Prefer the shared RPC: it runs the same surname-prefilter → names_match →
+  // most-rosters ordering in SQL, but normalizes BOTH sides of the prefilter so
+  // accented names resolve. The client-side path below compares a normalized
+  // token against the RAW display_name, so "Daan De Marree" never finds
+  // "Daan De Marrée" and the whole USAU side goes missing.
+  // A null result is authoritative ("no such player"), NOT a reason to fall
+  // through — the fallback is strictly weaker, so re-running it on a miss would
+  // spend queries only to maybe resurrect a match the RPC correctly rejected.
+  // Only a transport/missing-function error degrades to the client-side path.
+  const { data: rpcId, error: rpcError } = await db.rpc('find_usau_player_by_name', {
+    p_name: name,
+  });
+  if (!rpcError) return (rpcId as string | null) ?? null;
+
+  // Fallback (RPC missing/errored): cheap SQL prefilter on anyone whose
+  // display_name *contains* the surname, then the strict token-subset match in
+  // JS. Accent-sensitive — see above.
   const { data: matches } = await db
     .from('usau_players')
     .select('id, display_name')
@@ -3048,6 +3200,16 @@ type OfficialRankDivision =
   | 'Club-Mixed'
   | 'College-Men'
   | 'College-Women';
+
+/** Every published RankSet — the 5 above. Read at call time (not module-eval
+ *  time) by bestOfficialRankByEvent, which is defined earlier in the file. */
+const OFFICIAL_RANK_DIVISIONS: OfficialRankDivision[] = [
+  'Club-Men',
+  'Club-Women',
+  'Club-Mixed',
+  'College-Men',
+  'College-Women',
+];
 
 /** Map a (competitionLevel, genderDivision) to its published RankSet, or null
  *  if USAU doesn't publish rankings for that combination (D-III, Masters, etc.). */

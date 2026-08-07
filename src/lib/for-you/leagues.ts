@@ -22,4 +22,5 @@ export const LEAGUE_DISPLAY: Record<FavoriteLeague, string> = {
   pul: 'PUL',
   wul: 'WUL',
   wfdf: 'Worlds (WFDF)',
+  euf: 'European (EUCS)',
 };

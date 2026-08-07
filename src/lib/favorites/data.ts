@@ -23,12 +23,14 @@ function sessionClient(): AnyClient {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-/** The five leagues a team/league favorite can belong to (matches the DB CHECK
- *  and resultHref's routing switch). */
-export type FavoriteLeague = 'ufa' | 'usau' | 'pul' | 'wul' | 'wfdf';
+/** The leagues a team/league favorite can belong to. MUST stay in sync with the
+ *  DB CHECKs on user_favorite_{teams,leagues,players} (see migration
+ *  20260803210000) and with resultHref's routing switch — widening this union
+ *  alone means every favorite of the new league is silently rejected on insert. */
+export type FavoriteLeague = 'ufa' | 'usau' | 'pul' | 'wul' | 'wfdf' | 'euf';
 
 export const FAVORITE_LEAGUES: readonly FavoriteLeague[] = [
-  'ufa', 'usau', 'pul', 'wul', 'wfdf',
+  'ufa', 'usau', 'pul', 'wul', 'wfdf', 'euf',
 ] as const;
 
 export interface FavoriteTeam {
