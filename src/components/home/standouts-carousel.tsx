@@ -17,6 +17,7 @@ const LEAGUE_LABEL: Record<StandoutLine['league'], string> = {
   ufa: 'UFA',
   pul: 'PUL',
   wul: 'WUL',
+  usau: 'USAU',
 };
 
 const AWARD_LABEL: Record<AwardWatch, string> = {

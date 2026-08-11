@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
+import { FromPreservingCrumbs } from '@/components/players/from-aware-crumbs';
 import { PlayerHeadshot } from '@/components/players/player-headshot';
 import type { PlayerThread, ThreadNode, ThreadEdge } from '@/lib/players/connections';
 
@@ -49,7 +50,11 @@ export function PlayerThreadView({ thread, anchorDisplayName, anchorHeadshotUrl,
       <PageShell
         title="The Thread"
         eyebrow={anchorDisplayName.toUpperCase()}
-        breadcrumbs={[{ label: anchorDisplayName, href: backHref }, { label: 'The Thread' }]}
+        breadcrumbsSlot={
+          <FromPreservingCrumbs
+            crumbs={[{ label: anchorDisplayName, href: backHref }, { label: 'The Thread' }]}
+          />
+        }
         topNavSlot={<span aria-hidden="true" />}
       >
         <EmptyState anchorDisplayName={anchorDisplayName} backHref={backHref} />
@@ -61,7 +66,11 @@ export function PlayerThreadView({ thread, anchorDisplayName, anchorHeadshotUrl,
     <PageShell
       title="The Thread"
       eyebrow={anchorDisplayName.toUpperCase()}
-      breadcrumbs={[{ label: anchorDisplayName, href: backHref }, { label: 'The Thread' }]}
+      breadcrumbsSlot={
+        <FromPreservingCrumbs
+          crumbs={[{ label: anchorDisplayName, href: backHref }, { label: 'The Thread' }]}
+        />
+      }
       topNavSlot={<span aria-hidden="true" />}
     >
       <ThreadGraph

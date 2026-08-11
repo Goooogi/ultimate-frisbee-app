@@ -1,20 +1,37 @@
 // Server-side helpers for reading player_content rows.
 //
 // Why server-only: the player profile page is an RSC, so it fetches approved
-// content with the SSR Supabase client. RLS already filters by status, but we
-// keep an explicit .eq('status', 'approved') here too — defense in depth in
-// case the policy is ever loosened.
+// content server-side. RLS already filters by status, but we keep an explicit
+// .eq('status', 'approved') here too — defense in depth in case the policy is
+// ever loosened.
+//
+// APPROVED readers use a cookie-free ANON client: approved content is public,
+// and the cookie-bound SSR client would opt every calling page into dynamic
+// rendering — which is what forced /players/[id] to skip ISR and hammer the
+// profile RPC on every crawler hit. Admin readers keep the SSR client (they
+// need the caller's auth).
 
 import 'server-only';
 import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { parseEmbed } from './embed';
 import { STORAGE_BUCKET, type PlayerContentItem, type PlayerContentRow, type PlayerKind } from './types';
+
+let _anon: SupabaseClient | null = null;
+function anonClient(): SupabaseClient {
+  if (_anon) return _anon;
+  _anon = createSupabaseClient(supabaseUrl(), supabaseAnonKey(), {
+    auth: { persistSession: false },
+  }) as unknown as SupabaseClient;
+  return _anon;
+}
 
 export async function getApprovedContentForPlayer(
   playerKind: PlayerKind,
   playerRef: string,
 ): Promise<PlayerContentItem[]> {
-  const supabase = createClient();
+  const supabase = anonClient();
   const { data, error } = await supabase
     .from('player_content')
     .select('*')
@@ -43,7 +60,7 @@ export async function getApprovedContentForPlayers(
   refs: { kind: PlayerKind; ref: string }[],
 ): Promise<PlayerContentItem[]> {
   if (refs.length === 0) return [];
-  const supabase = createClient();
+  const supabase = anonClient();
   // Build an OR of AND(kind,ref) clauses. Values are ids/slugs (no PostgREST
   // metacharacters), but guard anyway by dropping any ref with a comma/paren
   // that would break the filter grammar.

@@ -29,6 +29,9 @@ const antonio = Antonio({
 });
 
 export const metadata: Metadata = {
+  // Base for relative alternates/canonical URLs (e.g. the player-profile
+  // canonical that collapses ?from= crawl duplicates).
+  metadataBase: new URL('https://thelayout.app'),
   title: 'The Layout · Ultimate Frisbee',
   description: 'Live Ultimate Frisbee scores from the UFA, USAU Club, and International ultimate.',
 };

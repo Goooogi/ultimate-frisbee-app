@@ -30,6 +30,9 @@ const FLAGSHIP_LEVELS = [
   'MASTERS',
   'GRAND_MASTERS',
   'GREAT_GRAND_MASTERS',
+  // BEACH was missing → beach events (Chicago Beach: Legends and Masters,
+  // Jones Beach 2026, weekend of 2026-08-08) sat in the app with 0 games.
+  'BEACH',
 ];
 
 // How long to wait for a child invocation to be ACCEPTED before moving on. We

@@ -21,12 +21,11 @@ import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { USAU_LEVELS } from '@/lib/league';
-import { UsauBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
+import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
 import { formatGameTime } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
-import { PillSelect, type PillSelectOption } from '@/components/pill-select';
 
 // Masters combined events prefix every bracket with its group ("GM Women ·
 // Pool A", "Masters Mixed · 1st Place"). Pool detection and display labels
@@ -291,7 +290,9 @@ export function UsauEventDetail({ event }: Props) {
       name,
       games: gs.slice().sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')),
     }))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    // Ordered by each group's EARLIEST scheduled game, not alphabetically —
+    // "Sat Round 2" should follow "Sat Round 1" by when it's actually played.
+    .sort((a, b) => (a.games[0]?.scheduledAt ?? '').localeCompare(b.games[0]?.scheduledAt ?? ''));
 
   // ── Pool play games ───────────────────────────────────────────────────
   // Second-phase pools are excluded — they render under Bracket, and their
@@ -362,16 +363,62 @@ export function UsauEventDetail({ event }: Props) {
   // where the horizontal bracket tree otherwise buries the final off-screen.
   // One per bracket GROUP: a multi-group view (GM + GGM Women in a combined
   // championships) gets one labeled banner per group.
+  //
+  // "Decided" covers two shapes:
+  //   1. The normal, tagged case — round='final', status='final', a real
+  //      score split.
+  //   2. The recovered-final case: USAU sometimes mislabels a bracket's
+  //      final as round='other' (see usau-bracket-tree's buildColumns finals
+  //      recovery) — recovered here the same way, by finding a non-tree-round
+  //      game whose two teams are both winners of a championship-bracket semi.
+  // A forfeit counts as decided (one side scored, one didn't show), same as
+  // everywhere else on this page.
   const champFinals = useMemo(() => {
-    const finals = games.filter(
-      (g) =>
-        isChampionshipBracket(g) &&
-        g.round === 'final' &&
-        g.status === 'final' &&
-        g.scoreA != null &&
-        g.scoreB != null &&
-        g.scoreA !== g.scoreB,
-    );
+    const championshipGames = games.filter(isChampionshipBracket);
+    const isDecided = (g: Game) => {
+      const status = g.status.toLowerCase();
+      if (status === 'forfeit') return true;
+      if (status !== 'final') return false;
+      return g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
+    };
+
+    const explicitFinals = championshipGames.filter((g) => g.round === 'final' && isDecided(g));
+
+    // Recovered finals: per bracket group, find semi winners, then a
+    // non-tree-round game between two of those winners.
+    const byGroupSemis = new Map<string, Game[]>();
+    for (const g of championshipGames) {
+      if (g.round !== 'semi') continue;
+      const k = bracketGroupPrefix(g.bracketName);
+      if (!byGroupSemis.has(k)) byGroupSemis.set(k, []);
+      byGroupSemis.get(k)!.push(g);
+    }
+    const recoveredFinals: Game[] = [];
+    for (const [k, semis] of byGroupSemis) {
+      // A group that already has an explicit decided final doesn't need
+      // recovery — avoid promoting some unrelated 'other' game to champion.
+      if (explicitFinals.some((g) => bracketGroupPrefix(g.bracketName) === k)) continue;
+      const semiWinners = new Set(
+        semis
+          .map((g) =>
+            g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB
+              ? (g.scoreA > g.scoreB ? g.teamAId : g.teamBId)
+              : null,
+          )
+          .filter((id): id is string => !!id),
+      );
+      const recovered = championshipGames.find(
+        (g) =>
+          g.round !== 'prequarter' && g.round !== 'quarter' && g.round !== 'semi' && g.round !== 'final' &&
+          bracketGroupPrefix(g.bracketName) === k &&
+          !!g.teamAId && !!g.teamBId &&
+          semiWinners.has(g.teamAId) && semiWinners.has(g.teamBId) &&
+          isDecided(g),
+      );
+      if (recovered) recoveredFinals.push(recovered);
+    }
+
+    const finals = [...explicitFinals, ...recoveredFinals];
     // USAU sometimes labels BOTH the semi and the title game round='final'
     // under "1st Place". The actual title game is the LAST one played, so
     // keep the latest scheduledAt per group.
@@ -420,15 +467,15 @@ export function UsauEventDetail({ event }: Props) {
 
   // ── View tabs (#6): Pools / Crossovers / Bracket ────────────────────────
   // Static set of button tabs. Each tab appears only when it has data. "Pools"
-  // holds BOTH the standings cards and the per-pool game lists (merged — they're
-  // the same subject). "Bracket" holds the championship tree + placement
-  // brackets (placement is a dropdown filter inside it). Default to the first
-  // tab that has content, biased toward Bracket (the headline) when finished.
+  // holds the standings cards, per-pool game lists, AND matchup-round groups
+  // ("Sat Round 1/2/3" — no separate Rounds tab). "Bracket" holds the
+  // championship tree + every placement group stacked below it. Default to
+  // the first tab that has content, biased toward Bracket (the headline)
+  // when finished.
   const hasBracket = games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
-  const hasPools = pools.length > 0 || poolGames.size > 0;
+  const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0;
   const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
     { key: 'pools',      label: 'Pools',      show: hasPools },
-    { key: 'rounds',     label: 'Rounds',     show: roundGroups.length > 0 },
     { key: 'crossovers', label: 'Crossovers', show: crossoverGames.length > 0 },
     { key: 'bracket',    label: 'Bracket',    show: hasBracket },
   ];
@@ -472,7 +519,7 @@ export function UsauEventDetail({ event }: Props) {
   );
 }
 
-type ViewTab = 'pools' | 'rounds' | 'crossovers' | 'bracket';
+type ViewTab = 'pools' | 'crossovers' | 'bracket';
 
 /**
  * Presentational tabbed body. Split out from UsauEventDetail so it can hold the
@@ -647,25 +694,26 @@ function EventTabsView(props: {
           ) : (
             pools.length > 0 && <PoolGamesEmpty slug={event.slug} />
           )}
-        </section>
-      )}
 
-      {/* ── Rounds — pool-less Saturday matchup phases ("Sat Round 1/2/3") ─ */}
-      {active === 'rounds' && roundGroups.length > 0 && (
-        <div className="flex flex-col gap-6">
-          {roundGroups.map((grp) => (
-            <section key={grp.name} aria-label={grp.name}>
-              <h2 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline">
-                {grp.name}
-              </h2>
-              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
-                {grp.games.map((g) => (
-                  <GameRow key={g.id} game={g} venueState={event.state} />
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+          {/* Matchup rounds — pool-less Saturday phases ("Sat Round 1/2/3"),
+              folded into Pool Play as generic sections below the pools. */}
+          {roundGroups.length > 0 && (
+            <div className="flex flex-col gap-5">
+              {roundGroups.map((grp) => (
+                <section key={grp.name} aria-label={grp.name}>
+                  <h2 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline">
+                    {grp.name}
+                  </h2>
+                  <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                    {grp.games.map((g) => (
+                      <GameRow key={g.id} game={g} venueState={event.state} />
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          )}
+        </section>
       )}
 
       {/* ── Crossovers ──────────────────────────────────────────────────── */}
@@ -686,7 +734,7 @@ function EventTabsView(props: {
         </section>
       )}
 
-      {/* ── Bracket — championship tree + placement brackets (#7 sub-tabs) ─ */}
+      {/* ── Bracket — championship tree, then every placement group stacked ─ */}
       {active === 'bracket' && (
         <BracketView
           games={games}
@@ -707,9 +755,14 @@ function EventTabsView(props: {
 }
 
 /**
- * "Bracket" tab body: the championship tree + placement brackets, with the
- * placement brackets grouped into sub-tabs by canonical placement (#7) —
- * Championship / 5th / 9th / 13th … — so a long tournament is navigable.
+ * "Bracket" tab body: the championship tree FIRST, then every placement
+ * group stacked below it, ascending by place (3rd → 5th → 7th → 9th …).
+ * Each placement group renders as its own tree when it's genuinely
+ * multi-round (label reads "bracket", or its games span ≥2 of
+ * prequarter/quarter/semi plus a decider); otherwise it's a flat list of
+ * game cards. When there's no championship tree at all, everything falls
+ * back to the pre-existing flat grouped list (never double-rendered against
+ * the tree-plus-stack path above).
  */
 function BracketView({
   games,
@@ -726,68 +779,101 @@ function BracketView({
 }) {
   const hasTree = games.some((g) => isChampionshipBracket(g));
 
-  // Group placement brackets by canonical bucket → sub-tabs. The championship
-  // tree is its own implicit "Championship" sub-tab (rendered as the tree).
-  const groups = useMemo(() => {
-    const byKey = new Map<string, { bucket: PlacementBucket; brackets: typeof placementBrackets }>();
-    for (const b of placementBrackets) {
-      const bucket = canonicalPlacement(b.name);
-      if (!byKey.has(bucket.key)) byKey.set(bucket.key, { bucket, brackets: [] });
-      byKey.get(bucket.key)!.brackets.push(b);
-    }
-    return Array.from(byKey.values()).sort((a, b) => a.bucket.order - b.bucket.order);
-  }, [placementBrackets]);
+  // Placement groups already arrive sorted ascending by place (bracketOrder,
+  // via canonicalPlacement) from the parent. Decide tree-vs-flat per group.
+  const renderGroups = useMemo(
+    () =>
+      placementBrackets.map((bracket) => ({
+        bracket,
+        isTree: isDerivableBracketGroup(bracket.name, bracket.games),
+      })),
+    [placementBrackets],
+  );
 
-  // Placement filter options: Championship (the tree) first, then each
-  // placement bucket (5th, 9th, …). A dropdown filter rather than tabs — it's
-  // more dynamic (a big event can have many placement brackets) and stays
-  // compact. Only shown when there's more than one option.
-  const filterOptions: PillSelectOption<string>[] = [
-    ...(hasTree ? [{ value: 'championship', label: 'Championship' }] : []),
-    ...groups
-      .filter((g) => g.bucket.key !== 'championship')
-      .map((g) => ({ value: g.bucket.key, label: g.bucket.label })),
-  ];
-  const [filter, setFilter] = useState<string>(filterOptions[0]?.value ?? 'championship');
-  const activeFilter = filterOptions.some((o) => o.value === filter)
-    ? filter
-    : (filterOptions[0]?.value ?? 'championship');
+  if (!hasTree) {
+    // No championship tree at all — keep the existing flat grouped fallback.
+    return (
+      <div className="flex flex-col gap-7">
+        {placementBrackets.map((bracket) => (
+          <BracketBlock
+            key={bracket.name}
+            bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
+            venueState={venueState}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-6">
-      {filterOptions.length > 1 && (
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-            Bracket
-          </span>
-          <PillSelect
-            value={activeFilter}
-            options={filterOptions}
-            onChange={setFilter}
-            ariaLabel="Filter by placement bracket"
-          />
-        </div>
-      )}
+    <div className="flex flex-col gap-9">
+      <UsauBracketTree games={games} teams={teams} venueState={venueState} />
 
-      {/* Championship tree */}
-      {activeFilter === 'championship' && hasTree && (
-        <UsauBracketTree games={games} teams={teams} venueState={venueState} />
-      )}
-
-      {/* Placement bucket blocks for the active filter */}
-      {groups
-        .filter((g) => g.bucket.key === activeFilter)
-        .map((g) => (
-          <div key={g.bucket.key} className="flex flex-col gap-7">
-            {g.brackets.map((bracket) => (
+      {renderGroups.length > 0 && (
+        <div className="flex flex-col gap-7">
+          {renderGroups.map(({ bracket, isTree }) =>
+            isTree ? (
+              <PlacementTree
+                key={bracket.name}
+                label={bracketLabel(bracket.name)}
+                games={bracket.games}
+                venueState={venueState}
+              />
+            ) : (
               <BracketBlock
                 key={bracket.name}
                 bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
                 venueState={venueState}
               />
-            ))}
-          </div>
-        ))}
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A placement group derives a tree (instead of the flat chronological list)
+// when either:
+//   (a) its label contains "bracket" ("Ninth Place Bracket", "Thirteenth
+//       Place Bracket") — USAU's own signal that it's bracket-shaped, or
+//   (b) its games actually span ≥2 distinct rounds from prequarter/quarter/
+//       semi PLUS a deciding game — e.g. "Fifth Place Bracket" carries semis
+//       + final without "bracket" always appearing verbatim upstream.
+// A single-game placement final ("Eleventh Place", "Fifteenth Place") hits
+// neither condition and stays flat — a 2-team tree would just be a game
+// card with extra steps. Mirrors mobile's isDerivableBracketGroup.
+const CHAIN_ROUNDS_FOR_TREE = ['prequarter', 'quarter', 'semi'];
+
+function isDerivableBracketGroup(label: string, games: Game[]): boolean {
+  if (label.toLowerCase().includes('bracket')) return true;
+  const chainRoundsPresent = new Set(
+    games.map((g) => g.round).filter((r) => CHAIN_ROUNDS_FOR_TREE.includes(r)),
+  );
+  if (chainRoundsPresent.size < 2) return false;
+  // A deciding game: an explicit final, or an 'other'-tagged game riding
+  // along with the chain rounds (the mislabeled-final recovery case).
+  return games.some((g) => g.round === 'final' || g.round === 'other');
+}
+
+/** Renders one placement group as its own bracket tree, labeled by our own
+ *  heading (the shared championship-tree component owns the "Championship
+ *  bracket" heading, so placement groups use the headless variant). */
+function PlacementTree({
+  label,
+  games,
+  venueState,
+}: {
+  label: string;
+  games: Game[];
+  venueState: string | null;
+}) {
+  return (
+    <div>
+      <h3 className="font-display italic font-bold text-[22px] leading-tight tracking-[-0.02em] text-ink mb-3">
+        {label}
+      </h3>
+      <UsauPlacementBracketTree games={games} venueState={venueState} />
     </div>
   );
 }
@@ -1102,10 +1188,18 @@ function GameRow({
   /** Event's US state — times render as the venue's wall clock. */
   venueState?: string | null;
 }) {
+  // A forfeit is a decided game (one side scored, one didn't show) — it must
+  // render won/lost like any other final, not fall through to "upcoming"
+  // styling just because the raw status string isn't literally 'final'.
+  const status = game.status.toLowerCase();
+  const isDecided = status === 'final' || status === 'forfeit';
   const aWon =
-    game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
+    isDecided && game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const bWon =
-    game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
+    isDecided && game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
+  const isCancelled = status === 'cancelled';
+  const statusLabel = isDecided ? 'Final' : isCancelled ? 'Cancelled' : game.status;
+  const statusClass = isDecided ? 'text-accent' : 'text-muted';
 
   // Bracket name and field are NOT mutually exclusive. This used to be an
   // either/or — bracket views showed the round and silently dropped the field
@@ -1133,9 +1227,7 @@ function GameRow({
         ) : (
           <span className="text-faint">—</span>
         )}
-        <span className={game.status === 'final' ? 'text-accent' : 'text-muted'}>
-          {game.status}
-        </span>
+        <span className={statusClass}>{statusLabel}</span>
       </div>
       <TeamLine
         name={game.teamAName}

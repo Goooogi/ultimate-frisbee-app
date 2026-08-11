@@ -1,6 +1,10 @@
 // Home-page "Standout Performances" — the best individual player stat-lines
-// from recent games, for the rotating carousel. UFA / PUL / WUL are wired; only
-// leagues with a live/recent season contribute (currently just UFA).
+// from recent games, for the rotating carousel. UFA / PUL / WUL are wired
+// (per-game box scores), plus USAU Club Nationals (event-level G/A totals).
+// Only leagues with a LIVE season contribute: a league's cards ride until
+// POST_SEASON_GRACE_DAYS after its last final game, then retire together —
+// so the rail shows finals lines for ~2 weeks after a season ends, goes quiet,
+// and lights back up when the next wired league (PUL → WUL → UFA) starts.
 //
 // Data is cheap: we mirror per-game box scores into Supabase
 // (ufa_game_player_stats / pul_game_player_stats / wul_game_player_stats, all
@@ -14,8 +18,10 @@
 // 7-block defender shows up on the blocks weight.
 //
 // SELECTION = strength-gated recency: the most recent weekend's best lines
-// appear easily; an older line must clear a higher perf bar to survive (a
-// 3-week-old line needs to be a monster). See gateThreshold().
+// appear easily; an older line must clear a higher perf bar to survive. Age is
+// measured against the LEAGUE'S latest final game (not wall-clock now), so the
+// newest slate always reads as fresh and a finished season's finals lines don't
+// decay during the post-season grace window. See gateThreshold().
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
@@ -30,7 +36,7 @@ function supabase(): AnyClient {
   return _client;
 }
 
-export type StandoutLeague = 'ufa' | 'pul' | 'wul';
+export type StandoutLeague = 'ufa' | 'pul' | 'wul' | 'usau';
 
 export interface StandoutStat {
   label: string;
@@ -77,10 +83,14 @@ export interface StandoutLine {
 }
 
 const MS_DAY = 86_400_000;
-const WINDOW_DAYS = 21; // max 3 weeks back — the section is "recent" great games
-const MAX_CARDS = 10;
+const WINDOW_DAYS = 28; // fetch window — playoff weeks are sparse, so reach back a month; the age gate decides what survives
+const MAX_CARDS = 14;
 const PER_GAME_CAP = 1; // at most one standout per game so one blowout doesn't flood
 const PER_PLAYER_CAP = 1; // at most one card per player — their single best recent game
+/** How long a league keeps its cards after its LAST final game. Covers the
+ *  "1-2 weeks after the season / Nationals ends" display window; past it the
+ *  league's cards (and UFA's award cards) retire together. */
+const POST_SEASON_GRACE_DAYS = 14;
 
 // ─── Perf score ───────────────────────────────────────────────────────────────
 
@@ -121,22 +131,24 @@ function perfScore(l: RawLine): number {
 
 /**
  * Strength-gated recency threshold: how strong a line must be to survive at a
- * given age. Fresh (≤3 days) lines pass at a low bar; the bar then climbs
- * steeply so the section reads as "this week / last week" and an older game must
- * be near-elite (and, past ~3 weeks, a genuine monster) to keep its spot. A
- * strong recent game therefore displaces a merely-good older one for the same
- * player. Tuned to the perf scale above (a recent weekend tops ~50-65).
+ * given age. `ageDays` is measured against the league's LATEST final game, not
+ * wall-clock now — during the season those are near-identical, but once the
+ * last game is played the slate stops aging, so finals lines hold their spot
+ * through the post-season grace window instead of decaying off one by one.
  *
- * Reference points on the current UFA data: a 4G/9A/761yd line (~perf 50) at 3
- * weeks old no longer survives (needs 54), but the same player's fresher
- * 3G/14A/938yd line (~perf 65) sails through — so the recent game wins the card.
+ * The curve is deliberately gentle (a mid-season perf tops ~50-65, and playoff
+ * weeks only have a handful of games): a good-not-monster line from 2-3 weeks
+ * back should still make the rail while the season is live. Reference: the
+ * Jul 24-26 UFA playoff slate peaks at perf 33-40 — at ~2 weeks old those now
+ * pass (gate 24) where the old curve (44+) silently emptied the carousel down
+ * to just the newest weekend.
  */
 function gateThreshold(ageDays: number): number {
-  if (ageDays <= 3) return 10; // this weekend — easy to appear
-  if (ageDays <= 10) return 24; // ~1-1.5 weeks — solid line
-  if (ageDays <= 14) return 34; // ~2 weeks — strong line only
-  if (ageDays <= 17) return 44; // ~2.5 weeks — near-elite
-  return 54; // 18-21 days — monster games only (WINDOW_DAYS caps the tail)
+  if (ageDays <= 3) return 10; // latest slate — easy to appear
+  if (ageDays <= 10) return 18; // ~1 week back — good line
+  if (ageDays <= 17) return 24; // ~2 weeks — solid line
+  if (ageDays <= 21) return 30; // ~3 weeks — strong line
+  return 38; // 3-4 weeks — elite games only (WINDOW_DAYS caps the tail)
 }
 
 // ─── UFA ──────────────────────────────────────────────────────────────────────
@@ -288,8 +300,29 @@ interface AwardData {
  * Shared computation: the current UFA award-watch leaders + every player's
  * season aggregate. See ufaAwardWatch / ufaAwardSeasonCards for the two callers.
  * Returns empty maps before week 5 or if the season has no games.
+ *
+ * Memoized per `now` value: within one getStandoutPerformances() run this is
+ * called twice (ufaAwardWatch during ufaStandouts, then again in
+ * ufaAwardSeasonCards). Each call is a paginated full-season stat scan — the
+ * heaviest part of the load — so caching the in-flight promise on `now` makes
+ * the second call instant and roughly halves the award work. The key is the
+ * exact `now` timestamp of the fetch, so a later refetch (new now) recomputes
+ * rather than serving stale data.
  */
-async function ufaAwardData(now: number): Promise<AwardData> {
+let _awardDataCache: { now: number; promise: Promise<AwardData> } | null = null;
+
+function ufaAwardData(now: number): Promise<AwardData> {
+  if (_awardDataCache && _awardDataCache.now === now) return _awardDataCache.promise;
+  const promise = computeUfaAwardData(now).catch((e) => {
+    // Don't cache a rejection — clear so the next call can retry cleanly.
+    if (_awardDataCache && _awardDataCache.now === now) _awardDataCache = null;
+    throw e;
+  });
+  _awardDataCache = { now, promise };
+  return promise;
+}
+
+async function computeUfaAwardData(now: number): Promise<AwardData> {
   const db = supabase();
   const empty: AwardData = { awards: new Map(), agg: new Map() };
 
@@ -549,6 +582,85 @@ async function proStandouts(league: 'pul' | 'wul', now: number): Promise<Standou
   });
 }
 
+// ─── USAU (Club Nationals — event-level G/A totals) ─────────────────────────────
+
+const USAU_MAX_CARDS = 8;
+const USAU_MIN_GA = 3; // event totals build over the weekend; don't card a 1-goal line
+
+/**
+ * Club Nationals standouts. USAU publishes only per-EVENT goal/assist totals
+ * (usau_player_event_stats — no blocks/yards), and Nationals is the one club
+ * event with national attention, so: cards show event totals for the top
+ * scorers, appear while Nationals runs, and retire POST_SEASON_GRACE_DAYS
+ * after end_date. ts = now keeps them exempt from the age gate — the event
+ * date-window here is the only on/off switch.
+ */
+async function usauStandouts(now: number): Promise<StandoutLine[]> {
+  const db = supabase();
+  const today = new Date(now).toISOString().slice(0, 10);
+  const graceCutoff = new Date(now - POST_SEASON_GRACE_DAYS * MS_DAY).toISOString().slice(0, 10);
+  // Naming drifts year to year ("Club Nationals" / "Club Championships") — match both.
+  const { data: events } = await db
+    .from('usau_events')
+    .select('id, name, start_date, end_date')
+    .eq('competition_level', 'CLUB')
+    .or('name.ilike.%club nationals%,name.ilike.%club championships%')
+    .lte('start_date', today)
+    .gte('end_date', graceCutoff);
+  const eventRows = (events ?? []) as { id: string }[];
+  if (eventRows.length === 0) return [];
+
+  const { data: stats } = await db
+    .from('usau_player_event_stats')
+    .select('player_id, event_id, team_id, goals, assists')
+    .in('event_id', eventRows.map((e) => e.id))
+    .range(0, 4999);
+  const ranked = ((stats ?? []) as { player_id: string; event_id: string; team_id: string | null; goals: number | null; assists: number | null }[])
+    .map((r) => ({ ...r, g: r.goals ?? 0, a: r.assists ?? 0 }))
+    .filter((r) => r.g + r.a >= USAU_MIN_GA)
+    .sort((x, y) => y.g + y.a - (x.g + x.a))
+    .slice(0, USAU_MAX_CARDS);
+  if (ranked.length === 0) return [];
+
+  const playerIds = [...new Set(ranked.map((r) => r.player_id))];
+  const teamIds = [...new Set(ranked.map((r) => r.team_id).filter(Boolean))] as string[];
+  const { data: playersData } = await db.from('usau_players').select('id, display_name').in('id', playerIds);
+  const { data: teamsData } = teamIds.length
+    ? await db.from('usau_teams').select('id, name').in('id', teamIds)
+    : { data: [] as { id: string; name: string }[] };
+  const names = new Map<string, string>();
+  for (const p of (playersData ?? []) as { id: string; display_name: string | null }[]) {
+    if (p.display_name) names.set(p.id, p.display_name);
+  }
+  const teams = new Map<string, string>();
+  for (const t of (teamsData ?? []) as { id: string; name: string }[]) teams.set(t.id, t.name);
+
+  return ranked.map((r) => ({
+    id: `usau-${r.event_id}-${r.player_id}`,
+    // Per-player key: these are event totals, so the per-game cap must not
+    // collapse the whole event into one card.
+    gameKey: `usau-${r.event_id}-${r.player_id}`,
+    league: 'usau' as const,
+    playerId: r.player_id,
+    playerName: names.get(r.player_id) ?? r.player_id,
+    href: `/players/${r.player_id}?from=usau`,
+    headshotUrl: null,
+    teamName: r.team_id ? teams.get(r.team_id) ?? null : null,
+    dateLabel: 'Nationals',
+    opponent: null,
+    seasonMode: true, // event totals, not a single game line
+    stats: [
+      { label: 'G', value: String(r.g) },
+      { label: 'A', value: String(r.a) },
+      { label: 'G+A', value: String(r.g + r.a) },
+    ],
+    awardWatch: null,
+    callahan: false,
+    perf: perfScore({ goals: r.g, assists: r.a, blocks: 0, plusMinus: 0, totalYards: null, completions: null, throwsAttempted: null }),
+    ts: now,
+  }));
+}
+
 // ─── Shared helpers ─────────────────────────────────────────────────────────────
 
 function buildStats(l: RawLine): StandoutStat[] {
@@ -585,22 +697,30 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
     ufaStandouts(now).catch(() => [] as StandoutLine[]),
     proStandouts('pul', now).catch(() => [] as StandoutLine[]),
     proStandouts('wul', now).catch(() => [] as StandoutLine[]),
+    usauStandouts(now).catch(() => [] as StandoutLine[]),
   ]);
-  const all = perLeague.flat();
 
-  const clearsGate = (l: StandoutLine) => l.perf >= gateThreshold((now - l.ts) / MS_DAY);
-
-  // An award-watch player is worth a SEASON card unless one of their recent games
-  // was genuinely standout-worthy (cleared the gate) — in which case we show that
-  // game. So: an MVP contender with a quiet week shows season totals, not the
-  // quiet line. Track which award-players earned a real game card.
-  const awardGameEarners = new Set<string>(); // player_id with a gate-clearing line
-  for (const l of all) {
-    if (l.awardWatch && l.playerId && clearsGate(l)) awardGameEarners.add(l.playerId);
+  // A league is LIVE while its latest final game is within the post-season
+  // grace window; past that, all its cards retire at once (and, for UFA, the
+  // award cards with them). Line ages are measured against that latest game —
+  // not now — so a finished season's finals slate stays "fresh" for the whole
+  // grace window instead of decaying off card by card.
+  const latestTs = new Map<StandoutLeague, number>();
+  const all: StandoutLine[] = [];
+  for (const lines of perLeague) {
+    if (lines.length === 0) continue;
+    const latest = Math.max(...lines.map((l) => l.ts));
+    if (now - latest > POST_SEASON_GRACE_DAYS * MS_DAY) continue; // season over
+    latestTs.set(lines[0].league, latest);
+    all.push(...lines);
   }
+  const ufaLive = latestTs.has('ufa');
+
+  const clearsGate = (l: StandoutLine) =>
+    l.perf >= gateThreshold(((latestTs.get(l.league) ?? now) - l.ts) / MS_DAY);
 
   // Strength-gated recency: keep only lines that cleared the age-scaled bar
-  // (a real standout game). This now applies to award lines too — a sub-gate
+  // (a real standout game). This applies to award lines too — a sub-gate
   // award line is dropped and replaced by a season card below.
   const gated = all.filter(clearsGate);
 
@@ -630,12 +750,19 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
     capped.push(l);
   }
 
-  // SEASON cards for award players who did NOT earn a game card (quiet week or
-  // no game at all) — so the MVP/OPOY/DPOY always appears, showing season totals
-  // when their latest game wasn't standout-worthy.
-  const seasonCards = await ufaAwardSeasonCards(now, awardGameEarners).catch(
-    () => [] as StandoutLine[],
-  );
+  // SEASON cards for award players who did NOT land a game card in the rail
+  // (quiet week, no game, or their line got squeezed out by a cap) — so the
+  // MVP/OPOY/DPOY always appears while the UFA season is live. Earners are
+  // computed from CAPPED, not the pre-cap pool: an award line dropped by the
+  // per-game cap must still fall through to a season card, or that award
+  // silently vanishes (this is exactly how OPOY went missing).
+  const awardGameEarners = new Set<string | null>();
+  for (const l of capped) {
+    if (l.awardWatch && l.playerId) awardGameEarners.add(l.playerId);
+  }
+  const seasonCards = ufaLive
+    ? await ufaAwardSeasonCards(now, awardGameEarners).catch(() => [] as StandoutLine[])
+    : [];
   capped.push(...seasonCards);
 
   // De-dup: keep only ONE card per award (their best line already sorted first),

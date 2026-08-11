@@ -19,6 +19,12 @@ import { EufFlag } from '@/components/euf/euf-flag';
 
 export const revalidate = 300;
 
+// SSG mode with on-demand paths: without this export the revalidate above
+// never engages and every crawler hit re-runs the name-resolution RPCs.
+export function generateStaticParams(): { name: string }[] {
+  return [];
+}
+
 interface Props {
   params: { name: string };
 }

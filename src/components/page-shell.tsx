@@ -121,6 +121,10 @@ interface PageShellProps {
   /** Optional breadcrumb trail rendered above the title. Shallowest first;
    *  last entry is the current page (rendered as plain text). */
   breadcrumbs?: Crumb[];
+  /** Custom node rendered in the breadcrumb position INSTEAD of `breadcrumbs`
+   *  (e.g. a client component that adjusts the back link from a search param
+   *  without making the page dynamic). Wins over `breadcrumbs` when both set. */
+  breadcrumbsSlot?: React.ReactNode;
   /** When set, a slim name bar sticks to the top on mobile once the page's
    *  big <h1> title scrolls out of view — so long stat tables (player
    *  profiles) never lose their "whose stats are these" context. Desktop
@@ -141,6 +145,7 @@ export function PageShell({
   controls,
   topNavSlot,
   breadcrumbs,
+  breadcrumbsSlot,
   stickyName,
   hideFooterMobile,
   wide,
@@ -153,7 +158,8 @@ export function PageShell({
         wide ? 'lg:px-10 xl:px-8 lg:max-w-[1320px]' : 'lg:px-14 lg:max-w-[1080px]',
       ].join(' ')}>
         {stickyName && <StickyName name={stickyName} />}
-        {breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />}
+        {breadcrumbsSlot ??
+          (breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />)}
         <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />
         {stickyName && <StickySentinel />}
         {children}

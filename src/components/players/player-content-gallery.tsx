@@ -8,6 +8,7 @@
 
 import { useState } from 'react';
 import { PlayerContentUploader } from './player-content-uploader';
+import { PlayerContentReportModal } from './player-content-report-modal';
 import type { PlayerContentItem, PlayerKind } from '@/lib/player-content/types';
 import { videoThumbnailUrl } from '@/lib/player-content/embed';
 import { useRouter } from 'next/navigation';
@@ -22,6 +23,7 @@ interface Props {
 export function PlayerContentGallery({ playerKind, playerRef, playerDisplayName, items }: Props) {
   const router = useRouter();
   const [lightbox, setLightbox] = useState<PlayerContentItem | null>(null);
+  const [reportTarget, setReportTarget] = useState<string | null>(null);
 
   return (
     <section className="mt-10" aria-labelledby="content-heading">
@@ -44,7 +46,10 @@ export function PlayerContentGallery({ playerKind, playerRef, playerDisplayName,
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
           {items.map((item) => (
-            <ContentTile key={item.id} item={item} onClick={() => setLightbox(item)} />
+            <div key={item.id} className="relative">
+              <ContentTile item={item} onClick={() => setLightbox(item)} />
+              <ReportFlagButton onClick={() => setReportTarget(item.id)} />
+            </div>
           ))}
         </div>
       )}
@@ -65,8 +70,47 @@ export function PlayerContentGallery({ playerKind, playerRef, playerDisplayName,
         />
       </div>
 
-      {lightbox && <Lightbox item={lightbox} onClose={() => setLightbox(null)} />}
+      {lightbox && (
+        <Lightbox
+          item={lightbox}
+          onClose={() => setLightbox(null)}
+          onReport={() => setReportTarget(lightbox.id)}
+        />
+      )}
+
+      {reportTarget && (
+        <PlayerContentReportModal
+          contentId={reportTarget}
+          onClose={() => setReportTarget(null)}
+        />
+      )}
     </section>
+  );
+}
+
+// Translucent flag button pinned to a tile's top-right corner. Tiles render
+// as <button> or <a> (the tile's own click target), so this must be a sibling
+// in the wrapping `relative` div rather than nested inside — a <button> can't
+// legally nest inside another <button>/<a>.
+function ReportFlagButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label="Report this content"
+      className="absolute top-1 right-1 z-10 p-1.5 rounded-full bg-black/40 text-white hover:bg-black/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+    >
+      <FlagGlyph />
+    </button>
+  );
+}
+
+function FlagGlyph() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 3v18" />
+      <path d="M5 4h11l-2 4 2 4H5" />
+    </svg>
   );
 }
 
@@ -167,7 +211,15 @@ function VideoThumb({ src }: { src: string }) {
   );
 }
 
-function Lightbox({ item, onClose }: { item: PlayerContentItem; onClose: () => void }) {
+function Lightbox({
+  item,
+  onClose,
+  onReport,
+}: {
+  item: PlayerContentItem;
+  onClose: () => void;
+  onReport: () => void;
+}) {
   return (
     <div
       role="dialog"
@@ -175,6 +227,17 @@ function Lightbox({ item, onClose }: { item: PlayerContentItem; onClose: () => v
       className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4"
       onClick={onClose}
     >
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onReport();
+        }}
+        className="absolute top-4 left-4 inline-flex items-center gap-1.5 text-bg text-[11px] font-bold tracking-[0.18em] uppercase font-tight hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer"
+      >
+        <FlagGlyph />
+        Report
+      </button>
       <button
         type="button"
         aria-label="Close"

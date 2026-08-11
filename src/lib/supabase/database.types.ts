@@ -14,6 +14,42 @@ export type Database = {
   }
   public: {
     Tables: {
+      cron_health_log: {
+        Row: {
+          detail: string | null
+          failure_class: string
+          id: number
+          jobid: number
+          jobname: string
+          logged_at: string
+          occurred_at: string
+          runid: number | null
+          status: string | null
+        }
+        Insert: {
+          detail?: string | null
+          failure_class: string
+          id?: never
+          jobid: number
+          jobname: string
+          logged_at?: string
+          occurred_at: string
+          runid?: number | null
+          status?: string | null
+        }
+        Update: {
+          detail?: string | null
+          failure_class?: string
+          id?: never
+          jobid?: number
+          jobname?: string
+          logged_at?: string
+          occurred_at?: string
+          runid?: number | null
+          status?: string | null
+        }
+        Relationships: []
+      }
       delete_account_attempts: {
         Row: {
           attempted_at: string
@@ -31,6 +67,331 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      euf_events: {
+        Row: {
+          created_at: string
+          end_date: string | null
+          id: string
+          kind: Database["public"]["Enums"]["euf_event_kind"]
+          last_scraped_at: string | null
+          last_scraped_status: string | null
+          location: string | null
+          name: string
+          season_id: string
+          short_name: string | null
+          slug: string
+          source_origin: string | null
+          start_date: string | null
+          updated_at: string
+          year: number
+        }
+        Insert: {
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          kind?: Database["public"]["Enums"]["euf_event_kind"]
+          last_scraped_at?: string | null
+          last_scraped_status?: string | null
+          location?: string | null
+          name: string
+          season_id: string
+          short_name?: string | null
+          slug: string
+          source_origin?: string | null
+          start_date?: string | null
+          updated_at?: string
+          year: number
+        }
+        Update: {
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          kind?: Database["public"]["Enums"]["euf_event_kind"]
+          last_scraped_at?: string | null
+          last_scraped_status?: string | null
+          location?: string | null
+          name?: string
+          season_id?: string
+          short_name?: string | null
+          slug?: string
+          source_origin?: string | null
+          start_date?: string | null
+          updated_at?: string
+          year?: number
+        }
+        Relationships: []
+      }
+      euf_game_player_stats: {
+        Row: {
+          assists: number
+          created_at: string
+          euf_player_id: number | null
+          event_id: string
+          full_name: string
+          game_id: string
+          goals: number
+          id: string
+          jersey_number: string | null
+          team_id: string | null
+          total: number
+        }
+        Insert: {
+          assists?: number
+          created_at?: string
+          euf_player_id?: number | null
+          event_id: string
+          full_name: string
+          game_id: string
+          goals?: number
+          id?: string
+          jersey_number?: string | null
+          team_id?: string | null
+          total?: number
+        }
+        Update: {
+          assists?: number
+          created_at?: string
+          euf_player_id?: number | null
+          event_id?: string
+          full_name?: string
+          game_id?: string
+          goals?: number
+          id?: string
+          jersey_number?: string | null
+          team_id?: string | null
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "euf_game_player_stats_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "euf_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "euf_game_player_stats_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "euf_games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "euf_game_player_stats_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "euf_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      euf_games: {
+        Row: {
+          away_score: number | null
+          away_team_id: string | null
+          created_at: string
+          division: Database["public"]["Enums"]["euf_division"]
+          euf_game_id: number | null
+          event_id: string
+          field: string | null
+          home_score: number | null
+          home_team_id: string | null
+          id: string
+          is_bracket: boolean
+          round_name: string | null
+          scheduled_at: string | null
+          stage: Database["public"]["Enums"]["euf_game_stage"]
+          start_time: string | null
+          status: Database["public"]["Enums"]["euf_game_status"]
+          updated_at: string
+        }
+        Insert: {
+          away_score?: number | null
+          away_team_id?: string | null
+          created_at?: string
+          division: Database["public"]["Enums"]["euf_division"]
+          euf_game_id?: number | null
+          event_id: string
+          field?: string | null
+          home_score?: number | null
+          home_team_id?: string | null
+          id?: string
+          is_bracket?: boolean
+          round_name?: string | null
+          scheduled_at?: string | null
+          stage?: Database["public"]["Enums"]["euf_game_stage"]
+          start_time?: string | null
+          status?: Database["public"]["Enums"]["euf_game_status"]
+          updated_at?: string
+        }
+        Update: {
+          away_score?: number | null
+          away_team_id?: string | null
+          created_at?: string
+          division?: Database["public"]["Enums"]["euf_division"]
+          euf_game_id?: number | null
+          event_id?: string
+          field?: string | null
+          home_score?: number | null
+          home_team_id?: string | null
+          id?: string
+          is_bracket?: boolean
+          round_name?: string | null
+          scheduled_at?: string | null
+          stage?: Database["public"]["Enums"]["euf_game_stage"]
+          start_time?: string | null
+          status?: Database["public"]["Enums"]["euf_game_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "euf_games_away_team_id_fkey"
+            columns: ["away_team_id"]
+            isOneToOne: false
+            referencedRelation: "euf_teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "euf_games_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "euf_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "euf_games_home_team_id_fkey"
+            columns: ["home_team_id"]
+            isOneToOne: false
+            referencedRelation: "euf_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      euf_rosters: {
+        Row: {
+          assists: number | null
+          created_at: string
+          euf_player_id: number
+          event_id: string
+          full_name: string
+          games: number | null
+          goals: number | null
+          id: string
+          jersey_number: string | null
+          name_key: string | null
+          team_id: string
+          total: number | null
+        }
+        Insert: {
+          assists?: number | null
+          created_at?: string
+          euf_player_id: number
+          event_id: string
+          full_name: string
+          games?: number | null
+          goals?: number | null
+          id?: string
+          jersey_number?: string | null
+          name_key?: string | null
+          team_id: string
+          total?: number | null
+        }
+        Update: {
+          assists?: number | null
+          created_at?: string
+          euf_player_id?: number
+          event_id?: string
+          full_name?: string
+          games?: number | null
+          goals?: number | null
+          id?: string
+          jersey_number?: string | null
+          name_key?: string | null
+          team_id?: string
+          total?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "euf_rosters_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "euf_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "euf_rosters_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "euf_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      euf_teams: {
+        Row: {
+          country_code: string | null
+          country_name: string | null
+          created_at: string
+          division: Database["public"]["Enums"]["euf_division"]
+          euf_team_id: number
+          event_id: string
+          final_placement: number | null
+          games: number | null
+          id: string
+          losses: number | null
+          name: string
+          scores_against: number | null
+          scores_for: number | null
+          seed: number | null
+          updated_at: string
+          wins: number | null
+        }
+        Insert: {
+          country_code?: string | null
+          country_name?: string | null
+          created_at?: string
+          division: Database["public"]["Enums"]["euf_division"]
+          euf_team_id: number
+          event_id: string
+          final_placement?: number | null
+          games?: number | null
+          id?: string
+          losses?: number | null
+          name: string
+          scores_against?: number | null
+          scores_for?: number | null
+          seed?: number | null
+          updated_at?: string
+          wins?: number | null
+        }
+        Update: {
+          country_code?: string | null
+          country_name?: string | null
+          created_at?: string
+          division?: Database["public"]["Enums"]["euf_division"]
+          euf_team_id?: number
+          event_id?: string
+          final_placement?: number | null
+          games?: number | null
+          id?: string
+          losses?: number | null
+          name?: string
+          scores_against?: number | null
+          scores_for?: number | null
+          seed?: number | null
+          updated_at?: string
+          wins?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "euf_teams_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "euf_events"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       fantasy_leagues: {
         Row: {
@@ -58,6 +419,13 @@ export type Database = {
           season_year?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "fantasy_leagues_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "fantasy_leagues_owner_id_fkey"
             columns: ["owner_id"]
@@ -194,6 +562,13 @@ export type Database = {
             foreignKeyName: "fantasy_teams_owner_id_fkey"
             columns: ["owner_id"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_teams_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -245,6 +620,13 @@ export type Database = {
             foreignKeyName: "feedback_user_id_profiles_fkey"
             columns: ["user_id"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "feedback_user_id_profiles_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -256,6 +638,633 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      jersey_blocks: {
+        Row: {
+          blocked_id: string
+          blocker_id: string
+          created_at: string
+          reason: string | null
+        }
+        Insert: {
+          blocked_id: string
+          blocker_id: string
+          created_at?: string
+          reason?: string | null
+        }
+        Update: {
+          blocked_id?: string
+          blocker_id?: string
+          created_at?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_blocks_blocked_id_fkey"
+            columns: ["blocked_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_blocks_blocked_id_fkey"
+            columns: ["blocked_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_blocks_blocked_id_fkey"
+            columns: ["blocked_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_blocks_blocker_id_fkey"
+            columns: ["blocker_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_blocks_blocker_id_fkey"
+            columns: ["blocker_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_blocks_blocker_id_fkey"
+            columns: ["blocker_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_listing_events: {
+        Row: {
+          created_at: string
+          event_name: string | null
+          event_starts_on: string | null
+          id: string
+          listing_id: string | null
+          usau_event_id: string | null
+          want_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_name?: string | null
+          event_starts_on?: string | null
+          id?: string
+          listing_id?: string | null
+          usau_event_id?: string | null
+          want_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_name?: string | null
+          event_starts_on?: string | null
+          id?: string
+          listing_id?: string | null
+          usau_event_id?: string | null
+          want_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_listing_events_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_listing_events_usau_event_id_fkey"
+            columns: ["usau_event_id"]
+            isOneToOne: false
+            referencedRelation: "usau_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_listing_events_want_id_fkey"
+            columns: ["want_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_wants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_listings: {
+        Row: {
+          city: string | null
+          condition: Database["public"]["Enums"]["jersey_condition"] | null
+          country: string | null
+          created_at: string
+          description: string | null
+          id: string
+          kind: Database["public"]["Enums"]["jersey_listing_kind"]
+          league: string | null
+          league_name: string | null
+          owner_id: string
+          player_name: string | null
+          price_cents: number | null
+          size: string | null
+          state: string | null
+          status: Database["public"]["Enums"]["jersey_listing_status"]
+          team_id: string | null
+          team_logo_url: string | null
+          team_name: string | null
+          title: string
+          updated_at: string
+          year: number | null
+        }
+        Insert: {
+          city?: string | null
+          condition?: Database["public"]["Enums"]["jersey_condition"] | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          kind?: Database["public"]["Enums"]["jersey_listing_kind"]
+          league?: string | null
+          league_name?: string | null
+          owner_id: string
+          player_name?: string | null
+          price_cents?: number | null
+          size?: string | null
+          state?: string | null
+          status?: Database["public"]["Enums"]["jersey_listing_status"]
+          team_id?: string | null
+          team_logo_url?: string | null
+          team_name?: string | null
+          title: string
+          updated_at?: string
+          year?: number | null
+        }
+        Update: {
+          city?: string | null
+          condition?: Database["public"]["Enums"]["jersey_condition"] | null
+          country?: string | null
+          created_at?: string
+          description?: string | null
+          id?: string
+          kind?: Database["public"]["Enums"]["jersey_listing_kind"]
+          league?: string | null
+          league_name?: string | null
+          owner_id?: string
+          player_name?: string | null
+          price_cents?: number | null
+          size?: string | null
+          state?: string | null
+          status?: Database["public"]["Enums"]["jersey_listing_status"]
+          team_id?: string | null
+          team_logo_url?: string | null
+          team_name?: string | null
+          title?: string
+          updated_at?: string
+          year?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_listings_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_listings_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_listings_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_messages: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          sender_id: string
+          thread_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          sender_id: string
+          thread_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          sender_id?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_messages_sender_id_fkey"
+            columns: ["sender_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_messages_thread_id_fkey"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_threads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_photos: {
+        Row: {
+          created_at: string
+          id: string
+          listing_id: string
+          sort_order: number
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          listing_id: string
+          sort_order?: number
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          listing_id?: string
+          sort_order?: number
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_photos_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_listings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_reports: {
+        Row: {
+          created_at: string
+          detail: string | null
+          id: string
+          listing_id: string | null
+          reason: string
+          reported_user_id: string | null
+          reporter_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["jersey_report_status"]
+          thread_id: string | null
+          want_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          detail?: string | null
+          id?: string
+          listing_id?: string | null
+          reason: string
+          reported_user_id?: string | null
+          reporter_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["jersey_report_status"]
+          thread_id?: string | null
+          want_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          detail?: string | null
+          id?: string
+          listing_id?: string | null
+          reason?: string
+          reported_user_id?: string | null
+          reporter_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["jersey_report_status"]
+          thread_id?: string | null
+          want_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_reports_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reported_user_id_fkey"
+            columns: ["reported_user_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reported_user_id_fkey"
+            columns: ["reported_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reported_user_id_fkey"
+            columns: ["reported_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reporter_id_fkey"
+            columns: ["reporter_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reporter_id_fkey"
+            columns: ["reporter_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reporter_id_fkey"
+            columns: ["reporter_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_thread_fk"
+            columns: ["thread_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_threads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_reports_want_id_fkey"
+            columns: ["want_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_wants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_threads: {
+        Row: {
+          created_at: string
+          id: string
+          last_message_at: string | null
+          listing_id: string | null
+          owner_id: string
+          owner_last_read_at: string | null
+          requester_id: string
+          requester_last_read_at: string | null
+          want_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          listing_id?: string | null
+          owner_id: string
+          owner_last_read_at?: string | null
+          requester_id: string
+          requester_last_read_at?: string | null
+          want_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_message_at?: string | null
+          listing_id?: string | null
+          owner_id?: string
+          owner_last_read_at?: string | null
+          requester_id?: string
+          requester_last_read_at?: string | null
+          want_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_threads_listing_id_fkey"
+            columns: ["listing_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_listings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_requester_id_fkey"
+            columns: ["requester_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_requester_id_fkey"
+            columns: ["requester_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_requester_id_fkey"
+            columns: ["requester_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_threads_want_id_fkey"
+            columns: ["want_id"]
+            isOneToOne: false
+            referencedRelation: "jersey_wants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      jersey_wants: {
+        Row: {
+          city: string | null
+          country: string | null
+          created_at: string
+          id: string
+          league: string | null
+          league_name: string | null
+          note: string | null
+          player_name: string | null
+          size: string | null
+          state: string | null
+          status: Database["public"]["Enums"]["jersey_listing_status"]
+          team_id: string | null
+          team_logo_url: string | null
+          team_name: string | null
+          updated_at: string
+          user_id: string
+          year: number | null
+        }
+        Insert: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          league?: string | null
+          league_name?: string | null
+          note?: string | null
+          player_name?: string | null
+          size?: string | null
+          state?: string | null
+          status?: Database["public"]["Enums"]["jersey_listing_status"]
+          team_id?: string | null
+          team_logo_url?: string | null
+          team_name?: string | null
+          updated_at?: string
+          user_id: string
+          year?: number | null
+        }
+        Update: {
+          city?: string | null
+          country?: string | null
+          created_at?: string
+          id?: string
+          league?: string | null
+          league_name?: string | null
+          note?: string | null
+          player_name?: string | null
+          size?: string | null
+          state?: string | null
+          status?: Database["public"]["Enums"]["jersey_listing_status"]
+          team_id?: string | null
+          team_logo_url?: string | null
+          team_name?: string | null
+          updated_at?: string
+          user_id?: string
+          year?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "jersey_wants_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_wants_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "jersey_wants_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      notification_prefs: {
+        Row: {
+          game_final: boolean
+          game_start: boolean
+          news: boolean
+          push_enabled: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          game_final?: boolean
+          game_start?: boolean
+          news?: boolean
+          push_enabled?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          game_final?: boolean
+          game_start?: boolean
+          news?: boolean
+          push_enabled?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       pb_play_steps: {
         Row: {
@@ -340,6 +1349,13 @@ export type Database = {
             foreignKeyName: "plays_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "plays_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -348,6 +1364,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "plays_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
             referencedColumns: ["id"]
           },
           {
@@ -415,6 +1438,13 @@ export type Database = {
             foreignKeyName: "team_invites_invited_by_fkey"
             columns: ["invited_by"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -465,6 +1495,13 @@ export type Database = {
             foreignKeyName: "team_members_user_id_fkey"
             columns: ["user_id"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "team_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -506,6 +1543,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "teams_owner_id_fkey"
+            columns: ["owner_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "teams_owner_id_fkey"
             columns: ["owner_id"]
@@ -585,6 +1629,13 @@ export type Database = {
             foreignKeyName: "player_content_reviewed_by_fkey"
             columns: ["reviewed_by"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_content_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -599,6 +1650,13 @@ export type Database = {
             foreignKeyName: "player_content_uploaded_by_fkey"
             columns: ["uploaded_by"]
             isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "player_content_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
@@ -607,6 +1665,47 @@ export type Database = {
             columns: ["uploaded_by"]
             isOneToOne: false
             referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      player_content_reports: {
+        Row: {
+          content_id: string
+          created_at: string
+          id: string
+          reason: string
+          reporter_id: string
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["player_content_report_status"]
+        }
+        Insert: {
+          content_id: string
+          created_at?: string
+          id?: string
+          reason: string
+          reporter_id: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["player_content_report_status"]
+        }
+        Update: {
+          content_id?: string
+          created_at?: string
+          id?: string
+          reason?: string
+          reporter_id?: string
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["player_content_report_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "player_content_reports_content_id_fkey"
+            columns: ["content_id"]
+            isOneToOne: false
+            referencedRelation: "player_content"
             referencedColumns: ["id"]
           },
         ]
@@ -1561,6 +2660,42 @@ export type Database = {
         }
         Relationships: []
       }
+      usau_api_coverage: {
+        Row: {
+          checked_at: string
+          id: string
+          live_group_ids: number[]
+          new_event_pages: string[]
+          new_site_rows: number
+          notes: string | null
+          play_site_rows: number
+          source: string
+          total_rows: number
+        }
+        Insert: {
+          checked_at?: string
+          id?: string
+          live_group_ids?: number[]
+          new_event_pages?: string[]
+          new_site_rows: number
+          notes?: string | null
+          play_site_rows: number
+          source: string
+          total_rows: number
+        }
+        Update: {
+          checked_at?: string
+          id?: string
+          live_group_ids?: number[]
+          new_event_pages?: string[]
+          new_site_rows?: number
+          notes?: string | null
+          play_site_rows?: number
+          source?: string
+          total_rows?: number
+        }
+        Relationships: []
+      }
       usau_event_teams: {
         Row: {
           event_id: string
@@ -2331,6 +3466,87 @@ export type Database = {
         }
         Relationships: []
       }
+      utcg_pvp_matches: {
+        Row: {
+          challenger_chem: number
+          challenger_id: string
+          challenger_strength: number
+          created_at: string
+          decided_by: string
+          defender_chem: number
+          defender_id: string
+          defender_strength: number
+          id: string
+          outcome: string
+          pot: number
+        }
+        Insert: {
+          challenger_chem: number
+          challenger_id: string
+          challenger_strength: number
+          created_at?: string
+          decided_by: string
+          defender_chem: number
+          defender_id: string
+          defender_strength: number
+          id?: string
+          outcome: string
+          pot: number
+        }
+        Update: {
+          challenger_chem?: number
+          challenger_id?: string
+          challenger_strength?: number
+          created_at?: string
+          decided_by?: string
+          defender_chem?: number
+          defender_id?: string
+          defender_strength?: number
+          id?: string
+          outcome?: string
+          pot?: number
+        }
+        Relationships: []
+      }
+      utcg_pvp_squads: {
+        Row: {
+          cards: Json
+          chem: number
+          consumed_at: string | null
+          created_at: string
+          formation: string
+          id: string
+          mean_score: number
+          staked_coins: number
+          strength: number
+          user_id: string
+        }
+        Insert: {
+          cards: Json
+          chem: number
+          consumed_at?: string | null
+          created_at?: string
+          formation: string
+          id?: string
+          mean_score: number
+          staked_coins?: number
+          strength: number
+          user_id: string
+        }
+        Update: {
+          cards?: Json
+          chem?: number
+          consumed_at?: string | null
+          created_at?: string
+          formation?: string
+          id?: string
+          mean_score?: number
+          staked_coins?: number
+          strength?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       utcg_trade_offer_cards: {
         Row: {
           id: string
@@ -3018,6 +4234,21 @@ export type Database = {
       }
     }
     Views: {
+      cron_health: {
+        Row: {
+          active: boolean | null
+          failed_24h: number | null
+          failed_7d: number | null
+          jobid: number | null
+          jobname: string | null
+          last_failure_msg: string | null
+          last_run_at: string | null
+          last_success_at: string | null
+          runs_24h: number | null
+          schedule: string | null
+        }
+        Relationships: []
+      }
       profile_contact: {
         Row: {
           email: string | null
@@ -3109,6 +4340,17 @@ export type Database = {
       }
       can_edit_play: { Args: { p_play_id: string }; Returns: boolean }
       can_view_play: { Args: { p_play_id: string }; Returns: boolean }
+      check_cron_health: {
+        Args: { p_window?: string }
+        Returns: {
+          detail: string
+          failure_class: string
+          failures: number
+          jobid: number
+          jobname: string
+        }[]
+      }
+      compact_name_key: { Args: { p: string }; Returns: string }
       create_team_invite: {
         Args: {
           p_email: string
@@ -3120,6 +4362,7 @@ export type Database = {
           token: string
         }[]
       }
+      derive_euf_placements: { Args: { p_event_id?: string }; Returns: number }
       distinct_usau_seasons: {
         Args: never
         Returns: {
@@ -3142,6 +4385,77 @@ export type Database = {
         Returns: boolean
       }
       find_usau_player_by_name: { Args: { p_name: string }; Returns: string }
+      get_euf_club_cross_league: {
+        Args: { p_division: string; p_name: string }
+        Returns: {
+          country_name: string
+          division: string
+          event_name: string
+          event_slug: string
+          league: string
+          placement: number
+          ref_id: string
+          team_name: string
+          year: number
+        }[]
+      }
+      get_euf_club_profile: {
+        Args: { p_division: string; p_name: string }
+        Returns: {
+          club_key: string
+          club_name: string
+          country_name: string
+          division: string
+          event_id: string
+          event_name: string
+          event_slug: string
+          final_placement: number
+          games: number
+          kind: string
+          losses: number
+          scores_against: number
+          scores_for: number
+          team_id: string
+          wins: number
+          year: number
+        }[]
+      }
+      get_euf_player_profile: {
+        Args: { p_name: string }
+        Returns: {
+          assists: number
+          country_name: string
+          division: Database["public"]["Enums"]["euf_division"]
+          event_id: string
+          event_name: string
+          event_slug: string
+          final_placement: number
+          full_name: string
+          games: number
+          goals: number
+          jersey_number: string
+          team_id: string
+          team_name: string
+          total: number
+          year: number
+        }[]
+      }
+      get_euf_standings: {
+        Args: { p_event_slug: string }
+        Returns: {
+          country_name: string
+          division: Database["public"]["Enums"]["euf_division"]
+          final_placement: number
+          games: number
+          losses: number
+          point_diff: number
+          scores_against: number
+          scores_for: number
+          team_id: string
+          team_name: string
+          wins: number
+        }[]
+      }
       get_player_connections: {
         Args: { p_limit?: number; p_name: string }
         Returns: {
@@ -3164,6 +4478,62 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean }
       is_team_editor: { Args: { p_team_id: string }; Returns: boolean }
       is_team_member: { Args: { p_team_id: string }; Returns: boolean }
+      jersey_is_blocked: {
+        Args: { p_a: string; p_b: string }
+        Returns: boolean
+      }
+      jersey_is_thread_participant: {
+        Args: { p_thread: string; p_user: string }
+        Returns: boolean
+      }
+      jersey_text_is_clean: { Args: { p_text: string }; Returns: boolean }
+      jersey_thread_messages_for_admin: {
+        Args: { p_thread: string }
+        Returns: {
+          body: string
+          created_at: string
+          id: string
+          sender_id: string
+        }[]
+      }
+      list_euf_clubs: {
+        Args: never
+        Returns: {
+          appearances: number
+          best_placement: number
+          club_key: string
+          club_name: string
+          country_name: string
+          division: string
+          events: number
+          first_year: number
+          last_year: number
+        }[]
+      }
+      list_euf_top_players: {
+        Args: { lim?: number }
+        Returns: {
+          assists: number
+          country_name: string
+          division: string
+          events: number
+          full_name: string
+          goals: number
+          points: number
+          team_name: string
+        }[]
+      }
+      list_usau_players: {
+        Args: {
+          p_champions?: Json
+          p_division?: string
+          p_level?: string
+          p_limit?: number
+          p_search?: string
+          p_season?: number
+        }
+        Returns: Json
+      }
       name_search_rank: { Args: { name: string; q: string }; Returns: number }
       names_match: { Args: { a: string; b: string }; Returns: boolean }
       normalize_player_name: { Args: { p: string }; Returns: string }
@@ -3179,6 +4549,43 @@ export type Database = {
         Returns: {
           edges: number
           nodes: number
+        }[]
+      }
+      search_euf_events_fuzzy: {
+        Args: { lim?: number; q: string }
+        Returns: {
+          id: string
+          kind: string
+          location: string
+          name: string
+          score: number
+          slug: string
+          year: number
+        }[]
+      }
+      search_euf_players_fuzzy: {
+        Args: { lim?: number; q: string }
+        Returns: {
+          country_name: string
+          event_name: string
+          event_slug: string
+          full_name: string
+          score: number
+          team_id: string
+          team_name: string
+        }[]
+      }
+      search_euf_teams_fuzzy: {
+        Args: { lim?: number; q: string }
+        Returns: {
+          country_name: string
+          division: string
+          event_name: string
+          event_slug: string
+          id: string
+          name: string
+          score: number
+          year: number
         }[]
       }
       search_pul_players_fuzzy: {
@@ -3465,6 +4872,11 @@ export type Database = {
           w_star: number
         }[]
       }
+      utcg_pvp_cancel: { Args: never; Returns: Json }
+      utcg_pvp_enter: {
+        Args: { p_cards: Json; p_formation: string }
+        Returns: Json
+      }
       utcg_quicksell: {
         Args: {
           p_player_id: string
@@ -3500,9 +4912,33 @@ export type Database = {
       utcg_ufa_division: { Args: { slug: string }; Returns: string }
     }
     Enums: {
+      euf_division: "Open" | "Women's" | "Mixed"
+      euf_event_kind:
+        | "eucf"
+        | "e2cf"
+        | "elite_invite"
+        | "spring_tour"
+        | "summer_tour"
+        | "regional"
+        | "other"
+      euf_game_stage:
+        | "pool"
+        | "crossover"
+        | "bracket"
+        | "quarterfinal"
+        | "semifinal"
+        | "final"
+        | "placement"
+        | "other"
+      euf_game_status: "scheduled" | "completed" | "forfeit" | "cancelled"
       feedback_status: "new" | "read" | "resolved"
+      jersey_condition: "new" | "excellent" | "good" | "worn"
+      jersey_listing_kind: "trade" | "sell" | "both"
+      jersey_listing_status: "active" | "completed" | "withdrawn"
+      jersey_report_status: "new" | "reviewed" | "actioned" | "dismissed"
       pb_team_role: "owner" | "coach" | "member"
       player_content_kind: "image" | "video" | "video_link" | "link"
+      player_content_report_status: "new" | "resolved"
       player_content_status: "pending" | "approved" | "rejected"
       usau_competition_level:
         | "CLUB"
@@ -3685,9 +5121,35 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      euf_division: ["Open", "Women's", "Mixed"],
+      euf_event_kind: [
+        "eucf",
+        "e2cf",
+        "elite_invite",
+        "spring_tour",
+        "summer_tour",
+        "regional",
+        "other",
+      ],
+      euf_game_stage: [
+        "pool",
+        "crossover",
+        "bracket",
+        "quarterfinal",
+        "semifinal",
+        "final",
+        "placement",
+        "other",
+      ],
+      euf_game_status: ["scheduled", "completed", "forfeit", "cancelled"],
       feedback_status: ["new", "read", "resolved"],
+      jersey_condition: ["new", "excellent", "good", "worn"],
+      jersey_listing_kind: ["trade", "sell", "both"],
+      jersey_listing_status: ["active", "completed", "withdrawn"],
+      jersey_report_status: ["new", "reviewed", "actioned", "dismissed"],
       pb_team_role: ["owner", "coach", "member"],
       player_content_kind: ["image", "video", "video_link", "link"],
+      player_content_report_status: ["new", "resolved"],
       player_content_status: ["pending", "approved", "rejected"],
       usau_competition_level: [
         "CLUB",

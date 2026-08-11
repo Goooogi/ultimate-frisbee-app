@@ -14,18 +14,22 @@ import { AdminContentQueue } from '@/components/admin/admin-content-queue';
 import { AdminFeedbackList } from '@/components/admin/admin-feedback-list';
 import { AdminRolesList } from '@/components/admin/admin-roles-list';
 import { AdminJerseyReports } from '@/components/admin/admin-jersey-reports';
+import { AdminPlayerContentReports } from '@/components/admin/admin-player-content-reports';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import type { FeedbackItem } from '@/lib/feedback/server';
 import type { AdminUserRow } from '@/lib/admin/roles';
 import type { JerseyReportItem } from '@/lib/jerseys/reports-server';
+import type { PlayerContentReportItem } from '@/lib/player-content/reports-server';
 
-export type AdminTab = 'content' | 'feedback' | 'jerseys' | 'roles';
+export type AdminTab = 'content' | 'feedback' | 'jerseys' | 'reports' | 'roles';
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: 'content', label: 'Content' },
   { id: 'feedback', label: 'Feedback' },
   // Jersey REPORTS only — listings publish instantly and never queue here.
-  { id: 'jerseys', label: 'Reports' },
+  { id: 'jerseys', label: 'Jersey reports' },
+  // Reports against already-approved player_content (photos/videos/links).
+  { id: 'reports', label: 'Content reports' },
   { id: 'roles', label: 'Roles' },
 ];
 
@@ -36,24 +40,27 @@ interface AdminPortalProps {
   newFeedback: number;
   jerseyReports: JerseyReportItem[];
   openJerseyReports: number;
+  contentReports: PlayerContentReportItem[];
+  openContentReports: number;
   users: AdminUserRow[];
   currentUserId: string;
   initialTab: AdminTab;
 }
 
-export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyReports, openJerseyReports, users, currentUserId, initialTab }: AdminPortalProps) {
+export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyReports, openJerseyReports, contentReports, openContentReports, users, currentUserId, initialTab }: AdminPortalProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const rawTab = searchParams.get('tab');
   const activeTab: AdminTab =
-    rawTab === 'feedback' ? 'feedback' : rawTab === 'jerseys' ? 'jerseys' : rawTab === 'roles' ? 'roles' : rawTab === 'content' ? 'content' : initialTab;
+    rawTab === 'feedback' ? 'feedback' : rawTab === 'jerseys' ? 'jerseys' : rawTab === 'reports' ? 'reports' : rawTab === 'roles' ? 'roles' : rawTab === 'content' ? 'content' : initialTab;
 
   const counts: Record<AdminTab, number> = {
     content: pending.length,
     feedback: newFeedback,
     jerseys: openJerseyReports,
+    reports: openContentReports,
     roles: users.length,
   };
 
@@ -108,6 +115,13 @@ export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyRepo
         <section role="tabpanel" id="admin-panel-jerseys" aria-label="Jersey reports">
           <h2 className="sr-only">Jersey reports</h2>
           <AdminJerseyReports reports={jerseyReports} />
+        </section>
+      )}
+
+      {activeTab === 'reports' && (
+        <section role="tabpanel" id="admin-panel-reports" aria-label="Content reports">
+          <h2 className="sr-only">Content reports</h2>
+          <AdminPlayerContentReports reports={contentReports} />
         </section>
       )}
 

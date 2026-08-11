@@ -51,7 +51,11 @@ import { StandoutsCarousel } from '@/components/home/standouts-carousel';
 import { getStandoutPerformances } from '@/lib/home/standouts';
 import { SiteFooter } from '@/components/site-footer';
 
-export const revalidate = 60;
+// 5 min: home data (standouts/scores blocks) only moves when crons ingest, and
+// at 60s the standouts award scan (a paginated full-season stat read) was
+// recomputing every minute under crawler traffic. See Supabase Load Diagnosis
+// 2026-08-11 (vault).
+export const revalidate = 300;
 
 export const metadata: Metadata = {
   title: 'The Layout · Ultimate Frisbee',

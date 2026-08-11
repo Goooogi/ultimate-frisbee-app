@@ -20,11 +20,13 @@ export interface AdminReviewCounts {
   content: number;
   /** feedback rows with status='new'. */
   feedback: number;
-  /** content + feedback — the single number shown on the avatar badge. */
+  /** player_content_reports rows with status='new'. */
+  reports: number;
+  /** content + feedback + reports — the single number shown on the avatar badge. */
   total: number;
 }
 
-const ZERO: AdminReviewCounts = { content: 0, feedback: 0, total: 0 };
+const ZERO: AdminReviewCounts = { content: 0, feedback: 0, reports: 0, total: 0 };
 
 /** Combined admin review counts (pending content + new feedback). */
 export function useAdminReviewCounts(isAdmin: boolean): AdminReviewCounts {
@@ -48,7 +50,7 @@ export function useAdminReviewCounts(isAdmin: boolean): AdminReviewCounts {
       const supabase = createClient();
 
       async function refresh() {
-        const [contentRes, feedbackRes] = await Promise.all([
+        const [contentRes, feedbackRes, reportsRes] = await Promise.all([
           supabase
             .from('player_content')
             .select('id', { count: 'exact', head: true })
@@ -57,11 +59,16 @@ export function useAdminReviewCounts(isAdmin: boolean): AdminReviewCounts {
             .from('feedback')
             .select('id', { count: 'exact', head: true })
             .eq('status', 'new'),
+          supabase
+            .from('player_content_reports')
+            .select('id', { count: 'exact', head: true })
+            .eq('status', 'new'),
         ]);
         if (cancelled) return;
         const content = contentRes.error ? 0 : contentRes.count ?? 0;
         const feedback = feedbackRes.error ? 0 : feedbackRes.count ?? 0;
-        setCounts({ content, feedback, total: content + feedback });
+        const reports = reportsRes.error ? 0 : reportsRes.count ?? 0;
+        setCounts({ content, feedback, reports, total: content + feedback + reports });
       }
 
       refresh();

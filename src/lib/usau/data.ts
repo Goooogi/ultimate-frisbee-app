@@ -140,12 +140,19 @@ function isChampionshipBracketName(name: string | null | undefined): boolean {
   const b = bracketTailLower(name);
   if (!b) return false;
   if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
+  // A bare "1st" section IS the championship bracket (Cooler Classic 37 names
+  // its winner's bracket just "1st") — exact-match it before the ordinal
+  // reject, which exists for SIDE brackets ("3rd Place", "21st").
+  if (b === '1st') return true;
   // Reject placement side brackets (any ordinal) + consolation.
   if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
   if (b.includes('consolation') || b.includes('placement')) return false;
   if (b === 'finals') return true;
   if (/(^|\s)championship(\s+(bracket|final|game))?$/.test(b)) return true;
   if (b === 'bracket' || b === 'bracket play' || b === 'sunday bracket') return true;
+  // Novelty-named championship section (Portland Kleinman's "Champs", beside
+  // its "Fiv-als"/"Ninals" placement siblings).
+  if (b === 'champs') return true;
   return false;
 }
 
@@ -164,32 +171,84 @@ async function resolveEventWinners(
   if (eventIds.length === 0) return out;
 
   // ── Bracket champions: latest decided championship final per event ──────
-  const { data: finals } = await db
-    .from('usau_games')
-    .select(
-      'event_id, bracket_name, scheduled_at, score_a, score_b, ' +
-        'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
-        'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
-    )
-    .in('event_id', eventIds)
-    .eq('round', 'final')
-    .eq('status', 'final');
+  // Rounds beyond 'final' are fetched because scrapes historically misfiled
+  // some championship finals as 'other'/'placement' (HoDown Showdown 2026's
+  // final was h3="Championship" h4="Championship" → 'other'; Cooler Classic's
+  // bare-ordinal "1st" section → 'placement'). For those groups the final is
+  // RECOVERED the same way UsauBracketTree does: the decided non-semi game
+  // whose two teams are both semi winners. A plain "latest decided game" pick
+  // would be wrong — when a final is cancelled (HoDown Men) it would crown a
+  // semi winner.
+  // Two PostgREST limits apply here: a season-wide id list overflows the GET
+  // URL (~500 uuids kills the fetch outright, error swallowed), and a single
+  // response caps at 1000 rows — especially now that the 'other' round drags
+  // in mislabeled pool games. Chunk the ids and page each chunk.
+  const fetchGamesByEvent = async (
+    ids: string[],
+    select: string,
+    rounds?: ('final' | 'semi' | 'placement' | 'other')[],
+  ): Promise<Record<string, unknown>[]> => {
+    const CHUNK = 100;
+    const PAGE = 1000;
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const chunk = ids.slice(i, i + CHUNK);
+      for (let from = 0; ; from += PAGE) {
+        let q = db
+          .from('usau_games')
+          .select(select)
+          .in('event_id', chunk)
+          .eq('status', 'final')
+          .range(from, from + PAGE - 1);
+        if (rounds) q = q.in('round', rounds);
+        const { data: page } = await q;
+        const got = (page ?? []) as unknown as Record<string, unknown>[];
+        rows.push(...got);
+        if (got.length < PAGE) break;
+      }
+    }
+    return rows;
+  };
+
+  const finals = await fetchGamesByEvent(
+    eventIds,
+    'event_id, bracket_name, round, scheduled_at, score_a, score_b, ' +
+      'team_a_id, team_b_id, ' +
+      'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
+      'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
+    ['final', 'semi', 'placement', 'other'],
+  );
 
   type FinalRow = {
     event_id: string;
     bracket_name: string | null;
+    round: string;
     scheduled_at: string | null;
     score_a: number | null;
     score_b: number | null;
+    team_a_id: string | null;
+    team_b_id: string | null;
     team_a: { name: string } | null;
     team_b: { name: string } | null;
   };
-  const bestFinalAt = new Map<string, string>();
-  for (const r of (finals ?? []) as unknown as FinalRow[]) {
+  const decided = (r: FinalRow) =>
+    r.score_a != null && r.score_b != null && r.score_a !== r.score_b;
+
+  // Group championship-bracket games per (event, bracket) — a combined masters
+  // event has one championship bracket per division ("GM Women · Championship").
+  const champGroups = new Map<string, FinalRow[]>();
+  for (const r of finals as unknown as FinalRow[]) {
     if (!isChampionshipBracketName(r.bracket_name)) continue;
-    if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
-    const winnerName = (r.score_a > r.score_b ? r.team_a?.name : r.team_b?.name) ?? null;
-    if (!winnerName) continue;
+    const key = `${r.event_id}|${r.bracket_name ?? ''}`;
+    const list = champGroups.get(key);
+    if (list) list.push(r);
+    else champGroups.set(key, [r]);
+  }
+
+  const bestFinalAt = new Map<string, string>();
+  const consider = (r: FinalRow): void => {
+    const winnerName = (r.score_a! > r.score_b! ? r.team_a?.name : r.team_b?.name) ?? null;
+    if (!winnerName) return;
     // Keep the LATEST final per event (a combined event has one per division;
     // one line on the card — detail page shows all).
     const at = r.scheduled_at ?? '';
@@ -198,73 +257,124 @@ async function resolveEventWinners(
       bestFinalAt.set(r.event_id, at);
       out.set(r.event_id, { name: winnerName, kind: 'champion' });
     }
+  };
+  for (const games of champGroups.values()) {
+    const tagged = games.filter((g) => g.round === 'final' && decided(g));
+    if (tagged.length > 0) {
+      for (const g of tagged) consider(g);
+      continue;
+    }
+    // Recovery: both teams of the candidate must have WON a semi in this group.
+    const semiWinners = new Set(
+      games
+        .filter((g) => g.round === 'semi' && decided(g))
+        .map((g) => (g.score_a! > g.score_b! ? g.team_a_id : g.team_b_id))
+        .filter(Boolean),
+    );
+    if (semiWinners.size < 2) continue;
+    const recovered = games.find(
+      (g) =>
+        g.round !== 'semi' &&
+        decided(g) &&
+        !!g.team_a_id &&
+        !!g.team_b_id &&
+        semiWinners.has(g.team_a_id) &&
+        semiWinners.has(g.team_b_id),
+    );
+    if (recovered) consider(recovered);
   }
 
   // ── Pool leaders: only for events with NO bracket champion ──────────────
   const poolOnly = eventIds.filter((id) => !out.has(id));
   if (poolOnly.length > 0) {
-    const { data: poolRows } = await db
-      .from('usau_games')
-      .select(
-        'event_id, bracket_name, score_a, score_b, status, ' +
-          'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
-          'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
-      )
-      .in('event_id', poolOnly)
-      .eq('status', 'final');
+    const poolRows = await fetchGamesByEvent(
+      poolOnly,
+      'event_id, bracket_name, round, score_a, score_b, status, ' +
+        'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
+        'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
+    );
 
     type PoolRow = {
       event_id: string;
       bracket_name: string | null;
+      round: string;
       score_a: number | null;
       score_b: number | null;
       team_a: { name: string } | null;
       team_b: { name: string } | null;
     };
-    // Per event: normalized-name W/L, deduped by matchup+score (dual-pipeline).
-    const perEvent = new Map<
-      string,
-      { rec: Map<string, { name: string; w: number; l: number }>; seen: Set<string> }
-    >();
-    for (const r of (poolRows ?? []) as unknown as PoolRow[]) {
-      const tail = bracketTailLower(r.bracket_name);
-      if (!tail.startsWith('pool') || tail.includes('crossover')) continue;
-      if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
-      const an = r.team_a?.name?.trim();
-      const bn = r.team_b?.name?.trim();
-      if (!an || !bn) continue;
-      let e = perEvent.get(r.event_id);
-      if (!e) {
-        e = { rec: new Map(), seen: new Set() };
-        perEvent.set(r.event_id, e);
-      }
+    type Tally = { rec: Map<string, { name: string; w: number; l: number }>; seen: Set<string> };
+    const tallyGame = (
+      t: Tally,
+      an: string,
+      bn: string,
+      scoreA: number,
+      scoreB: number,
+    ): void => {
       const ka = an.toLowerCase();
       const kb = bn.toLowerCase();
       const pair = [ka, kb].sort();
-      const sc = [r.score_a, r.score_b].sort((x, y) => x - y);
+      const sc = [scoreA, scoreB].sort((x, y) => x - y);
       const gkey = `${pair[0]}|${pair[1]}|${sc[0]}|${sc[1]}`;
-      if (e.seen.has(gkey)) continue;
-      e.seen.add(gkey);
-      const aWon = r.score_a > r.score_b;
+      if (t.seen.has(gkey)) return;
+      t.seen.add(gkey);
+      const aWon = scoreA > scoreB;
       const wk = aWon ? ka : kb;
       const lk = aWon ? kb : ka;
       const wn = aWon ? an : bn;
       const ln = aWon ? bn : an;
-      const rw = e.rec.get(wk) ?? { name: wn, w: 0, l: 0 };
+      const rw = t.rec.get(wk) ?? { name: wn, w: 0, l: 0 };
       rw.w += 1;
-      e.rec.set(wk, rw);
-      const rl = e.rec.get(lk) ?? { name: ln, w: 0, l: 0 };
+      t.rec.set(wk, rw);
+      const rl = t.rec.get(lk) ?? { name: ln, w: 0, l: 0 };
       rl.l += 1;
-      e.rec.set(lk, rl);
+      t.rec.set(lk, rl);
+    };
+    // Per event: normalized-name W/L, deduped by matchup+score (dual-pipeline).
+    // `all` tallies EVERY decided game and `structured` flags pool/tree
+    // structure — together they back the unstructured-event fallback below.
+    const perEvent = new Map<string, { pool: Tally; all: Tally; structured: boolean }>();
+    const TREE_STRUCTURE_ROUNDS = ['prequarter', 'quarter', 'semi', 'final'];
+    for (const r of poolRows as unknown as PoolRow[]) {
+      let e = perEvent.get(r.event_id);
+      if (!e) {
+        e = {
+          pool: { rec: new Map(), seen: new Set() },
+          all: { rec: new Map(), seen: new Set() },
+          structured: false,
+        };
+        perEvent.set(r.event_id, e);
+      }
+      const tail = bracketTailLower(r.bracket_name);
+      const isPool = tail.startsWith('pool') && !tail.includes('crossover');
+      if (isPool || TREE_STRUCTURE_ROUNDS.includes(r.round)) e.structured = true;
+      if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
+      const an = r.team_a?.name?.trim();
+      const bn = r.team_b?.name?.trim();
+      if (!an || !bn) continue;
+      tallyGame(e.all, an, bn, r.score_a, r.score_b);
+      if (isPool) tallyGame(e.pool, an, bn, r.score_a, r.score_b);
     }
-    for (const [eventId, { rec }] of perEvent) {
-      const standings = Array.from(rec.values()).sort((a, b) => b.w - a.w || a.l - b.l);
-      if (standings.length === 0) continue;
+    for (const [eventId, { pool, all, structured }] of perEvent) {
+      const standings = Array.from(pool.rec.values()).sort((a, b) => b.w - a.w || a.l - b.l);
       const top = standings[0];
-      if (top.w === 0 && top.l === 0) continue; // no games played
-      const tied = standings.filter((s) => s.w === top.w && s.l === top.l).length;
-      if (tied > 1) continue; // ambiguous — no leader
-      out.set(eventId, { name: top.name, kind: 'pool-leader' });
+      if (top && !(top.w === 0 && top.l === 0)) {
+        const tied = standings.filter((s) => s.w === top.w && s.l === top.l).length;
+        if (tied === 1) out.set(eventId, { name: top.name, kind: 'pool-leader' });
+        continue; // pools exist — ambiguous pools stay winner-less
+      }
+      // Unstructured-event fallback (Garbage Pla(c)e's Extra Fancy Tournament:
+      // two novelty-named single-game "brackets", no pools, no tree rounds): a
+      // team that won EVERY decided game, uniquely, is the winner. Gated to
+      // events with no pool/bracket structure so a cancelled real final can
+      // never be papered over by an undefeated run.
+      if (structured) continue;
+      const allStandings = Array.from(all.rec.values()).sort((a, b) => b.w - a.w || a.l - b.l);
+      const best = allStandings[0];
+      if (!best || best.w === 0 || best.l > 0) continue;
+      const undefeated = allStandings.filter((s) => s.w > 0 && s.l === 0).length;
+      if (undefeated > 1) continue; // two unbeaten teams — ambiguous
+      out.set(eventId, { name: best.name, kind: 'champion' });
     }
   }
 
@@ -2150,175 +2260,38 @@ export async function listUsauPlayers(opts?: {
   const limit = opts?.limit ?? 60;
   const db = await supabase();
 
-  // Pull rosters with their team + season. Two strategies:
-  //   1. With a search term: narrow at the SQL layer by first finding
-  //      matching player_ids (usau_players ilike), then only fetching
-  //      THEIR rosters. Cheap even on a 30k-row table — typical search
-  //      returns < 100 player_ids and < 500 rosters.
-  //   2. Without search: scan rosters in pages of 1000 (Supabase ceiling)
-  //      so a > 1k roster table doesn't silently drop entries.
-  type RosterRow = {
-    player_id: string;
-    season: number;
-    team_id: string;
-    usau_players: { display_name: string } | null;
-    usau_teams: { name: string; gender_division: string | null } | null;
-  };
-  let rows: RosterRow[] = [];
-
-  if (opts?.search && opts.search.trim().length >= 2) {
-    const needle = opts.search.trim();
-    const pattern = `%${needle.replace(/[%_]/g, '\\$&')}%`;
-    // Step 1: matching player_ids. Supabase caps each select at 1000.
-    const { data: matches, error: pErr } = await db
-      .from('usau_players')
-      .select('id')
-      .ilike('display_name', pattern)
-      .limit(1000);
-    if (pErr) throw pErr;
-    const matchIds = (matches ?? []).map((m) => m.id);
-    if (matchIds.length === 0) return [];
-
-    // Step 2: rosters for those player_ids. Page in 1000 chunks (Supabase
-    // ".in()" has a similar ceiling).
-    const CHUNK = 500;
-    for (let i = 0; i < matchIds.length; i += CHUNK) {
-      const slice = matchIds.slice(i, i + CHUNK);
-      let q = db
-        .from('usau_rosters')
-        .select(
-          'player_id, season, team_id, usau_players(display_name), usau_teams!inner(name, gender_division)',
-        )
-        .in('player_id', slice);
-      if (opts?.season != null) q = q.eq('season', opts.season);
-      if (opts?.genderDivision) {
-        q = q.eq('usau_teams.gender_division', opts.genderDivision);
-      }
-      if (opts?.competitionLevel) {
-        q = q.eq('usau_teams.competition_level', opts.competitionLevel);
-      }
-      const { data, error } = await q;
-      if (error) throw error;
-      rows = rows.concat((data ?? []) as unknown as RosterRow[]);
-    }
-  } else {
-    const PAGE = 1000;
-    let from = 0;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      let q = db
-        .from('usau_rosters')
-        .select(
-          'player_id, season, team_id, usau_players(display_name), usau_teams!inner(name, gender_division)',
-        )
-        .range(from, from + PAGE - 1);
-      if (opts?.season != null) q = q.eq('season', opts.season);
-      if (opts?.genderDivision) {
-        q = q.eq('usau_teams.gender_division', opts.genderDivision);
-      }
-      if (opts?.competitionLevel) {
-        q = q.eq('usau_teams.competition_level', opts.competitionLevel);
-      }
-      const { data, error } = await q;
-      if (error) throw error;
-      const page = (data ?? []) as unknown as RosterRow[];
-      rows = rows.concat(page);
-      if (page.length < PAGE) break;
-      from += PAGE;
-      if (from > 200_000) break;
-    }
-  }
-
-  type Row = RosterRow;
-
-  // Fetch champion map once so we can tag list rows in the same loop.
-  // The champion source is Club Nationals, so only tag when we're listing
-  // Club (or unfiltered) players — a Masters/College team that happens to
-  // share a club champion's name must not inherit the badge.
+  // Aggregation lives in the list_usau_players RPC (one indexed SQL pass over
+  // rosters⋈teams⋈players). The old client-side path paged the ENTIRE join
+  // through PostgREST in 1000-row chunks per list view — the heaviest
+  // table-read load on the DB (2026-08-11 diagnosis). Champion logic stays
+  // here: the RPC only tags championYears from the (season, division, teamId)
+  // triples we pass, and only in Club (or unfiltered) scope — a Masters/College
+  // team that happens to share a club champion's name must not inherit the badge.
   const isClubScope = !opts?.competitionLevel || opts.competitionLevel === 'CLUB';
   const championsBySeason = isClubScope
     ? await getUsauClubChampionsBySeason().catch(
         () => new Map<number, Map<string, UsauChampion>>(),
       )
     : new Map<number, Map<string, UsauChampion>>();
-
-  // Group by lowercased name → aggregate stats across player_id dupes.
-  interface Agg {
-    anchorId: string;
-    anchorCount: number;
-    displayName: string;
-    latestSeason: number | null;
-    latestTeam: string | null;
-    latestTeamId: string | null;
-    appearances: number;
-    perPlayerCount: Map<string, number>;
-    championYears: Set<number>;
-  }
-  const byName = new Map<string, Agg>();
-  for (const r of (rows ?? []) as unknown as Row[]) {
-    const name = r.usau_players?.display_name;
-    if (!name) continue;
-    const key = name.toLowerCase();
-    // Look up the (season, division) champion — same Nationals event
-    // has separate Men/Women/Mixed finals, so we need both keys.
-    const div = r.usau_teams?.gender_division ?? null;
-    const champ = div ? championsBySeason.get(r.season)?.get(div) : null;
-    const isChampStint = !!champ && champ.teamId === r.team_id;
-    const existing = byName.get(key);
-    if (!existing) {
-      const ppc = new Map<string, number>([[r.player_id, 1]]);
-      const cy = new Set<number>();
-      if (isChampStint) cy.add(r.season);
-      byName.set(key, {
-        anchorId: r.player_id,
-        anchorCount: 1,
-        displayName: name,
-        latestSeason: r.season,
-        latestTeam: r.usau_teams?.name ?? null,
-        latestTeamId: r.team_id,
-        appearances: 1,
-        perPlayerCount: ppc,
-        championYears: cy,
-      });
-    } else {
-      const ppc = existing.perPlayerCount;
-      const next = (ppc.get(r.player_id) ?? 0) + 1;
-      ppc.set(r.player_id, next);
-      if (next > existing.anchorCount) {
-        existing.anchorCount = next;
-        existing.anchorId = r.player_id;
-      }
-      if (existing.latestSeason == null || r.season > existing.latestSeason) {
-        existing.latestSeason = r.season;
-        existing.latestTeam = r.usau_teams?.name ?? null;
-        existing.latestTeamId = r.team_id;
-      }
-      existing.appearances += 1;
-      if (isChampStint) existing.championYears.add(r.season);
+  const champions: Array<{ season: number; division: string; team_id: string }> = [];
+  for (const [season, byDivision] of championsBySeason) {
+    for (const [division, champ] of byDivision) {
+      champions.push({ season, division, team_id: champ.teamId });
     }
   }
 
-  // Note: when opts.search was provided, the SQL pass above already
-  // filtered rosters to just matching player_ids, so no JS filter needed.
-  const entries = Array.from(byName.values());
-
-  entries.sort((a, b) => {
-    // Prefer most-recently-active first, then by total appearances.
-    const sa = a.latestSeason ?? 0;
-    const sb = b.latestSeason ?? 0;
-    if (sa !== sb) return sb - sa;
-    return b.appearances - a.appearances;
+  const search = opts?.search?.trim();
+  // Omitted (undefined) params fall through to the RPC's SQL defaults (null).
+  const { data, error } = await db.rpc('list_usau_players', {
+    p_limit: limit,
+    p_season: opts?.season ?? undefined,
+    p_division: opts?.genderDivision ?? undefined,
+    p_level: opts?.competitionLevel ?? undefined,
+    p_search: search && search.length >= 2 ? search : undefined,
+    p_champions: champions,
   });
-
-  return entries.slice(0, limit).map((e) => ({
-    id: e.anchorId,
-    displayName: e.displayName,
-    latestTeam: e.latestTeam,
-    latestTeamId: e.latestTeamId,
-    latestSeason: e.latestSeason,
-    appearances: e.appearances,
-    championYears: Array.from(e.championYears).sort((a, b) => b - a),
-  }));
+  if (error) throw error;
+  return (data ?? []) as unknown as UsauPlayerListRow[];
 }
 
 // ─── Search ────────────────────────────────────────────────────────────

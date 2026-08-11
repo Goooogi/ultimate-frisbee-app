@@ -22,6 +22,7 @@ import type {
 } from '@/lib/unified-player';
 import { teamMetaByAbbr, teamCityForYear, teamLogoForYear, teamNameForYear } from '@/lib/ufa/teams';
 import { PageShell } from '@/components/page-shell';
+import { FromAwareCrumbs } from '@/components/players/from-aware-crumbs';
 import { TeamLogo } from '@/components/team-logo';
 import { STICKY_NAMEONLY_HEAD, STICKY_NAMEONLY_BODY } from '@/components/sticky-cols';
 import { ChampionBanner } from '@/components/usau/usau-player-profile';
@@ -43,24 +44,9 @@ interface Props {
   content: PlayerContentItem[];
   /** Second-hop "Connections" (teammates of teammates). May be empty. */
   connections: PlayerConnection[];
-  // Which league the user navigated from (via ?from=), so "< Players" returns
-  // them there. Undefined → root /players (UFA). See PLAYERS_LIST_HREF.
-  fromLeague?: string;
 }
 
-// Map an originating-league code to its players-list URL. UFA is the root app,
-// so it (and any unknown value) falls back to /players. All non-UFA leagues use
-// the shared /players page with a ?league= filter.
-const PLAYERS_LIST_HREF: Record<string, string> = {
-  ufa: '/players',
-  usau: '/players?league=usau',
-  pul: '/players?league=pul',
-  wul: '/players?league=wul',
-  wfdf: '/wfdf/players',
-  euf: '/euf/players',
-};
-
-export function UnifiedProfile({ profile, content, connections, fromLeague }: Props) {
+export function UnifiedProfile({ profile, content, connections }: Props) {
   const { career, years } = profile;
   const eyebrow = buildEyebrow(profile);
 
@@ -70,11 +56,12 @@ export function UnifiedProfile({ profile, content, connections, fromLeague }: Pr
   // wins.)
   const topNavSlot = <span aria-hidden="true" />;
 
-  const playersHref =
-    (fromLeague && PLAYERS_LIST_HREF[fromLeague]) || '/players';
+  // Default crumbs point at the root /players list; FromAwareCrumbs patches the
+  // "Players" href client-side from ?from= so the page can stay statically
+  // cached (reading searchParams server-side would force dynamic rendering).
   const crumbs = [
     { label: 'Home', href: '/' },
-    { label: 'Players', href: playersHref },
+    { label: 'Players', href: '/players' },
     { label: profile.displayName },
   ];
 
@@ -93,7 +80,7 @@ export function UnifiedProfile({ profile, content, connections, fromLeague }: Pr
       stickyName={profile.displayName}
       eyebrow={eyebrow}
       topNavSlot={topNavSlot}
-      breadcrumbs={crumbs}
+      breadcrumbsSlot={<FromAwareCrumbs crumbs={crumbs} />}
       controls={headshot}
     >
       {/* Championship banners — one per league when applicable. */}

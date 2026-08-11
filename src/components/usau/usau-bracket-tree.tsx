@@ -88,6 +88,23 @@ export function bracketGroupPrefix(name: string | null | undefined): string {
   return i >= 0 ? name.slice(0, i).trim() : '';
 }
 
+/**
+ * Renders a single already-filtered game list (one placement bracket, e.g.
+ * "9th Place Bracket") as a bracket tree, with no heading of its own — the
+ * caller (usau-event-detail's Bracket tab) supplies the label. Reuses the
+ * same column-building + positioning as the championship tree so placement
+ * brackets that are genuinely multi-round get the identical tree treatment.
+ */
+export function UsauPlacementBracketTree({
+  games,
+  venueState,
+}: {
+  games: Game[];
+  venueState?: string | null;
+}) {
+  return <BracketTreeGroup games={games} label={null} venueState={venueState ?? null} />;
+}
+
 export function UsauBracketTree({ games, venueState, includePlacement = false }: Props) {
   // ── Which brackets this tree renders ──────────────────────────────────
   // Tournaments run parallel placement brackets (5th, 9th, 13th …) that decide

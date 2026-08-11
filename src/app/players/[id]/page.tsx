@@ -16,27 +16,38 @@ import { DivisionSync } from '@/components/players/division-sync';
 import { getApprovedContentForPlayers } from '@/lib/player-content/server';
 import { getPlayerConnections } from '@/lib/players/connections';
 
-// Content rows are user-uploaded and approved on demand — they can change
-// any time without an underlying data refresh. Drop the page-level revalidate
-// so each request re-fetches; the upstream UFA/USAU calls remain cached via
-// their own TTL config.
-export const dynamic = 'force-dynamic';
+// ISR: profile data changes only when crons ingest, and user content is
+// approved on a human timescale — a 10-min-stale page is fine. This page is
+// the app's biggest crawler surface, and rendering it per-request ran the
+// ~1s get_player_profile RPC on every hit (pegging DB CPU). The ?from=
+// breadcrumb param is handled client-side (FromAwareCrumbs) so nothing here
+// opts the route back into dynamic rendering.
+export const revalidate = 600;
+
+// Empty list + dynamicParams (default true) = SSG mode with every path
+// generated on first request, then served from the full-route cache for the
+// revalidate window. Without this export the route stays request-rendered and
+// the revalidate above never engages.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 interface Props {
   params: { id: string };
-  // `from` records which league's list/feed the user arrived from, so the
-  // "< Players" breadcrumb returns them to that league rather than always
-  // defaulting to the UFA (root) players list. Absent → root /players.
-  searchParams: { from?: string };
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
   if (!profile) return { title: 'Player not found · The Layout' };
-  return { title: `${profile.displayName} · The Layout` };
+  return {
+    title: `${profile.displayName} · The Layout`,
+    // Canonical without ?from= so crawlers collapse the league-suffixed
+    // variants into one page instead of crawling each as a duplicate.
+    alternates: { canonical: `/players/${params.id}` },
+  };
 }
 
-export default async function PlayerProfilePage({ params, searchParams }: Props) {
+export default async function PlayerProfilePage({ params }: Props) {
   const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
   if (!profile) notFound();
 
@@ -55,12 +66,7 @@ export default async function PlayerProfilePage({ params, searchParams }: Props)
   return (
     <>
       <DivisionSync division={profile.mostRecentUsauDivision} />
-      <UnifiedProfile
-        profile={profile}
-        content={content}
-        connections={connections}
-        fromLeague={searchParams.from}
-      />
+      <UnifiedProfile profile={profile} content={content} connections={connections} />
     </>
   );
 }

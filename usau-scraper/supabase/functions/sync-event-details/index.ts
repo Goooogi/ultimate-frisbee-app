@@ -140,12 +140,16 @@ function classifyRound(h4Label: string | null, h3Label: string | null): GameRoun
     h3.includes('1st place') ||
     h3.includes('first place') ||
     h3.includes('bracket play') ||
+    h3 === '1st' ||        // bare-ordinal sections (Cooler Classic 37: "1st",
+    h3 === 'first' ||      // "5th", "9th" — "1st" IS the championship bracket)
     h3 === '';
   const isChampRound =
     h4.includes('1st place') ||
     h4.includes('first place') ||
     h4.includes('final') ||
-    h4 === '1st';
+    h4.startsWith('champ') ||      // "Championship" (HoDown 2026), "Champs" (Vacationland 2026 Men)
+    h4 === '1st' ||
+    (h4 !== '' && h4 === h3);      // deciding game repeats its section label verbatim
   if (isChampSection && isChampRound) {
     return 'final';
   }
@@ -162,6 +166,13 @@ function classifyRound(h4Label: string | null, h3Label: string | null): GameRoun
   ) {
     return 'placement';
   }
+
+  // The deciding game of a NON-championship bracket section also repeats the
+  // section label as its round (h4 === h3) even when the name carries no
+  // ordinal ("Fiv-als" / "Ninals" — Portland Kleinman 2026). That's the
+  // bracket's placement final; without this it filed as 'other' and vanished
+  // from the placement view.
+  if (h4 !== '' && h4 === h3) return 'placement';
 
   // Any other "final"-ish label not caught above.
   if (t.includes('final')) return 'final';
@@ -1020,12 +1031,60 @@ async function persistSchedulePage(
     if (g.usau_game_id) row.usau_game_id = g.usau_game_id;
     if (g.usau_event_game_id) row.usau_event_game_id = g.usau_event_game_id;
 
+    // Natural-key collision (23505 on usau_games_natural_key_uidx) during a
+    // write means the same physical game already exists on ANOTHER row — USAU
+    // re-created the game under a new id, or a game we matched by id moved to
+    // a (teams, time, bracket) slot the other pipeline's copy already occupies.
+    // One stuck game must not abort the whole event sync (Kentucky Fried
+    // Classic 2026 froze for 24h+ exactly this way): merge instead — keep the
+    // row that owns the natural key, delete the stale duplicate, retry.
+    const findNaturalKeyDup = async (excludeId: string | null) => {
+      if (!teamA || !teamB || !g.scheduled_at) return null;
+      const [lo, hi] = teamA < teamB ? [teamA, teamB] : [teamB, teamA];
+      let q = db
+        .from('usau_games')
+        .select('id')
+        .eq('event_id', eventUUID)
+        .eq('scheduled_at', g.scheduled_at)
+        .eq('bracket_name', g.bracket_name ?? '')
+        .or(
+          `and(team_a_id.eq.${lo},team_b_id.eq.${hi}),and(team_a_id.eq.${hi},team_b_id.eq.${lo})`,
+        );
+      if (excludeId) q = q.neq('id', excludeId);
+      const { data } = await q.limit(1).maybeSingle();
+      return data ? { id: data.id } : null;
+    };
+    const isNaturalKeyConflict = (error: { code?: string; message?: string } | null) =>
+      !!error && error.code === '23505' && (error.message ?? '').includes('usau_games_natural_key_uidx');
+
     if (existing) {
       const { error } = await db.from('usau_games').update(row).eq('id', existing.id);
-      if (error) throw new Error(`usau_games update: ${stringifyErr(error)}`);
+      if (error) {
+        if (!isNaturalKeyConflict(error)) {
+          throw new Error(`usau_games update: ${stringifyErr(error)}`);
+        }
+        // Our id-matched row carries the CURRENT usau ids; the row squatting on
+        // the natural key is the stale copy. Drop it, retry the update.
+        const dup = await findNaturalKeyDup(existing.id);
+        if (!dup) throw new Error(`usau_games update: ${stringifyErr(error)}`);
+        const { error: delErr } = await db.from('usau_games').delete().eq('id', dup.id);
+        if (delErr) throw new Error(`usau_games dedupe delete: ${stringifyErr(delErr)}`);
+        const { error: retryErr } = await db.from('usau_games').update(row).eq('id', existing.id);
+        if (retryErr) throw new Error(`usau_games update (post-dedupe): ${stringifyErr(retryErr)}`);
+      }
     } else {
       const { error } = await db.from('usau_games').insert(row);
-      if (error) throw new Error(`usau_games insert: ${stringifyErr(error)}`);
+      if (error) {
+        if (!isNaturalKeyConflict(error)) {
+          throw new Error(`usau_games insert: ${stringifyErr(error)}`);
+        }
+        // Row already exists under the natural key (raced/other pipeline) —
+        // update that row in place instead.
+        const dup = await findNaturalKeyDup(null);
+        if (!dup) throw new Error(`usau_games insert: ${stringifyErr(error)}`);
+        const { error: updErr } = await db.from('usau_games').update(row).eq('id', dup.id);
+        if (updErr) throw new Error(`usau_games insert-merge: ${stringifyErr(updErr)}`);
+      }
     }
   }
 

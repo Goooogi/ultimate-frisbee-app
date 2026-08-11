@@ -9,11 +9,18 @@ import { getUnifiedPlayerProfile } from '@/lib/unified-player';
 import { getPlayerThread } from '@/lib/players/connections';
 import { PlayerThreadView } from '@/components/players/player-thread-view';
 
-export const dynamic = 'force-dynamic';
+// ISR: the thread graph reads the precomputed player_edges table and only
+// changes on ingest — same crawler-load rationale as the profile page. The
+// ?from= passthrough moved client-side (view reads it) to keep this static.
+export const revalidate = 600;
+
+// SSG mode with on-demand paths — see the profile page's note.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 interface Props {
   params: { id: string };
-  searchParams: { from?: string };
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -25,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-export default async function ThreadPage({ params, searchParams }: Props) {
+export default async function ThreadPage({ params }: Props) {
   const profile = await getUnifiedPlayerProfile(params.id).catch(() => null);
   if (!profile) notFound();
 
@@ -36,7 +43,7 @@ export default async function ThreadPage({ params, searchParams }: Props) {
       thread={thread}
       anchorDisplayName={profile.displayName}
       anchorHeadshotUrl={profile.headshotUrl}
-      backHref={`/players/${params.id}${searchParams.from ? `?from=${searchParams.from}` : ''}`}
+      backHref={`/players/${params.id}`}
     />
   );
 }
