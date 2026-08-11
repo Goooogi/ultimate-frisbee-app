@@ -6,6 +6,7 @@
 // action + revalidate round-trips.
 
 import { useState, useTransition } from 'react';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { setFeedbackStatus, deleteFeedback } from '@/app/admin/feedback/actions';
 import type { FeedbackItem, FeedbackStatus } from '@/lib/feedback/server';
 
@@ -29,6 +30,7 @@ export function AdminFeedbackList({ items }: { items: FeedbackItem[] }) {
 function FeedbackRow({ item }: { item: FeedbackItem }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   function run(action: () => Promise<void>) {
     setError(null);
@@ -100,11 +102,7 @@ function FeedbackRow({ item }: { item: FeedbackItem }) {
         <button
           type="button"
           disabled={pending}
-          onClick={() => {
-            if (confirm('Delete this feedback permanently?')) {
-              run(() => deleteFeedback(item.id));
-            }
-          }}
+          onClick={() => setConfirmDelete(true)}
           className={[
             'ml-auto px-3 py-1.5 rounded-full text-[10px] font-bold tracking-[0.12em] uppercase font-tight cursor-pointer',
             'text-live hover:bg-live/10 transition-colors duration-150',
@@ -117,6 +115,20 @@ function FeedbackRow({ item }: { item: FeedbackItem }) {
       </div>
 
       {error && <p className="mt-2 mb-0 text-[11px] text-live font-tight">{error}</p>}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this feedback?"
+        body="It’s removed permanently — this can’t be undone."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={pending}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          run(() => deleteFeedback(item.id));
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </div>
   );
 }

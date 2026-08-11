@@ -25,6 +25,7 @@ import { StepRail } from './step-rail';
 import { PlaybackControls } from './playback-controls';
 import { SidebarPlayList } from './sidebar-play-list';
 import { CreatePlayDialog } from './create-play-dialog';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { DrawToolbar } from './draw-toolbar';
 import { uid } from '@/lib/playbook/storage';
 import {
@@ -93,6 +94,8 @@ export function PlaybookApp() {
   // Save state — surfaces "saving…" / "saved just now" / "save failed".
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [lastError, setLastError] = useState<string | null>(null);
+  const [pendingDeleteID, setPendingDeleteID] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
   // Transient confirmation after a play is copied to another playbook.
   const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const copyNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -386,7 +389,6 @@ export function PlaybookApp() {
     async (id: string) => {
       const target = plays.find((p) => p.id === id);
       if (!target) return;
-      if (!confirm(`Delete "${target.name}"? This cannot be undone.`)) return;
       try {
         await apiDeletePlay(id);
         setPlays((all) => {
@@ -407,6 +409,23 @@ export function PlaybookApp() {
     },
     [plays, currentID],
   );
+
+  // Deleting a play is confirmed in-app (see ConfirmDialog at the end of the
+  // tree) rather than via window.confirm. Both call sites open the dialog; only
+  // the dialog's confirm reaches handleDeletePlay.
+  const requestDeletePlay = useCallback((id: string) => setPendingDeleteID(id), []);
+
+  const pendingDeletePlay = pendingDeleteID
+    ? (plays.find((p) => p.id === pendingDeleteID) ?? null)
+    : null;
+
+  const confirmDeletePlay = useCallback(async () => {
+    if (!pendingDeleteID) return;
+    setDeleteBusy(true);
+    await handleDeletePlay(pendingDeleteID);
+    setDeleteBusy(false);
+    setPendingDeleteID(null);
+  }, [pendingDeleteID, handleDeletePlay]);
 
   // Copy a play into another playbook (personal ↔ team, team → team). The
   // original stays put. If the destination is the scope we're currently
@@ -572,13 +591,27 @@ export function PlaybookApp() {
 
   // Sidebar plays list is the same in every render path — pre-compute it
   // so loading / empty / editor states can share it.
+  // Rendered in every path, since the sidebar (and its delete buttons) is too.
+  const deletePlayDialog = (
+    <ConfirmDialog
+      open={pendingDeleteID !== null}
+      title={pendingDeletePlay ? `Delete “${pendingDeletePlay.name}”?` : 'Delete this play?'}
+      body="This can’t be undone."
+      confirmLabel="Delete"
+      busyLabel="Deleting…"
+      busy={deleteBusy}
+      onConfirm={confirmDeletePlay}
+      onCancel={() => setPendingDeleteID(null)}
+    />
+  );
+
   const sidebarList = (
     <SidebarPlayList
       plays={plays}
       currentID={currentID}
       onSelect={handleSelectPlay}
       onCreate={handleOpenCreateDialog}
-      onDelete={handleDeletePlay}
+      onDelete={requestDeletePlay}
       copyTargets={copyTargetsForCurrentScope}
       onCopy={handleCopyPlay}
     />
@@ -594,6 +627,7 @@ export function PlaybookApp() {
         playsNavExtras={sidebarList}
       >
         <div className="p-8 text-faint text-[13px]">Loading playbook…</div>
+        {deletePlayDialog}
       </PlaybookShell>
     );
   }
@@ -638,6 +672,8 @@ export function PlaybookApp() {
           onCancel={() => setShowCreateDialog(false)}
           onCreate={handleConfirmCreate}
         />
+
+        {deletePlayDialog}
       </PlaybookShell>
     );
   }
@@ -820,7 +856,7 @@ export function PlaybookApp() {
       currentPlayID={currentID}
       onSelectPlay={handleSelectPlay}
       onCreatePlay={handleOpenCreateDialog}
-      onDeletePlay={handleDeletePlay}
+      onDeletePlay={requestDeletePlay}
       copyTargets={copyTargetsForCurrentScope}
       onCopyPlay={handleCopyPlay}
     >
@@ -866,6 +902,8 @@ export function PlaybookApp() {
         onCancel={() => setShowCreateDialog(false)}
         onCreate={handleConfirmCreate}
       />
+
+      {deletePlayDialog}
     </PlaybookShell>
   );
 }

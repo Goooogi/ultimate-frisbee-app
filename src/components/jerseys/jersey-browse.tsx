@@ -36,12 +36,15 @@ export function JerseyBrowse({
   listings,
   wants,
   signedIn,
+  initialTab = 'listings',
 }: {
   listings: JerseyListing[];
   wants: JerseyWant[];
   signedIn: boolean;
+  /** From ?tab= — lets a redirect land you back on the tab you came from. */
+  initialTab?: Tab;
 }) {
-  const [tab, setTab] = useState<Tab>('listings');
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [q, setQ] = useState('');
   const [size, setSize] = useState<string>('all');
   const [place, setPlace] = useState<string>('all');

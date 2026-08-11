@@ -6,6 +6,7 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { approveContent, deleteContent, rejectContent } from '@/app/admin/content/actions';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 
@@ -63,6 +64,7 @@ export function AdminContentQueue({ pending, recent }: Props) {
 function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 'recent' }) {
   const [isPending, startTransition] = useTransition();
   const [showRejectForm, setShowRejectForm] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [reason, setReason] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
@@ -158,11 +160,7 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
             <ActionButton
               variant="danger"
               disabled={isPending}
-              onClick={() => {
-                if (confirm('Permanently delete this submission?')) {
-                  run(() => deleteContent(item.id));
-                }
-              }}
+              onClick={() => setConfirmDelete(true)}
             >
               Delete
             </ActionButton>
@@ -224,17 +222,27 @@ function ReviewRow({ item, mode }: { item: PlayerContentItem; mode: 'pending' | 
             <ActionButton
               variant="danger"
               disabled={isPending}
-              onClick={() => {
-                if (confirm('Permanently delete this submission?')) {
-                  run(() => deleteContent(item.id));
-                }
-              }}
+              onClick={() => setConfirmDelete(true)}
             >
               Delete
             </ActionButton>
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this submission?"
+        body="It’s removed permanently — this can’t be undone."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={isPending}
+        onConfirm={() => {
+          setConfirmDelete(false);
+          run(() => deleteContent(item.id));
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
     </article>
   );
 }

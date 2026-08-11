@@ -19,7 +19,11 @@ export const metadata: Metadata = {
     'Trade, buy, and sell ultimate frisbee jerseys with the community. Search by team, player, or year and meet up at a tournament.',
 };
 
-export default async function JerseysPage() {
+export default async function JerseysPage({
+  searchParams,
+}: {
+  searchParams: { tab?: string };
+}) {
   const supabase = createClient();
   const [{ data: userData }, listings, wants] = await Promise.all([
     supabase.auth.getUser(),
@@ -33,7 +37,12 @@ export default async function JerseysPage() {
       title="Jersey Exchange"
       subtitle="Trade or sell jerseys with other players. Arrange the swap yourselves — we just connect you."
     >
-      <JerseyBrowse listings={listings} wants={wants} signedIn={Boolean(userData.user)} />
+      <JerseyBrowse
+        listings={listings}
+        wants={wants}
+        signedIn={Boolean(userData.user)}
+        initialTab={searchParams.tab === 'wants' ? 'wants' : 'listings'}
+      />
     </PageShell>
   );
 }

@@ -8,6 +8,7 @@
 // wrong.
 
 import { useState, useTransition } from 'react';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { setPlayerContentReportStatus } from '@/app/admin/content/report-actions';
 import { deleteContent } from '@/app/admin/content/actions';
 import type { PlayerContentReportItem } from '@/lib/player-content/reports-server';
@@ -16,6 +17,9 @@ export function AdminPlayerContentReports({ reports }: { reports: PlayerContentR
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
+  // Which content id the delete dialog is asking about (rows render in a map,
+  // so the pending target lives here rather than per-row).
+  const [pendingDeleteContentID, setPendingDeleteContentID] = useState<string | null>(null);
 
   const visible = filter === 'open' ? reports.filter((r) => r.status === 'new') : reports;
 
@@ -123,19 +127,7 @@ export function AdminPlayerContentReports({ reports }: { reports: PlayerContentR
                     <ActionButton
                       danger
                       disabled={pending}
-                      onClick={() => {
-                        if (
-                          !confirm(
-                            'Delete this content permanently? It will be removed from the player profile for everyone.',
-                          )
-                        )
-                          return;
-                        // Reports cascade-delete with the content — no status
-                        // update needed; the row simply leaves the queue.
-                        run(async () => {
-                          await deleteContent(r.content!.id);
-                        });
-                      }}
+                      onClick={() => setPendingDeleteContentID(r.content!.id)}
                     >
                       Delete content
                     </ActionButton>
@@ -146,6 +138,26 @@ export function AdminPlayerContentReports({ reports }: { reports: PlayerContentR
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={pendingDeleteContentID !== null}
+        title="Delete this content?"
+        body="It’s removed from the player profile for everyone, permanently. The report clears with it."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={pending}
+        onConfirm={() => {
+          const id = pendingDeleteContentID;
+          setPendingDeleteContentID(null);
+          if (!id) return;
+          // Reports cascade-delete with the content — no status update needed;
+          // the row simply leaves the queue.
+          run(async () => {
+            await deleteContent(id);
+          });
+        }}
+        onCancel={() => setPendingDeleteContentID(null)}
+      />
     </div>
   );
 }

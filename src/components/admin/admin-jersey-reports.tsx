@@ -8,6 +8,7 @@
 
 import { useState, useTransition } from 'react';
 import Link from 'next/link';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   setJerseyReportStatus,
   withdrawReportedListing,
@@ -20,6 +21,11 @@ export function AdminJerseyReports({ reports }: { reports: JerseyReportItem[] })
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<'open' | 'all'>('open');
+  // Rows render in a map, so the delete dialog's target (listing + its report)
+  // is held here rather than per-row.
+  const [pendingDelete, setPendingDelete] = useState<
+    { listingId: string; reportId: string } | null
+  >(null);
 
   const visible = filter === 'open' ? reports.filter((r) => r.status === 'new') : reports;
 
@@ -143,13 +149,9 @@ export function AdminJerseyReports({ reports }: { reports: JerseyReportItem[] })
                   <ActionButton
                     danger
                     disabled={pending}
-                    onClick={() => {
-                      if (!confirm('Delete this listing and its photos permanently?')) return;
-                      run(async () => {
-                        await deleteReportedListing(r.listing!.id);
-                        await setJerseyReportStatus(r.id, 'actioned');
-                      });
-                    }}
+                    onClick={() =>
+                      setPendingDelete({ listingId: r.listing!.id, reportId: r.id })
+                    }
                   >
                     Delete permanently
                   </ActionButton>
@@ -164,6 +166,25 @@ export function AdminJerseyReports({ reports }: { reports: JerseyReportItem[] })
           ))}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete this listing?"
+        body="The listing and its photos are removed permanently, and the report is marked actioned. This can’t be undone."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={pending}
+        onConfirm={() => {
+          const target = pendingDelete;
+          setPendingDelete(null);
+          if (!target) return;
+          run(async () => {
+            await deleteReportedListing(target.listingId);
+            await setJerseyReportStatus(target.reportId, 'actioned');
+          });
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

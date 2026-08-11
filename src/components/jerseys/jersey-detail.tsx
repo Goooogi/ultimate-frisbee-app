@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { PosterByline } from '@/components/jerseys/poster-byline';
 import { ReportButton } from '@/components/jerseys/report-button';
 import { BlockButton } from '@/components/jerseys/block-button';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { openThread } from '@/lib/jerseys/messages';
 import { setListingStatus, deleteListing } from '@/lib/jerseys/data';
@@ -38,6 +39,7 @@ export function JerseyDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const isOwner = viewerId != null && viewerId === listing.ownerId;
   const where = jerseyLocationLine(listing);
@@ -77,12 +79,17 @@ export function JerseyDetail({
   );
 
   const handleDelete = useCallback(async () => {
-    if (!confirm('Delete this listing? This cannot be undone.')) return;
     setBusy(true);
+    setError(null);
     const err = await deleteListing(listing.id);
     setBusy(false);
-    if (err) setError(err);
-    else router.push('/jerseys');
+    if (err) {
+      setError(err);
+      return;
+    }
+    setConfirmDelete(false);
+    router.push('/jerseys');
+    router.refresh();
   }, [listing.id, router]);
 
   return (
@@ -197,7 +204,7 @@ export function JerseyDetail({
           <PosterByline poster={listing.owner} size={32} subtitle={where} />
         </div>
 
-        {error && (
+        {error && !confirmDelete && (
           <p className="text-[12px] text-accent font-tight" role="alert">
             {error}
           </p>
@@ -223,7 +230,7 @@ export function JerseyDetail({
                 Relist
               </SecondaryAction>
             )}
-            <SecondaryAction disabled={busy} onClick={handleDelete}>
+            <SecondaryAction disabled={busy} onClick={() => setConfirmDelete(true)}>
               Delete
             </SecondaryAction>
           </div>
@@ -253,6 +260,21 @@ export function JerseyDetail({
             />
           </div>
         )}
+
+        <ConfirmDialog
+          open={confirmDelete}
+          title="Delete this listing?"
+          body="This can’t be undone. Its photos are removed too, and any conversations it started stay in your inbox."
+          confirmLabel="Delete"
+          busyLabel="Deleting…"
+          busy={busy}
+          error={error}
+          onConfirm={handleDelete}
+          onCancel={() => {
+            setConfirmDelete(false);
+            setError(null);
+          }}
+        />
 
         <AuthModal
           open={authOpen}

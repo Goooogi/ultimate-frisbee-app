@@ -13,6 +13,7 @@ import Link from 'next/link';
 import { PosterByline } from '@/components/jerseys/poster-byline';
 import { ReportButton } from '@/components/jerseys/report-button';
 import { BlockButton } from '@/components/jerseys/block-button';
+import { ConfirmDialog } from '@/components/confirm-dialog';
 import { AuthModal } from '@/components/auth/auth-modal';
 import { openThread } from '@/lib/jerseys/messages';
 import { setWantStatus, deleteWant } from '@/lib/jerseys/data';
@@ -32,6 +33,7 @@ export function WantDetail({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const isOwner = viewerId != null && viewerId === want.userId;
   const where = jerseyLocationLine(want);
@@ -68,12 +70,19 @@ export function WantDetail({
   );
 
   const handleDelete = useCallback(async () => {
-    if (!confirm('Delete this wanted post? This cannot be undone.')) return;
     setBusy(true);
+    setError(null);
     const err = await deleteWant(want.id);
     setBusy(false);
-    if (err) setError(err);
-    else router.push('/jerseys');
+    if (err) {
+      setError(err);
+      return;
+    }
+    setConfirmDelete(false);
+    // Back to the board on the WANTED tab — landing on Listings after deleting
+    // a want loses the user's place.
+    router.push('/jerseys?tab=wants');
+    router.refresh();
   }, [want.id, router]);
 
   return (
@@ -140,7 +149,7 @@ export function WantDetail({
         <PosterByline poster={want.user} size={32} subtitle={where} />
       </div>
 
-      {error && (
+      {error && !confirmDelete && (
         <p className="text-[12px] text-accent font-tight" role="alert">
           {error}
         </p>
@@ -165,7 +174,7 @@ export function WantDetail({
               Repost
             </SecondaryAction>
           )}
-          <SecondaryAction disabled={busy} onClick={handleDelete}>
+          <SecondaryAction disabled={busy} onClick={() => setConfirmDelete(true)}>
             Delete
           </SecondaryAction>
         </div>
@@ -195,6 +204,21 @@ export function WantDetail({
           />
         </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this wanted post?"
+        body="This can’t be undone. Any conversations it started stay in your inbox."
+        confirmLabel="Delete"
+        busyLabel="Deleting…"
+        busy={busy}
+        error={error}
+        onConfirm={handleDelete}
+        onCancel={() => {
+          setConfirmDelete(false);
+          setError(null);
+        }}
+      />
 
       <AuthModal
         open={authOpen}

@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { PlaybookShell } from './playbook-shell';
+import { AlertDialog, ConfirmDialog, PromptDialog } from '@/components/confirm-dialog';
 import { TEAM_COLORS } from '@/lib/playbook/teams';
 import {
   createInvite,
@@ -52,6 +53,17 @@ export function ManageTeams() {
   // rosterCache: undefined = never fetched, 'loading' = in flight, TeamMember[] = loaded.
   const [expandedRosters, setExpandedRosters] = useState<Set<string>>(new Set());
   const [rosterCache, setRosterCache] = useState<Record<string, TeamMember[] | 'loading'>>({});
+
+  // In-app dialogs, replacing window.confirm / alert / prompt. `notice` is a
+  // one-button acknowledgement; the other two carry the row they act on.
+  const [notice, setNotice] = useState<{ title: string; body?: React.ReactNode } | null>(null);
+  const [renaming, setRenaming] = useState<Team | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    | { kind: 'delete'; team: Team }
+    | { kind: 'leave'; team: Team }
+    | null
+  >(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   // Re-load teams + pending invites for every owned/coach team.
   const refresh = useCallback(async () => {
@@ -103,39 +115,26 @@ export function ManageTeams() {
     [refresh],
   );
 
-  const handleDelete = useCallback(
-    async (id: string) => {
-      const target = teams.find((t) => t.id === id);
-      if (!target) return;
-      if (!confirm(`Delete "${target.name}"? Members lose access, plays are removed. This cannot be undone.`)) {
-        return;
-      }
-      try {
-        setError(null);
-        await deleteTeam(id);
-        await refresh();
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Delete team'));
-        console.error('[manage-teams] deleteTeam failed', err);
-      }
-    },
-    [refresh, teams],
-  );
-
-  const handleLeave = useCallback(
-    async (id: string) => {
-      if (!confirm('Leave this team? You can rejoin if invited again.')) return;
-      try {
-        setError(null);
-        await leaveTeam(id);
-        await refresh();
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Leave team'));
-        console.error('[manage-teams] leaveTeam failed', err);
-      }
-    },
-    [refresh],
-  );
+  // Both destructive actions are gated by ConfirmDialog (see the end of the
+  // tree) — the row buttons only set `pendingAction`.
+  const runPendingAction = useCallback(async () => {
+    if (!pendingAction) return;
+    const { kind, team } = pendingAction;
+    setActionBusy(true);
+    try {
+      setError(null);
+      if (kind === 'delete') await deleteTeam(team.id);
+      else await leaveTeam(team.id);
+      setPendingAction(null);
+      await refresh();
+    } catch (err) {
+      setError(formatSupabaseError(err, kind === 'delete' ? 'Delete team' : 'Leave team'));
+      console.error(`[manage-teams] ${kind}Team failed`, err);
+      setPendingAction(null);
+    } finally {
+      setActionBusy(false);
+    }
+  }, [pendingAction, refresh]);
 
   const handleInvite = useCallback(
     async (teamID: string, email: string, role: 'coach' | 'member') => {
@@ -147,19 +146,36 @@ export function ManageTeams() {
         // the invite (already created in the DB) is still usable.
         try {
           await sendInviteEmail({ teamId: teamID, email, role, token });
-          alert(`Invite emailed to ${email}.`);
+          setNotice({ title: 'Invite sent', body: `We emailed the invite to ${email}.` });
         } catch (emailErr) {
-          // Email failed — the token still exists. Surface the link manually.
+          // Email failed — the token still exists. Surface the link manually so
+          // it stays usable. The link is rendered selectable rather than pushed
+          // through window.prompt, which was the only way to show it before.
           const link = `${window.location.origin}/playbook/invite/${token}`;
           const errMsg =
             emailErr instanceof Error ? emailErr.message : 'Could not send the email automatically.';
-          const note = `Couldn't send the email automatically — here's the link to share:\n\n${link}\n\n(${errMsg})`;
+          let copied = false;
           try {
             await navigator.clipboard.writeText(link);
-            alert(`${note}\n\nLink copied to clipboard.`);
+            copied = true;
           } catch {
-            window.prompt(note, link);
+            copied = false;
           }
+          setNotice({
+            title: 'Share this link',
+            body: (
+              <div className="flex flex-col gap-2">
+                <span>
+                  We couldn&rsquo;t email {email} automatically
+                  {copied ? ' — the link is on your clipboard.' : '. Copy the link below to share it.'}
+                </span>
+                <code className="block px-3 py-2 rounded-card bg-surface text-[12px] text-ink font-mono break-all select-all">
+                  {link}
+                </code>
+                <span className="text-[11px] text-faint">({errMsg})</span>
+              </div>
+            ),
+          });
           console.warn('[manage-teams] sendInviteEmail failed, fell back to copy-link', emailErr);
         }
 
@@ -194,7 +210,7 @@ export function ManageTeams() {
         setError(null);
         setResendingInviteID(inviteID);
         await resendInviteEmail({ inviteId: inviteID });
-        alert(`Invite re-sent to ${email}.`);
+        setNotice({ title: 'Invite re-sent', body: `We emailed the invite to ${email} again.` });
       } catch (err) {
         setError(formatSupabaseError(err, 'Resend invite'));
         console.error('[manage-teams] resendInviteEmail failed', err);
@@ -310,16 +326,13 @@ export function ManageTeams() {
                     <SmallButton onClick={() => setInvitingTeamID(t.id)} variant="primary">
                       Invite
                     </SmallButton>
-                    <SmallButton
-                      onClick={async () => {
-                        const name = prompt('Rename team:', t.name);
-                        if (name && name.trim()) await handleRename(t.id, name.trim());
-                      }}
-                      variant="ghost"
-                    >
+                    <SmallButton onClick={() => setRenaming(t)} variant="ghost">
                       Rename
                     </SmallButton>
-                    <SmallButton onClick={() => handleDelete(t.id)} variant="danger">
+                    <SmallButton
+                      onClick={() => setPendingAction({ kind: 'delete', team: t })}
+                      variant="danger"
+                    >
                       Delete
                     </SmallButton>
                   </>
@@ -345,7 +358,7 @@ export function ManageTeams() {
                     <SmallButton onClick={() => setInvitingTeamID(t.id)} variant="primary">
                       Invite
                     </SmallButton>
-                    <SmallButton onClick={() => handleLeave(t.id)} variant="ghost">
+                    <SmallButton onClick={() => setPendingAction({ kind: 'leave', team: t })} variant="ghost">
                       Leave
                     </SmallButton>
                   </>
@@ -366,7 +379,7 @@ export function ManageTeams() {
                 empty="You're not a member of any other teams."
                 teams={memberOf}
                 renderActions={(t) => (
-                  <SmallButton onClick={() => handleLeave(t.id)} variant="ghost">
+                  <SmallButton onClick={() => setPendingAction({ kind: 'leave', team: t })} variant="ghost">
                     Leave
                   </SmallButton>
                 )}
@@ -375,6 +388,47 @@ export function ManageTeams() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={pendingAction !== null}
+        title={
+          pendingAction?.kind === 'delete'
+            ? `Delete “${pendingAction.team.name}”?`
+            : `Leave “${pendingAction?.team.name ?? 'this team'}”?`
+        }
+        body={
+          pendingAction?.kind === 'delete'
+            ? 'Members lose access and every play on this team is removed. This can’t be undone.'
+            : 'You’ll lose access to this team’s plays. You can rejoin if someone invites you again.'
+        }
+        confirmLabel={pendingAction?.kind === 'delete' ? 'Delete' : 'Leave'}
+        busyLabel={pendingAction?.kind === 'delete' ? 'Deleting…' : 'Leaving…'}
+        busy={actionBusy}
+        onConfirm={runPendingAction}
+        onCancel={() => setPendingAction(null)}
+      />
+
+      <PromptDialog
+        open={renaming !== null}
+        title="Rename team"
+        label="Team name"
+        initialValue={renaming?.name ?? ''}
+        maxLength={60}
+        confirmLabel="Save"
+        onSubmit={async (value) => {
+          const target = renaming;
+          setRenaming(null);
+          if (target && value !== target.name) await handleRename(target.id, value);
+        }}
+        onCancel={() => setRenaming(null)}
+      />
+
+      <AlertDialog
+        open={notice !== null}
+        title={notice?.title ?? ''}
+        body={notice?.body}
+        onClose={() => setNotice(null)}
+      />
     </PlaybookShell>
   );
 }
@@ -564,6 +618,8 @@ function CreateTeamForm({
   const [name, setName] = useState('');
   const [shortName, setShortName] = useState('');
   const [color, setColor] = useState(TEAM_COLORS[0]);
+  // Field-level validation belongs next to the field, not in a modal.
+  const [shortNameError, setShortNameError] = useState<string | null>(null);
 
   return (
     <form
@@ -571,9 +627,10 @@ function CreateTeamForm({
         e.preventDefault();
         const sn = (shortName || name.slice(0, 3)).toUpperCase().replace(/[^A-Z0-9]/g, '');
         if (!sn || sn.length < 2) {
-          alert('Short name needs 2–4 letters/numbers.');
+          setShortNameError('Short name needs 2–4 letters or numbers.');
           return;
         }
+        setShortNameError(null);
         onCreate(name, sn, color);
       }}
       className="mt-2 mb-2 p-4 bg-surface flex flex-col gap-3 rounded-card shadow-card"
@@ -601,13 +658,23 @@ function CreateTeamForm({
           <input
             type="text"
             value={shortName}
-            onChange={(e) => setShortName(e.target.value.toUpperCase())}
+            onChange={(e) => {
+              setShortName(e.target.value.toUpperCase());
+              if (shortNameError) setShortNameError(null);
+            }}
             maxLength={4}
+            aria-invalid={shortNameError ? true : undefined}
+            aria-describedby={shortNameError ? 'create-team-short-error' : undefined}
             placeholder="BOS"
             className="bg-bg border border-border px-3 py-2 text-[13px] text-ink font-tight tabular uppercase tracking-[0.06em] focus-visible:outline-none focus-visible:border-ink rounded"
           />
         </label>
       </div>
+      {shortNameError && (
+        <p id="create-team-short-error" role="alert" className="text-[12px] text-live font-tight">
+          {shortNameError}
+        </p>
+      )}
       <div className="flex flex-col gap-1.5">
         <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight">
           Color
