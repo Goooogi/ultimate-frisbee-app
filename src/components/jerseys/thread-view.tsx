@@ -64,7 +64,11 @@ export function ThreadView({
     router.refresh();
   }, [body, thread.id, router]);
 
-  const backHref = thread.listingId ? `/jerseys/${thread.listingId}` : '/jerseys';
+  const backHref = thread.listingId
+    ? `/jerseys/${thread.listingId}`
+    : thread.wantId
+      ? `/jerseys/wanted/${thread.wantId}`
+      : '/jerseys';
 
   return (
     <div className="flex flex-col gap-3 max-w-2xl">

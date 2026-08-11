@@ -3,23 +3,27 @@
 // WantCard — an "ISO" post. No photo (there's nothing to photograph — the
 // person doesn't have the jersey yet), so this is a text-forward row rather
 // than the photo tile a listing gets.
+//
+// The whole card links to the want's detail page, where the message / withdraw
+// / delete actions live — same shape as JerseyCard → /jerseys/[id].
 
+import Link from 'next/link';
 import { PosterByline } from '@/components/jerseys/poster-byline';
 import { jerseyLocationLine, jerseyTargetLine, type JerseyWant } from '@/lib/jerseys/types';
 
-export function WantCard({
-  want,
-  onMessage,
-}: {
-  want: JerseyWant;
-  /** Omitted on the public board for signed-out users. */
-  onMessage?: (want: JerseyWant) => void;
-}) {
+export function WantCard({ want }: { want: JerseyWant }) {
   const target = jerseyTargetLine(want) ?? want.leagueName ?? 'Any jersey';
   const where = jerseyLocationLine(want);
 
   return (
-    <div className="flex flex-col gap-2 p-3.5 rounded-card-lg bg-surface shadow-card">
+    <Link
+      href={`/jerseys/wanted/${want.id}`}
+      className={[
+        'flex flex-col gap-2 p-3.5 rounded-card-lg bg-surface shadow-card hover:shadow-lift',
+        'motion-safe:transition-shadow motion-safe:duration-200',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+      ].join(' ')}
+    >
       <div className="flex items-start justify-between gap-2">
         <span className="inline-flex items-center px-2 py-[3px] rounded-full bg-accent/15 text-accent text-[9px] font-extrabold tracking-[0.08em] uppercase font-tight">
           Looking for
@@ -56,16 +60,10 @@ export function WantCard({
 
       <div className="flex items-center justify-between gap-2 mt-1 pt-2 border-t border-hairline/60">
         <PosterByline poster={want.user} size={20} subtitle={where} />
-        {onMessage && (
-          <button
-            type="button"
-            onClick={() => onMessage(want)}
-            className="inline-flex items-center px-3 min-h-[30px] rounded-full bg-ink/5 text-ink text-[10.5px] font-bold tracking-[0.06em] uppercase font-tight hover:bg-ink/10 cursor-pointer motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent flex-shrink-0"
-          >
-            I have this
-          </button>
-        )}
+        <span className="inline-flex items-center px-3 min-h-[30px] rounded-full bg-ink/5 text-ink text-[10.5px] font-bold tracking-[0.06em] uppercase font-tight flex-shrink-0">
+          I have this
+        </span>
       </div>
-    </div>
+    </Link>
   );
 }

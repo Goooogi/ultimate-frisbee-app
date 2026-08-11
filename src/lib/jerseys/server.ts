@@ -241,6 +241,30 @@ export async function listJerseyWants(filters: BrowseFilters = {}): Promise<Jers
   }));
 }
 
+export async function getJerseyWant(id: string): Promise<JerseyWant | null> {
+  const supabase = createClient() as any;
+  const { data, error } = await supabase
+    .from('jersey_wants')
+    .select(WANT_COLS)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const r = data as any;
+  return {
+    id: String(r.id),
+    userId: String(r.user_id),
+    user: mapPoster(r.user),
+    size: r.size ?? null,
+    note: r.note ?? null,
+    status: r.status,
+    events: mapEvents(r.jersey_listing_events),
+    createdAt: String(r.created_at),
+    updatedAt: String(r.updated_at),
+    ...mapTargetAndLocation(r),
+  };
+}
+
 /** Listings + wants the signed-in user posted (any status). */
 export async function getMyJerseyPosts(): Promise<{ listings: JerseyListing[]; wants: JerseyWant[] }> {
   const supabase = createClient() as any;
