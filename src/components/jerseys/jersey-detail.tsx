@@ -205,11 +205,8 @@ export function JerseyDetail({
 
         {/* Actions */}
         {isOwner ? (
-          <div className="flex flex-wrap gap-2">
-            <Link
-              href={`/jerseys/${listing.id}/edit`}
-              className="inline-flex items-center px-5 min-h-[44px] rounded-full bg-ink text-bg text-[12px] font-bold tracking-[0.06em] uppercase font-tight hover:opacity-90"
-            >
+          <div className={OWNER_ACTIONS_CLASS}>
+            <Link href={`/jerseys/${listing.id}/edit`} className={PRIMARY_ACTION_CLASS}>
               Edit
             </Link>
             {listing.status === 'active' ? (
@@ -237,8 +234,8 @@ export function JerseyDetail({
               onClick={handleMessage}
               disabled={busy || listing.status !== 'active'}
               className={[
-                'inline-flex items-center gap-2 px-6 min-h-[48px] rounded-full',
-                'text-[12.5px] font-bold tracking-[0.08em] uppercase font-tight',
+                'inline-flex flex-1 min-w-[10rem] items-center justify-center gap-2 px-4 sm:px-6 min-h-[48px] rounded-full',
+                'text-[12px] sm:text-[12.5px] font-bold tracking-[0.06em] sm:tracking-[0.08em] uppercase font-tight',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
                 listing.status === 'active' && !busy
                   ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer'
@@ -276,6 +273,22 @@ export function JerseyDetail({
   );
 }
 
+// Owner actions are equal-width columns that reflow by AVAILABLE WIDTH rather
+// than at a fixed breakpoint, so 4 buttons sit on one line from ~640px up and
+// pack a clean 2x2 on a phone instead of stranding "Delete" alone on its own
+// row. The 9rem floor is load-bearing: at 7.5rem a 450px viewport fits THREE
+// tracks and strands the fourth — measured, not guessed. Buttons keep a 44px
+// min height for touch, and labels tighten below the sm breakpoint.
+const OWNER_ACTIONS_CLASS = 'grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2';
+
+const ACTION_BASE_CLASS = [
+  'inline-flex items-center justify-center text-center px-3 sm:px-5 min-h-[44px] rounded-full',
+  'text-[11px] sm:text-[12px] font-bold tracking-[0.04em] sm:tracking-[0.06em] uppercase font-tight',
+  'motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+].join(' ');
+
+const PRIMARY_ACTION_CLASS = `${ACTION_BASE_CLASS} bg-ink text-bg hover:opacity-90`;
+
 function Detail({ label, value }: { label: string; value: string | null }) {
   if (!value) return null;
   return (
@@ -302,7 +315,7 @@ function SecondaryAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center px-5 min-h-[44px] rounded-full bg-ink/5 text-ink text-[12px] font-bold tracking-[0.06em] uppercase font-tight hover:bg-ink/10 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      className={`${ACTION_BASE_CLASS} bg-ink/5 text-ink hover:bg-ink/10 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer`}
     >
       {children}
     </button>

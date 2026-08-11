@@ -262,6 +262,48 @@ export async function createWant(
   return { error: tagError, id };
 }
 
+export async function updateWant(id: string, draft: WantDraft): Promise<string | null> {
+  const hasTarget =
+    draft.teamId || draft.teamName || draft.playerName || draft.year || draft.leagueName;
+  if (!hasTarget) {
+    return 'Say what you’re looking for — a team, player, league, or year.';
+  }
+
+  for (const [v, label] of [
+    [draft.note, 'Note'],
+    [draft.teamName, 'Team'],
+    [draft.leagueName, 'League'],
+    [draft.playerName, 'Player'],
+  ] as [string | null | undefined, string][]) {
+    if (v) {
+      const err = moderateName(v, label);
+      if (err) return err;
+    }
+  }
+
+  const db = createClient() as any;
+  const { error } = await db
+    .from('jersey_wants')
+    .update({
+      league: draft.league ?? null,
+      team_id: draft.teamId ?? null,
+      team_name: cleanText(draft.teamName, 120),
+      team_logo_url: draft.teamLogoUrl ?? null,
+      league_name: cleanText(draft.leagueName, 80),
+      player_name: cleanText(draft.playerName, 120),
+      year: draft.year ?? null,
+      size: cleanText(draft.size, 20),
+      note: cleanText(draft.note, MAX_DESCRIPTION),
+      city: cleanText(draft.city, 100),
+      state: cleanText(draft.state, 60),
+      country: cleanText(draft.country, 60),
+    })
+    .eq('id', id);
+
+  if (error) return friendlyError(error.message);
+  return replaceEventTags({ wantId: id, events: draft.events ?? [] });
+}
+
 export async function setWantStatus(
   id: string,
   status: 'active' | 'completed' | 'withdrawn',
