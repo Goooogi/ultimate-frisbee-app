@@ -255,14 +255,14 @@ export function JerseyForm({ existing }: { existing?: JerseyListing }) {
       <Section title="Where are you?" note="Helps people judge whether a meetup is realistic.">
         <div className="grid grid-cols-2 gap-3">
           <Field label="City" htmlFor="j-city">
-            <input id="j-city" value={city} onChange={(e) => setCity(e.target.value)} maxLength={100} placeholder="Denver" className={inputClass} />
+            <input id="j-city" value={city} onChange={(e) => setCity(e.target.value)} maxLength={100} placeholder="Denver" autoComplete="address-level2" className={inputClass} />
           </Field>
           <Field label="State / region" htmlFor="j-state">
-            <input id="j-state" value={stateRegion} onChange={(e) => setStateRegion(e.target.value)} maxLength={60} placeholder="CO" className={inputClass} />
+            <input id="j-state" value={stateRegion} onChange={(e) => setStateRegion(e.target.value)} maxLength={60} placeholder="CO" autoComplete="address-level1" className={inputClass} />
           </Field>
         </div>
         <Field label="Country" htmlFor="j-country">
-          <input id="j-country" value={country} onChange={(e) => setCountry(e.target.value)} maxLength={60} placeholder="USA" className={inputClass} />
+          <input id="j-country" value={country} onChange={(e) => setCountry(e.target.value)} maxLength={60} placeholder="USA" autoComplete="country-name" className={inputClass} />
         </Field>
         <EventPicker value={events} onChange={setEvents} />
       </Section>

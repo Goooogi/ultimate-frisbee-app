@@ -149,16 +149,16 @@ export function WantForm() {
         <div className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="w-city" className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-muted font-tight">City</label>
-            <input id="w-city" value={city} onChange={(e) => setCity(e.target.value)} maxLength={100} placeholder="Boston" className={inputClass} />
+            <input id="w-city" value={city} onChange={(e) => setCity(e.target.value)} maxLength={100} placeholder="Boston" autoComplete="address-level2" className={inputClass} />
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="w-state" className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-muted font-tight">State / region</label>
-            <input id="w-state" value={stateRegion} onChange={(e) => setStateRegion(e.target.value)} maxLength={60} placeholder="MA" className={inputClass} />
+            <input id="w-state" value={stateRegion} onChange={(e) => setStateRegion(e.target.value)} maxLength={60} placeholder="MA" autoComplete="address-level1" className={inputClass} />
           </div>
         </div>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="w-country" className="text-[10.5px] font-bold tracking-[0.12em] uppercase text-muted font-tight">Country</label>
-          <input id="w-country" value={country} onChange={(e) => setCountry(e.target.value)} maxLength={60} placeholder="USA" className={inputClass} />
+          <input id="w-country" value={country} onChange={(e) => setCountry(e.target.value)} maxLength={60} placeholder="USA" autoComplete="country-name" className={inputClass} />
         </div>
         <EventPicker value={events} onChange={setEvents} />
       </section>
