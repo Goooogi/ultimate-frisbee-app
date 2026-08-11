@@ -17,7 +17,6 @@ import { EventPicker, type EventDraft } from '@/components/jerseys/event-picker'
 import { PhotoUpload, type PendingPhoto } from '@/components/jerseys/photo-upload';
 import { createListing, updateListing, uploadListingPhoto } from '@/lib/jerseys/data';
 import {
-  JERSEY_KINDS,
   JERSEY_CONDITIONS,
   JERSEY_SIZES,
   MAX_TITLE,
@@ -27,10 +26,6 @@ import {
   type JerseyListing,
 } from '@/lib/jerseys/types';
 
-const KIND_OPTIONS: PillSelectOption<JerseyKind>[] = JERSEY_KINDS.map((k) => ({
-  value: k.value,
-  label: k.label,
-}));
 const CONDITION_OPTIONS: PillSelectOption<string>[] = [
   { value: '', label: 'Not specified' },
   ...JERSEY_CONDITIONS.map((c) => ({ value: c.value, label: c.label })),
@@ -43,14 +38,10 @@ const SIZE_OPTIONS: PillSelectOption<string>[] = [
 export function JerseyForm({ existing }: { existing?: JerseyListing }) {
   const router = useRouter();
 
-  const [kind, setKind] = useState<JerseyKind>(existing?.kind ?? 'trade');
   const [title, setTitle] = useState(existing?.title ?? '');
   const [description, setDescription] = useState(existing?.description ?? '');
   const [size, setSize] = useState(existing?.size ?? '');
   const [condition, setCondition] = useState<string>(existing?.condition ?? '');
-  const [price, setPrice] = useState(
-    existing?.priceCents != null ? String(existing.priceCents / 100) : '',
-  );
 
   const [team, setTeam] = useState<EntityValue>({
     name: existing?.teamName ?? '',
@@ -88,21 +79,16 @@ export function JerseyForm({ existing }: { existing?: JerseyListing }) {
     setBusy(true);
     setError(null);
 
-    const priceCents =
-      kind === 'trade' || !price.trim() ? null : Math.round(Number(price.replace(/[^0-9.]/g, '')) * 100);
-    if (priceCents != null && (!Number.isFinite(priceCents) || priceCents < 0)) {
-      setError('That price doesn’t look right.');
-      setBusy(false);
-      return;
-    }
-
     const draft = {
-      kind,
+      // Listings are trades/gifts only — the sell option (and price) was
+      // removed 2026-08-11; every listing, including edits of old 'sell'
+      // rows, is normalized to 'trade'.
+      kind: 'trade' as JerseyKind,
       title,
       description,
       size: size || null,
       condition: (condition || null) as JerseyCondition | null,
-      priceCents,
+      priceCents: null,
       // Structured refs only survive when the user PICKED from our data.
       league: team.entityId ? team.league : null,
       teamId: team.entityId,
@@ -171,7 +157,7 @@ export function JerseyForm({ existing }: { existing?: JerseyListing }) {
     router.push(`/jerseys/${id}`);
     router.refresh();
   }, [
-    kind, title, description, size, condition, price, team, player, leagueName,
+    title, description, size, condition, team, player, leagueName,
     year, city, stateRegion, country, events, photos, existing, router,
   ]);
 
@@ -186,30 +172,10 @@ export function JerseyForm({ existing }: { existing?: JerseyListing }) {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             maxLength={MAX_TITLE}
-            placeholder="e.g. Johnny Bravo 2025 game jersey"
+            placeholder="e.g. New York Empire 2025"
             className={inputClass}
           />
         </Field>
-
-        <Field label="Trade or sell" htmlFor="j-kind">
-          <PillSelect value={kind} options={KIND_OPTIONS} onChange={setKind} ariaLabel="Trade or sell" />
-        </Field>
-
-        {kind !== 'trade' && (
-          <Field label="Asking price" htmlFor="j-price" hint="Optional — you handle payment yourselves">
-            <div className="flex items-center gap-2 px-3 min-h-[44px] rounded-card bg-surface shadow-card focus-within:ring-2 focus-within:ring-accent">
-              <span className="text-[13.5px] text-faint font-tight">$</span>
-              <input
-                id="j-price"
-                inputMode="decimal"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                placeholder="40"
-                className="flex-1 bg-transparent text-[13.5px] text-ink font-tight placeholder:text-faint focus:outline-none py-2.5"
-              />
-            </div>
-          </Field>
-        )}
 
         <Field label="Photos" htmlFor="j-photos" hint="Up to 6 — a photo is what sells it">
           <PhotoUpload

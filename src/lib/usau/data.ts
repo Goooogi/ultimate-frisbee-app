@@ -632,7 +632,9 @@ function flightRankForName(name: string | null | undefined): number {
 
 /**
  * Best (lowest) official USAU rank among each event's entrants, keyed by event
- * id. Events with no ranked entrant are simply absent from the map.
+ * id, plus EVERY ranked entrant's rank per event (feeds the average-rank depth
+ * measure in getCurrentEvent's small-but-strong exception). Events with no
+ * ranked entrant are simply absent from both maps.
  *
  * Matched by NAME + division, not by usau_rankings.team_id: the ranking rows
  * and usau_event_teams frequently point at different usau_teams rows for the
@@ -645,9 +647,10 @@ function flightRankForName(name: string | null | undefined): number {
 async function bestOfficialRankByEvent(
   db: Awaited<ReturnType<typeof supabase>>,
   eventIds: string[],
-): Promise<Map<string, number>> {
+): Promise<{ best: Map<string, number>; ranks: Map<string, number[]> }> {
   const out = new Map<string, number>();
-  if (eventIds.length === 0) return out;
+  const ranksOut = new Map<string, number[]>();
+  if (eventIds.length === 0) return { best: out, ranks: ranksOut };
 
   // Latest (season, week) per RankSet — rankings are scraped weekly, and the
   // divisions don't always land on the same week.
@@ -665,7 +668,7 @@ async function bestOfficialRankByEvent(
       if (head) heads.set(division, head);
     }),
   );
-  if (heads.size === 0) return out;
+  if (heads.size === 0) return { best: out, ranks: ranksOut };
 
   // rankByKey: "division|lowercased team name" → rank.
   const rankByKey = new Map<string, number>();
@@ -692,7 +695,7 @@ async function bestOfficialRankByEvent(
       }
     }),
   );
-  if (rankByKey.size === 0) return out;
+  if (rankByKey.size === 0) return { best: out, ranks: ranksOut };
 
   // Entrants for the candidate events, paged past the 1000-row response cap.
   const PAGE = 1000;
@@ -722,10 +725,13 @@ async function bestOfficialRankByEvent(
       if (rank === undefined) continue;
       const prev = out.get(r.event_id);
       if (prev === undefined || rank < prev) out.set(r.event_id, rank);
+      const acc = ranksOut.get(r.event_id) ?? [];
+      acc.push(rank);
+      ranksOut.set(r.event_id, acc);
     }
     if (rows.length < PAGE) break;
   }
-  return out;
+  return { best: out, ranks: ranksOut };
 }
 
 export async function getCurrentEvent(opts?: {
@@ -782,9 +788,10 @@ export async function getCurrentEvent(opts?: {
   };
   let events: EventRow[] = (windowEvents ?? []) as EventRow[];
 
-  // Per-event game counts + gender divisions of participating teams.
+  // Per-event game counts + gender divisions + team counts of participants.
   const counts = new Map<string, number>();
   const divisionsByEvent = new Map<string, Set<string>>();
+  const teamCounts = new Map<string, number>();
   if (events.length > 0) {
     const eventIds = events.map((e) => e.id);
 
@@ -807,33 +814,37 @@ export async function getCurrentEvent(opts?: {
       if (rows.length < PAGE) break;
     }
 
-    // Participating divisions, for the optional filter. Team rows are far fewer
-    // than games, but page defensively for the same cap reason.
-    if (opts?.genderDivision) {
-      for (let from = 0; ; from += PAGE) {
-        const { data: page } = await db
-          .from('usau_event_teams')
-          .select('event_id, team_id, usau_teams(gender_division)')
-          .in('event_id', eventIds)
-          // Composite key (event_id, team_id) → order by both for a total order
-          // so paged ranges don't skip/overlap.
-          .order('event_id', { ascending: true })
-          .order('team_id', { ascending: true })
-          .range(from, from + PAGE - 1);
-        const rows = (page ?? []) as Array<{
-          event_id: string;
-          team_id: string;
-          usau_teams: { gender_division: string | null } | null;
-        }>;
-        for (const r of rows) {
-          const div = r.usau_teams?.gender_division;
-          if (div) {
-            if (!divisionsByEvent.has(r.event_id)) divisionsByEvent.set(r.event_id, new Set());
-            divisionsByEvent.get(r.event_id)!.add(div);
-          }
+    // Participating teams: their divisions feed the optional gender filter, and
+    // the per-event COUNT feeds the field-size term in the ranking below. The
+    // count is always needed, so this no longer runs only when a division
+    // filter is set. Team rows are far fewer than games, but page defensively
+    // for the same cap reason.
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_event_teams')
+        .select('event_id, team_id, usau_teams(gender_division)')
+        .in('event_id', eventIds)
+        // Composite key (event_id, team_id) → order by both for a total order
+        // so paged ranges don't skip/overlap.
+        .order('event_id', { ascending: true })
+        .order('team_id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      const rows = (page ?? []) as Array<{
+        event_id: string;
+        team_id: string;
+        usau_teams: { gender_division: string | null } | null;
+      }>;
+      for (const r of rows) {
+        teamCounts.set(r.event_id, (teamCounts.get(r.event_id) ?? 0) + 1);
+        const div = r.usau_teams?.gender_division;
+        if (div) {
+          if (!divisionsByEvent.has(r.event_id)) divisionsByEvent.set(r.event_id, new Set());
+          divisionsByEvent.get(r.event_id)!.add(div);
         }
-        if (rows.length < PAGE) break;
       }
+      if (rows.length < PAGE) break;
+    }
+    if (opts?.genderDivision) {
       events = events.filter((e) => divisionsByEvent.get(e.id)?.has(opts.genderDivision!) ?? false);
     }
   }
@@ -843,10 +854,17 @@ export async function getCurrentEvent(opts?: {
   // 0 for every event sharing a weekend; without this the comparator returned 0
   // and the "winner" was whatever order PostgREST happened to return (web and
   // mobile picked different events from identical code).
-  const bestRankByEvent = await bestOfficialRankByEvent(
+  const { best: bestRankByEvent, ranks: ranksByEvent } = await bestOfficialRankByEvent(
     db,
     events.map((e) => e.id),
   );
+
+  // Mean rank across an event's ranked entrants (see avgRank below).
+  const avgRankByEvent = new Map<string, number>();
+  for (const [eventId, ranks] of ranksByEvent) {
+    if (ranks.length === 0) continue;
+    avgRankByEvent.set(eventId, ranks.reduce((a, b) => a + b, 0) / ranks.length);
+  }
 
   // Weekend cadence: before Wednesday we look back at last weekend; from
   // Wednesday on we look forward to the next weekend. We use getUTCDay() so the
@@ -857,6 +875,38 @@ export async function getCurrentEvent(opts?: {
   const endOf = (e: EventRow) => e.end_date ?? e.start_date ?? '';
 
   const bestRank = (e: EventRow) => bestRankByEvent.get(e.id) ?? Infinity;
+
+  const teamCount = (e: EventRow) => teamCounts.get(e.id) ?? 0;
+
+  /** Minimum field for an event to headline on size alone. Below this it's a
+   *  scrimmage or a pre-sectional warm-up, not a tournament. */
+  const MIN_HEADLINE_TEAMS = 8;
+
+  /** How many ranked entrants a small event needs before its STRENGTH can earn
+   *  it a headline slot despite the size floor. One ranked team is noise; a
+   *  cluster means a genuinely strong small field. */
+  const SMALL_EVENT_MIN_RANKED = 3;
+
+  /** Whether an event clears the size floor — either on field size, or (for a
+   *  small event) by fielding enough ranked teams that its AVERAGE rank can
+   *  compete. Below-floor events aren't dropped, just demoted: they still
+   *  headline when nothing else is available (early season, sparse weekend).
+   *
+   *  Hunter's rule: "any tournament with less than 8 teams shouldn't be
+   *  included unless there are greater than 2 teams with an average rank higher
+   *  than the other tournaments." */
+  const clearsSizeFloor = (e: EventRow): boolean =>
+    teamCount(e) >= MIN_HEADLINE_TEAMS || rankedCount(e) >= SMALL_EVENT_MIN_RANKED;
+
+  /** Average official rank across an event's ranked entrants — the strength
+   *  measure for the small-but-strong exception. Lower is better; an event with
+   *  no ranked teams is Infinity so it never wins this comparison. Mean (not
+   *  best) is deliberate: it's what distinguishes a deep field from one that
+   *  happens to contain a single good team. */
+  const avgRank = (e: EventRow) => avgRankByEvent.get(e.id) ?? Infinity;
+
+  /** How many of an event's entrants carry an official ranking. */
+  const rankedCount = (e: EventRow) => ranksByEvent.get(e.id)?.length ?? 0;
 
   // Quantize a start date to its tournament WEEKEND (the Saturday of the
   // Fri–Sun span) so co-scheduled events group together even when their
@@ -885,11 +935,31 @@ export async function getCurrentEvent(opts?: {
     if (wCmp !== 0) return wCmp;
     const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
     if (fCmp !== 0) return fCmp;
+    // SIZE FLOOR, before strength of field. An event with a real field always
+    // outranks a 2-team scrimmage or a 3-team pre-sectional, regardless of
+    // whether the small one happens to contain a ranked team. A small event
+    // still clears the floor when it fields 3+ ranked teams — then it competes
+    // on average rank below, so a genuinely strong small field isn't buried.
+    const aFloor = clearsSizeFloor(a) ? 1 : 0;
+    const bFloor = clearsSizeFloor(b) ? 1 : 0;
+    if (aFloor !== bFloor) return bFloor - aFloor;
+    // Among small-but-strong events, DEPTH decides: mean rank across ranked
+    // entrants, not the single best. (Only meaningful when both sides are
+    // below the size floor — two full-size fields almost always both have
+    // enough ranked teams that bestRank below is the sharper signal.)
+    if (teamCount(a) < MIN_HEADLINE_TEAMS && teamCount(b) < MIN_HEADLINE_TEAMS) {
+      const avgCmp = avgRank(a) - avgRank(b);
+      if (avgCmp !== 0) return avgCmp;
+    }
     // Strength of field: the event with the best-ranked entrant headlines.
     // Lower rank number = better, so this sorts ASCENDING; events with no
     // ranked team sort last (Infinity) rather than winning by default.
     const rCmp = bestRank(a) - bestRank(b);
     if (rCmp !== 0) return rCmp;
+    // Equal strength → the bigger field wins (a 36-team and a 32-team event
+    // both fielding a #13 team: the deeper one headlines).
+    const tCmp = teamCount(b) - teamCount(a);
+    if (tCmp !== 0) return tCmp;
     return recentFirst
       ? (b.start_date ?? '').localeCompare(a.start_date ?? '')
       : (a.start_date ?? '').localeCompare(b.start_date ?? '');
