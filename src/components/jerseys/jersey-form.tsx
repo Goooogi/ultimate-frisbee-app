@@ -307,21 +307,20 @@ export function JerseyForm({ existing }: { existing?: JerseyListing }) {
         </p>
       )}
 
-      <div className="flex items-center gap-2 sticky bottom-[calc(env(safe-area-inset-bottom)+88px)] sm:static">
-        <button
-          type="button"
-          onClick={submit}
-          disabled={!canSubmit}
-          className={[
-            'flex-1 inline-flex items-center justify-center min-h-[52px] rounded-full',
-            'text-[12.5px] font-bold tracking-[0.08em] uppercase font-tight shadow-hero',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
-            canSubmit ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer' : 'bg-surface text-faint cursor-not-allowed',
-          ].join(' ')}
-        >
-          {busy ? (progress ?? 'Saving…') : existing ? 'Save changes' : 'Post listing'}
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={submit}
+        disabled={!canSubmit}
+        className={[
+          'w-full inline-flex items-center justify-center min-h-[52px] rounded-full',
+          'text-[12.5px] font-bold tracking-[0.08em] uppercase font-tight shadow-hero',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
+          'bg-accent text-accent-ink',
+          canSubmit ? 'hover:opacity-90 cursor-pointer' : 'opacity-40 cursor-not-allowed',
+        ].join(' ')}
+      >
+        {busy ? (progress ?? 'Saving…') : existing ? 'Save changes' : 'Post listing'}
+      </button>
 
       <p className="text-[11px] text-faint font-tight leading-snug">
         Your listing goes live right away. The Layout doesn&rsquo;t process payments or shipping —
