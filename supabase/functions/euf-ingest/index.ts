@@ -341,10 +341,47 @@ async function ingest(supabase: SupabaseClient, body: IngestBody) {
     const statRows = batches.flat();
     gamesWithStats = batches.filter((b) => b.length > 0).length;
     statLines = statRows.length;
-    for (let i = 0; i < statRows.length; i += 500) {
+
+    // DIFF BEFORE WRITE (2026-08-12). euf-refresh runs hourly and used to
+    // blind-upsert every stat line every run (~59.8k no-op updates observed in
+    // a single 2h window, with ZERO inserts) — pure WAL + dead-tuple + disk-IO
+    // cost on a 2vCPU/2GB instance for no new data. Historical EUCS stats are
+    // immutable once scraped, so almost every row is unchanged.
+    // ONE paginated read scoped to the event — not one read per game. A
+    // per-game loop would be ~180 round trips on the biggest event, costing
+    // more than the writes it saves (App Health Rule #2 applies to our own
+    // ingest, not just the read path). PostgREST caps responses at 1,000 rows,
+    // so page explicitly rather than trusting a large .limit().
+    const priorByKey = new Map<string, any>();
+    const STAT_PAGE = 1000;
+    for (let from = 0; ; from += STAT_PAGE) {
+      const { data: priorRows, error: priorErr } = await supabase
+        .from('euf_game_player_stats')
+        .select('game_id, team_id, full_name, jersey_number, goals, assists, total')
+        .eq('event_id', eventId)
+        .order('game_id', { ascending: true })
+        .range(from, from + STAT_PAGE - 1);
+      if (priorErr) throw new Error(`stats read-back: ${priorErr.message}`);
+      const batch = priorRows ?? [];
+      for (const r of batch) {
+        priorByKey.set(`${r.game_id}|${r.team_id}|${r.full_name}`, r);
+      }
+      if (batch.length < STAT_PAGE) break;
+    }
+    const changedStats = statRows.filter((r: any) => {
+      const p = priorByKey.get(`${r.game_id}|${r.team_id}|${r.full_name}`);
+      if (!p) return true; // new stat line
+      return (
+        p.jersey_number !== r.jersey_number ||
+        p.goals !== r.goals ||
+        p.assists !== r.assists ||
+        p.total !== r.total
+      );
+    });
+    for (let i = 0; i < changedStats.length; i += 500) {
       const { error } = await supabase
         .from('euf_game_player_stats')
-        .upsert(statRows.slice(i, i + 500), { onConflict: 'game_id,team_id,full_name' });
+        .upsert(changedStats.slice(i, i + 500), { onConflict: 'game_id,team_id,full_name' });
       if (error) throw new Error(`game stats upsert: ${error.message}`);
     }
   }
