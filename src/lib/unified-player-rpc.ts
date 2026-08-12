@@ -781,9 +781,16 @@ export async function getProfileViaRpc(
     const { data, error } = await db.rpc('get_player_profile', {
       p_anchor_id: anchorId,
     });
-    if (error || !data) return null;
+    if (error || !data) {
+      if (error) console.error('[getProfileViaRpc] rpc error', anchorId, error.message);
+      return null;
+    }
     return await mapRpcProfile(anchorId, data as RpcProfile);
-  } catch {
+  } catch (e) {
+    // Log before falling back. A bare `catch {}` here turned a cookies()-in-SSG
+    // throw into a silent 500 with nothing in the logs (fixed in 76889b1) — the
+    // fallback is meant for a bad RPC payload, not for hiding runtime faults.
+    console.error('[getProfileViaRpc] threw', anchorId, e instanceof Error ? e.message : e);
     return null;
   }
 }
