@@ -109,7 +109,7 @@ export function WantForm({ existing }: { existing?: JerseyWant }) {
           id="w-team"
           kind="team"
           label="Team"
-          placeholder="Any team — ours or not"
+          placeholder="Any team"
           value={team}
           onChange={setTeam}
         />

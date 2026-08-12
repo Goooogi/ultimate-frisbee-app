@@ -192,7 +192,7 @@ export function JerseyForm({ existing }: { existing?: JerseyListing }) {
           id="j-team"
           kind="team"
           label="Team"
-          placeholder="Any team — ours or not"
+          placeholder="Any team"
           value={team}
           onChange={setTeam}
         />
