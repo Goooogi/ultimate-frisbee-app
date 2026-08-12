@@ -1,22 +1,28 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 
-// EMERGENCY GATE (2026-08-12): crawler sweep of the player surfaces saturated
-// the Micro DB instance (48k profile renders/hr at peak; see vault "Supabase
-// Load Diagnosis 2026-08-11"). 503 + Retry-After tells well-behaved bots to
-// back off without de-indexing; real browsers never match the UA test.
-// Remove once the connections/profile render cost is fixed and verified.
-const BOT_UA = /bot|crawl|spider|slurp|facebookexternalhit|meta-external/i;
+// Crawler policy (2026-08-12 incident, see vault "Supabase Load Diagnosis
+// 2026-08-11"): allowlist-only. Anything that identifies as a bot or scraping
+// framework and is not in ALLOWED_BOTS gets 403 everywhere. Allowed bots still
+// get 503 + Retry-After on the /players surfaces until the profile read path
+// stops rebuilding inline — lift that block only after the async-rebuild fix
+// is verified. Real browsers match neither test. robots.ts mirrors this policy.
+const BOT_UA =
+  /bot|crawl|spider|slurp|facebookexternalhit|meta-external|python-requests|python-httpx|scrapy|go-http-client|java\/|libwww/i;
+const ALLOWED_BOTS = /googlebot|bingbot/i;
 
 export async function middleware(request: NextRequest) {
-  if (
-    BOT_UA.test(request.headers.get('user-agent') ?? '') &&
-    request.nextUrl.pathname.includes('/players')
-  ) {
-    return new NextResponse('Crawling temporarily paused', {
-      status: 503,
-      headers: { 'Retry-After': '86400' },
-    });
+  const ua = request.headers.get('user-agent') ?? '';
+  if (BOT_UA.test(ua)) {
+    if (!ALLOWED_BOTS.test(ua)) {
+      return new NextResponse('Forbidden', { status: 403 });
+    }
+    if (request.nextUrl.pathname.includes('/players')) {
+      return new NextResponse('Crawling temporarily paused', {
+        status: 503,
+        headers: { 'Retry-After': '86400' },
+      });
+    }
   }
   return await updateSession(request);
 }

@@ -6,12 +6,21 @@ import type { MetadataRoute } from 'next';
 // always misses the ISR cache and runs a name-resolution RPC (measured at
 // 190/min of find_usau_player_by_name). Canonical content lives on /players —
 // keep crawlers off the resolvers. /admin and /api are not crawlable content.
+// Allowlist-only (2026-08-12): default-deny every crawler, allow only the two
+// major well-behaved ones. Middleware enforces the same policy with 403s for
+// bots that ignore robots.txt.
 export default function robots(): MetadataRoute.Robots {
   return {
     rules: [
       {
-        userAgent: '*',
+        userAgent: ['Googlebot', 'Bingbot'],
+        allow: '/',
         disallow: ['/wfdf/players/by-name/', '/euf/players/by-name/', '/admin', '/api/'],
+        crawlDelay: 10,
+      },
+      {
+        userAgent: '*',
+        disallow: '/',
       },
     ],
   };
