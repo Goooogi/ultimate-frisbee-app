@@ -1,5 +1,15 @@
 # The Layout — web app
 
+## App health rules — check EVERY change against these (2026-08-12 outage)
+
+Full version: vault `App Health Rules.md`. The DB is 2 vCPU / 2 GB; assume zero headroom.
+
+1. **No expensive work on the read path** — serve stale from cache tables, rebuild in background. Never inline-rebuild on a page view or RPC read.
+2. **Fallbacks must be cheaper than what failed** — fail fast on timeout/5xx; fall back only on shape/contract errors.
+3. **Crawlers are the biggest user** — bot allowlist lives in `src/middleware.ts` + `robots.ts`. New public `[param]` routes need real ISR (generateStaticParams, no server-side searchParams reads) and a bounded per-render query count.
+4. **Alerts over vigilance** — CPU was pinned for days before the crash. Check Supabase compute graph before adding load.
+5. **Deploys must not depend on a healthy DB** — build-rendered pages must tolerate DB failure.
+
 ## Read the vault FIRST, every fresh session
 
 Project notes live in the Obsidian vault, **not** in this repo:

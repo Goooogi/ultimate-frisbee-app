@@ -17,7 +17,10 @@ export async function middleware(request: NextRequest) {
     if (!ALLOWED_BOTS.test(ua)) {
       return new NextResponse('Forbidden', { status: 403 });
     }
-    if (request.nextUrl.pathname.includes('/players')) {
+    if (
+      request.nextUrl.pathname.includes('/players') ||
+      request.nextUrl.pathname.startsWith('/usau/teams')
+    ) {
       return new NextResponse('Crawling temporarily paused', {
         status: 503,
         headers: { 'Retry-After': '86400' },
