@@ -1,7 +1,23 @@
-import { type NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { updateSession } from '@/lib/supabase/middleware';
 
+// EMERGENCY GATE (2026-08-12): crawler sweep of the player surfaces saturated
+// the Micro DB instance (48k profile renders/hr at peak; see vault "Supabase
+// Load Diagnosis 2026-08-11"). 503 + Retry-After tells well-behaved bots to
+// back off without de-indexing; real browsers never match the UA test.
+// Remove once the connections/profile render cost is fixed and verified.
+const BOT_UA = /bot|crawl|spider|slurp|facebookexternalhit|meta-external/i;
+
 export async function middleware(request: NextRequest) {
+  if (
+    BOT_UA.test(request.headers.get('user-agent') ?? '') &&
+    request.nextUrl.pathname.includes('/players')
+  ) {
+    return new NextResponse('Crawling temporarily paused', {
+      status: 503,
+      headers: { 'Retry-After': '86400' },
+    });
+  }
   return await updateSession(request);
 }
 
