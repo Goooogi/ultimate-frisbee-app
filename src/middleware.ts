@@ -10,8 +10,12 @@ import { updateSession } from '@/lib/supabase/middleware';
 // Google's non-Googlebot crawlers (GoogleOther = bulk crawl, Google-InspectionTool
 // = Search Console) match neither BOT_UA nor ALLOWED_BOTS, so they used to fall
 // through as ordinary browser traffic and render the expensive surfaces.
+// 2026-08-12 evening sweep: a scraper with a plain Chrome UA walked ~1k unique
+// /players/[id] pages in <1h. UA matching can only catch the sloppy tools
+// (HeadlessChrome et al. below); honest-looking browser UAs need Vercel Bot
+// Protection (Firewall → challenge mode) — that's the real gate, not this regex.
 const BOT_UA =
-  /bot|crawl|spider|slurp|facebookexternalhit|meta-external|python-requests|python-httpx|scrapy|go-http-client|java\/|libwww|googleother|google-inspectiontool/i;
+  /bot|crawl|spider|slurp|facebookexternalhit|meta-external|python-requests|python-httpx|scrapy|go-http-client|java\/|libwww|googleother|google-inspectiontool|headlesschrome|phantomjs|puppeteer|playwright|selenium|curl\/|wget\/|okhttp|axios\/|node-fetch/i;
 const ALLOWED_BOTS = /googlebot|bingbot|google-inspectiontool/i;
 
 export async function middleware(request: NextRequest) {
