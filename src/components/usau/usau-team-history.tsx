@@ -6,7 +6,8 @@
 // selected year's tournaments + roster.
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import type { UsauTeamSummary } from '@/lib/usau/data';
 import { usauEventHref } from '@/lib/usau/event-href';
 import { PillSelect } from '@/components/pill-select';
@@ -16,13 +17,33 @@ interface Props {
   /** The team's gender division — carried onto event links so a Mixed team's
    *  Nationals link opens the Mixed bracket, not the default Men's. */
   genderDivision?: string | null;
-  /** Season to open on (?season= deep link); ignored if we have no such season. */
-  initialSeason?: number | null;
 }
 
-export function UsauTeamHistory({ seasons, genderDivision = null, initialSeason = null }: Props) {
-  // ?season= deep-link (player-profile team links pass the stint's year) wins
-  // when it names a season we actually have; otherwise newest.
+// useSearchParams() must sit inside a Suspense boundary (Next 14) or it
+// de-opts the whole route out of static rendering — the exact thing this split
+// exists to prevent. Same pattern as page-shell.tsx.
+export function UsauTeamHistory(props: Props) {
+  return (
+    <Suspense fallback={<SeasonHistory {...props} initialSeason={null} />}>
+      <SeasonHistoryWithParam {...props} />
+    </Suspense>
+  );
+}
+
+// ?season= deep-link (player-profile team links pass the stint's year) is read
+// HERE rather than passed down from the page: a server-side searchParams read
+// opts /usau/teams/[id] out of static rendering entirely, which made every
+// crawler hit a full request-render. Client-side keeps the route SSG.
+function SeasonHistoryWithParam(props: Props) {
+  const seasonParam = Number.parseInt(useSearchParams().get('season') ?? '', 10);
+  return <SeasonHistory {...props} initialSeason={Number.isFinite(seasonParam) ? seasonParam : null} />;
+}
+
+function SeasonHistory({
+  seasons,
+  genderDivision = null,
+  initialSeason,
+}: Props & { initialSeason: number | null }) {
   const [selected, setSelected] = useState<number | null>(() =>
     initialSeason != null && seasons.some((s) => s.season === initialSeason)
       ? initialSeason

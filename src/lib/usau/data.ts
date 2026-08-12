@@ -16,6 +16,7 @@ import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { flightForName, FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
+import { isUnhealthyError } from '@/lib/supabase/health';
 
 type DB = SupabaseClient<Database>;
 
@@ -1317,6 +1318,17 @@ export async function findUsauPlayerByName(name: string): Promise<string | null>
     p_name: name,
   });
   if (!rpcError) return (rpcId as string | null) ?? null;
+
+  // App Health Rule #2 (2026-08-12 outage): when the RPC failed because the DB
+  // is saturated, the fallback below costs MORE than what just failed — a
+  // leading-wildcard ilike over 100k+ rows plus a second usau_rosters query.
+  // Re-running it on a timeout is how load became collapse. Only degrade to the
+  // client-side path for real contract errors (missing function, bad schema
+  // cache); on a health error, fail fast and report no match.
+  if (isUnhealthyError(rpcError)) {
+    console.error('[findUsauPlayerByName] db unhealthy, failing fast', rpcError.message);
+    return null;
+  }
 
   // Fallback (RPC missing/errored): cheap SQL prefilter on anyone whose
   // display_name *contains* the surname, then the strict token-subset match in

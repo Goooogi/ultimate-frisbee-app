@@ -19,6 +19,13 @@ import { USAU_LEVELS, buildLeagueQs, type UsauLevel } from '@/lib/league';
 
 export const revalidate = 60;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered (3,742
+// crawlable event URLs, the largest event surface).
+export function generateStaticParams(): { slug: string }[] {
+  return [];
+}
+
 interface Props {
   params: { slug: string };
 }

@@ -16,6 +16,13 @@ import { EufExternalLink } from '@/components/euf/euf-event-detail';
 
 export const revalidate = 300;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered (1,632
+// crawlable game URLs).
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
+
 interface Props {
   params: { id: string };
 }

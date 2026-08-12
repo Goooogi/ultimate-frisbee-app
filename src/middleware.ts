@@ -7,9 +7,12 @@ import { updateSession } from '@/lib/supabase/middleware';
 // get 503 + Retry-After on the /players surfaces until the profile read path
 // stops rebuilding inline — lift that block only after the async-rebuild fix
 // is verified. Real browsers match neither test. robots.ts mirrors this policy.
+// Google's non-Googlebot crawlers (GoogleOther = bulk crawl, Google-InspectionTool
+// = Search Console) match neither BOT_UA nor ALLOWED_BOTS, so they used to fall
+// through as ordinary browser traffic and render the expensive surfaces.
 const BOT_UA =
-  /bot|crawl|spider|slurp|facebookexternalhit|meta-external|python-requests|python-httpx|scrapy|go-http-client|java\/|libwww/i;
-const ALLOWED_BOTS = /googlebot|bingbot/i;
+  /bot|crawl|spider|slurp|facebookexternalhit|meta-external|python-requests|python-httpx|scrapy|go-http-client|java\/|libwww|googleother|google-inspectiontool/i;
+const ALLOWED_BOTS = /googlebot|bingbot|google-inspectiontool/i;
 
 export async function middleware(request: NextRequest) {
   const ua = request.headers.get('user-agent') ?? '';

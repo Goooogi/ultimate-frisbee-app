@@ -12,6 +12,13 @@ import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 
 export const revalidate = 120;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered (1,174
+// crawlable team URLs).
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
+
 interface Props {
   params: { id: string };
 }

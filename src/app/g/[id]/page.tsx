@@ -20,7 +20,16 @@ interface Props {
   params: { id: string };
 }
 
+// 30s keeps live scores fresh; ISR still revalidates on that window, it just
+// serves cached HTML in between instead of re-rendering per request.
 export const revalidate = 30;
+
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit re-runs the UFA API fan-out
+// (~5 upstream calls per render).
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const game = await getGameById(params.id).catch(() => null);

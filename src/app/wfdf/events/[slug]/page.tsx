@@ -10,6 +10,12 @@ import { WfdfEventDetail } from '@/components/wfdf/wfdf-event-detail';
 
 export const revalidate = 120;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered.
+export function generateStaticParams(): { slug: string }[] {
+  return [];
+}
+
 interface Props {
   params: { slug: string };
 }

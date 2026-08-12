@@ -13,6 +13,13 @@ import { EufFlag } from '@/components/euf/euf-flag';
 
 export const revalidate = 300;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered (578
+// crawlable team URLs).
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
+
 interface Props {
   params: { id: string };
 }

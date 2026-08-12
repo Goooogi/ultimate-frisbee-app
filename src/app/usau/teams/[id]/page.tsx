@@ -6,6 +6,7 @@
 // selected year's tournaments + roster.
 
 import { notFound } from 'next/navigation';
+import { cache } from 'react';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { getTeam, getTeamNationalsMedals } from '@/lib/usau/data';
@@ -21,27 +22,35 @@ import {
   USAU_LEVELS,
 } from '@/lib/league';
 
-export const revalidate = 60;
+// ISR: team history changes only on ingest. This route was the last
+// request-rendered crawler surface (~100k URLs): `revalidate` was inert because
+// nothing here opted into SSG, and the server read of ?season= forced dynamic
+// rendering on top of that. The season deep link now lives in UsauTeamHistory.
+export const revalidate = 3600;
+
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
 
 interface Props {
   params: { id: string };
-  searchParams: { season?: string };
 }
 
+// getTeam runs in both generateMetadata and the page body; cache() collapses
+// them into one query per render instead of two.
+const getTeamCached = cache(getTeam);
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const team = await getTeam(params.id).catch(() => null);
+  const team = await getTeamCached(params.id).catch(() => null);
   if (!team) return { title: 'Team not found · The Layout' };
   return { title: `${team.name} · USAU · The Layout` };
 }
 
-export default async function UsauTeamPage({ params, searchParams }: Props) {
-  const team = await getTeam(params.id);
+export default async function UsauTeamPage({ params }: Props) {
+  const team = await getTeamCached(params.id);
   if (!team) notFound();
-
-  // ?season= deep link (player profiles pass the stint's year). Bad values
-  // fall through to the newest season inside UsauTeamHistory.
-  const seasonParam = Number.parseInt(searchParams.season ?? '', 10);
-  const initialSeason = Number.isFinite(seasonParam) ? seasonParam : null;
 
   // National Championship medals (year + placement). Non-fatal on failure.
   const medals = await getTeamNationalsMedals(
@@ -108,11 +117,7 @@ export default async function UsauTeamPage({ params, searchParams }: Props) {
         )}
       </div>
 
-      <UsauTeamHistory
-        seasons={team.seasons}
-        genderDivision={team.genderDivision}
-        initialSeason={initialSeason}
-      />
+      <UsauTeamHistory seasons={team.seasons} genderDivision={team.genderDivision} />
     </PageShell>
   );
 }

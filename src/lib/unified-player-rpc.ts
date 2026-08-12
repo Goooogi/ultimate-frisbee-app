@@ -57,6 +57,7 @@ import {
   isStateCoveredByRegionMap,
 } from '@/lib/usau/regions';
 import type { UfaPlayerGameRow } from '@/lib/ufa/types';
+import { isUnhealthyError } from '@/lib/supabase/health';
 import type { PlayerKind } from '@/lib/player-content/types';
 import type {
   UnifiedPlayerProfile,
@@ -770,9 +771,27 @@ function anonDb() {
   return _anonDb;
 }
 
-export async function getProfileViaRpc(
-  anchorId: string,
-): Promise<UnifiedPlayerProfile | null> {
+/**
+ * Outcome of the RPC fast path, so the caller can tell "the RPC answered but I
+ * couldn't use the answer" from "the database is in trouble".
+ *
+ * App Health Rule #2 — a fallback must be CHEAPER than what failed. The
+ * multi-query assembler behind this RPC costs 6-10 queries; running it because
+ * the DB just timed out is how the 2026-08-12 outage turned load into collapse
+ * (every timeout bought 6-10 more timeouts). So:
+ *   - 'ok'       → use the profile.
+ *   - 'shape'    → the RPC replied but the payload was null/unmappable. The
+ *                  assembler is a legitimate alternate path here; it's a data
+ *                  defect, not a load problem, and the DB is answering fine.
+ *   - 'unhealthy'→ timeout / network / 5xx. FAIL FAST. Do not run the
+ *                  assembler; let the caller degrade.
+ */
+export type RpcProfileResult =
+  | { status: 'ok'; profile: UnifiedPlayerProfile }
+  | { status: 'shape' }
+  | { status: 'unhealthy'; reason: string };
+
+export async function getProfileViaRpc(anchorId: string): Promise<RpcProfileResult> {
   try {
     const db = anonDb();
     // NOTE: call db.rpc(...) on the client object DIRECTLY (bound) — pulling it
@@ -781,16 +800,28 @@ export async function getProfileViaRpc(
     const { data, error } = await db.rpc('get_player_profile', {
       p_anchor_id: anchorId,
     });
-    if (error || !data) {
-      if (error) console.error('[getProfileViaRpc] rpc error', anchorId, error.message);
-      return null;
+    if (error) {
+      if (isUnhealthyError(error)) {
+        console.error('[getProfileViaRpc] db unhealthy, failing fast', anchorId, error.message);
+        return { status: 'unhealthy', reason: error.code ?? error.message };
+      }
+      console.error('[getProfileViaRpc] rpc error', anchorId, error.message);
+      return { status: 'shape' };
     }
-    return await mapRpcProfile(anchorId, data as RpcProfile);
+    if (!data) return { status: 'shape' };
+    const profile = await mapRpcProfile(anchorId, data as RpcProfile);
+    return profile ? { status: 'ok', profile } : { status: 'shape' };
   } catch (e) {
     // Log before falling back. A bare `catch {}` here turned a cookies()-in-SSG
     // throw into a silent 500 with nothing in the logs (fixed in 76889b1) — the
     // fallback is meant for a bad RPC payload, not for hiding runtime faults.
-    console.error('[getProfileViaRpc] threw', anchorId, e instanceof Error ? e.message : e);
-    return null;
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error('[getProfileViaRpc] threw', anchorId, msg);
+    // A thrown fetch (network down, socket reset, abort) is a health signal, not
+    // a shape defect — don't let it buy 6-10 more queries.
+    if (isUnhealthyError({ message: msg })) {
+      return { status: 'unhealthy', reason: msg };
+    }
+    return { status: 'shape' };
   }
 }
