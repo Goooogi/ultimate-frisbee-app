@@ -4467,6 +4467,7 @@ export type Database = {
           leagues: string[]
           name: string
           score: number
+          usau_id: string
           via_display: string
         }[]
       }

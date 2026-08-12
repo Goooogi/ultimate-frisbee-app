@@ -9,7 +9,6 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
-import { findUsauPlayerByName } from '@/lib/usau/data';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -54,6 +53,8 @@ interface RawConn {
   is_pro: boolean | null;
   is_nationals: boolean | null;
   is_alumni: boolean | null;
+  /** Resolved server-side by the RPC (migration player_connections_resolve_usau_id). */
+  usau_id: string | null;
 }
 
 /**
@@ -75,21 +76,19 @@ export async function getPlayerConnections(
   if (error) return [];
   const rows = (data ?? []) as RawConn[];
 
-  // Resolve each connection to a profile link by name (USAU id has the widest
-  // coverage; the unified profile then merges the other leagues). 3-5 lookups,
-  // each a small indexed surname query — cheap. Unresolvable → plain text.
-  const hrefs = await Promise.all(
-    rows.map((r) => findUsauPlayerByName(r.display_name).catch(() => null)),
-  );
-
-  return rows.map((r, i) => ({
+  // The RPC resolves usau_id itself (one round-trip instead of 1+N). This used
+  // to fire findUsauPlayerByName per row — "3-5 lookups, cheap" was wrong at
+  // traffic: 5:1 amplification made it 267k calls / 10.2 CPU-hours per 12h, 69%
+  // of all DB time. Each query was small; the cost was queueing on a saturated
+  // instance. Unresolvable → plain text, same as before.
+  return rows.map((r) => ({
     name: r.name,
     displayName: r.display_name,
     leagues: r.leagues ?? [],
     score: r.score == null ? null : Number(r.score),
     bridgeCount: r.bridge_count,
     viaDisplay: r.via_display,
-    href: hrefs[i] ? `/players/${hrefs[i]}?from=usau` : null,
+    href: r.usau_id ? `/players/${r.usau_id}?from=usau` : null,
     isPro: r.is_pro ?? false,
     isNationals: r.is_nationals ?? false,
     isAlumni: r.is_alumni ?? false,

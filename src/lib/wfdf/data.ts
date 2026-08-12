@@ -408,7 +408,10 @@ export async function getWfdfPlayerStints(displayName: string): Promise<WfdfPlay
   if (!surname) return [];
   const db = supabase();
 
-  // Prefilter by surname (indexed on lower(last_name)) to keep the scan small,
+  // Prefilter by surname to keep the scan small. Served by the trgm index
+  // wfdf_rosters_last_name_raw_trgm — it must be gin_trgm_ops on the RAW
+  // last_name, because a leading-wildcard ilike can use neither the
+  // lower(last_name) btree nor the normalize_player_name(last_name) trgm.
   // then confirm with the full namesMatch rule. A CamelCase-joined compound
   // surname (EUCS "DeMarree") would never ilike-hit the split spelling WFDF
   // stores ("De Marree"), so prefilter on the tail after the last case
