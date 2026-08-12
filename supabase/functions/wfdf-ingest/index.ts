@@ -395,10 +395,41 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
             total: p.total ?? null,
             games: p.games ?? null,
           }));
-          const { error } = await supabase
+          // DIFF BEFORE WRITE (2026-08-12). This function runs every 15 min
+          // (96x/day) and used to blind-upsert every roster row every time:
+          // ~24.5k rows x 96 = ~2.35M no-op writes/day, each one burning WAL,
+          // dead tuples and the Micro instance's 11 MB/s disk budget for zero
+          // new data. One cheap read per team replaces all of it.
+          const { data: priorRows } = await supabase
             .from('wfdf_rosters')
-            .upsert(rows, { onConflict: 'team_id,wfdf_player_id' });
-          if (!error) rosterPlayers += rows.length;
+            .select('wfdf_player_id, first_name, last_name, full_name, jersey_number, goals, assists, callahans, total, games')
+            .eq('team_id', teamUuid);
+          const prior = new Map(
+            (priorRows ?? []).map((r: any) => [String(r.wfdf_player_id), r]),
+          );
+          const changed = rows.filter((r: any) => {
+            const p: any = prior.get(String(r.wfdf_player_id));
+            if (!p) return true; // new player on this roster
+            return (
+              p.first_name !== r.first_name ||
+              p.last_name !== r.last_name ||
+              p.full_name !== r.full_name ||
+              p.jersey_number !== r.jersey_number ||
+              p.goals !== r.goals ||
+              p.assists !== r.assists ||
+              p.callahans !== r.callahans ||
+              p.total !== r.total ||
+              p.games !== r.games
+            );
+          });
+          if (changed.length === 0) {
+            rosterPlayers += rows.length;
+          } else {
+            const { error } = await supabase
+              .from('wfdf_rosters')
+              .upsert(changed, { onConflict: 'team_id,wfdf_player_id' });
+            if (!error) rosterPlayers += rows.length;
+          }
         }
         await sleep(FETCH_DELAY_MS);
       }),
@@ -594,8 +625,8 @@ Deno.serve(async (req) => {
         mode: 'dispatch-discover',
         candidates: candidates.length,
         discovered,
-        skippedKnown: skippedKnown.length,
-        skippedLegacy: skippedLegacy.length,
+        skippedKnown,
+        skippedLegacy,
         failed,
       }),
       { headers: { 'Content-Type': 'application/json' } },

@@ -81,16 +81,29 @@ async function runSync(supabase: SupabaseClient): Promise<SyncResult> {
   }
 
   // 2. What do we already have? Pull id + status + score to decide what to refetch.
-  const { data: existingRows, error: exErr } = await supabase
-    .from('pul_games')
-    .select('id, season, status, away_score, home_score')
-    .limit(100000);
-  if (exErr) throw exErr;
-  const existing = new Map(
-    (existingRows ?? []).map((r) => [r.id as string, r as {
-      id: string; season: number; status: string; away_score: number | null; home_score: number | null;
-    }]),
-  );
+  //
+  // PAGINATED on purpose: PostgREST caps a single response at 1,000 rows no
+  // matter what .limit() says, so the old `.limit(100000)` silently returned
+  // only the first 1,000 games. Every game past that looked "not in the DB" and
+  // was refetched from the upstream site on EVERY run — unbounded upstream
+  // work that grows with the table. Page until short read.
+  type ExistingGame = {
+    id: string; season: number; status: string; away_score: number | null; home_score: number | null;
+  };
+  const PAGE = 1000;
+  const existingRows: ExistingGame[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from('pul_games')
+      .select('id, season, status, away_score, home_score')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const batch = (data ?? []) as ExistingGame[];
+    existingRows.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  const existing = new Map(existingRows.map((r) => [r.id, r]));
 
   // 3. Decide which games to (re)fetch:
   //    - any game not in the DB yet (new on /schedule)

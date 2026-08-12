@@ -757,10 +757,19 @@ export const getUnifiedPlayerProfileMultiQuery = _getUnifiedPlayerProfile;
  *
  * The RPC (co-owned with the mobile app) does the whole cross-league merge in
  * one round trip — ~2ms warm off its cache-aside table vs. the double-digit
- * fan-out of upstream calls the multi-query path above makes. Any RPC error, a
- * null return, or a payload we can't map faithfully falls through to
- * `_getUnifiedPlayerProfile`, so this is additive: worst case we do the work we
- * were already doing.
+ * fan-out of upstream calls the multi-query path above makes.
+ *
+ * Fallback policy (App Health Rule #2, 2026-08-12 outage). The old comment here
+ * claimed falling back was "additive: worst case we do the work we were already
+ * doing". That was wrong, and it is why load became collapse: when the DB is
+ * saturated the RPC times out, and the assembler then fires 6-10 MORE queries
+ * that also time out. The fallback cost more than the thing that failed.
+ *
+ * So we only fall back on 'shape' — the RPC answered, but the payload was null
+ * or unmappable. That's a data defect with a healthy DB, and the assembler is a
+ * genuinely different code path that may succeed. On 'unhealthy' (timeout,
+ * connection failure, 5xx) we return null immediately and let the caller render
+ * the not-found/degraded state. Failing fast is the whole point.
  *
  * The RPC path re-applies web's location-based UFA attribution itself, and
  * refuses payloads affected by the known upstream defects — see the header of
@@ -770,7 +779,8 @@ async function _getProfilePreferRpc(
   anchorId: string,
 ): Promise<UnifiedPlayerProfile | null> {
   const viaRpc = await getProfileViaRpc(anchorId);
-  if (viaRpc) return viaRpc;
+  if (viaRpc.status === 'ok') return viaRpc.profile;
+  if (viaRpc.status === 'unhealthy') return null;
   return _getUnifiedPlayerProfile(anchorId);
 }
 

@@ -120,11 +120,17 @@ export async function markThreadRead(threadId: string): Promise<void> {
     .eq('id', threadId);
 }
 
-/** Live updates for an open thread. Returns an unsubscribe fn. */
+/** Live updates for an open thread. Returns an unsubscribe fn.
+ *
+ * The channel name is made UNIQUE per call. supabase-js caches channels by
+ * name, so a fixed name meant a remount (React StrictMode double-invokes
+ * effects) got the already-subscribed instance back, and `.on()` after
+ * `subscribe()` throws — which unwound the whole page into the error boundary.
+ */
 export function subscribeToThread(threadId: string, onMessage: () => void): () => void {
   const db = createClient() as any;
   const channel = db
-    .channel(`jersey_thread_${threadId}`)
+    .channel(`jersey_thread_${threadId}_${Math.random().toString(36).slice(2)}`)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'jersey_messages', filter: `thread_id=eq.${threadId}` },

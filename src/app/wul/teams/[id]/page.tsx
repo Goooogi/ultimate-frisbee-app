@@ -26,6 +26,12 @@ import { wulTeamState, locationLine } from '@/lib/team-geo';
 
 export const revalidate = 3600;
 
+// SSG mode with on-demand paths — see /players/[id]. Without this export the
+// revalidate above never engages and every hit is request-rendered.
+export function generateStaticParams(): { id: string }[] {
+  return [];
+}
+
 interface Props {
   params: { id: string };
 }

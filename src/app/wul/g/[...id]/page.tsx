@@ -17,6 +17,12 @@ import { WulGameDetail } from '@/components/wul/wul-game-detail';
 
 export const revalidate = 300; // 5 min — scores refresh frequently during season
 
+// SSG mode with on-demand paths — see /players/[id]. Catch-all route, so the
+// param is string[]. Without this export the revalidate above never engages.
+export function generateStaticParams(): { id: string[] }[] {
+  return [];
+}
+
 interface Props {
   params: { id: string[] };
 }
