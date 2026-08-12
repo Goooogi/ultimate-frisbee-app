@@ -45,7 +45,9 @@
 //      live solely in the upstream UFA API. Guard: ufaCoverageIsComplete().
 
 import 'server-only';
-import { createClient } from '@/lib/supabase/server';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import type { Database } from '@/lib/supabase/database.types';
 import { getPlayerInfo } from '@/lib/ufa/client';
 import { teamBySlugOrAbbr } from '@/lib/ufa/teams';
 import {
@@ -754,11 +756,25 @@ export async function mapRpcProfile(
  * Call the shared RPC and map it. Returns null on any error, a null payload, or
  * an unmappable shape — the caller falls back to the multi-query assembler.
  */
+// Cookie-free anon client: profile data is public, and the cookie-bound SSR
+// client makes cookies() throw inside an SSG render — /players/[id] has
+// generateStaticParams, so every render 500'd with "Page changed from static to
+// dynamic at runtime, reason: cookies". Same fix already applied to the
+// approved-content reader in lib/player-content/server.ts.
+let _anonDb: ReturnType<typeof createSupabaseClient<Database>> | null = null;
+function anonDb() {
+  if (_anonDb) return _anonDb;
+  _anonDb = createSupabaseClient<Database>(supabaseUrl(), supabaseAnonKey(), {
+    auth: { persistSession: false },
+  });
+  return _anonDb;
+}
+
 export async function getProfileViaRpc(
   anchorId: string,
 ): Promise<UnifiedPlayerProfile | null> {
   try {
-    const db = createClient();
+    const db = anonDb();
     // NOTE: call db.rpc(...) on the client object DIRECTLY (bound) — pulling it
     // into a local `const rpc = db.rpc` detaches `this` and supabase-js then
     // reads `this.rest` → "Cannot read properties of undefined (reading 'rest')".
