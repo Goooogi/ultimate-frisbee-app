@@ -8,6 +8,7 @@
 // schedule page. We don't have W-L records aggregated yet — that's a
 // future enhancement (compute from usau_games rows).
 
+import { Suspense } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
@@ -78,7 +79,14 @@ export default async function UsauEventPage({ params }: Props) {
       {/* The "View on USAU" link renders inside UsauEventDetail, sharing a
           row with the Level/Division selects (right-aligned) so mobile gets
           one compact header row instead of stacked controls. */}
-      <UsauEventDetail event={event} />
+      {/* Suspense is load-bearing: UsauEventDetail reads useSearchParams()
+          (useDivision/useLevel), which throws missing-suspense-with-csr-bailout
+          during the static render this route opted into — every event page
+          500'd (FUNCTION_INVOCATION_FAILED) until this boundary. Same pattern
+          as page-shell.tsx and usau-team-history.tsx. */}
+      <Suspense>
+        <UsauEventDetail event={event} />
+      </Suspense>
     </PageShell>
   );
 }
