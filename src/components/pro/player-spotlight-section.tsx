@@ -173,7 +173,7 @@ function SpotlightCard({
   if (p?.profileId) {
     return (
       <Link
-        href={`/players/${p.profileId}`}
+        href={`/players/${p.profileId}`} prefetch={false}
         className={[
           base,
           'hover:bg-surface-hi transition-colors cursor-pointer',

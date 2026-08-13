@@ -173,7 +173,7 @@ export function UfaRosterTable({ players, jerseyByPlayer, year }: Props) {
               <tr key={p.playerID} className="group hover:bg-surface-hi transition-colors duration-100">
                 <td className={`px-3 py-2.5 text-[13px] text-left text-faint tabular font-tight sticky left-0 z-10 bg-surface group-hover:bg-surface-hi ${LEAD_W} ${rowTop}`}>{jersey ?? fallbackNum}</td>
                 <td className={`px-3 py-2.5 text-[13px] text-left text-ink font-medium font-tight sticky ${NAME_LEFT} z-10 bg-surface group-hover:bg-surface-hi ${STICKY_EDGE} ${rowTop}`}>
-                  <Link href={`/players/${p.playerID}?from=ufa`} className="hover:text-accent transition-colors duration-150">
+                  <Link href={`/players/${p.playerID}?from=ufa`} prefetch={false} className="hover:text-accent transition-colors duration-150">
                     {p.name}
                   </Link>
                 </td>

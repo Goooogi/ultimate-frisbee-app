@@ -330,7 +330,7 @@ function PlayerRow({
     >
       <td className="py-2 pl-1.5 pr-2 text-left">
         <Link
-          href={`/players/${row.playerID}?from=ufa`}
+          href={`/players/${row.playerID}?from=ufa`} prefetch={false}
           className="font-semibold text-ink hover:text-accent transition-colors focus-visible:outline-none focus-visible:underline"
         >
           {row.firstName} {row.lastName}

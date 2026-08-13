@@ -159,7 +159,7 @@ export function ProRosterTable({ players, league, linkNames = true, minWidth = 6
                 </td>
                 <td className={`px-3 py-2.5 text-[13px] text-left text-ink font-medium font-tight ${rowTop}`}>
                   {linkNames ? (
-                    <Link href={`/players/${player.id}?from=${league}`} className="hover:text-accent transition-colors duration-150">
+                    <Link href={`/players/${player.id}?from=${league}`} prefetch={false} className="hover:text-accent transition-colors duration-150">
                       {player.playerName}
                     </Link>
                   ) : (

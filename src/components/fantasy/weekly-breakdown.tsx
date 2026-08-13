@@ -104,7 +104,7 @@ function PlayerRows({
             </span>
             <span className="flex-1 min-w-0">
               <Link
-                href={`/players/${p.playerId}`}
+                href={`/players/${p.playerId}`} prefetch={false}
                 className="block font-tight text-[13.5px] font-semibold text-ink truncate hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:underline"
               >
                 {p.fullName}

@@ -204,7 +204,7 @@ function PlayerTypeahead({
         </span>
         <span className="flex-1 min-w-0">
           <Link
-            href={`/players/${currentPlayer.playerId}`}
+            href={`/players/${currentPlayer.playerId}`} prefetch={false}
             className={[
               'block font-tight text-[14px] font-semibold text-ink truncate',
               'hover:text-accent transition-colors duration-150',
@@ -327,7 +327,7 @@ function PlayerTypeahead({
               </button>
               {/* Secondary: jump to the player's profile without selecting. */}
               <Link
-                href={`/players/${hit.playerId}`}
+                href={`/players/${hit.playerId}`} prefetch={false}
                 onMouseDown={(e) => e.stopPropagation()}
                 aria-label={`View ${hit.fullName}'s profile`}
                 title="View profile"

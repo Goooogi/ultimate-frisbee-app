@@ -107,7 +107,7 @@ function SeasonHistory({
               {active.roster.map((p) => (
                 <li key={p.playerId}>
                   <Link
-                    href={`/players/${p.playerId}?from=usau`}
+                    href={`/players/${p.playerId}?from=usau`} prefetch={false}
                     className="flex items-center gap-3 px-3 py-2.5 rounded-card-sm hover:bg-ink/[0.04] transition-colors no-underline"
                   >
                     <span
@@ -221,7 +221,7 @@ function EventCard({
   return (
     <li>
       <Link
-        href={usauEventHref(event.slug, genderDivision)}
+        href={usauEventHref(event.slug, genderDivision)} prefetch={false}
         className="group block bg-surface rounded-card shadow-card p-3.5 transition-shadow hover:shadow-lift cursor-pointer no-underline"
       >
         <div className="flex items-baseline justify-between gap-2 mb-1">

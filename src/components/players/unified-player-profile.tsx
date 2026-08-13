@@ -329,7 +329,7 @@ function UfaStintRow({ stint, year }: { stint: UfaSeasonStint; year: number }) {
       <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
         <Caret />
         <Link
-          href={`/teams/${stint.teamMeta.id}?year=${year}`}
+          href={`/teams/${stint.teamMeta.id}?year=${year}`} prefetch={false}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <TeamLogo
@@ -391,7 +391,7 @@ function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number })
       <summary className="list-none cursor-pointer select-none px-4 py-3 flex items-center gap-3 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset">
         <Caret />
         <Link
-          href={`/usau/teams/${stint.teamId}?season=${year}`}
+          href={`/usau/teams/${stint.teamId}?season=${year}`} prefetch={false}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <UsauTeamLogo
@@ -466,7 +466,7 @@ function UsauEventRow({
   return (
     <li className="flex items-center gap-3 px-2 py-1.5 hover:bg-surface transition-colors rounded">
       <Link
-        href={href}
+        href={href} prefetch={false}
         className="flex-1 min-w-0 text-[13px] text-ink font-tight hover:text-accent transition-colors truncate"
       >
         {event.name}
@@ -524,7 +524,7 @@ function PulStintRow({ stint }: { stint: PulSeasonStint }) {
       >
         <Caret />
         <Link
-          href={`/pul/teams/${stint.teamId}`}
+          href={`/pul/teams/${stint.teamId}`} prefetch={false}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <PulTeamLogoInline
@@ -644,7 +644,7 @@ function PulGameLogTable({ games }: { games: PulPlayerGameRow[] }) {
               </td>
               <td className={`${tdBase} text-left`}>
                 <Link
-                  href={`/pul/g/${g.gameId}`}
+                  href={`/pul/g/${g.gameId}`} prefetch={false}
                   className="inline-flex items-center gap-1 text-ink hover:text-accent transition-colors cursor-pointer"
                 >
                   <span
@@ -709,7 +709,7 @@ function WulStintRow({ stint }: { stint: WulSeasonStint }) {
       >
         <Caret />
         <Link
-          href={`/wul/teams/${stint.teamId}`}
+          href={`/wul/teams/${stint.teamId}`} prefetch={false}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <WulTeamLogoInline
@@ -757,7 +757,7 @@ function WfdfStintRow({ stint }: { stint: WfdfSeasonStint }) {
   return (
     <div className="px-4 py-3 flex items-center gap-3">
       <Link
-        href={`/wfdf/teams/${stint.teamId}`}
+        href={`/wfdf/teams/${stint.teamId}`} prefetch={false}
         className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
       >
         <WfdfFlag flagFile={null} countryCode={stint.countryCode} size={20} />
@@ -813,6 +813,7 @@ function EufClubRow({ stints }: { stints: EufSeasonStint[] }) {
           href={`/euf/clubs/${encodeURIComponent(first.teamName)}?season=${first.season}${
             first.divisionName ? `&div=${encodeURIComponent(first.divisionName)}` : ''
           }`}
+          prefetch={false}
           className="flex items-center gap-2 min-w-0 flex-1 hover:opacity-80 transition-opacity"
         >
           <EufFlag countryName={first.countryName} size={20} />
@@ -858,7 +859,7 @@ function EufEventRow({ stint }: { stint: EufSeasonStint }) {
   return (
     <li className="flex items-center gap-3 px-2 py-1.5 hover:bg-surface transition-colors rounded">
       <Link
-        href={`/euf/events/${stint.eventSlug}`}
+        href={`/euf/events/${stint.eventSlug}`} prefetch={false}
         className="flex-1 min-w-0 text-[13px] text-ink font-tight hover:text-accent transition-colors truncate"
       >
         {stint.eventName}
@@ -975,7 +976,7 @@ function WulGameLogTable({ games }: { games: WulPlayerGameRow[] }) {
               </td>
               <td className={`${tdBase} text-left`}>
                 <Link
-                  href={`/wul/g/${g.gameId}`}
+                  href={`/wul/g/${g.gameId}`} prefetch={false}
                   className="inline-flex items-center gap-1 text-ink hover:text-accent transition-colors cursor-pointer"
                 >
                   <span
@@ -1160,7 +1161,7 @@ function GameLogTable({ games }: { games: UfaPlayerGameRow[] }) {
               <td className={`${tdBase} text-left`}>
                 {opp.team ? (
                   <Link
-                    href={`/teams/${opp.team.id}`}
+                    href={`/teams/${opp.team.id}`} prefetch={false}
                     className="inline-flex items-center gap-1.5 text-ink hover:text-accent transition-colors"
                   >
                     <TeamLogo team={opp.team} size={18} />
@@ -1456,7 +1457,7 @@ function ConnectionsSection({
           return c.href ? (
             <li key={c.name}>
               <Link
-                href={c.href}
+                href={c.href} prefetch={false}
                 className="rounded-card bg-surface shadow-card px-4 py-3 flex items-center gap-3 no-underline hover:shadow-lift transition-shadow"
               >
                 {inner}

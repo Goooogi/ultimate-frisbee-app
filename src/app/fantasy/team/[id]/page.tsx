@@ -233,7 +233,7 @@ function RosterSection({
             </span>
             <span className="flex-1 min-w-0">
               <Link
-                href={`/players/${slot.playerId}`}
+                href={`/players/${slot.playerId}`} prefetch={false}
                 className={[
                   'block font-tight text-[14px] font-semibold text-ink truncate',
                   'hover:text-accent transition-colors duration-150',

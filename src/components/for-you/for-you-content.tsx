@@ -1055,7 +1055,7 @@ function LeaderRow({ leader }: { leader: TeamLeader }) {
   if (leader.playerId) {
     return (
       <Link
-        href={`/players/${leader.playerId}?from=${leader.league}`}
+        href={`/players/${leader.playerId}?from=${leader.league}`} prefetch={false}
         className="group flex items-center gap-2 rounded-card-sm -mx-1.5 px-1.5 py-1 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
         {inner}
@@ -1103,7 +1103,7 @@ function RosterRow({
     return (
       <li className="border-b border-hairline last:border-b-0">
         <Link
-          href={`/players/${player.playerId}?from=${league}`}
+          href={`/players/${player.playerId}?from=${league}`} prefetch={false}
           className="group flex items-center gap-2.5 py-1.5 text-[13px] font-tight text-ink hover:text-accent cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm -mx-1 px-1"
         >
           {jersey}

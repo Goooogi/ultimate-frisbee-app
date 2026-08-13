@@ -267,7 +267,7 @@ export default async function PlayersPage({ searchParams }: Props) {
                       </td>
                       <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         <Link
-                          href={`/players/${player.id}?from=pul`}
+                          href={`/players/${player.id}?from=pul`} prefetch={false}
                           className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"
                         >
                           {player.playerName}
@@ -416,7 +416,7 @@ export default async function PlayersPage({ searchParams }: Props) {
                       </td>
                       <td className={`px-3 py-2.5 text-[13px] text-left w-[140px] sm:w-[180px] ${STICKY_NAME_BODY} bg-surface group-hover:bg-surface-hi ${i === 0 ? '' : 'border-t border-hairline'}`}>
                         <Link
-                          href={`/players/${player.id}?from=wul`}
+                          href={`/players/${player.id}?from=wul`} prefetch={false}
                           className="block font-medium font-tight text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded whitespace-nowrap overflow-x-auto no-scrollbar"
                         >
                           {player.playerName}
