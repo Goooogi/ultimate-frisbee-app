@@ -113,6 +113,25 @@ export function hasWfdfBracket(
   return buildBrackets(divisionName, games, teams).length > 0;
 }
 
+/** Ids of every bracket game the trees will actually RENDER for a division.
+ *  classifyRound only places `Playoff (N-M)` / `Placement (N-M)` rounds, so
+ *  "Pre-quarter", "Crossover", "Round of 32" and the placement round-robins
+ *  ("Pool D (13-18)") fall through it. The event detail lists those in a flat
+ *  section below the trees so no played bracket game is ever invisible. */
+export function wfdfBracketCoveredIds(
+  divisionName: string,
+  games: Game[],
+  teams: Team[],
+): Set<string> {
+  const ids = new Set<string>();
+  for (const b of buildBrackets(divisionName, games, teams)) {
+    for (const col of b.columns) {
+      for (const g of col.games) ids.add(g.id);
+    }
+  }
+  return ids;
+}
+
 export function WfdfBracketTree({ divisionName, games, teams }: Props) {
   const brackets = useMemo(
     () => buildBrackets(divisionName, games, teams),

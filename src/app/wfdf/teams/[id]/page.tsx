@@ -6,7 +6,7 @@ import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
-import { getTeam } from '@/lib/wfdf/data';
+import { getTeam, findClubTwin } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 
@@ -33,6 +33,11 @@ export default async function WfdfTeamPage({ params }: Props) {
   const team = await getTeam(params.id);
   if (!team) notFound();
 
+  // This page is ONE Worlds appearance. When the entry resolves to a
+  // league-wide club identity (EUCS club, or a USAU club for US entries), link
+  // out to the full club profile rather than dead-ending here.
+  const clubTwin = await findClubTwin(team);
+
   const eyebrowParts = [team.divisionName, team.countryName].filter(Boolean).join(' · ');
 
   return (
@@ -46,6 +51,21 @@ export default async function WfdfTeamPage({ params }: Props) {
         { label: team.name },
       ]}
     >
+      {clubTwin && (
+        <Link
+          href={
+            clubTwin.kind === 'euf'
+              ? `/euf/clubs/${encodeURIComponent(clubTwin.clubName)}?div=${encodeURIComponent(clubTwin.division)}`
+              : `/usau/teams/${clubTwin.teamId}`
+          }
+          className="inline-flex items-center gap-1 mb-4 text-[12px] font-semibold font-tight text-accent no-underline hover:text-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+        >
+          {clubTwin.kind === 'euf'
+            ? `View ${clubTwin.clubName}'s full ${clubTwin.division} club history →`
+            : `View ${clubTwin.teamName}'s full USAU club profile →`}
+        </Link>
+      )}
+
       {/* Hero panel — mirrors the USAU team hero shape. */}
       <div className="mb-8 bg-surface rounded-card-lg shadow-card overflow-hidden">
         <div className="flex items-center gap-4 p-4 lg:p-5">

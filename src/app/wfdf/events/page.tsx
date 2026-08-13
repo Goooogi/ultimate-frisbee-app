@@ -8,6 +8,7 @@ import Link from 'next/link';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { listEvents } from '@/lib/wfdf/data';
+import { WfdfEventLogo } from '@/components/wfdf/wfdf-event-logo';
 
 export const revalidate = 300;
 
@@ -63,24 +64,7 @@ export default async function WfdfEventsPage() {
               ].join(' ')}
             >
               <div className="flex items-start gap-3">
-                {e.logoUrl ? (
-                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-white overflow-hidden flex-shrink-0">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={e.logoUrl}
-                      alt=""
-                      width={44}
-                      height={44}
-                      loading="eager"
-                      fetchPriority="high"
-                      className="w-full h-full object-contain p-1"
-                    />
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-ink/[0.06] text-[10px] font-bold text-ink font-tight flex-shrink-0">
-                    {e.year}
-                  </span>
-                )}
+                <WfdfEventLogo logoUrl={e.logoUrl} year={e.year} />
                 <div className="min-w-0 flex-1">
                   <div className="text-[10px] font-bold tracking-[0.16em] uppercase text-accent font-tight">
                     {KIND_LABEL[e.kind] ?? 'Championship'}

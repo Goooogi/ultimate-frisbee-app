@@ -11,11 +11,96 @@ import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
+import { PillSelect } from '@/components/pill-select';
 import { WfdfFlag } from './wfdf-flag';
-import { WfdfBracketTree, hasWfdfBracket } from './wfdf-bracket-tree';
+import { WfdfBracketTree, hasWfdfBracket, wfdfBracketCoveredIds } from './wfdf-bracket-tree';
 
 interface Props {
   event: WfdfEvent;
+}
+
+type WfdfTabKey = 'pools' | 'bracket' | 'standings';
+
+const TAB_LABELS: Record<WfdfTabKey, string> = {
+  pools: 'Pools',
+  bracket: 'Bracket',
+  standings: 'Standings',
+};
+
+// ── Real pools vs. bracket phases ─────────────────────────────────────────
+//
+// wfdf_games.pool_name is NOT a pool field — it's whatever phase label the
+// source published. Of the ~97 distinct values in the table, many are bracket
+// rounds ("Playoff (1-8)", "Pre-quarter", "Crossover", "Gold", "Bronze").
+// `is_bracket` doesn't fully separate them either (AOBUC24 tags "Pre-quarter"
+// rows as pool play), so grouping on pool_name alone fills Pool Play with
+// playoff rounds. Only labels that actually read as a pool ("Pool A", "Pool
+// B") are treated as pools; everything else stays out of the pool grouping.
+function isRealPoolName(name: string | null): boolean {
+  if (!name) return false;
+  const t = name.trim().toLowerCase();
+  // Bracket phases first — "Crossover(s)" and playoff/quarter rounds are
+  // single-elimination, not round-robin groups, even when the source files
+  // them under pool_name.
+  if (t.includes('playoff') || t.includes('crossover') || t.includes('quarter')) return false;
+  // "Pool A", but also WFDF's second-phase groups: "Power Pool E" (seeded
+  // regroup after first-phase pools) and "Placement Pool K" (lower-bracket
+  // round robin). Both are real round-robin pools with their own slates, so
+  // anchoring on a leading "pool" token would misfile ~250 games into Other.
+  return /(^|\s)pool\b/.test(t);
+}
+
+// Stored values already carry the word "Pool" ("Pool A", "Power Pool E"), so
+// the header renders the name as-is rather than prefixing "POOL " and
+// producing "POOL POOL A".
+function poolDisplayLabel(pool: string): string {
+  return pool.trim().toUpperCase();
+}
+
+// ── Pool membership, derived from games ───────────────────────────────────
+//
+// Unlike USAU (usau_event_teams.pool), wfdf_teams carries NO pool column —
+// the schema has seed/final_standing/W-L but nothing tying a team to a pool.
+// So a pool's teams are the teams that played in that pool's games. Callers
+// pass division-filtered games/teams: WFDF pool names are only unique WITHIN
+// a division (AOBUC24's "Pool A" spans several divisions' pools), so grouping
+// across divisions would merge unrelated pools into one oversized card.
+//
+// Teams are ordered by seed when present, then name — WFDF pool play has no
+// per-pool standings to rank by, so this is presentation order, not a table.
+function buildWfdfPoolTeams(
+  games: WfdfEvent['games'],
+  teams: WfdfEvent['teams'],
+): Map<string, WfdfEvent['teams']> {
+  const byId = new Map(teams.map((t) => [t.id, t]));
+  const byPool = new Map<string, Map<string, WfdfEvent['teams'][number]>>();
+
+  for (const g of games) {
+    if (!isRealPoolName(g.poolName)) continue;
+    const pool = g.poolName as string;
+    const bucket = byPool.get(pool) ?? new Map<string, WfdfEvent['teams'][number]>();
+    for (const id of [g.homeTeamId, g.awayTeamId]) {
+      if (id == null) continue;
+      const team = byId.get(id);
+      // Only teams in the active division resolve — a game whose opponent sits
+      // outside this division (shouldn't happen, but the data is scraped) just
+      // contributes the side we know.
+      if (team) bucket.set(team.id, team);
+    }
+    byPool.set(pool, bucket);
+  }
+
+  const out = new Map<string, WfdfEvent['teams']>();
+  for (const [pool, bucket] of byPool) {
+    out.set(
+      pool,
+      [...bucket.values()].sort((a, b) => {
+        const sd = (a.seed ?? 9999) - (b.seed ?? 9999);
+        return sd !== 0 ? sd : a.name.localeCompare(b.name);
+      }),
+    );
+  }
+  return out;
 }
 
 export function WfdfEventDetail({ event }: Props) {
@@ -72,134 +157,128 @@ export function WfdfEventDetail({ event }: Props) {
     [activeDiv, event.games, event.teams],
   );
 
+  // Bracket games the trees DON'T place (Pre-quarter, Crossover, Round of 32,
+  // the placement round-robins) still render as a flat section below the trees
+  // — a played game must never be invisible. 307 games across 13 events fall
+  // through classifyRound, so without this they vanish wherever a tree renders.
+  const uncoveredBracketGames = useMemo(() => {
+    if (!hasBracketTree) return [];
+    const covered = wfdfBracketCoveredIds(activeDiv, event.games, event.teams);
+    return bracketGames.filter((g) => !covered.has(g.id));
+  }, [hasBracketTree, activeDiv, event.games, event.teams, bracketGames]);
+
+  // Which section tabs this division can actually fill. Standings is gated on
+  // having teams at all (it ranks by record when no official final_standing
+  // exists); pools/bracket on having those games. Order is the reading order:
+  // pools → bracket → standings.
+  const visibleTabs = useMemo<WfdfTabKey[]>(() => {
+    const out: WfdfTabKey[] = [];
+    if (poolGames.length > 0) out.push('pools');
+    if (bracketGames.length > 0) out.push('bracket');
+    if (standings.length > 0) out.push('standings');
+    return out;
+  }, [poolGames.length, bracketGames.length, standings.length]);
+
+  const [activeTab, setActiveTab] = useState<WfdfTabKey>('pools');
+
+  // Resolve synchronously rather than via an effect — switching divisions can
+  // invalidate the current tab (a division with no bracket), and waiting a
+  // render to correct it paints one frame of an empty section.
+  const effectiveTab: WfdfTabKey = visibleTabs.includes(activeTab)
+    ? activeTab
+    : (visibleTabs[0] ?? 'pools');
+
+  const divisionOptions = useMemo(
+    () => divisions.map((d) => ({ value: d.name, label: d.name })),
+    [divisions],
+  );
+
   if (divisions.length === 0) {
     return <p className="text-muted font-tight text-[13px]">No divisions found for this event.</p>;
   }
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Division filter — a native <select> (accessible, mobile-native picker,
-          zero-JS) dressed as a proper filter control. WMUCC has up to 9
-          divisions, so a dropdown reads cleaner than a wrapping tab row. The
-          whole control is one bordered pill: a small "Division" eyebrow, the
-          selected value, and a chevron; hover/focus light up the border +
-          surface. group-focus-within drives the accent treatment on the chevron
-          so keyboard focus is obvious. */}
-      <div
-        className={[
-          'group relative inline-flex items-center gap-2 self-start',
-          'h-10 pl-4 pr-3.5 rounded-full',
-          'bg-surface shadow-soft',
-          'transition-shadow duration-150',
-          'hover:shadow-card',
-          'focus-within:ring-2 focus-within:ring-accent/40',
-        ].join(' ')}
-      >
-        <label
-          htmlFor="wfdf-division-select"
-          className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight flex-shrink-0 pointer-events-none select-none"
-        >
+      {/* Division filter — WMUCC has up to 9 divisions, so a dropdown reads
+          cleaner than a wrapping tab row. PillSelect is the app-wide idiom for
+          5+ options (see the USAU division select), so the WFDF control matches
+          the rest of the chrome rather than rendering an OS <select> popover. */}
+      <div className="flex items-center gap-2 self-start">
+        <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight select-none">
           Division
-        </label>
-        <span className="w-px h-4 bg-hairline flex-shrink-0" aria-hidden="true" />
-
-        {/* The real <select> is transparent + stretched to fill the pill so the
-            entire control is the click/tap target; the value text sits on top. */}
-        <span className="relative flex items-center">
-          <select
-            id="wfdf-division-select"
-            value={activeDiv}
-            onChange={(e) => setActiveDiv(e.target.value)}
-            aria-label="Filter by division"
-            className={[
-              'appearance-none cursor-pointer bg-transparent border-0 outline-none',
-              'pr-6 py-1.5',
-              'text-[12px] font-bold tracking-[0.04em] uppercase font-tight text-ink',
-              'focus:outline-none',
-            ].join(' ')}
-          >
-            {divisions.map((d) => (
-              <option key={d.id} value={d.name} className="normal-case tracking-normal text-ink bg-bg">
-                {d.name}
-              </option>
-            ))}
-          </select>
-          {/* Chevron — accent when the control is focused (keyboard), muted at
-              rest, ink on hover. pointer-events-none so it never blocks clicks. */}
-          <svg
-            className={[
-              'pointer-events-none absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3',
-              'text-muted group-hover:text-ink group-focus-within:text-accent',
-              'transition-colors duration-150',
-            ].join(' ')}
-            viewBox="0 0 10 10"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M2 3.5L5 6.5L8 3.5"
-              stroke="currentColor"
-              strokeWidth="1.75"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
         </span>
+        <PillSelect
+          value={activeDiv}
+          options={divisionOptions}
+          onChange={setActiveDiv}
+          ariaLabel="Filter by division"
+        />
       </div>
 
-      {/* Bracket trees lead — people prefer the visual over the table.
-          Championship + placement brackets, each a left-to-right tree with a
-          final-placement rail. Reconstructed for modern events that carry
-          round-labeled playoff games; renders nothing for divisions with no
-          derivable bracket (legacy events, pool-only) — the flat list below is
-          the fallback there. */}
-      <WfdfBracketTree divisionName={activeDiv} games={event.games} teams={event.teams} />
-
-      {/* Fallback flat bracket-games list — only when the tree couldn't render
-          (e.g. legacy events with no round labels). Modern events show the
-          trees above and skip this. */}
-      {!hasBracketTree && bracketGames.length > 0 && (
-        <GameSection heading="Bracket Games" games={bracketGames} />
+      {/* Section tabs — Pools / Bracket / Standings, mirroring the USAU event
+          page. Each tab appears only when this division can fill it, so a
+          pool-only legacy event never shows an empty Bracket tab. Edge-bleed
+          horizontal scroll on mobile so nothing clips. */}
+      {visibleTabs.length > 1 && (
+        <div
+          role="tablist"
+          aria-label="Event views"
+          className="-mx-5 px-5 md:mx-0 md:px-0 flex gap-2 overflow-x-auto scrollbar-none"
+        >
+          {visibleTabs.map((t) => {
+            const on = t === effectiveTab;
+            return (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={on}
+                onClick={() => setActiveTab(t)}
+                className={[
+                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
+                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
+                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  on ? 'bg-ink text-bg' : 'bg-ink/5 text-muted hover:text-ink',
+                ].join(' ')}
+              >
+                {TAB_LABELS[t]}
+              </button>
+            );
+          })}
+        </div>
       )}
 
-      {/* Final Standings — collapsible. Collapsed by default WHEN a bracket
-          leads (the bracket is then the primary view). But when this division
-          has NO bracket at all (e.g. legacy pool-only events like WUC 2024
-          Open), the standings ARE the primary view, so open them by default.
-          key forces the <details> back to its default state when the division
-          changes, so it doesn't carry an open/closed state across divisions. */}
-      <details
-        key={`standings-${activeDiv}`}
-        className="group"
-        open={!hasBracketTree && bracketGames.length === 0}
-      >
-        <summary
+      {/* Bracket — the trees when the shape parses, else the flat list. Games
+          the trees don't place (Pre-quarter, Crossover, Round of 32, placement
+          round-robins) still list below, so no played game is ever invisible. */}
+      {effectiveTab === 'bracket' && bracketGames.length > 0 && (
+        hasBracketTree ? (
+          <>
+            <WfdfBracketTree divisionName={activeDiv} games={event.games} teams={event.teams} />
+            {uncoveredBracketGames.length > 0 && (
+              <GameSection heading="More bracket games" games={uncoveredBracketGames} groupByPool />
+            )}
+          </>
+        ) : (
+          <GameSection heading="Bracket Games" games={bracketGames} />
+        )
+      )}
+
+      {/* Pool play — teams per pool, that pool's games collapsed underneath. */}
+      {effectiveTab === 'pools' && <PoolPlaySection games={poolGames} teams={teams} />}
+
+      {effectiveTab === 'standings' && standings.length > 0 && (
+      <section>
+        <h2
           className={[
-            'flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden',
+            'flex items-center gap-2',
             'text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight',
             'pb-2 border-b border-hairline',
-            'hover:text-ink transition-colors duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm',
           ].join(' ')}
         >
-          {/* Disclosure chevron — rotates when open. */}
-          <svg
-            className="w-2.5 h-2.5 flex-shrink-0 transition-transform duration-150 group-open:rotate-90"
-            viewBox="0 0 10 10"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M3.5 2L6.5 5L3.5 8"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
           {hasOfficialStanding ? 'Final Standings' : 'Standings · By Record'}
           <span className="text-faint tabular ml-1">{standings.length}</span>
-        </summary>
+        </h2>
 
         <div className="mt-3 bg-surface rounded-card-lg shadow-card overflow-hidden">
           <div className="hidden sm:grid grid-cols-[2.5rem_1fr_5rem_4rem] items-center px-4 py-2.5 border-b border-hairline text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
@@ -253,13 +332,156 @@ export function WfdfEventDetail({ event }: Props) {
             ))}
           </ol>
         </div>
-      </details>
+      </section>
+      )}
 
-      {/* Pool games */}
-      {poolGames.length > 0 && (
-        <GameSection heading="Pool Play" games={poolGames} groupByPool />
+      {standings.length === 0 && games.length === 0 && (
+        <p className="text-muted font-tight text-[13px]">No results in this division yet.</p>
       )}
     </div>
+  );
+}
+
+// ─── Pool play ────────────────────────────────────────────────────────────────
+//
+// Mirrors the USAU Pools tab: each pool renders its team list as a card, with
+// that pool's games collapsed underneath. Teams come from the games (WFDF has
+// no team→pool column — see buildWfdfPoolTeams), so there's no seed column
+// guarantee and no W-L table; it's a membership list, not standings.
+
+function PoolPlaySection({
+  games,
+  teams,
+}: {
+  games: WfdfEvent['games'];
+  teams: WfdfEvent['teams'];
+}) {
+  const poolTeams = useMemo(() => buildWfdfPoolTeams(games, teams), [games, teams]);
+
+  const gamesByPool = useMemo(() => {
+    const byPool = new Map<string, WfdfEvent['games']>();
+    for (const g of games) {
+      if (!isRealPoolName(g.poolName)) continue;
+      const k = g.poolName as string;
+      if (!byPool.has(k)) byPool.set(k, []);
+      byPool.get(k)!.push(g);
+    }
+    for (const arr of byPool.values()) {
+      arr.sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? ''));
+    }
+    return byPool;
+  }, [games]);
+
+  // Phase labels that aren't real pools (Playoff, Crossover, Pre-quarter…)
+  // still need somewhere to live, or a played game would vanish from the
+  // page — they render flat below the pools.
+  const otherGames = useMemo(() => games.filter((g) => !isRealPoolName(g.poolName)), [games]);
+
+  const pools = useMemo(
+    () => [...gamesByPool.keys()].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    [gamesByPool],
+  );
+
+  if (pools.length === 0 && otherGames.length === 0) return null;
+
+  return (
+    <>
+      {pools.length > 0 && (
+        <section>
+          <h2 className="flex items-center gap-2 text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline">
+            Pool Play
+            <span className="text-faint tabular ml-1">{pools.length}</span>
+          </h2>
+
+          <div className="mt-4 flex flex-col gap-6">
+            {pools.map((pool) => {
+              const pTeams = poolTeams.get(pool) ?? [];
+              const pGames = gamesByPool.get(pool) ?? [];
+              return (
+                <div key={pool}>
+                  <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+                        {poolDisplayLabel(pool)}
+                      </span>
+                      <span className="text-[10px] tabular text-faint font-tight">
+                        {pTeams.length} teams
+                      </span>
+                    </div>
+                    <ul>
+                      {pTeams.map((t, i) => (
+                        <li key={t.id}>
+                          <Link
+                            href={`/wfdf/teams/${t.id}`}
+                            className={[
+                              'flex items-center gap-2.5 px-4 py-2.5 no-underline',
+                              'transition-colors duration-150 hover:bg-surface-hi',
+                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+                              i > 0 ? 'border-t border-hairline' : '',
+                            ].join(' ')}
+                          >
+                            <span className="w-5 text-right text-[11px] font-bold tabular text-faint font-tight">
+                              {t.seed ?? '–'}
+                            </span>
+                            <WfdfFlag flagFile={t.flagFile} countryCode={t.countryCode} size={16} />
+                            <span className="flex-1 min-w-0 font-tight text-[14px] font-semibold text-ink truncate">
+                              {t.name}
+                            </span>
+                            <span className="text-[11px] tabular text-faint font-tight">
+                              {t.wins ?? '—'}–{t.losses ?? '—'}
+                            </span>
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {pGames.length > 0 && (
+                    <details className="group mt-1.5">
+                      <summary
+                        className={[
+                          'flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden',
+                          'px-4 py-2 rounded-full',
+                          'text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight',
+                          'hover:text-ink transition-colors duration-150',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                        ].join(' ')}
+                      >
+                        <svg
+                          className="w-2.5 h-2.5 flex-shrink-0 transition-transform duration-150 group-open:rotate-90"
+                          viewBox="0 0 10 10"
+                          fill="none"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M3.5 2L6.5 5L3.5 8"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        Games
+                        <span className="text-faint tabular">{pGames.length}</span>
+                      </summary>
+                      <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {pGames.map((g) => (
+                          <GameRow key={g.id} game={g} />
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {otherGames.length > 0 && (
+        <GameSection heading="Other Games" games={otherGames} groupByPool />
+      )}
+    </>
   );
 }
 

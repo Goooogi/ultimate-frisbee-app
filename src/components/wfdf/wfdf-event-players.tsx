@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
-import type { WfdfEventPlayersDetail } from '@/lib/wfdf/data';
+import type { WfdfEventPlayersDetail, WfdfEventTeamPlayers } from '@/lib/wfdf/data';
 import { WfdfFlag } from './wfdf-flag';
 import { SearchBox, EmptyState } from './wfdf-teams-hub';
 
@@ -14,46 +14,24 @@ interface Props {
   event: WfdfEventPlayersDetail;
 }
 
-interface TeamGroup {
-  teamId: string;
-  teamName: string;
-  countryCode: string | null;
-  divisionName: string | null;
-  players: WfdfEventPlayersDetail['players'];
-}
-
 export function WfdfEventPlayers({ event }: Props) {
   const [query, setQuery] = useState('');
 
-  const groups = useMemo<TeamGroup[]>(() => {
+  // Teams arrive pre-grouped and pre-sorted from the data layer (finish order,
+  // then jersey order within a team) — filtering here only narrows that order,
+  // it never re-derives it.
+  const groups = useMemo<WfdfEventTeamPlayers[]>(() => {
     const q = query.trim().toLowerCase();
-    const filtered = q
-      ? event.players.filter(
-          (p) =>
-            p.fullName.toLowerCase().includes(q) || p.teamName.toLowerCase().includes(q),
-        )
-      : event.players;
-
-    const byTeam = new Map<string, TeamGroup>();
-    for (const p of filtered) {
-      let g = byTeam.get(p.teamId);
-      if (!g) {
-        g = {
-          teamId: p.teamId,
-          teamName: p.teamName,
-          countryCode: p.countryCode,
-          divisionName: p.divisionName,
-          players: [],
-        };
-        byTeam.set(p.teamId, g);
-      }
-      g.players.push(p);
-    }
-    const out = [...byTeam.values()];
-    out.sort((a, b) => a.teamName.localeCompare(b.teamName));
-    for (const g of out) g.players.sort((a, b) => a.fullName.localeCompare(b.fullName));
-    return out;
-  }, [event.players, query]);
+    if (!q) return event.teams;
+    return event.teams
+      .map((g) => {
+        // A team-name hit keeps the whole roster; otherwise filter by player.
+        if (g.teamName.toLowerCase().includes(q)) return g;
+        const players = g.players.filter((p) => p.fullName.toLowerCase().includes(q));
+        return players.length > 0 ? { ...g, players } : null;
+      })
+      .filter((g): g is WfdfEventTeamPlayers => g !== null);
+  }, [event.teams, query]);
 
   const totalShown = groups.reduce((s, g) => s + g.players.length, 0);
 
@@ -63,7 +41,7 @@ export function WfdfEventPlayers({ event }: Props) {
         value={query}
         onChange={setQuery}
         placeholder="Filter players or teams…"
-        count={query ? totalShown : event.players.length}
+        count={query ? totalShown : event.totalPlayers}
         countLabel="players"
       />
 

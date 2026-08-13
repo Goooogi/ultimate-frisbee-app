@@ -334,6 +334,31 @@ export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
 
 // ─── Team detail (with roster) ────────────────────────────────────────────────
 
+/** '03' → '3', '00' → '0'; whitespace trimmed; non-numeric passes through;
+ *  empty → null. Same rule as USAU's getTeam roster so a zero-padded scrape
+ *  variant can't split one player into two rows. */
+function normalizeJersey(j: string | null): string | null {
+  const raw = (j ?? '').trim();
+  if (raw === '') return null;
+  return /^\d+$/.test(raw) ? String(parseInt(raw, 10)) : raw;
+}
+
+/** Collapse duplicate roster rows for the same (name, normalized jersey) —
+ *  name AND number must both match to merge; a missing jersey never merges
+ *  with a numbered one, and two same-named teammates with genuinely different
+ *  numbers both survive (live data has exactly that: 88/99 and 0/24 pairs).
+ *  First row wins — rows arrive sorted total-desc, so the survivor carries
+ *  the stats. */
+function dedupeRoster<T extends { fullName: string; jerseyNumber: string | null }>(rows: T[]): T[] {
+  const seen = new Set<string>();
+  return rows.filter((r) => {
+    const key = `${r.fullName.trim().toLowerCase()}|${r.jerseyNumber ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function getTeam(teamId: string): Promise<WfdfTeamSummary | null> {
   const db = supabase();
   const { data: t } = await db
@@ -383,15 +408,17 @@ export async function getTeam(teamId: string): Promise<WfdfTeamSummary | null> {
     scoresFor: (t.scores_for as number) ?? null,
     scoresAgainst: (t.scores_against as number) ?? null,
     spiritAvg: (t.spirit_avg as number) ?? null,
-    roster: ((roster ?? []) as Row[]).map((r: Row) => ({
-      wfdfPlayerId: r.wfdf_player_id as number,
-      fullName: r.full_name as string,
-      jerseyNumber: (r.jersey_number as string) ?? null,
-      goals: (r.goals as number) ?? null,
-      assists: (r.assists as number) ?? null,
-      games: (r.games as number) ?? null,
-      total: (r.total as number) ?? null,
-    })),
+    roster: dedupeRoster(
+      ((roster ?? []) as Row[]).map((r: Row) => ({
+        wfdfPlayerId: r.wfdf_player_id as number,
+        fullName: r.full_name as string,
+        jerseyNumber: normalizeJersey((r.jersey_number as string) ?? null),
+        goals: (r.goals as number) ?? null,
+        assists: (r.assists as number) ?? null,
+        games: (r.games as number) ?? null,
+        total: (r.total as number) ?? null,
+      })),
+    ),
     games: ((games ?? []) as Row[]).map(mapGameRow),
   };
 }
@@ -604,11 +631,25 @@ export interface WfdfEventPlayerRow {
   divisionName: string | null;
 }
 
+export interface WfdfEventTeamPlayers {
+  teamId: string;
+  teamName: string;
+  countryCode: string | null;
+  divisionName: string | null;
+  finalStanding: number | null;
+  players: WfdfEventPlayerRow[];
+}
+
 export interface WfdfEventPlayersDetail {
   slug: string;
   name: string;
   year: number;
-  players: WfdfEventPlayerRow[];
+  /** Grouped by team, teams ordered by finish then name, players by jersey
+   *  then name. Grouping is done here rather than in the client component so
+   *  the finish order (which needs final_standing, a field the flat player row
+   *  doesn't carry) survives to the UI. */
+  teams: WfdfEventTeamPlayers[];
+  totalPlayers: number;
 }
 
 /**
@@ -628,38 +669,87 @@ export async function getEventPlayers(slug: string): Promise<WfdfEventPlayersDet
   if (!ev) return null;
   const eventId = ev.id as string;
 
-  const players: WfdfEventPlayerRow[] = [];
+  const byTeam = new Map<string, WfdfEventTeamPlayers>();
+  let totalPlayers = 0;
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     const { data: rows } = await db
       .from('wfdf_rosters')
       .select(
-        'full_name, jersey_number, goals, assists, ' +
-          'team:team_id(id, name, country_code, division:division_id(name))',
+        'id, full_name, jersey_number, goals, assists, ' +
+          'team:team_id(id, name, country_code, final_standing, division:division_id(name))',
       )
       .eq('event_id', eventId)
-      .order('full_name')
+      // Ordered by id so the ranges can't skip or overlap. full_name is NOT
+      // unique within an event (7 of the 12 events over one page carry
+      // duplicate names), and Postgres won't stably order ties across
+      // .range() calls — a name-ordered page boundary silently drops rows.
+      .order('id', { ascending: true })
       .range(offset, offset + PAGE - 1);
     if (!rows || rows.length === 0) break;
     for (const r of rows as Row[]) {
       const team = r.team as Record<string, unknown> | null;
       if (!team) continue;
+      const teamId = (team.id as string) ?? '';
+      const fullName = (r.full_name as string) ?? '';
+      if (!teamId || !fullName) continue;
       const division = team.division as Record<string, unknown> | null;
-      players.push({
-        fullName: r.full_name as string,
-        jerseyNumber: (r.jersey_number as string) ?? null,
+      let group = byTeam.get(teamId);
+      if (!group) {
+        group = {
+          teamId,
+          teamName: (team.name as string) ?? '',
+          countryCode: (team.country_code as string) ?? null,
+          divisionName: (division?.name as string) ?? null,
+          finalStanding: (team.final_standing as number) ?? null,
+          players: [],
+        };
+        byTeam.set(teamId, group);
+      }
+      group.players.push({
+        fullName,
+        jerseyNumber: normalizeJersey((r.jersey_number as string) ?? null),
         goals: (r.goals as number) ?? null,
         assists: (r.assists as number) ?? null,
-        teamId: team.id as string,
-        teamName: (team.name as string) ?? '',
-        countryCode: (team.country_code as string) ?? null,
-        divisionName: (division?.name as string) ?? null,
+        teamId,
+        teamName: group.teamName,
+        countryCode: group.countryCode,
+        divisionName: group.divisionName,
       });
+      totalPlayers += 1;
     }
     if (rows.length < PAGE) break;
   }
 
-  return { slug: ev.slug as string, name: ev.name as string, year: ev.year as number, players };
+  // Teams by finish then name (same convention as the Teams hub); players by
+  // jersey then name, unnumbered last rather than sorting as 0. jersey_number
+  // is a STRING column here (mobile types it as a number), so compare it
+  // numerically only when it actually parses — a non-numeric jersey sorts
+  // with the unnumbered tail rather than becoming NaN.
+  const jerseyRank = (j: string | null): number => {
+    if (j == null) return Number.MAX_SAFE_INTEGER;
+    const n = Number(j);
+    return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+  };
+  const teams = [...byTeam.values()].sort(
+    (a, b) =>
+      (a.finalStanding ?? 999) - (b.finalStanding ?? 999) || a.teamName.localeCompare(b.teamName),
+  );
+  for (const t of teams) {
+    t.players.sort(
+      (a, b) =>
+        jerseyRank(a.jerseyNumber) - jerseyRank(b.jerseyNumber) ||
+        a.fullName.localeCompare(b.fullName),
+    );
+  }
+
+  return {
+    slug: ev.slug as string,
+    name: ev.name as string,
+    year: ev.year as number,
+    teams,
+    totalPlayers,
+  };
 }
 
 /**
@@ -799,4 +889,88 @@ function mapGameRow(g: Row): WfdfGameRow {
     status: g.status as string,
     scheduledAt: (g.scheduled_at as string) ?? null,
   };
+}
+
+// ─── Club twin — the league-wide identity behind a per-event Worlds entry ─────
+//
+// WUCC-style teams are real CLUB teams, so a wfdf_teams row is one appearance
+// of a club that usually also exists as an EUCS club (European clubs) or a
+// USAU club team (US clubs). Mirrors the DB's get_euf_club_cross_league
+// matching: compact name key + division (Masters prefixes stripped) + country
+// for the EUF side; US-country teams fall back to a USAU team lookup. Returns
+// null when nothing matches — the team page simply shows no club link.
+
+export type WfdfClubTwin =
+  | { kind: 'euf'; clubName: string; division: string }
+  | { kind: 'usau'; teamId: string; teamName: string };
+
+/** compact_name_key mirror: normalized name with spaces removed. */
+function compactNameKey(name: string): string {
+  return normalizeName(name).replace(/ /g, '');
+}
+
+/** "Master Open" / "Grand Master Women's" → "open" / "women's" (lowercased),
+ *  mirroring the SQL's `regexp_replace(d.name, '^(Grand )?Master ', '')`. */
+function baseDivisionKey(divisionName: string): string {
+  return divisionName.replace(/^(Grand )?Master /i, '').trim().toLowerCase();
+}
+
+/**
+ * Resolve a Worlds team entry to its league-wide club identity. At most two
+ * queries (fuzzy EUF prefilter, then a USAU lookup only for US entries that
+ * missed) — the team page is ISR, so this stays inside the per-render query
+ * budget.
+ */
+export async function findClubTwin(team: {
+  name: string;
+  divisionName: string | null;
+  countryName: string | null;
+}): Promise<WfdfClubTwin | null> {
+  if (!team.divisionName) return null;
+  const key = compactNameKey(team.name);
+  if (!key) return null;
+  const div = baseDivisionKey(team.divisionName);
+  const db = supabase();
+
+  // EUCS club first — the club identity layer with the cross-league shelf.
+  // The fuzzy RPC is the prefilter; the strict compact-key + division +
+  // country equality here mirrors get_euf_club_cross_league's join.
+  const { data: eufRows } = await db.rpc('search_euf_teams_fuzzy', {
+    q: team.name,
+    lim: 20,
+  });
+  const eufHit = ((eufRows ?? []) as {
+    name: string;
+    division: string;
+    country_name: string | null;
+  }[]).find(
+    (t) =>
+      compactNameKey(t.name) === key &&
+      t.division.trim().toLowerCase() === div &&
+      (team.countryName == null ||
+        t.country_name == null ||
+        t.country_name.trim().toLowerCase() === team.countryName.trim().toLowerCase()),
+  );
+  if (eufHit) return { kind: 'euf', clubName: eufHit.name, division: eufHit.division };
+
+  // USAU club team — only worth attempting for US entries. A same-named
+  // foreign club matching a USAU team would be a false merge.
+  const country = team.countryName?.trim().toLowerCase() ?? '';
+  if (country !== 'united states' && country !== 'usa' && country !== 'united states of america') {
+    return null;
+  }
+  const usauGender =
+    div === 'open' ? 'Men' : div === "women's" ? 'Women' : div === 'mixed' ? 'Mixed' : null;
+  if (!usauGender) return null;
+  const { data: usauRows } = await db
+    .from('usau_teams')
+    .select('id, name, gender_division, competition_level')
+    .ilike('name', `%${team.name.trim()}%`)
+    .eq('gender_division', usauGender)
+    .eq('competition_level', 'CLUB')
+    .limit(20);
+  const usauHit = ((usauRows ?? []) as { id: string; name: string }[]).find(
+    (t) => compactNameKey(t.name) === key,
+  );
+  return usauHit ? { kind: 'usau', teamId: usauHit.id, teamName: usauHit.name } : null;
 }

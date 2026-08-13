@@ -34,7 +34,7 @@ export default async function WfdfEventPlayersPage({ params }: Props) {
     <PageShell
       title={`${ev.name} Players`}
       eyebrow="WFDF · Rosters"
-      subtitle={`${ev.players.length} named roster players.`}
+      subtitle={`${ev.totalPlayers} named roster players.`}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'WFDF', href: '/wfdf/events' },
