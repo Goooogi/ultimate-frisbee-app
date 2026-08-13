@@ -14,9 +14,8 @@
 //
 // Tab targets:
 //   Home     → "/"            (app landing)
-//   Leagues  → "/scores"      (games hub, UFA default — web has no persisted
-//                              last-league yet; localStorage persistence is a
-//                              possible follow-up)
+//   Leagues  → "/leagues"     (league directory — home base for the league
+//                              family, mirrors the mobile app's Leagues tab)
 //   Playbook → "/playbook"
 //   Fantasy  → "/fantasy"
 //   For You  → "/for-you"
@@ -36,16 +35,17 @@ interface StaticTab {
 
 const TABS: StaticTab[] = [
   { id: 'home',     label: 'Home',     href: '/',         icon: 'home' },
-  { id: 'leagues',  label: 'Leagues',  href: '/scores',   icon: 'leagues' },
+  { id: 'leagues',  label: 'Leagues',  href: '/leagues',  icon: 'leagues' },
   { id: 'playbook', label: 'Playbook', href: '/playbook', icon: 'playbook' },
   { id: 'fantasy',  label: 'Fantasy',  href: '/fantasy',  icon: 'fantasy' },
   { id: 'foryou',   label: 'For You',  href: '/for-you',  icon: 'foryou' },
 ];
 
 // League-family route prefixes → the Leagues tab lights up under all of them
-// (every league's Scores/Schedule/Teams/Players + game/team/player detail).
+// (the directory itself + every league's Scores/Schedule/Teams/Players +
+// game/team/player detail).
 const LEAGUE_PREFIXES = [
-  '/scores', '/schedule', '/teams', '/players', '/g',
+  '/leagues', '/scores', '/schedule', '/teams', '/players', '/g',
   '/usau', '/pul', '/wul', '/wfdf', '/euf',
 ];
 

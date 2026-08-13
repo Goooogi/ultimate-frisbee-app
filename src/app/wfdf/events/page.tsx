@@ -28,9 +28,16 @@ const KIND_LABEL: Record<string, string> = {
 
 export default async function WfdfEventsPage() {
   const events = await listEvents().catch(() => []);
+  // Preload hints for the above-fold logo batch so the browser fetches them
+  // alongside the HTML instead of discovering them after hydration/paint.
+  const preloadLogos = events.slice(0, 9).map((e) => e.logoUrl).filter((u): u is string => !!u);
 
   return (
-    <PageShell
+    <>
+      {preloadLogos.map((url) => (
+        <link key={url} rel="preload" as="image" href={url} />
+      ))}
+      <PageShell
       title="WFDF Worlds"
       eyebrow="WFDF · World Championships"
       subtitle="World Flying Disc Federation events — pick a championship for standings, games, and rosters."
@@ -59,7 +66,15 @@ export default async function WfdfEventsPage() {
                 {e.logoUrl ? (
                   <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-white overflow-hidden flex-shrink-0">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={e.logoUrl} alt="" className="w-full h-full object-contain p-1" />
+                    <img
+                      src={e.logoUrl}
+                      alt=""
+                      width={44}
+                      height={44}
+                      loading="eager"
+                      fetchPriority="high"
+                      className="w-full h-full object-contain p-1"
+                    />
                   </span>
                 ) : (
                   <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-ink/[0.06] text-[10px] font-bold text-ink font-tight flex-shrink-0">
@@ -85,6 +100,7 @@ export default async function WfdfEventsPage() {
           ))}
         </div>
       )}
-    </PageShell>
+      </PageShell>
+    </>
   );
 }

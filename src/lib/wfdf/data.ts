@@ -474,6 +474,9 @@ export interface WfdfTeamHubRow {
   eventSlug: string;
   eventName: string;
   eventYear: number;
+  /** ISO date; drives newest-event-first ordering in the hub (same-year
+   *  Worlds events — WUCC vs WJUC/WMUCC — tie on year alone). */
+  eventStartDate: string | null;
 }
 
 export interface WfdfEventGroup {
@@ -510,6 +513,7 @@ export async function listAllTeams(): Promise<WfdfTeamHubRow[]> {
         eventSlug: (ev.slug as string) ?? '',
         eventName: (ev.name as string) ?? '',
         eventYear: (ev.year as number) ?? 0,
+        eventStartDate: (ev.start_date as string) ?? null,
       } as WfdfTeamHubRow;
     })
     .filter((r): r is WfdfTeamHubRow => r !== null);
@@ -577,6 +581,75 @@ export async function searchRosterPlayers(query: string): Promise<WfdfPlayerHubR
   return rows.sort((a, b) => b.eventYear - a.eventYear || a.fullName.localeCompare(b.fullName));
 }
 
+export interface WfdfEventPlayerRow {
+  fullName: string;
+  jerseyNumber: string | null;
+  goals: number | null;
+  assists: number | null;
+  teamId: string;
+  teamName: string;
+  countryCode: string | null;
+  divisionName: string | null;
+}
+
+export interface WfdfEventPlayersDetail {
+  slug: string;
+  name: string;
+  year: number;
+  players: WfdfEventPlayerRow[];
+}
+
+/**
+ * Every named roster player for a single event, for the Players hub's
+ * event-scoped view (clicking an event shows who played, not the event
+ * overview). One event lookup + a roster query filtered on event_id; an
+ * event's roster can approach ~2k rows, over the 1k PostgREST response cap,
+ * so this pages with .range() rather than assuming a single page suffices.
+ */
+export async function getEventPlayers(slug: string): Promise<WfdfEventPlayersDetail | null> {
+  const db = supabase();
+  const { data: ev } = await db
+    .from('wfdf_events')
+    .select('id, slug, name, year')
+    .eq('slug', slug)
+    .maybeSingle();
+  if (!ev) return null;
+  const eventId = ev.id as string;
+
+  const players: WfdfEventPlayerRow[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: rows } = await db
+      .from('wfdf_rosters')
+      .select(
+        'full_name, jersey_number, goals, assists, ' +
+          'team:team_id(id, name, country_code, division:division_id(name))',
+      )
+      .eq('event_id', eventId)
+      .order('full_name')
+      .range(offset, offset + PAGE - 1);
+    if (!rows || rows.length === 0) break;
+    for (const r of rows as Row[]) {
+      const team = r.team as Record<string, unknown> | null;
+      if (!team) continue;
+      const division = team.division as Record<string, unknown> | null;
+      players.push({
+        fullName: r.full_name as string,
+        jerseyNumber: (r.jersey_number as string) ?? null,
+        goals: (r.goals as number) ?? null,
+        assists: (r.assists as number) ?? null,
+        teamId: team.id as string,
+        teamName: (team.name as string) ?? '',
+        countryCode: (team.country_code as string) ?? null,
+        divisionName: (division?.name as string) ?? null,
+      });
+    }
+    if (rows.length < PAGE) break;
+  }
+
+  return { slug: ev.slug as string, name: ev.name as string, year: ev.year as number, players };
+}
+
 /**
  * Per-event roster player counts for the Players hub's pre-search browse state.
  * One head+count query per event, filtered through an inner join on the team's
@@ -599,7 +672,9 @@ export async function listEventPlayerTotals(): Promise<
       return { slug: e.slug, name: e.name, year: e.year, playerCount: count ?? 0 };
     }),
   );
-  return totals.sort((a, b) => b.year - a.year || a.name.localeCompare(b.name));
+  // Keep listEvents' start_date DESC order (Promise.all preserves it) — a
+  // year/name re-sort put WUCC alphabetically last among same-year Worlds.
+  return totals;
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────

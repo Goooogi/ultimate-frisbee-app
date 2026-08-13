@@ -17,6 +17,7 @@ interface EventGroup {
   slug: string;
   name: string;
   year: number;
+  startDate: string | null;
   teams: WfdfTeamHubRow[];
 }
 
@@ -38,14 +39,26 @@ export function WfdfTeamsHub({ teams }: Props) {
     for (const t of filtered) {
       let g = byEvent.get(t.eventSlug);
       if (!g) {
-        g = { slug: t.eventSlug, name: t.eventName, year: t.eventYear, teams: [] };
+        g = {
+          slug: t.eventSlug,
+          name: t.eventName,
+          year: t.eventYear,
+          startDate: t.eventStartDate,
+          teams: [],
+        };
         byEvent.set(t.eventSlug, g);
       }
       g.teams.push(t);
     }
     const out = [...byEvent.values()];
-    // Newest event first; teams within an event by finish then name.
-    out.sort((a, b) => b.year - a.year || a.name.localeCompare(b.name));
+    // Newest event first by START DATE — same-year Worlds (WUCC vs WJUC/WMUCC)
+    // tie on year, and a name tiebreak put WUCC alphabetically last.
+    out.sort(
+      (a, b) =>
+        (b.startDate ?? '').localeCompare(a.startDate ?? '') ||
+        b.year - a.year ||
+        a.name.localeCompare(b.name),
+    );
     for (const g of out) {
       g.teams.sort(
         (a, b) => (a.finalStanding ?? 999) - (b.finalStanding ?? 999) || a.name.localeCompare(b.name),

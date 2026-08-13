@@ -72,7 +72,7 @@ export function WfdfPlayersHub({ eventTotals, totalPlayers }: Props) {
             {eventTotals.map((e) => (
               <Link
                 key={e.slug}
-                href={`/wfdf/events/${e.slug}`}
+                href={`/wfdf/players/${e.slug}`}
                 className={[
                   'flex items-center justify-between gap-3 bg-surface rounded-card px-4 py-3',
                   'shadow-card no-underline transition-shadow hover:shadow-lift cursor-pointer',

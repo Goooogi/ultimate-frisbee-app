@@ -11,7 +11,7 @@
 
 import Link from 'next/link';
 
-interface LeagueRow {
+export interface LeagueRow {
   id: string;
   label: string;
   abbr: string;
@@ -24,7 +24,9 @@ interface LeagueRow {
 // UFA and USAU use ?league=ufa / ?league=usau query params.
 // buildLeagueQs omits the param when it matches the default (ufa), so we
 // set it explicitly to keep links predictable.
-const LEAGUE_ROWS: LeagueRow[] = [
+// Exported so /leagues (the league directory page) can reuse the exact same
+// league list + assets instead of duplicating them.
+export const LEAGUE_ROWS: LeagueRow[] = [
   {
     id: 'ufa',
     label: 'UFA',
@@ -215,7 +217,7 @@ function LeagueRowMobile({ row, isLast }: { row: LeagueRow; isLast: boolean }) {
 // A compact rounded-square badge showing the league abbreviation or logo.
 // Uses CSS-var tokens so it adapts to both field and broadcast themes.
 
-function LeagueMark({
+export function LeagueMark({
   abbr,
   img,
   disabled = false,
