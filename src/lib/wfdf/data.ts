@@ -489,14 +489,26 @@ export interface WfdfEventGroup {
 /** Every WFDF team, tagged with its event, newest event first. Grouped in the UI. */
 export async function listAllTeams(): Promise<WfdfTeamHubRow[]> {
   const db = supabase();
-  const { data } = await db
-    .from('wfdf_teams')
-    .select(
-      'id, name, country_code, flag_file, final_standing, wins, losses, ' +
-        'division:division_id(name), event:event_id(slug, name, year, start_date)',
-    )
-    .order('name');
-  const rows = ((data ?? []) as Row[])
+  // Page past PostgREST's 1000-row cap — wfdf_teams is 1,174 rows and an
+  // unpaged select silently dropped 174 teams from the hub. Ranges are ordered
+  // by id, not name: names repeat across events, so name-ordered pages can
+  // skip/overlap rows. The hub sorts for display itself.
+  const PAGE = 1000;
+  const data: Row[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('wfdf_teams')
+      .select(
+        'id, name, country_code, flag_file, final_standing, wins, losses, ' +
+          'division:division_id(name), event:event_id(slug, name, year, start_date)',
+      )
+      .order('id')
+      .range(from, from + PAGE - 1);
+    const rows = (page ?? []) as Row[];
+    data.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  const rows = (data as Row[])
     .map((t) => {
       const ev = t.event as Record<string, unknown> | null;
       const div = t.division as Record<string, unknown> | null;
