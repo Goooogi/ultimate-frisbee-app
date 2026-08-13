@@ -1750,10 +1750,11 @@ export interface UsauMajorWithChampions {
      *  labels these "Pool leader" instead of "Champion". */
     viaPoolRecord?: boolean;
   }>;
-  /** True when at least one division's championship final was cancelled and no
-   *  champion exists for it (2026 Vacationland washout). The card says "Final
-   *  cancelled" instead of the indefinite "Results pending". */
-  finalCancelled?: boolean;
+  /** Divisions whose championship final was cancelled with no champion (2026
+   *  Vacationland washout). The card says "Final cancelled" instead of the
+   *  indefinite "Results pending" — naming the division when other divisions
+   *  DID decide, so the missing one isn't read as "not scraped yet". */
+  cancelledFinals?: Array<'Men' | 'Women' | 'Mixed'>;
 }
 
 /**
@@ -2094,12 +2095,17 @@ export async function recentUsauTournamentCards(
     // (no bracket final and no unique pool leader). Champions may be empty; the
     // card renders the event header with no winner row in that case.
     const champions = championsByEvent.get(e.id) ?? [];
-    // Cancelled final with no champion for that division (a later replayed
+    // Cancelled finals with no champion for that division (a later replayed
     // final that DID decide it clears the flag via the champions check).
-    const finalCancelled = [...cancelledKeys].some((k) => {
-      const [eventId, division] = k.split('|');
-      return eventId === e.id && !champions.some((c) => c.division === division && !c.viaPoolRecord);
-    });
+    const cancelledFinals = [...cancelledKeys]
+      .map((k) => k.split('|') as [string, 'Men' | 'Women' | 'Mixed'])
+      .filter(
+        ([eventId, division]) =>
+          eventId === e.id &&
+          !champions.some((c) => c.division === division && !c.viaPoolRecord),
+      )
+      .map(([, division]) => division)
+      .sort((a, b) => (DIV_ORDER[a] ?? 9) - (DIV_ORDER[b] ?? 9));
     results.push({
       slug: e.usau_slug,
       name: e.name,
@@ -2107,7 +2113,7 @@ export async function recentUsauTournamentCards(
       endDate: e.end_date,
       flight: flightForName(e.name),
       champions: champions.sort((a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9)),
-      ...(finalCancelled ? { finalCancelled } : {}),
+      ...(cancelledFinals.length > 0 ? { cancelledFinals } : {}),
     });
   }
 
