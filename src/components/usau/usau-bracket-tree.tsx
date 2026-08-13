@@ -302,6 +302,10 @@ function MatchCard({
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
   const tone = matchTone(game);
+  // Cancelled games carry 0–0 in the DB; showing "0 0" under a Cancelled pill
+  // reads like a played shutout, so blank the scores instead.
+  const scoreA = tone === 'cancelled' ? null : game.scoreA;
+  const scoreB = tone === 'cancelled' ? null : game.scoreB;
 
   return (
     <article
@@ -333,7 +337,7 @@ function MatchCard({
         teamId={game.teamAId}
         name={game.teamAName}
         seed={game.seedA}
-        score={game.scoreA}
+        score={scoreA}
         won={aWon}
         lost={bWon}
         compact={compact}
@@ -343,7 +347,7 @@ function MatchCard({
         teamId={game.teamBId}
         name={game.teamBName}
         seed={game.seedB}
-        score={game.scoreB}
+        score={scoreB}
         won={bWon}
         lost={aWon}
         compact={compact}
@@ -409,7 +413,7 @@ function TeamLine({
 
 // ── Status pill ───────────────────────────────────────────────────────────
 
-type Tone = 'final' | 'live' | 'upcoming' | 'tbd';
+type Tone = 'final' | 'live' | 'upcoming' | 'tbd' | 'cancelled';
 
 function StatusPill({ tone, label }: { tone: Tone; label: string }) {
   const toneClass = {
@@ -417,6 +421,7 @@ function StatusPill({ tone, label }: { tone: Tone; label: string }) {
     live: 'text-accent',
     upcoming: 'text-muted',
     tbd: 'text-faint',
+    cancelled: 'text-faint',
   }[tone];
 
   return (
@@ -431,16 +436,21 @@ function StatusPill({ tone, label }: { tone: Tone; label: string }) {
   );
 }
 
+// 'forfeit' counts as decided and 'cancelled' gets its own pill — both
+// otherwise fell through to "Upcoming", which read as a lie on games USAU
+// called off (2026 Vacationland final washout).
 function matchTone(game: Game): Tone {
   if (game.status === 'in_progress') return 'live';
-  if (game.status === 'final') return 'final';
+  if (game.status === 'final' || game.status === 'forfeit') return 'final';
+  if (game.status === 'cancelled') return 'cancelled';
   if (!game.teamAName && !game.teamBName) return 'tbd';
   return 'upcoming';
 }
 
 function statusLabel(game: Game): string {
   if (game.status === 'in_progress') return 'Live';
-  if (game.status === 'final') return 'Final';
+  if (game.status === 'final' || game.status === 'forfeit') return 'Final';
+  if (game.status === 'cancelled') return 'Cancelled';
   if (!game.teamAName && !game.teamBName) return 'TBD';
   return 'Upcoming';
 }

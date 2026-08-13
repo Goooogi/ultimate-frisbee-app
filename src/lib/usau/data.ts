@@ -1750,6 +1750,10 @@ export interface UsauMajorWithChampions {
      *  labels these "Pool leader" instead of "Champion". */
     viaPoolRecord?: boolean;
   }>;
+  /** True when at least one division's championship final was cancelled and no
+   *  champion exists for it (2026 Vacationland washout). The card says "Final
+   *  cancelled" instead of the indefinite "Results pending". */
+  finalCancelled?: boolean;
 }
 
 /**
@@ -1975,6 +1979,7 @@ export async function recentUsauTournamentCards(
     score_b: number | null;
     scheduled_at: string | null;
     bracket_name: string | null;
+    status: string | null;
     team_a: TeamRef;
     team_b: TeamRef;
   };
@@ -1990,7 +1995,7 @@ export async function recentUsauTournamentCards(
     const { data: page } = await db
       .from('usau_games')
       .select(
-        'id, event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+        'id, event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, status, ' +
           'team_a:usau_teams!team_a_id(name, gender_division), ' +
           'team_b:usau_teams!team_b_id(name, gender_division)',
       )
@@ -2009,12 +2014,27 @@ export async function recentUsauTournamentCards(
     string,
     { teamName: string; teamId: string; scheduledAt: string }
   >();
+  // `${eventId}|${division}` championship finals USAU cancelled — no champion
+  // exists AND the pool-record fallback must not crown a Saturday pool leader
+  // over a bracket that really reached its final (2026 Vacationland washout).
+  const cancelledKeys = new Set<string>();
   for (const g of finals) {
-    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
-    if (g.team_a_id == null || g.team_b_id == null) continue;
     const b = (g.bracket_name ?? '').toLowerCase();
     if (/\b\d+(st|nd|rd|th)\b/.test(b) && !b.includes('1st')) continue; // drop 5th/13th/17th…
     if (b.includes('consolation') || b.includes('placement')) continue;
+    if (g.status === 'cancelled') {
+      let division =
+        g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
+      if (!division) {
+        if (b.includes('mixed')) division = 'Mixed';
+        else if (b.includes('women')) division = 'Women';
+        else if (b.includes('men')) division = 'Men';
+      }
+      if (division) cancelledKeys.add(`${g.event_id}|${division}`);
+      continue;
+    }
+    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
+    if (g.team_a_id == null || g.team_b_id == null) continue;
 
     const aWon = g.score_a > g.score_b;
     const winnerId = aWon ? g.team_a_id : g.team_b_id;
@@ -2053,7 +2073,9 @@ export async function recentUsauTournamentCards(
   // with the best pool-play record is the de-facto winner. We only declare one
   // when there's a UNIQUE best record — a tie for first in a pool-only format
   // has no clear champion, so we skip rather than guess.
-  const decidedKeys = new Set(best.keys()); // `${eventId}|${division}` already won via bracket
+  // Already won via bracket — plus cancelled-final divisions, where a pool
+  // leader would misrepresent a bracket that reached its final.
+  const decidedKeys = new Set([...best.keys(), ...cancelledKeys]);
   const poolWinners = await bestPoolRecordWinners(db, eventIds, decidedKeys);
   for (const w of poolWinners) {
     if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
@@ -2072,6 +2094,12 @@ export async function recentUsauTournamentCards(
     // (no bracket final and no unique pool leader). Champions may be empty; the
     // card renders the event header with no winner row in that case.
     const champions = championsByEvent.get(e.id) ?? [];
+    // Cancelled final with no champion for that division (a later replayed
+    // final that DID decide it clears the flag via the champions check).
+    const finalCancelled = [...cancelledKeys].some((k) => {
+      const [eventId, division] = k.split('|');
+      return eventId === e.id && !champions.some((c) => c.division === division && !c.viaPoolRecord);
+    });
     results.push({
       slug: e.usau_slug,
       name: e.name,
@@ -2079,6 +2107,7 @@ export async function recentUsauTournamentCards(
       endDate: e.end_date,
       flight: flightForName(e.name),
       champions: champions.sort((a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9)),
+      ...(finalCancelled ? { finalCancelled } : {}),
     });
   }
 

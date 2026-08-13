@@ -285,7 +285,7 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
       <div className="flex flex-col gap-2">
         {major.champions.length === 0 ? (
           <span className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
-            Results pending
+            {major.finalCancelled ? 'Final cancelled' : 'Results pending'}
           </span>
         ) : (
           major.champions.map((c) => (
@@ -309,6 +309,13 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
               </div>
             </Link>
           ))
+        )}
+        {/* A division whose final was cancelled while others were decided —
+            without this line the missing division reads as "not scraped yet". */}
+        {major.finalCancelled && major.champions.length > 0 && (
+          <span className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
+            Final cancelled
+          </span>
         )}
       </div>
     </div>
