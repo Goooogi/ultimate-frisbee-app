@@ -2,7 +2,7 @@
 
 ## App health rules — check EVERY change against these (2026-08-12 outage)
 
-Full version: vault `App Health Rules.md`. The DB is 2 vCPU / 2 GB; assume zero headroom.
+Full version: vault `Ops/App Health Rules.md`. The DB is 2 vCPU / 2 GB; assume zero headroom.
 
 1. **No expensive work on the read path** — serve stale from cache tables, rebuild in background. Never inline-rebuild on a page view or RPC read.
 2. **Fallbacks must be cheaper than what failed** — fail fast on timeout/5xx; fall back only on shape/contract errors.
@@ -27,17 +27,25 @@ work is often documented in the vault before it's written, and left uncommitted.
 Notes are appended chronologically — **the newest entries are at the BOTTOM of the
 file**. Read to the end.
 
+**Foldered by subject as of 2026-08-13** (was flat). Obsidian wikilinks resolve
+by FILENAME not path, so `[[Note Name]]` works from anywhere — but the paths
+below are the real on-disk locations.
+
 Key notes by area:
 
 | Area | Note |
 |---|---|
-| Anything | `The Layout Project Overview.md` |
-| Player profiles, shared RPC, cross-league merge | `Player Profile RPC Migration.md` |
-| USAU ingestion, scrapers, cron | `USAU Scraper Pipeline.md`, `USAU Masters Ingestion Plan.md` |
-| Mobile parity | `Mobile Web Alignment.md` |
-| UTCG card game | `UTCG Card Game.md` |
-| Fantasy | `Fantasy Feature.md` · 12-0 → `12-0 Mini Game.md` |
-| Styling | `V2 Redesign — Editorial Calm.md` + `docs/redesign-v2-style-guide.md` |
+| Anything | `The Layout Project Overview.md` (root — now an index, not a dump) |
+| DB load, CPU, outages, prod 403s | `Ops/App Health Rules.md`, `Ops/Supabase Load Diagnosis 2026-08-11.md` |
+| Firewall / bot blocking / efficiency debt | `Ops/Security & Efficiency Backlog.md` |
+| Player profiles, shared RPC, cross-league merge | `Player Identity/Player Profile RPC Migration.md` |
+| USAU ingestion, scrapers, cron | `Pipelines/USAU Scraper Pipeline.md`, `Pipelines/USAU Masters Ingestion Plan.md` |
+| Any other league's ingest | `Pipelines/` — one note per league (EUCS, PUL, WUL, WFDF, UFA) |
+| Mobile parity | `Mobile/Mobile Web Alignment.md` |
+| UTCG card game | `Features/UTCG Card Game.md` |
+| Fantasy | `Features/Fantasy Feature.md` · 12-0 → `Features/12-0 Mini Game.md` |
+| Styling | `Features/V2 Redesign — Editorial Calm.md` + `docs/redesign-v2-style-guide.md` |
+| Why is this built this way? (May–Jun 2026) | `Archive/Project Changelog 2026-05 to 2026-06.md` |
 
 Write notes back to the vault when something is worth carrying forward
 (architecture decisions and why, gotchas that cost real time, infra quirks).
@@ -50,7 +58,7 @@ Append to the existing note rather than creating a near-duplicate.
 and RPCs against the same DB. That means:
 
 - Changes mobile makes to a shared RPC can require a **web-side port** with no
-  git signal in this repo. `Player Profile RPC Migration.md` tracks these under
+  git signal in this repo. `Player Identity/Player Profile RPC Migration.md` tracks these under
   its follow-up checklists.
 - Some migrations exist **only in the remote DB**, not in either repo, so the
   deployed function body diverges from committed SQL. Never `create or replace`

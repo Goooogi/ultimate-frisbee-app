@@ -4,7 +4,7 @@
 // else a circular initials monogram. Client-only because it needs onError to
 // swap a broken/expired image URL for the monogram at runtime; the parent
 // profile header otherwise stays a Server Component.
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface PlayerHeadshotProps {
   headshotUrl: string | null;
@@ -36,14 +36,40 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
   const [attempt, setAttempt] = useState(0);
   const MAX_ATTEMPTS = 2;
   const prevUrl = useRef<string | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+
+  // onError alone misses a failure that completes BEFORE hydration attaches the
+  // handler — this component server-renders, so the browser can finish (and
+  // fail) the request while React is still booting. The error event fires into
+  // the void and the broken image sticks. So also inspect the settled DOM node
+  // and route it through the same retry→monogram path onError would take.
+  // (Proven on the WFDF event logo: naturalWidth 0, complete true, onError
+  // never ran. See vault Ops/Recurring Bug Classes.)
+  const failOnce = useCallback(() => {
+    setAttempt((a) => {
+      if (a + 1 < MAX_ATTEMPTS) return a + 1;
+      setImgFailed(true);
+      return a;
+    });
+  }, []);
+
+  const checkSettled = useCallback(
+    (node: HTMLImageElement | null) => {
+      if (node && node.complete && node.naturalWidth === 0) failOnce();
+    },
+    [failOnce],
+  );
 
   useEffect(() => {
     if (prevUrl.current !== headshotUrl) {
       prevUrl.current = headshotUrl;
       setImgFailed(false);
       setAttempt(0);
+      return;
     }
-  }, [headshotUrl]);
+    // Same url: catch a load that already settled as broken pre-hydration.
+    checkSettled(imgRef.current);
+  }, [headshotUrl, checkSettled]);
 
   const showImage = Boolean(headshotUrl) && !imgFailed;
 
@@ -59,6 +85,10 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
         // Key by url so a src change across navigations remounts the <img>
         // cleanly (fresh load, no stale error state on the DOM node).
         key={headshotUrl!}
+        ref={(node) => {
+          imgRef.current = node;
+          checkSettled(node);
+        }}
         src={src}
         alt={`${displayName} headshot`}
         width={RENDER_PX}
@@ -67,13 +97,7 @@ export function PlayerHeadshot({ headshotUrl, displayName, size = 88 }: PlayerHe
         // here only added a failure window (and delayed the primary image).
         fetchPriority="high"
         decoding="async"
-        onError={() => {
-          if (attempt + 1 < MAX_ATTEMPTS) {
-            setAttempt((a) => a + 1);
-          } else {
-            setImgFailed(true);
-          }
-        }}
+        onError={failOnce}
         className="h-full w-full rounded-xl object-cover"
       />
     );

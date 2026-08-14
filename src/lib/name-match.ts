@@ -61,12 +61,20 @@ function tokenize(name: string): { givens: string[]; surname: string } | null {
  *   "John Smith"        ↔ "John Robert Smith"
  *   "John Smith"        ↔ "John Smith"
  *
+ *   "Chance Cochran"    ↔ "Jackson Cochran"   (curated FULL_NAME_ALIASES pair)
+ *
  * Examples (all return false):
  *   "John Smith"        ↔ "Jane Smith"        (givens differ)
  *   "Bob Smith"         ↔ "Robert Smith"      (nickname)
  *   "John A Smith"      ↔ "John B Smith"      (middles contradict)
+ *   "Chance Smith"      ↔ "Jackson Smith"     (alias is full-name-scoped, so
+ *                                              it never generalizes)
  */
 export function namesMatch(a: string, b: string): boolean {
+  // Person-specific aliases first: these pairs deliberately FAIL the token rule
+  // (different givens), so they must short-circuit before tokenization.
+  if (aliasedFullNames(a, b)) return true;
+
   const ta = tokenize(a);
   const tb = tokenize(b);
   if (!ta || !tb) return false;
@@ -156,12 +164,54 @@ const NICKNAME_GROUPS: readonly (readonly string[])[] = [
   ['meg', 'maggie', 'margaret'],
   ['becky', 'rebecca'],
   ['jen', 'jenny', 'jennifer'],
-  ['sam', 'samantha', 'samuel'],
+  ['sam', 'sammy', 'samantha', 'samuel'],
   ['alex', 'alexander', 'alexandra'],
   ['gabe', 'gabriel'],
   ['nate', 'nathan', 'nathaniel'],
   ['andy', 'drew', 'andrew'],
+  ['eddie', 'eddy', 'ed', 'edwin', 'edward'],
 ];
+
+// Person-specific full-name aliases — for people whose two league identities
+// share a surname but have givens that are NOT a general nickname pair.
+//
+// These CANNOT go in NICKNAME_GROUPS: putting ['chance','jackson'] there would
+// merge every Chance with every Jackson sharing a surname. Here the ENTIRE
+// normalized full name must match on both sides, so the alias applies to one
+// real person and nobody else.
+//
+// Add a row only when you've confirmed both spellings are the same human.
+// Keep entries normalized (lowercase, no punctuation) to match normalizeName.
+const FULL_NAME_ALIASES: readonly (readonly [string, string])[] = [
+  // Chance Cochran (UFA) is Jackson Cochran (USAU). Verified 2026-08-13: the
+  // DB holds exactly one "Chance Cochran" and a distinct "Jackson Cochran",
+  // alongside unrelated Cochrans (Caleb, Isaiah, Nolan, Scott…) that this
+  // full-name-scoped rule cannot touch.
+  ['chance cochran', 'jackson cochran'],
+];
+
+// Symmetric lookup: normalized full name → the set of names it aliases to.
+const FULL_NAME_ALIAS_INDEX: Map<string, Set<string>> = (() => {
+  const m = new Map<string, Set<string>>();
+  const link = (from: string, to: string) => {
+    let s = m.get(from);
+    if (!s) m.set(from, (s = new Set()));
+    s.add(to);
+  };
+  for (const [a, b] of FULL_NAME_ALIASES) {
+    link(a, b);
+    link(b, a);
+  }
+  return m;
+})();
+
+/** True if a and b are a curated person-specific full-name alias pair. */
+function aliasedFullNames(a: string, b: string): boolean {
+  const na = normalizeName(a);
+  const nb = normalizeName(b);
+  if (!na || !nb) return false;
+  return FULL_NAME_ALIAS_INDEX.get(na)?.has(nb) ?? false;
+}
 
 // Flattened symmetric index: given name → its group id. Two names are nickname-
 // equivalent iff they resolve to the same group id.
