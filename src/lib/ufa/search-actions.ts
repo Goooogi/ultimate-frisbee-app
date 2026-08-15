@@ -16,7 +16,7 @@ import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
 import { search as searchUsau, compareByNameThenYearDesc, type SearchResult } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
-import { allUfaTeams } from '@/lib/ufa/teams';
+import { allUfaTeams, teamEras } from '@/lib/ufa/teams';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { listPulTeams, searchPulPlayers } from '@/lib/pul/data';
 import { listWulTeams, searchWulPlayers } from '@/lib/wul/data';
@@ -163,6 +163,29 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
         logoUrl: t.meta.logo ?? null,
         prominence: 3, // pro league — top-tier
       }));
+
+    // Former identities as their own rows — "Roughnecks" finds Dallas even
+    // though TEAM_META only carries the current brand (Legion). These link to
+    // the same franchise page; the year label is what distinguishes them.
+    ufaTeamResults = ufaTeamResults.concat(
+      teamEras()
+        .filter(
+          (e) =>
+            e.name.toLowerCase().includes(needle) ||
+            e.city.toLowerCase().includes(needle) ||
+            `${e.city} ${e.name}`.toLowerCase().includes(needle),
+        )
+        .slice(0, cap)
+        .map((e) => ({
+          kind: 'team' as const,
+          id: e.id,
+          name: [e.city, e.name].filter(Boolean).join(' '),
+          hint: `UFA · ${e.yearLabel}`,
+          league: 'ufa' as const,
+          logoUrl: e.logo ?? null,
+          prominence: 3,
+        })),
+    );
   } catch {
     ufaTeamResults = [];
   }

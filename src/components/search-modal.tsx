@@ -206,7 +206,7 @@ export function SearchModal({ open, onClose }: Props) {
                     const i = results.indexOf(r);
                     return (
                       <ResultRow
-                        key={r.id}
+                        key={`${r.league ?? ''}:${r.kind}:${r.id}:${r.name}`}
                         result={r}
                         active={i === highlight}
                         onClick={() => goTo(r)}

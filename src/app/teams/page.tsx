@@ -7,7 +7,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getStandings, getTeamStats, currentSeasonYear } from '@/lib/ufa/client';
-import { teamMeta } from '@/lib/ufa/teams';
+import { teamMeta, teamNameForYear, teamCityForYear, teamLogoForYear } from '@/lib/ufa/teams';
 import type { UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { YearSelector } from '@/components/year-selector';
@@ -142,7 +142,7 @@ export default async function TeamsPage({ searchParams }: Props) {
       {isCurrentSeason && standings.length > 0 ? (
         <DivisionView standings={standings} statsByTeam={statsByTeam} />
       ) : (
-        <TeamStatsTable stats={teamStats} />
+        <TeamStatsTable stats={teamStats} year={year} />
       )}
     </PageShell>
   );
@@ -260,7 +260,7 @@ function DivisionView({
 
 // ── Flat team-stats table (non-current years) ─────────────────────────────────
 
-function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
+function TeamStatsTable({ stats, year }: { stats: UfaTeamStat[]; year: number }) {
   if (stats.length === 0) return <EmptyState message="No team stats available for this season." />;
 
   const thBase = 'px-3 py-3 text-[10px] font-bold tracking-wide uppercase text-faint whitespace-nowrap text-right';
@@ -282,7 +282,15 @@ function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
           </tr>
         </thead>
         <tbody>
-          {stats.map((t, i) => (
+          {stats.map((t, i) => {
+            // The API stamps the CURRENT brand on every season, so 2018 Dallas
+            // comes back as "Legion". Show the identity the team actually
+            // played under that year.
+            const eraName = teamNameForYear(t.teamID, year);
+            const eraCity = teamCityForYear(t.teamID, year);
+            const label = [eraCity, eraName].filter(Boolean).join(' ') || t.teamName;
+            const eraLogo = teamLogoForYear(t.teamID, year);
+            return (
             <tr key={t.teamID} className="hover:bg-surface-hi transition-colors duration-100">
               <td className={`px-3 py-2.5 text-[13px] text-left pl-5 ${i === 0 ? '' : 'border-t border-hairline'}`}>
                 <Link
@@ -290,9 +298,9 @@ function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
                   className="inline-flex items-center gap-2 hover:opacity-80 transition-opacity"
                 >
                   <span className="inline-flex rounded-full overflow-hidden">
-                    <TeamLogo team={teamMeta(t.teamID)} size={24} />
+                    <TeamLogo team={{ ...teamMeta(t.teamID), logo: eraLogo }} size={24} />
                   </span>
-                  <span className="font-medium font-tight text-ink">{t.teamName}</span>
+                  <span className="font-medium font-tight text-ink">{label}</span>
                 </Link>
               </td>
               {[t.gamesPlayed, t.wins, t.losses, t.scoresFor, t.scoresAgainst, t.completions, t.turnovers, t.blocks].map((val, ci) => (
@@ -308,7 +316,8 @@ function TeamStatsTable({ stats }: { stats: UfaTeamStat[] }) {
                 </td>
               ))}
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>

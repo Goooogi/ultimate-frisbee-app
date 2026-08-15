@@ -234,7 +234,7 @@ export function SearchBar() {
                     const i = results.indexOf(r);
                     return (
                       <ResultRow
-                        key={r.id}
+                        key={`${r.league ?? ''}:${r.kind}:${r.id}:${r.name}`}
                         id={`search-bar-option-${i}`}
                         result={r}
                         active={i === highlight}

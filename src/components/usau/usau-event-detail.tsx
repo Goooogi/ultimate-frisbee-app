@@ -472,7 +472,20 @@ export function UsauEventDetail({ event }: Props) {
   // championship tree + every placement group stacked below it. Default to
   // the first tab that has content, biased toward Bracket (the headline)
   // when finished.
-  const hasBracket = games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
+  // A bracket game with both teams NULL is a feeder slot waiting on pool play,
+  // not data. An event whose bracket is ENTIRELY placeholders (a schedule
+  // published before the tournament starts) has nothing to show, so it gets no
+  // tab — otherwise the headline tab renders a tree of "— vs —" cards and
+  // reads as missing data. Show everything we have as soon as we have it; the
+  // tab returns the moment any bracket game gets a real team.
+  const bracketHasTeams = games.some(
+    (g) =>
+      (isChampionshipBracket(g) || isPlacementName(g.bracketName)) &&
+      (g.teamAId != null || g.teamBId != null),
+  );
+  const hasBracket =
+    (games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0) &&
+    bracketHasTeams;
   const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0;
   const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
     { key: 'pools',      label: 'Pools',      show: hasPools },
@@ -482,17 +495,9 @@ export function UsauEventDetail({ event }: Props) {
   const visibleTabs = TABS.filter((t) => t.show);
   // Bias to Bracket only once it has real content — a bracket that is all TBD
   // feeder slots (Cooler Classic Men pre-Sunday: 24 placeholder games) should
-  // not outrank the phase people are actually watching.
-  const bracketStarted =
-    hasBracket &&
-    games.some(
-      (g) =>
-        (isChampionshipBracket(g) || isPlacementName(g.bracketName)) &&
-        (g.teamAId != null || g.teamBId != null),
-    );
-  const defaultTab: ViewTab = bracketStarted
-    ? 'bracket'
-    : (visibleTabs[0]?.key ?? 'pools');
+  // not outrank the phase people are actually watching. hasBracket now carries
+  // that condition, so a visible Bracket tab is by definition a started one.
+  const defaultTab: ViewTab = hasBracket ? 'bracket' : (visibleTabs[0]?.key ?? 'pools');
 
   return (
     <EventTabsView
@@ -745,9 +750,11 @@ function EventTabsView(props: {
         />
       )}
 
-      {pools.length === 0 && placementBrackets.length === 0 && games.length === 0 && (
+      {visibleTabs.length === 0 && (
         <div className="text-[12px] text-faint font-tight">
-          No pool or bracket data scraped for this event yet.
+          {games.length > 0
+            ? 'Schedule published, matchups not set yet — teams are seeded once pool play begins.'
+            : 'No pool or bracket data scraped for this event yet.'}
         </div>
       )}
     </>

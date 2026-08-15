@@ -177,6 +177,74 @@ export function teamBySlugOrAbbr(slugOrAbbr: string): TeamMeta | null {
   return null;
 }
 
+/**
+ * A franchise's former identity as its own searchable entity — "Dallas
+ * Roughnecks" rather than the Legion row that currently absorbs it. Derived
+ * from NAME_HISTORY/CITY_HISTORY/LOGO_HISTORY so there is one source of truth;
+ * adding an era to those maps adds it here for free.
+ *
+ * `id` stays the franchise slug: an era is a display alias, not a separate
+ * team, so it links to the same /teams/[id] page. That means era rows are NOT
+ * safe to render in a React list keyed by `id` alongside their franchise —
+ * use `eraKey` for keys.
+ */
+export interface TeamEra {
+  /** Franchise slug — where this era links. Shared with the current-brand row. */
+  id: string;
+  /** Unique per era; safe as a React key. e.g. 'legion@2021'. */
+  eraKey: string;
+  city: string;
+  name: string;
+  logo?: string;
+  /** Last season under this identity. */
+  through: number;
+  /** First season under it — the prior era's `through` + 1, or the UFA's first. */
+  from: number;
+  /** "2016–2021" — for search hints and index badges. */
+  yearLabel: string;
+}
+
+// First season each rebranded franchise fielded a team — verified 2026-08-15
+// against /web-v1/team-stats?year=N (first year the slug appears). Needed
+// because franchises joined in different years, so there is no league-wide
+// floor: Dallas played 2016–2021 as the Roughnecks, not 2012–2021.
+const DEBUT_SEASON: Record<string, number> = {
+  legion: 2016,
+  union: 2013,
+  cascades: 2014,
+};
+
+/**
+ * Every historical (non-current) identity across all franchises, city-sorted.
+ *
+ * Only NAME_HISTORY drives this: a city-only move (San Jose → Oakland Spiders)
+ * is the same brand in a new town, not a distinct team worth its own row. Those
+ * still get the era's correct city here when a name change coincides.
+ */
+export function teamEras(): TeamEra[] {
+  const eras: TeamEra[] = [];
+  for (const [slug, hist] of Object.entries(NAME_HISTORY)) {
+    // Ascending by `through` so each era's start is the previous era's end + 1.
+    const ordered = [...hist].sort((a, b) => a.through - b.through);
+    let from = DEBUT_SEASON[slug] ?? ordered[0].through;
+    for (const h of ordered) {
+      const city = teamCityForYear(slug, h.through) ?? TEAM_META[slug]?.city ?? '';
+      eras.push({
+        id: slug,
+        eraKey: `${slug}@${h.through}`,
+        city,
+        name: h.name,
+        logo: teamLogoForYear(slug, h.through),
+        through: h.through,
+        from,
+        yearLabel: from === h.through ? `${from}` : `${from}–${h.through}`,
+      });
+      from = h.through + 1;
+    }
+  }
+  return eras.sort((a, b) => `${a.city} ${a.name}`.localeCompare(`${b.city} ${b.name}`));
+}
+
 /** Sorted list of currently-active teams for dropdowns / nav menus. */
 export function activeTeams(): TeamMeta[] {
   return Object.values(TEAM_META)
