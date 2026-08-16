@@ -7,8 +7,9 @@
 // shows: final standings (from wfdf_teams) + the division's games grouped into
 // pool play and bracket. Team names link to /wfdf/teams/[id].
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
+import { useViewParam } from '@/lib/use-view-param';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
 import { PillSelect } from '@/components/pill-select';
@@ -105,7 +106,14 @@ function buildWfdfPoolTeams(
 
 export function WfdfEventDetail({ event }: Props) {
   const divisions = event.divisions;
-  const [activeDiv, setActiveDiv] = useState<string>(divisions[0]?.name ?? '');
+  // Division lives in the URL (?div=) so back-nav from a team page and hard
+  // refresh both keep the filter (Hunter ruling 2026-08-16; default omitted
+  // for clean URLs, unknown values fall back to the first division).
+  const [divParam, setDivParam] = useViewParam('div');
+  const defaultDiv = divisions[0]?.name ?? '';
+  const activeDiv =
+    divParam != null && divisions.some((d) => d.name === divParam) ? divParam : defaultDiv;
+  const setActiveDiv = (next: string) => setDivParam(next === defaultDiv ? null : next);
 
   const teams = useMemo(
     () => event.teams.filter((t) => t.divisionName === activeDiv),
@@ -187,7 +195,10 @@ export function WfdfEventDetail({ event }: Props) {
     return out;
   }, [poolGames.length, bracketGames.length, standings.length]);
 
-  const [activeTab, setActiveTab] = useState<WfdfTabKey>('pools');
+  // Tab in the URL too (?tab=), same survival rules as the division.
+  const [tabParam, setTabParam] = useViewParam('tab');
+  const activeTab = (tabParam as WfdfTabKey | null) ?? 'pools';
+  const setActiveTab = (next: WfdfTabKey) => setTabParam(next);
 
   // Resolve synchronously rather than via an effect — switching divisions can
   // invalidate the current tab (a division with no bracket), and waiting a

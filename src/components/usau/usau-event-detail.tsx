@@ -20,6 +20,7 @@ import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
+import { useViewParam } from '@/lib/use-view-param';
 import { USAU_LEVELS } from '@/lib/league';
 import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
 import { formatGameTime } from '@/lib/usau/venue-tz';
@@ -583,7 +584,11 @@ function EventTabsView(props: {
     visibleTabs, defaultTab,
   } = props;
 
-  const [tab, setTab] = useState<ViewTab>(defaultTab);
+  // Tab lives in the URL (?tab=) so back-nav from a team page and hard refresh
+  // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
+  const [tabParam, setTabParam] = useViewParam('tab');
+  const tab: ViewTab = tabParam === 'pools' || tabParam === 'bracket' ? tabParam : defaultTab;
+  const setTab = (next: ViewTab) => setTabParam(next);
   // If the div/level switch changes which tabs exist, keep the active tab valid.
   const active = visibleTabs.some((t) => t.key === tab) ? tab : defaultTab;
 

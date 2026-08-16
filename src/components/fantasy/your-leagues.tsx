@@ -19,9 +19,14 @@ interface YourLeaguesProps {
   /** The open-to-everyone pool (the original UFA beta), pinned above private
    *  leagues so it stays one tap away. Null when no global contest exists. */
   globalPool?: { name: string } | null;
+  /** True when this is the whole page (/fantasy/leagues): the PageShell owns
+   *  the title, so the section header is skipped and the New-league action
+   *  renders in its own row. False (default) on the /fantasy hub, where the
+   *  component renders as a titled section. */
+  standalone?: boolean;
 }
 
-export function YourLeagues({ globalPool = null }: YourLeaguesProps) {
+export function YourLeagues({ globalPool = null, standalone = false }: YourLeaguesProps) {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [authOpen, setAuthOpen] = useState(false);
@@ -74,7 +79,7 @@ export function YourLeagues({ globalPool = null }: YourLeaguesProps) {
   if (loading) {
     return (
       <section aria-labelledby="your-leagues-heading" className="mb-8 lg:mb-10">
-        <SectionHeader />
+        {!standalone && <SectionHeader />}
         <div className="bg-surface rounded-card-lg shadow-card p-8">
           <div className="h-4 w-40 rounded-full bg-ink/[0.06] animate-pulse" />
         </div>
@@ -86,7 +91,7 @@ export function YourLeagues({ globalPool = null }: YourLeaguesProps) {
   if (!user) {
     return (
       <section aria-labelledby="your-leagues-heading" className="mb-8 lg:mb-10">
-        <SectionHeader />
+        {!standalone && <SectionHeader />}
         <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8 flex flex-col lg:flex-row lg:items-center gap-5 lg:gap-8">
           <div className="flex-1">
             <h3 className="font-display italic text-[22px] lg:text-[26px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-2">
@@ -124,25 +129,29 @@ export function YourLeagues({ globalPool = null }: YourLeaguesProps) {
   }
 
   // ── Signed in ────────────────────────────────────────────────────────────
+  const newLeagueAction = (
+    <Link
+      href="/fantasy/leagues/new"
+      className={[
+        'inline-flex items-center gap-1.5',
+        'px-4 py-2 rounded-full min-h-[36px]',
+        'bg-accent text-accent-ink font-tight text-[11px] font-bold tracking-[0.1em] uppercase',
+        'hover:opacity-90 transition-opacity duration-150',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
+      ].join(' ')}
+    >
+      <PlusGlyph />
+      New league
+    </Link>
+  );
+
   return (
     <section aria-labelledby="your-leagues-heading" className="mb-8 lg:mb-10">
-      <SectionHeader
-        action={
-          <Link
-            href="/fantasy/leagues/new"
-            className={[
-              'inline-flex items-center gap-1.5',
-              'px-4 py-2 rounded-full min-h-[36px]',
-              'bg-accent text-accent-ink font-tight text-[11px] font-bold tracking-[0.1em] uppercase',
-              'hover:opacity-90 transition-opacity duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-            ].join(' ')}
-          >
-            <PlusGlyph />
-            New league
-          </Link>
-        }
-      />
+      {standalone ? (
+        <div className="flex justify-end mb-4">{newLeagueAction}</div>
+      ) : (
+        <SectionHeader action={newLeagueAction} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         {/* League list */}

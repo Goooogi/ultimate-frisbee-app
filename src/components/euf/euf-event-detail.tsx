@@ -18,7 +18,8 @@
 // no team records or final placements, so ranking is final_placement → win% →
 // point diff.
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useViewParam } from '@/lib/use-view-param';
 import Link from 'next/link';
 import type { EufDivision, EufGameCard, EufStandingRow } from '@/lib/euf/data';
 import { eufGameDate, eufGameTime, eufDayKey } from '@/lib/euf/format-date';
@@ -55,7 +56,16 @@ const STAGE_ORDER: Record<string, number> = {
 const TREE_ROUND_RE = /^(?:Bracket \d+-\d+|\d+-\d+ Bracket)(?:\s+(?:Quarterfinals|Semifinals|Finals))?$/;
 
 export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props) {
-  const [activeDiv, setActiveDiv] = useState<EufDivision>(divisions[0] ?? 'Open');
+  // Division lives in the URL (?div=) so back-nav from a team page and hard
+  // refresh both keep the filter (Hunter ruling 2026-08-16; default omitted
+  // for clean URLs, unknown values fall back to the first division).
+  const [divParam, setDivParam] = useViewParam('div');
+  const defaultDiv: EufDivision = divisions[0] ?? 'Open';
+  const activeDiv: EufDivision =
+    divParam != null && (divisions as string[]).includes(divParam)
+      ? (divParam as EufDivision)
+      : defaultDiv;
+  const setActiveDiv = (next: EufDivision) => setDivParam(next === defaultDiv ? null : next);
 
   const divStandings = useMemo(
     () => standings.filter((s) => s.division === activeDiv),
@@ -123,7 +133,10 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
     ? 'bracket'
     : (visibleTabs[0]?.key ?? 'standings');
 
-  const [tab, setTab] = useState<ViewTab>(defaultTab);
+  // Tab in the URL too (?tab=), same survival rules as the division.
+  const [tabParam, setTabParam] = useViewParam('tab');
+  const tab = (tabParam as ViewTab | null) ?? defaultTab;
+  const setTab = (next: ViewTab) => setTabParam(next);
   // Switching division can change which tabs exist; keep the active one valid.
   const active = visibleTabs.some((t) => t.key === tab) ? tab : defaultTab;
 

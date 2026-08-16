@@ -2,6 +2,7 @@
 // Server-fetches the event (divisions, teams, games) and hands it to the
 // client WfdfEventDetail, which tabs by division and shows standings + games.
 
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
@@ -53,7 +54,11 @@ export default async function WfdfEventPage({ params }: Props) {
         { label: ev.name },
       ]}
     >
-      <WfdfEventDetail event={ev} />
+      {/* Suspense is load-bearing: the detail reads useSearchParams (?div/?tab
+          view state), which otherwise bails the whole static render to CSR. */}
+      <Suspense fallback={null}>
+        <WfdfEventDetail event={ev} />
+      </Suspense>
     </PageShell>
   );
 }

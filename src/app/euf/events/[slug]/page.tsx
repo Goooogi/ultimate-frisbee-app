@@ -1,5 +1,6 @@
 // /euf/events/[slug] — a single EUCS event: standings + games, tabbed by division.
 
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
@@ -54,12 +55,16 @@ export default async function EufEventPage({ params }: Props) {
           Scoring leaders →
         </Link>
       </div>
-      <EufEventDetail
-        divisions={ev.divisions}
-        standings={standings}
-        games={games}
-        sourceUrl={eufSourceUrl(ev)}
-      />
+      {/* Suspense is load-bearing: the detail reads useSearchParams (?div/?tab
+          view state), which otherwise bails the whole static render to CSR. */}
+      <Suspense fallback={null}>
+        <EufEventDetail
+          divisions={ev.divisions}
+          standings={standings}
+          games={games}
+          sourceUrl={eufSourceUrl(ev)}
+        />
+      </Suspense>
     </PageShell>
   );
 }

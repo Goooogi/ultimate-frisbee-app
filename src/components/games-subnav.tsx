@@ -52,9 +52,9 @@ const NAV_ITEMS: NavItem[] = [
 // Fantasy is its own sub-app: it gets a Fantasy-specific secondary nav instead
 // of the league (Scores/Schedule/Teams/Players) tabs, and no league switcher.
 const FANTASY_NAV_ITEMS: NavItem[] = [
-  { label: 'Leaderboard', href: '/fantasy',      match: '/fantasy' },
-  { label: 'My Team',     href: '/fantasy/team', match: '/fantasy/team' },
-  { label: 'My League',   href: '#',             match: '__none__', soon: true },
+  { label: 'Leaderboard', href: '/fantasy',         match: '/fantasy' },
+  { label: 'My Team',     href: '/fantasy/team',    match: '/fantasy/team' },
+  { label: 'My Leagues',  href: '/fantasy/leagues', match: '/fantasy/leagues' },
 ];
 
 // WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
@@ -95,6 +95,17 @@ function isFantasyActive(pathname: string, item: NavItem): boolean {
   }
   if (item.match === '/fantasy/team') {
     return pathname === '/fantasy/team' || pathname.startsWith('/fantasy/team/');
+  }
+  if (item.match === '/fantasy/leagues') {
+    // The whole leagues layer: the list, a league home, its contests, and the
+    // invite/join flows all live under "My Leagues".
+    return (
+      pathname === '/fantasy/leagues' ||
+      pathname.startsWith('/fantasy/leagues/') ||
+      pathname.startsWith('/fantasy/contests/') ||
+      pathname.startsWith('/fantasy/invite/') ||
+      pathname.startsWith('/fantasy/join/')
+    );
   }
   return false;
 }
