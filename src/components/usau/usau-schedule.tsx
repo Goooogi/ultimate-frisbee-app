@@ -1,27 +1,21 @@
 'use client';
 
-// USAU schedule view — tournaments ordered by date relative to today.
+// USAU schedule view — the FUTURE-FACING events list (mobile parity 2026-08-16).
 //
-// Layout:
-//   - "Upcoming" section: events whose start_date is today or later,
-//     soonest first. Always expanded.
-//   - "Prior" section: events that already happened, most-recent first.
-//     Collapsed by default.
-//
-// We default to the latest season but show a season pill row so users
-// can browse the archive.
+// Only "Upcoming" renders: events that haven't started yet, soonest first.
+// Anything started (including in play right now) or finished belongs to
+// /scores — a "View completed tournaments →" link points there when prior
+// events exist. Season browsing also lives on /scores now ("which season's
+// results" is a results question); the schedule always shows the latest
+// season's calendar.
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
 import { listEvents, listSeasons, type UsauEventCard, type CompetitionLevel } from '@/lib/usau/data';
 import { FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
-import type { UsauDivision } from '@/lib/league';
+import { buildLeagueQs, type UsauLevel } from '@/lib/league';
 
 interface Props {
-  /** Optional gender division filter. When omitted, all divisions show
-   *  (and events without scraped teams still appear). */
-  division?: UsauDivision;
   /** Competition level to list (Club, College D-I, etc.). Required so the
    *  schedule shows the full calendar for that level, not just events that
    *  happen to have teams scraped. */
@@ -31,24 +25,20 @@ interface Props {
   flights?: Flight[];
 }
 
-export function UsauSchedule({ division, competitionLevel, flights = [] }: Props = {}) {
+// Upcoming events are the HEAD of listEvents' start_date-desc order, so a
+// modest fetch covers the whole future calendar (was 1000 — wasteful).
+const EVENT_FETCH_LIMIT = 200;
+
+export function UsauSchedule({ competitionLevel, flights = [] }: Props = {}) {
   // Serialize for a stable useEffect dep (array identity changes each render).
   const flightsKey = flights.join(',');
-  const searchParams = useSearchParams();
   const [seasons, setSeasons] = useState<number[]>([]);
   const [events, setEvents] = useState<UsauEventCard[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Season is URL-driven (?season=YYYY) so its control can live in the page
-  // header controls row (above the other filters on mobile) and persist/share
-  // via the URL. Falls back to the latest available season when ?season is
-  // absent or not in the list.
-  const seasonParam = Number(searchParams.get('season'));
-  const season =
-    Number.isInteger(seasonParam) && seasons.includes(seasonParam)
-      ? seasonParam
-      : (seasons[0] ?? null);
+  // Always the latest season with data — the archive browser moved to /scores.
+  const season = seasons[0] ?? null;
 
   useEffect(() => {
     let cancelled = false;
@@ -71,10 +61,8 @@ export function UsauSchedule({ division, competitionLevel, flights = [] }: Props
     let cancelled = false;
     // Filter to the selected competition level (default Club) so we show the
     // FULL calendar for that level — including events whose teams aren't
-    // scraped yet. genderDivision is optional: when undefined, every event at
-    // the level shows; when set, it narrows to events with scraped teams in
-    // that division (the only ones we can attribute a gender to).
-    listEvents({ season, limit: 1000, genderDivision: division, competitionLevel, flights })
+    // scraped yet.
+    listEvents({ season, limit: EVENT_FETCH_LIMIT, competitionLevel, flights })
       .then((e) => !cancelled && setEvents(e))
       .catch((err) =>
         !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
@@ -85,9 +73,13 @@ export function UsauSchedule({ division, competitionLevel, flights = [] }: Props
     };
     // flightsKey (serialized) is the stable dep — `flights` array identity changes each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [season, division, competitionLevel, flightsKey]);
+  }, [season, competitionLevel, flightsKey]);
 
   const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
+
+  // Prior events aren't listed here — they only decide whether to show the
+  // link out to the results feed.
+  const scoresHref = `/scores${buildLeagueQs('usau', null, (competitionLevel ?? 'CLUB') as UsauLevel)}`;
 
   if (error) {
     return (
@@ -102,29 +94,28 @@ export function UsauSchedule({ division, competitionLevel, flights = [] }: Props
 
       {loading && events.length === 0 ? (
         <div className="text-[12px] text-faint font-tight">Loading events…</div>
-      ) : events.length === 0 ? (
+      ) : upcoming.length === 0 ? (
         <div className="text-[12px] text-faint font-tight">
-          No events for {season ?? 'this season'}.
+          No upcoming events scheduled.
         </div>
       ) : (
-        <div className="flex flex-col gap-8">
-          {upcoming.length > 0 && (
-            <Section
-              eyebrow="Upcoming"
-              count={upcoming.length}
-              events={upcoming}
-              defaultOpen
-              emphasized
-            />
-          )}
-          {prior.length > 0 && (
-            <Section
-              eyebrow="Prior"
-              count={prior.length}
-              events={prior}
-              defaultOpen={upcoming.length === 0}
-            />
-          )}
+        <Section
+          eyebrow="Upcoming"
+          count={upcoming.length}
+          events={upcoming}
+          defaultOpen
+          emphasized
+        />
+      )}
+
+      {prior.length > 0 && (
+        <div>
+          <Link
+            href={scoresHref}
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] uppercase font-tight text-accent hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full"
+          >
+            View completed tournaments →
+          </Link>
         </div>
       )}
     </div>
@@ -321,13 +312,21 @@ function Chevron() {
 
 function partitionByDate(events: UsauEventCard[]) {
   const now = Date.now();
-  // "Upcoming" includes anything ending today or later (still ongoing).
+  const today = new Date().toISOString().slice(0, 10);
+  // "Upcoming" = hasn't STARTED yet. An event in play right now (started, not
+  // ended) is prior here — /scores admits it the moment it starts (mobile
+  // parity 2026-08-16), so it no longer pins to the top of the future-facing
+  // tab all weekend.
   const upcoming: UsauEventCard[] = [];
   const prior: UsauEventCard[] = [];
   for (const e of events) {
     const compareDate = e.endDate ?? e.startDate;
     if (!compareDate) {
       upcoming.push(e);
+      continue;
+    }
+    if (e.startDate != null && e.startDate <= today) {
+      prior.push(e);
       continue;
     }
     const t = new Date(compareDate + 'T23:59:59').getTime();

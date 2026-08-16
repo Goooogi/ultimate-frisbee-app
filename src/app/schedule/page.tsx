@@ -11,7 +11,7 @@ import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
 import { YearSelector } from '@/components/year-selector';
-import { parseDivisionParam, parseLeagueParam, parseLevelParam, levelLabel } from '@/lib/league';
+import { parseLeagueParam, parseLevelParam, levelLabel } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
 import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
 import { parseFlightsParam, FLIGHT_LABELS } from '@/lib/usau/flights';
@@ -60,20 +60,18 @@ export default async function SchedulePage({ searchParams }: Props) {
 
   if (league === 'usau') {
     const level = parseLevelParam(searchParams.level);
-    // Division is OPTIONAL on the schedule: absent ?div ⇒ show all divisions
-    // (and events without scraped teams). Only narrow when a div is present.
-    const division = searchParams.div ? parseDivisionParam(searchParams.div) : undefined;
     // Flight is OPTIONAL + MULTI: absent ?flight ⇒ all flights; ?flight=pro,elite
     // ⇒ those tiers. Flights are a CLUB-ONLY concept (Triple Crown Tour tiers),
     // so ignore any persisted ?flight off-Club — otherwise switching
     // Club→Masters carries the flight over and filters out every event (no
     // masters event has a flight), and the eyebrow shows a stray "N flights".
     // The flight control itself already only renders for Club.
+    // (Division + season filters removed for mobile parity 2026-08-16 —
+    // the schedule is future-facing; season browsing lives on /scores.)
     const flights = level === 'CLUB' ? parseFlightsParam(searchParams.flight) : [];
     const eyebrow = [
       'USAU',
       levelLabel(level),
-      division,
       flights.length === 1 ? FLIGHT_LABELS[flights[0]] : flights.length > 1 ? `${flights.length} flights` : null,
     ].filter(Boolean).join(' · ');
     return (
@@ -82,7 +80,7 @@ export default async function SchedulePage({ searchParams }: Props) {
         eyebrow={eyebrow}
         controls={<UsauScheduleControls level={level} />}
       >
-        <UsauSchedule competitionLevel={level} division={division} flights={flights} />
+        <UsauSchedule competitionLevel={level} flights={flights} />
       </PageShell>
     );
   }

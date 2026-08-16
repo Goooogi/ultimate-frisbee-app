@@ -49,29 +49,36 @@ interface RoundColumn {
   /** Display label for this column. */
   label: string;
   /** Stable key. */
-  key: 'r1' | 'qf' | 'sf' | 'final';
+  key: 'r16' | 'r1' | 'qf' | 'sf' | 'final';
   games: Game[];
 }
 
-// Vertical pitch (height per "row slot") on desktop. R1 sets the base unit;
-// every later column anchors to row slots in R1 so cards line up. Card
+// Vertical pitch (height per "row slot") on desktop. The base column sets the
+// unit; every later column anchors to its row slots so cards line up. Card
 // height ≈ 88px; we leave a bit of breathing room.
 // Layout math is shared across every league's bracket tree — see
-// src/lib/bracket-tree.ts. USAU games name their teams teamAId/teamBId, so we
-// adapt to the engine's homeId/awayId shape at this boundary rather than
-// renaming fields through a shipped component.
-function assignPositions(columns: RoundColumn[]): Map<string, number> {
+// src/lib/bracket-tree.ts. USAU slots name their teams via the underlying
+// game's teamAId/teamBId (null for placeholders), so we adapt to the engine's
+// homeId/awayId shape at this boundary rather than renaming fields through a
+// shipped component. Placeholder slots carry no team ids, so their linkage
+// rides entirely on sourceIds — see slotToNode below for real-slot fallback.
+function assignPositions(columns: SlotColumn[]): Map<string, number> {
   const adapted = columns.map((c) => ({
     key: c.key,
     label: c.label,
-    games: c.games.map((g) => ({ id: g.id, homeId: g.teamAId, awayId: g.teamBId })),
+    games: c.slots.map((s) => ({
+      id: s.id,
+      homeId: s.game?.teamAId ?? null,
+      awayId: s.game?.teamBId ?? null,
+      sourceIds: s.sourceIds,
+    })),
   }));
   const positions = sharedAssignPositions(adapted);
   // The engine re-sorts each column into vertical order; mirror that ordering
-  // back onto the real game arrays so render order matches the layout.
+  // back onto the real slot arrays so render order matches the layout.
   columns.forEach((col, i) => {
     const order = new Map(adapted[i].games.map((g, idx) => [g.id, idx]));
-    col.games.sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0));
+    col.slots.sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0));
   });
   return positions;
 }
@@ -178,11 +185,11 @@ function BracketTreeGroup({
   label: string | null;
   venueState: string | null;
 }) {
-  // ── Split into round columns + assign vertical positions ───────────────
-  const columns = useMemo(() => buildColumns(games), [games]);
+  // ── Split into round columns, complete the bracket, assign positions ───
+  const columns = useMemo(() => completeBracket(buildColumns(games)), [games]);
   const positions = useMemo(() => assignPositions(columns), [columns]);
 
-  if (columns.every((c) => c.games.length === 0)) {
+  if (columns.every((c) => c.slots.length === 0)) {
     return null;
   }
 
@@ -201,14 +208,14 @@ function BracketTreeGroup({
       <div className="lg:hidden flex flex-col gap-5">
         {[...columns].reverse().map(
           (col) =>
-            col.games.length > 0 && (
+            col.slots.length > 0 && (
               <div key={col.key}>
                 <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
                   {col.label}
                 </div>
                 <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {col.games.map((g) => (
-                    <MatchCard key={g.id} game={g} venueState={venueState} compact />
+                  {col.slots.map((s) => (
+                    <MatchCard key={s.id} slot={s} venueState={venueState} compact />
                   ))}
                 </ul>
               </div>
@@ -231,14 +238,14 @@ function DesktopBracket({
   positions,
   venueState,
 }: {
-  columns: RoundColumn[];
+  columns: SlotColumn[];
   positions: Map<string, number>;
   venueState: string | null;
 }) {
   // Determine total height needed: the tallest column sets the pitch count
   // (small regionals brackets are just 2 semis + a final — don't reserve
   // four rows of blank space for those). 32 covers the round-label row.
-  const baseCount = Math.max(0, ...columns.map((c) => c.games.length));
+  const baseCount = Math.max(0, ...columns.map((c) => c.slots.length));
   // A de-overlap pass can push a later-round card below the base-column count
   // (two collided semis get spread to 156/260 while the QF column ends at 312),
   // so also honor the lowest positioned card + one card-height so nothing clips.
@@ -253,7 +260,7 @@ function DesktopBracket({
   const totalHeight = Math.max(baseCount * ROW_PITCH_PX, maxTop + ROW_PITCH_PX) + 32;
 
   // Column count drives grid template.
-  const renderedColumns = columns.filter((c) => c.games.length > 0);
+  const renderedColumns = columns.filter((c) => c.slots.length > 0);
 
   return (
     <div
@@ -268,15 +275,15 @@ function DesktopBracket({
           <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
             {col.label}
           </div>
-          {col.games.map((g) => {
-            const top = positions.get(g.id) ?? 0;
+          {col.slots.map((s) => {
+            const top = positions.get(s.id) ?? 0;
             return (
               <div
-                key={g.id}
+                key={s.id}
                 className="absolute left-0 right-0"
                 style={{ top: `${top + 32}px` }}
               >
-                <MatchCard game={g} venueState={venueState} />
+                <MatchCard slot={s} venueState={venueState} />
               </div>
             );
           })}
@@ -289,19 +296,63 @@ function DesktopBracket({
 // ── Match card ────────────────────────────────────────────────────────────
 
 function MatchCard({
-  game,
+  slot,
   venueState,
   compact = false,
 }: {
-  game: Game;
+  slot: Slot;
   venueState: string | null;
   compact?: boolean;
 }) {
+  const game = slot.game;
+  const tag = `G${slot.number}`;
+
+  // Wholly-synthesized slot (no stored row at all): a pure placeholder card
+  // with only its "W of …" side labels and game-number tag.
+  if (!game) {
+    return (
+      <article className="bg-surface rounded-card-sm overflow-hidden shadow-card">
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
+          <StatusPill tone="upcoming" label="Upcoming" tag={tag} />
+        </div>
+        <TeamLine
+          teamId={null}
+          name={null}
+          fallback={slot.aFallback}
+          seed={null}
+          score={null}
+          won={false}
+          lost={false}
+          compact={compact}
+        />
+        <div className="h-px bg-hairline" />
+        <TeamLine
+          teamId={null}
+          name={null}
+          fallback={slot.bFallback}
+          seed={null}
+          score={null}
+          won={false}
+          lost={false}
+          compact={compact}
+        />
+      </article>
+    );
+  }
+
   const aWon =
     game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
-  const tone = matchTone(game);
+  let tone = matchTone(game);
+  let label = statusLabel(game);
+  // A slot that names its origin isn't a bare "TBD" card anymore — it's a
+  // scheduled game whose participants are pending, so it reads as upcoming
+  // (cancelled keeps its own treatment via matchTone/statusLabel).
+  if ((slot.aFallback || slot.bFallback) && tone === 'tbd' && game.status !== 'cancelled') {
+    tone = 'upcoming';
+    label = 'Upcoming';
+  }
   // Cancelled games carry 0–0 in the DB; showing "0 0" under a Cancelled pill
   // reads like a played shutout, so blank the scores instead.
   const scoreA = tone === 'cancelled' ? null : game.scoreA;
@@ -314,8 +365,8 @@ function MatchCard({
         tone === 'live' ? 'shadow-lift ring-1 ring-accent/40' : 'shadow-card',
       ].join(' ')}
     >
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
-        <StatusPill tone={tone} label={statusLabel(game)} />
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
+        <StatusPill tone={tone} label={label} tag={tag} />
         {/* Field + time. The bracket previously showed time only, so the field
             number was unavailable on exactly the games spectators travel for.
             `location` is usually a bare number ("7") but occasionally a full
@@ -336,6 +387,7 @@ function MatchCard({
       <TeamLine
         teamId={game.teamAId}
         name={game.teamAName}
+        fallback={slot.aFallback}
         seed={game.seedA}
         score={scoreA}
         won={aWon}
@@ -346,6 +398,7 @@ function MatchCard({
       <TeamLine
         teamId={game.teamBId}
         name={game.teamBName}
+        fallback={slot.bFallback}
         seed={game.seedB}
         score={scoreB}
         won={bWon}
@@ -359,6 +412,7 @@ function MatchCard({
 function TeamLine({
   teamId,
   name,
+  fallback,
   seed,
   score,
   won,
@@ -367,6 +421,9 @@ function TeamLine({
 }: {
   teamId: string | null;
   name: string | null;
+  /** Shown in place of "TBD" when the team isn't decided yet but the slot's
+   *  origin is known — USAU-style "W of Quarters G1". */
+  fallback?: string | null;
   seed: number | null;
   score: number | null;
   won: boolean;
@@ -385,7 +442,7 @@ function TeamLine({
         </span>
       )}
       <span className={`text-[13px] font-tight truncate ${fontWeight}`}>
-        {name ?? 'TBD'}
+        {name ?? fallback ?? 'TBD'}
       </span>
     </span>
   );
@@ -415,7 +472,17 @@ function TeamLine({
 
 type Tone = 'final' | 'live' | 'upcoming' | 'tbd' | 'cancelled';
 
-function StatusPill({ tone, label }: { tone: Tone; label: string }) {
+function StatusPill({
+  tone,
+  label,
+  tag,
+}: {
+  tone: Tone;
+  label: string;
+  /** Game number within its round ("G1") — USAU's own bracket-sheet numbering.
+   *  Leads the strip, before the status label. */
+  tag?: string;
+}) {
   const toneClass = {
     final: 'text-faint',
     live: 'text-accent',
@@ -425,13 +492,20 @@ function StatusPill({ tone, label }: { tone: Tone; label: string }) {
   }[tone];
 
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${toneClass}`}
-    >
-      {tone === 'live' && (
-        <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
+    <span className="inline-flex items-center gap-1.5">
+      {tag && (
+        <span className="inline-flex items-center rounded-full bg-ink/5 px-1.5 py-0.5 text-[9px] font-bold tracking-[0.1em] text-muted font-tight tabular">
+          {tag}
+        </span>
       )}
-      {label}
+      <span
+        className={`inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${toneClass}`}
+      >
+        {tone === 'live' && (
+          <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
+        )}
+        {label}
+      </span>
     </span>
   );
 }
@@ -486,9 +560,14 @@ function statusLabel(game: Game): string {
  * non-tree rounds, so they're excluded; "Pool E"-style second-phase pools are
  * excluded here as well because they're round-robins, not trees.
  */
+const TREE_ROUNDS = ['prequarter', 'quarter', 'semi', 'final'];
+
 export function isBracketGame(g: Game): boolean {
-  const TREE_ROUNDS = ['prequarter', 'quarter', 'semi', 'final'];
-  if (!TREE_ROUNDS.includes(g.round)) return false;
+  // 'other' is admitted so buildColumns can recover a round-of-16 / mislabeled
+  // final from it (see recoverFeederRound). Games it doesn't claim are simply
+  // ignored when the columns are built, so this widening can't leak stray
+  // boxes into the tree.
+  if (!TREE_ROUNDS.includes(g.round) && g.round !== 'other') return false;
   const raw = (g.bracketName ?? '').trim();
   if (!raw) return true; // untagged but tree-rounded — legacy events
   const lastDot = raw.lastIndexOf('\u00b7');
@@ -508,7 +587,7 @@ export function isChampionshipBracket(g: Game): boolean {
   const tail = lastDot >= 0 ? raw.slice(lastDot + 1) : raw;
   const b = tail.trim().toLowerCase();
 
-  if (!b && ['quarter', 'semi', 'final'].includes(g.round)) return true;
+  if (!b && ['prequarter', 'quarter', 'semi', 'final'].includes(g.round)) return true;
   if (!b) return false;
 
   // Word-boundary the "1st place" / "first place" check — a naive substring
@@ -517,13 +596,27 @@ export function isChampionshipBracket(g: Game): boolean {
   // overlapped the real semifinals. The \b before "1" fails inside "21".
   if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
 
+  // Bare "1st" / "champs" brackets (Cooler Classic, Portland) — accepted by the
+  // server-side twin in data.ts since 2026-08-10; without them here the event
+  // crowns a champion but renders no tree. Must run BEFORE the ordinal reject
+  // ("1st" would fail it).
+  if (b === '1st' || b === 'champs') return true;
+
   // Allow "Championship", "Championship Bracket", "Championship Final",
   // "National Championship", "Sectional Championship", "Regional
   // Championship", or "<Division> Championship" — but exclude things that
   // happen to contain "championship" plus an ordinal place ("5th Place
   // Championship") which signals a side bracket, not the main one.
   if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
-  if (b.includes('consolation') || b.includes('placement') || b.includes('play in') || b.includes('play-in')) return false;
+  // Seeding crossovers are NOT championship-bracket games: they only set
+  // seeding for the bracket that follows.
+  if (
+    b.includes('consolation') ||
+    b.includes('placement') ||
+    b.includes('play in') ||
+    b.includes('play-in') ||
+    b.includes('crossover')
+  ) return false;
   if (b === 'finals') return true;
   // The main pattern: "championship" possibly preceded by qualifiers, possibly followed by "bracket" or "final" or "game".
   if (/(^|\s)championship(\s+(bracket|final|game))?$/.test(b)) return true;
@@ -533,7 +626,43 @@ export function isChampionshipBracket(g: Game): boolean {
   // used by smaller events where there's only one bracket on the page.
   if (b === 'bracket' || b === 'bracket play' || b === 'sunday bracket' || b === 'champion bracket') return true;
 
+  // Championship play-in rounds stored as their own bracket ("Pre-Quarters" —
+  // Ski Town Mixed). Exact match only, placed AFTER the ordinal reject so
+  // "9th Place Pre-Quarters" still reads as a side bracket.
+  if (b === 'pre-quarters' || b === 'prequarters' || b === 'pre quarters') return true;
+
   return false;
+}
+
+/**
+ * Recover a feeder round stored as round='other' (the enum has no round-of-16).
+ *
+ * A game qualifies when it is outside the tree rounds and its WINNER appears in
+ * one of the `openers` — the column that currently starts the tree. Matching on
+ * the winner (not either team) is what keeps this tight: the loser of a real
+ * feeder game drops to a placement bracket and never reappears upstream, so a
+ * placement or consolation game can't sneak in.
+ *
+ * Only fires when the openers have known teams; an all-TBD opener column would
+ * otherwise match nothing and cost nothing.
+ */
+function recoverFeederRound(games: Game[], openers: Game[]): Game[] {
+  if (openers.length === 0) return [];
+
+  const openerTeams = new Set<string>();
+  for (const g of openers) {
+    if (g.teamAId) openerTeams.add(g.teamAId);
+    if (g.teamBId) openerTeams.add(g.teamBId);
+  }
+  if (openerTeams.size === 0) return [];
+
+  return games.filter((g) => {
+    if (TREE_ROUNDS.includes(g.round)) return false;
+    if (!g.teamAId || !g.teamBId) return false;
+    if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) return false;
+    const winner = g.scoreA > g.scoreB ? g.teamAId : g.teamBId;
+    return openerTeams.has(winner);
+  });
 }
 
 function buildColumns(games: Game[]): RoundColumn[] {
@@ -548,14 +677,61 @@ function buildColumns(games: Game[]): RoundColumn[] {
   // those brackets don't regress to a single collapsed column.
   const prequarters = games.filter((g) => g.round === 'prequarter');
   const semis = games.filter((g) => g.round === 'semi');
-  const finals = games.filter((g) => g.round === 'final');
+  let finals = games.filter((g) => g.round === 'final');
   const quarters = games.filter((g) => g.round === 'quarter');
+
+  // Round-of-16 recovery. The usau_game_round enum tops out at 'prequarter', so
+  // a bracket that opens with a round of 16 is stored as round='other' and was
+  // dropped entirely — isBracketGame() rejects 'other' by default, so a whole
+  // played round vanished from the tree while its winners appeared in the QFs.
+  //
+  // Identify it structurally rather than by name: an 'other' game in this
+  // bracket whose winner plays in the round that opens the tree. That keeps a
+  // genuinely unclassifiable game out while recovering a real feeder round.
+  const openers = prequarters.length > 0 ? prequarters : quarters;
+  const recovered = recoverFeederRound(games, openers);
+  // Type the recovered round by SIZE: more games than the openers is a round
+  // of 16; equal-or-fewer is a play-in/prequarter round feeding the openers
+  // (Ski Town Mixed stores its play-ins as round='other', bracket
+  // "Pre-Quarters"). Only claims the prequarter column when none is explicitly
+  // tagged.
+  const recoveredAsPrequarters =
+    prequarters.length === 0 && recovered.length > 0 && recovered.length <= openers.length;
+  const r16 = recoveredAsPrequarters ? [] : recovered;
+
+  // USAU routinely mislabels a bracket's FINAL as round='other': a placement
+  // bracket's semis store round='semi' but the deciding game stores 'other',
+  // so the tree draws semis with no final. Recover it the same way — a game
+  // outside the tree rounds whose two teams are both semi WINNERS is the final.
+  if (finals.length === 0 && semis.length > 0) {
+    const semiWinners = new Set(
+      semis
+        .map((g) =>
+          g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB
+            ? (g.scoreA > g.scoreB ? g.teamAId : g.teamBId)
+            : null,
+        )
+        .filter((id): id is string => !!id),
+    );
+    finals = games.filter(
+      (g) =>
+        !TREE_ROUNDS.includes(g.round) &&
+        !!g.teamAId && !!g.teamBId &&
+        semiWinners.has(g.teamAId) &&
+        semiWinners.has(g.teamBId),
+    );
+  }
 
   let r1: Game[];
   let qf: Game[];
   if (prequarters.length > 0) {
     // Explicitly tagged: pre-quarters are their own column, quarters stay whole.
     r1 = prequarters;
+    qf = quarters;
+  } else if (recoveredAsPrequarters) {
+    // Recovered play-in round takes the prequarter column; the date-split
+    // fallback below must not also fire (it would double-claim quarters).
+    r1 = recovered;
     qf = quarters;
   } else {
     // Legacy fallback: infer an opening round from a two-date quarter split.
@@ -576,24 +752,239 @@ function buildColumns(games: Game[]): RoundColumn[] {
     }
   }
 
-  // Initial sort: R1 by lower seed first (1-vs-16, 2-vs-15... feels right
-  // even though college brackets use 1-bye + 5-vs-12 style). Later rounds
-  // will get re-ordered by assignPositions().
-  const sortBySeed = (a: Game, b: Game) =>
+  // USAU's schedule-row ids are assigned in bracket-sheet order within a
+  // bracket, and slot k of a round is fed by games 2k-1/2k of the previous
+  // one. Sorting each column by that id makes the column order USAU's own
+  // G1…Gn — which completeBracket then relies on for game numbers, feeder
+  // pairing, and "W of …" labels. Seed order is the fallback for batches
+  // whose ids are opaque hashes.
+  const sortByBracketOrder = (a: Game, b: Game) =>
+    (a.usauGameOrder ?? Number.MAX_SAFE_INTEGER) - (b.usauGameOrder ?? Number.MAX_SAFE_INTEGER) ||
     (a.seedA ?? a.seedB ?? 99) - (b.seedA ?? b.seedB ?? 99);
 
   return [
+    { key: 'r16', label: 'Round of 16', games: r16.slice().sort(sortByBracketOrder) },
     {
       key: 'r1',
-      // Name the column for what it actually is when the round is tagged;
-      // the date-split fallback can't know, so it stays the generic "Round 1".
-      label: prequarters.length > 0 ? 'Pre-Quarters' : 'Round 1',
-      games: r1.slice().sort(sortBySeed),
+      // Name the column for what it actually is when the round is tagged or
+      // recovered; the date-split fallback can't know, so it stays "Round 1".
+      label: prequarters.length > 0 || recoveredAsPrequarters ? 'Pre-Quarters' : 'Round 1',
+      games: r1.slice().sort(sortByBracketOrder),
     },
-    { key: 'qf', label: 'Quarterfinals', games: qf.slice().sort(sortBySeed) },
-    { key: 'sf', label: 'Semifinals', games: semis.slice().sort(sortBySeed) },
-    { key: 'final', label: 'Final', games: finals.slice().sort(sortBySeed) },
+    { key: 'qf', label: 'Quarterfinals', games: qf.slice().sort(sortByBracketOrder) },
+    { key: 'sf', label: 'Semifinals', games: semis.slice().sort(sortByBracketOrder) },
+    { key: 'final', label: 'Final', games: finals.slice().sort(sortByBracketOrder) },
   ];
+}
+
+// ─── Full-bracket completion (USAU-parity placeholder slots) ─────────────────
+//
+// USAU renders the WHOLE bracket up front: every downstream game shows as a
+// slot ("W of Quarters G1" vs "W of Quarters G2") with its round + game number,
+// even before any team is known. The rows themselves are purely data-driven, so
+// this pass adds the structural layer on top of buildColumns' output:
+//
+//   • every game gets its USAU game number within its round (G1…Gn — column
+//     order is bracket-sheet order, see sortByBracketOrder),
+//   • a real row whose team(s) aren't decided yet gets "W of <round> G<n>"
+//     side labels derived from its feeder slots, plus explicit sourceIds so
+//     the layout engine can order/connect it despite having no team ids,
+//   • rounds USAU omitted entirely are synthesized as placeholder slots, so a
+//     bracket that only has its opening round stored still renders its full
+//     shape through the final.
+
+interface Slot {
+  /** Real row id, or a synthetic `ph-…` id for a synthesized slot. */
+  id: string;
+  game: Game | null;
+  /** 1-based game number within the round (USAU's G1…Gn). */
+  number: number;
+  /** Feeder slot ids in the previous column. */
+  sourceIds: string[];
+  /** Side labels used when the team is unknown ("W of Quarters G1"). */
+  aFallback: string | null;
+  bFallback: string | null;
+}
+
+export interface SlotColumn {
+  key: string;
+  label: string;
+  slots: Slot[];
+}
+
+/** Short round names for "W of …" labels (USAU wording). */
+const FEEDER_SHORT: Record<string, string> = {
+  r16: 'R16',
+  r1: 'Prequarters',
+  qf: 'Quarters',
+  sf: 'Semis',
+};
+
+function wOf(prevKey: string, n: number): string {
+  return `W of ${FEEDER_SHORT[prevKey] ?? 'Round'} G${n}`;
+}
+
+function isDecidedForTree(g: Game): boolean {
+  const s = g.status.toLowerCase();
+  if (s === 'forfeit') return true;
+  return s === 'final' && g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
+}
+
+function treeWinnerId(g: Game): string | null {
+  if (!isDecidedForTree(g) || g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) {
+    return null;
+  }
+  return g.scoreA > g.scoreB ? g.teamAId : g.teamBId;
+}
+
+/** Slot for a real row: attach feeders, derive side labels for unknown sides. */
+function makeRealSlot(g: Game, idx: number, feeders: Slot[], prevKey: string): Slot {
+  const known = [g.teamAId, g.teamBId].filter((id): id is string => !!id);
+
+  // The structural pairing (slot k ← feeders 2k-1/2k) is an assumption about
+  // USAU's sheet — verify it wherever the data can speak, and drop the linkage
+  // for this slot when contradicted (team-id links still apply naturally).
+  let fs = feeders;
+  if (fs.length > 0 && known.length > 0) {
+    const winners = fs
+      .map((f) => (f.game ? treeWinnerId(f.game) : null))
+      .filter((id): id is string => !!id);
+    const contradicted =
+      known.length === 2
+        ? winners.some((w) => !known.includes(w))
+        : winners.length === fs.length && !winners.includes(known[0]);
+    if (contradicted) fs = [];
+  }
+
+  let aFallback: string | null = null;
+  let bFallback: string | null = null;
+  if (fs.length === 2) {
+    // Which feeder feeds which side: when a side's team already appears in a
+    // feeder's row, that feeder is its source; otherwise positional (top
+    // feeder → side A).
+    const inFeeder = (teamId: string | null, f: Slot): boolean =>
+      teamId != null &&
+      f.game != null &&
+      (f.game.teamAId === teamId || f.game.teamBId === teamId);
+    let [fa, fb] = fs;
+    if (inFeeder(g.teamAId, fb) || inFeeder(g.teamBId, fa)) [fa, fb] = [fb, fa];
+    if (g.teamAId == null) aFallback = wOf(prevKey, fa.number);
+    if (g.teamBId == null) bFallback = wOf(prevKey, fb.number);
+  } else if (fs.length === 1) {
+    // Play-in feeder (prequarter → quarter): only the open side gets a label.
+    if (g.teamAId == null) aFallback = wOf(prevKey, fs[0].number);
+    else if (g.teamBId == null) bFallback = wOf(prevKey, fs[0].number);
+  }
+
+  return {
+    id: g.id,
+    game: g,
+    number: idx + 1,
+    sourceIds: fs.map((f) => f.id),
+    aFallback,
+    bFallback,
+  };
+}
+
+// Rounds a synthesized chain can step through. 'r1' (prequarters) never
+// synthesizes forward: a prequarter round is by definition a partial play-in
+// (some quarter slots are byes), so its count says nothing about the quarters'.
+const SYNTH_NEXT: Record<string, { key: string; label: string }> = {
+  r16: { key: 'qf', label: 'Quarterfinals' },
+  qf: { key: 'sf', label: 'Semifinals' },
+  sf: { key: 'final', label: 'Final' },
+};
+
+/**
+ * Turn buildColumns' output into slot columns: number every game, link each
+ * round to its feeders, label undecided sides, and synthesize wholly-missing
+ * downstream rounds.
+ *
+ * Feeder linkage between two present rounds fires when the counts relate
+ * structurally: next = prev/2 (two feeders per slot) or next = prev (play-in,
+ * one feeder per slot). Anything else leaves the games unlinked — team-id
+ * linkage still applies — rather than guessing.
+ *
+ * Synthesis fires only past the LAST stored round, only from a power-of-2
+ * column that can halve cleanly to a final, and only while that round is not
+ * fully decided — a decided round with no stored successor is historical data
+ * that genuinely ends there, and a synthesized never-resolving slot would
+ * misread as an upcoming game.
+ */
+function completeBracket(cols: RoundColumn[]): SlotColumn[] {
+  const present = cols.filter((c) => c.games.length > 0);
+  if (present.length === 0) return [];
+
+  const out: SlotColumn[] = [
+    {
+      key: present[0].key,
+      label: present[0].label,
+      slots: present[0].games.map((g, i) => ({
+        id: g.id,
+        game: g,
+        number: i + 1,
+        sourceIds: [],
+        aFallback: null,
+        bFallback: null,
+      })),
+    },
+  ];
+
+  for (let i = 1; i < present.length; i++) {
+    const col = present[i];
+    const prev = out[out.length - 1];
+    const half = col.games.length * 2 === prev.slots.length;
+    // Positional linkage is only trusted for the halving case and 1↔1 chains.
+    // Same-sized rounds (4 play-ins → 4 QFs) looked positional but real data
+    // disproved it — Ski Town Mixed slots play-in G4's winner into QF G1, so an
+    // equal-count guess renders wrong "W of …" labels on unplayed rounds.
+    // (Played feeders get rescued by the winner-contradiction check either
+    // way; unplayed ones have nothing to contradict.)
+    const chain = col.games.length === 1 && prev.slots.length === 1;
+    out.push({
+      key: col.key,
+      label: col.label,
+      slots: col.games.map((g, j) =>
+        makeRealSlot(
+          g,
+          j,
+          half
+            ? [prev.slots[2 * j], prev.slots[2 * j + 1]]
+            : chain
+              ? [prev.slots[0]]
+              : [],
+          prev.key,
+        ),
+      ),
+    });
+  }
+
+  let last = out[out.length - 1];
+  const isPow2 = (n: number) => n >= 2 && (n & (n - 1)) === 0;
+  while (
+    SYNTH_NEXT[last.key] != null &&
+    isPow2(last.slots.length) &&
+    last.slots.some((s) => !s.game || !isDecidedForTree(s.game))
+  ) {
+    const next = SYNTH_NEXT[last.key];
+    const slots: Slot[] = [];
+    for (let j = 0; j < last.slots.length / 2; j++) {
+      const fa = last.slots[2 * j];
+      const fb = last.slots[2 * j + 1];
+      slots.push({
+        id: `ph-${next.key}-${j}`,
+        game: null,
+        number: j + 1,
+        sourceIds: [fa.id, fb.id],
+        aFallback: wOf(last.key, fa.number),
+        bFallback: wOf(last.key, fb.number),
+      });
+    }
+    last = { key: next.key, label: next.label, slots };
+    out.push(last);
+  }
+
+  return out;
 }
 
 /**

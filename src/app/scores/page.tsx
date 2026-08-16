@@ -8,8 +8,8 @@ import { getCurrentGames } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
-import { type UsauMajorWithChampions } from '@/lib/usau/data';
-import { recentUsauTournamentCardsCached } from '@/lib/cached-readers';
+import { type UsauTournamentPage } from '@/lib/usau/data';
+import { recentUsauTournamentPageCached, listUsauSeasonsCached } from '@/lib/cached-readers';
 import { parseLeagueParam, parseLevelParam } from '@/lib/league';
 import { parseFlightsParam } from '@/lib/usau/flights';
 import { PageShell } from '@/components/page-shell';
@@ -21,7 +21,7 @@ import { getWulCurrentSeason } from '@/lib/wul/data';
 export const revalidate = 30;
 
 interface Props {
-  searchParams: { league?: string; div?: string; level?: string; season?: string; flight?: string };
+  searchParams: { league?: string; div?: string; level?: string; season?: string; flight?: string; page?: string };
 }
 
 export default async function HomePage({ searchParams }: Props) {
@@ -66,27 +66,60 @@ export default async function HomePage({ searchParams }: Props) {
   // showed, causing slow/stalled loads. Gate it on the active league so UFA
   // renders as fast as its own ~fast API call. (Mirrors how /schedule gates
   // its USAU fetch.) Switching to USAU re-fetches on that navigation.
-  const [games, usauCards] = await Promise.all([
+  const EMPTY_USAU_PAGE: UsauTournamentPage = { cards: [], total: 0, page: 0, pageCount: 1 };
+  const [games, usauPage] = await Promise.all([
     getCurrentGames().catch((err) => {
       console.error('Failed to fetch UFA current games:', err);
       return [] as UfaGame[];
     }),
     league === 'usau'
-      ? recentUsauTournamentCardsCached(usauLevel, usauFlights).catch((err) => {
+      ? loadUsauPage(usauLevel, usauFlights, searchParams).catch((err) => {
           console.error('Failed to load recent USAU tournaments:', err);
-          return [] as UsauMajorWithChampions[];
+          return EMPTY_USAU_PAGE;
         })
-      : Promise.resolve<UsauMajorWithChampions[]>([]),
+      : Promise.resolve(EMPTY_USAU_PAGE),
   ]);
   const today = getToday();
   return (
     <FeedPage
       games={sortForFeed(games)}
       today={today}
-      usauCards={usauCards}
+      usauPage={usauPage}
       usauLevel={usauLevel}
     />
   );
+}
+
+/**
+ * USAU results page fetch (mobile parity 2026-08-16):
+ *   • ?season absent ⇒ LATEST season with data; ?season=all ⇒ every season;
+ *     ?season=YYYY ⇒ that year.
+ *   • ?page is 1-based in the URL (absent ⇒ 1). Out-of-range pages (filters
+ *     narrowed the set) clamp to the last real page with one refetch.
+ */
+async function loadUsauPage(
+  usauLevel: ReturnType<typeof parseLevelParam>,
+  usauFlights: ReturnType<typeof parseFlightsParam>,
+  searchParams: Props['searchParams'],
+): Promise<UsauTournamentPage> {
+  let season: number | null;
+  if (searchParams.season === 'all') {
+    season = null;
+  } else {
+    const parsed = parseInt(searchParams.season ?? '', 10);
+    if (Number.isInteger(parsed)) {
+      season = parsed;
+    } else {
+      const seasons = await listUsauSeasonsCached();
+      season = seasons[0] ?? null;
+    }
+  }
+  const requested = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1) - 1;
+  const result = await recentUsauTournamentPageCached(usauLevel, usauFlights, season, requested);
+  if (requested > 0 && requested >= result.pageCount) {
+    return recentUsauTournamentPageCached(usauLevel, usauFlights, season, result.pageCount - 1);
+  }
+  return result;
 }
 
 /**

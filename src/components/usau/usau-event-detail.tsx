@@ -133,6 +133,16 @@ export function UsauEventDetail({ event }: Props) {
   // assignment lives on event_teams (with team.gender), so this approach
   // cleanly partitions pools per gender. For single-gender events the
   // filter is a no-op (every team passes).
+  //
+  // Future bracket slots (semis/final before their teams are decided) have NO
+  // participants, so the roster test alone silently dropped every one of
+  // them — a multi-division event's tree died at the quarters in each
+  // division tab. They can't be attributed by bracket_name either (e.g. Men
+  // AND Women both using "Championship Bracket"), but within one bracket_name
+  // group the FIELD cluster splits divisions cleanly (Men on 7-9/11, Women on
+  // 12): USAU keeps a bracket on its field block. So a team-less row is kept
+  // when a rostered game in the SAME bracket_name group already plays on its
+  // field cluster; a row that matches nothing stays dropped (old behavior).
   const { teams, games } = useMemo(() => {
     const filteredTeams = gender
       ? levelTeams.filter((t) => t.genderDivision === gender)
@@ -142,11 +152,25 @@ export function UsauEventDetail({ event }: Props) {
       return { teams: event.teams, games: event.games };
     }
     const teamIds = new Set(filteredTeams.map((t) => t.teamId));
-    const filteredGames = event.games.filter(
-      (g) =>
-        (g.teamAId && teamIds.has(g.teamAId)) ||
-        (g.teamBId && teamIds.has(g.teamBId)),
-    );
+    const inDivision = (g: Game) =>
+      (g.teamAId != null && teamIds.has(g.teamAId)) ||
+      (g.teamBId != null && teamIds.has(g.teamBId));
+    // "8a" / "8b" → cluster "8"; non-numeric venue strings cluster verbatim.
+    const fieldCluster = (loc: string) =>
+      loc.trim().toLowerCase().replace(/^(\d+)[a-z]$/, '$1');
+    const divisionFields = new Map<string, Set<string>>();
+    for (const g of event.games) {
+      if (!g.bracketName || !g.location || !inDivision(g)) continue;
+      const set = divisionFields.get(g.bracketName) ?? new Set<string>();
+      set.add(fieldCluster(g.location));
+      divisionFields.set(g.bracketName, set);
+    }
+    const filteredGames = event.games.filter((g) => {
+      if (inDivision(g)) return true;
+      if (g.teamAId != null || g.teamBId != null) return false; // other division's team
+      if (!g.bracketName || !g.location) return false;
+      return divisionFields.get(g.bracketName)?.has(fieldCluster(g.location)) ?? false;
+    });
     return { teams: filteredTeams, games: filteredGames };
   }, [event.teams, event.games, levelTeams, gender]);
 
@@ -246,16 +270,16 @@ export function UsauEventDetail({ event }: Props) {
 
   // ── Placement brackets (filtered games) ───────────────────────────────
   // The championship bracket ("1st Place") is rendered as the visual tree
-  // above, so skip it here. What's left is placement: 13th-place ties,
-  // 17th-place ties, etc. These don't fit a tree visualization (they're
-  // tie-break round-robins), so we keep them as a flat list.
+  // above, so skip it here. What's left is placement (13th-place ties, 17th-
+  // place ties, …) AND crossovers ("Pool B-C Crossover") — mobile parity:
+  // crossovers have no tab of their own, they render as their own flat
+  // group in the Bracket tab, ordered alongside the other placement groups.
   const bracketKey = (g: Game) => g.bracketName ?? 'Bracket';
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
     // Real Saturday pools stay out; second-phase pools ("Pool E") fall
     // through and become a placement-bracket group of their own.
     if (isPoolBracket(g.bracketName) && !isSecondPhasePool(g.bracketName)) continue;
-    if (isCrossoverBracket(g.bracketName)) continue; // crossovers have their own tab
     if (isMatchupRound(g)) continue; // Saturday matchup rounds have their own tab
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
@@ -268,12 +292,6 @@ export function UsauEventDetail({ event }: Props) {
       games: gs.slice().sort((a, b) => roundOrder(a.round) - roundOrder(b.round)),
     }))
     .sort((a, b) => bracketOrder(a.name) - bracketOrder(b.name));
-
-  // ── Crossover games (#6 tab) — bridge pool play and the bracket. ────────
-  const crossoverGames = games
-    .filter((g) => isCrossoverBracket(g.bracketName))
-    .slice()
-    .sort((a, b) => (a.bracketName ?? '').localeCompare(b.bracketName ?? ''));
 
   // ── Matchup rounds ("Sat Round 1/2/3") — pool-less Saturday phases. ─────
   // Grouped by bracket_name; groups sort by name (the labels are ordinal),
@@ -297,12 +315,17 @@ export function UsauEventDetail({ event }: Props) {
   // ── Pool play games ───────────────────────────────────────────────────
   // Second-phase pools are excluded — they render under Bracket, and their
   // results must not pollute the Saturday-pool W-L records tallied below.
+  // Sorted by scheduled time (mobile parity) so each pool's slate reads as
+  // its actual schedule, earliest first.
   const poolGames = new Map<string, Game[]>();
   for (const g of games) {
     if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
     if (isSecondPhasePool(g.bracketName)) continue;
     if (!poolGames.has(g.bracketName)) poolGames.set(g.bracketName, []);
     poolGames.get(g.bracketName)!.push(g);
+  }
+  for (const gs of poolGames.values()) {
+    gs.sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? ''));
   }
 
   // ── Pool-play records (per team, from that pool's completed games) ──────
@@ -465,11 +488,12 @@ export function UsauEventDetail({ event }: Props) {
     availableGenders.includes(d),
   ) as UsauDivision[];
 
-  // ── View tabs (#6): Pools / Crossovers / Bracket ────────────────────────
+  // ── View tabs (#6): Pools / Bracket ──────────────────────────────────────
   // Static set of button tabs. Each tab appears only when it has data. "Pools"
   // holds the standings cards, per-pool game lists, AND matchup-round groups
   // ("Sat Round 1/2/3" — no separate Rounds tab). "Bracket" holds the
-  // championship tree + every placement group stacked below it. Default to
+  // championship tree + every placement group (including crossovers, which
+  // have no tab of their own — mobile parity) stacked below it. Default to
   // the first tab that has content, biased toward Bracket (the headline)
   // when finished.
   // A bracket game with both teams NULL is a feeder slot waiting on pool play,
@@ -480,7 +504,7 @@ export function UsauEventDetail({ event }: Props) {
   // tab returns the moment any bracket game gets a real team.
   const bracketHasTeams = games.some(
     (g) =>
-      (isChampionshipBracket(g) || isPlacementName(g.bracketName)) &&
+      (isChampionshipBracket(g) || isPlacementName(g.bracketName) || isCrossoverBracket(g.bracketName)) &&
       (g.teamAId != null || g.teamBId != null),
   );
   const hasBracket =
@@ -489,7 +513,6 @@ export function UsauEventDetail({ event }: Props) {
   const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0;
   const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
     { key: 'pools',      label: 'Pools',      show: hasPools },
-    { key: 'crossovers', label: 'Crossovers', show: crossoverGames.length > 0 },
     { key: 'bracket',    label: 'Bracket',    show: hasBracket },
   ];
   const visibleTabs = TABS.filter((t) => t.show);
@@ -514,7 +537,6 @@ export function UsauEventDetail({ event }: Props) {
       pools={pools}
       poolGames={poolGames}
       poolRecords={poolRecords}
-      crossoverGames={crossoverGames}
       roundGroups={roundGroups}
       placementBrackets={placementBrackets}
       bracketLabel={bracketLabel}
@@ -524,7 +546,7 @@ export function UsauEventDetail({ event }: Props) {
   );
 }
 
-type ViewTab = 'pools' | 'crossovers' | 'bracket';
+type ViewTab = 'pools' | 'bracket';
 
 /**
  * Presentational tabbed body. Split out from UsauEventDetail so it can hold the
@@ -548,7 +570,6 @@ function EventTabsView(props: {
   pools: Array<{ name: string; teams: Team[] }>;
   poolGames: Map<string, Game[]>;
   poolRecords: Map<string, { wins: number; losses: number }>;
-  crossoverGames: Game[];
   roundGroups: Array<{ name: string; games: Game[] }>;
   placementBrackets: Array<{ name: string; games: Game[] }>;
   bracketLabel: (name: string) => string;
@@ -558,7 +579,7 @@ function EventTabsView(props: {
   const {
     event, champFinals, poolLeader, showGroupPrefixes, level, gender,
     availableLevels, eventDivisions, games, teams, pools, poolGames,
-    poolRecords, crossoverGames, roundGroups, placementBrackets, bracketLabel,
+    poolRecords, roundGroups, placementBrackets, bracketLabel,
     visibleTabs, defaultTab,
   } = props;
 
@@ -664,7 +685,8 @@ function EventTabsView(props: {
         <section aria-labelledby="pools-heading" className="flex flex-col gap-8">
           <h2 id="pools-heading" className="sr-only">Pools</h2>
 
-          {/* Standings cards */}
+          {/* Standings cards, each with its games merged in behind a
+              collapsed-by-default disclosure (mobile parity). */}
           {pools.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
               {pools.map((pool) => (
@@ -673,32 +695,13 @@ function EventTabsView(props: {
                   pool={{ name: bracketLabel(pool.name), teams: pool.teams }}
                   competitionLevel={level || event.competitionLevel}
                   records={poolRecords}
+                  games={poolGames.get(pool.name) ?? []}
+                  venueState={event.state}
                 />
               ))}
             </div>
           )}
-
-          {/* Per-pool game lists */}
-          {poolGames.size > 0 ? (
-            <div className="flex flex-col gap-5">
-              {Array.from(poolGames.entries())
-                .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([poolName, gs]) => (
-                  <div key={poolName}>
-                    <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-                      {bracketLabel(poolName)} games
-                    </div>
-                    <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {gs.map((g) => (
-                        <GameRow key={g.id} game={g} venueState={event.state} />
-                      ))}
-                    </ul>
-                  </div>
-                ))}
-            </div>
-          ) : (
-            pools.length > 0 && <PoolGamesEmpty slug={event.slug} />
-          )}
+          {pools.length > 0 && poolGames.size === 0 && <PoolGamesEmpty slug={event.slug} />}
 
           {/* Matchup rounds — pool-less Saturday phases ("Sat Round 1/2/3"),
               folded into Pool Play as generic sections below the pools. */}
@@ -718,24 +721,6 @@ function EventTabsView(props: {
               ))}
             </div>
           )}
-        </section>
-      )}
-
-      {/* ── Crossovers ──────────────────────────────────────────────────── */}
-      {active === 'crossovers' && crossoverGames.length > 0 && (
-        <section aria-labelledby="crossovers-heading">
-          <h2 id="crossovers-heading" className="sr-only">Crossovers</h2>
-          <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            {crossoverGames.map((g) => (
-              <GameRow
-                key={g.id}
-                game={g}
-                showBracket
-                bracketLabel={bracketLabel}
-                venueState={event.state}
-              />
-            ))}
-          </ul>
         </section>
       )}
 
@@ -1063,10 +1048,17 @@ function PoolCard({
   pool,
   competitionLevel,
   records,
+  games,
+  venueState,
 }: {
   pool: { name: string; teams: Team[] };
   competitionLevel: string;
   records: Map<string, { wins: number; losses: number }>;
+  /** That pool's games, sorted by scheduled time — rendered in a collapsed-
+   *  by-default "Games" disclosure beneath the standings (mobile parity:
+   *  per-pool games merge under the pool's standings card). */
+  games: Game[];
+  venueState?: string | null;
 }) {
   // Rank by pool record when we have any completed games; the incoming
   // team order is by seed, which stays as the tiebreak within equal records.
@@ -1082,6 +1074,9 @@ function PoolCard({
           return (a.seed ?? 99) - (b.seed ?? 99);
         })
     : pool.teams;
+
+  const [gamesOpen, setGamesOpen] = useState(false);
+  const panelId = `pool-games-${pool.name}`;
 
   return (
     <div className="bg-surface rounded-card shadow-card overflow-hidden">
@@ -1119,7 +1114,55 @@ function PoolCard({
           );
         })}
       </ul>
+
+      {games.length > 0 && (
+        <div className="border-t border-hairline">
+          <button
+            type="button"
+            aria-expanded={gamesOpen}
+            aria-controls={panelId}
+            onClick={() => setGamesOpen((o) => !o)}
+            className={[
+              'w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left cursor-pointer',
+              'hover:bg-ink/[0.03] transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+            ].join(' ')}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <PoolGamesChevron open={gamesOpen} />
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                Games
+              </span>
+            </span>
+            <span className="tabular text-[10px] font-bold text-faint font-tight">
+              {games.length}
+            </span>
+          </button>
+          {gamesOpen && (
+            <ul id={panelId} className="flex flex-col gap-2 px-3 pb-3">
+              {games.map((g) => (
+                <GameRow key={g.id} game={g} venueState={venueState} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
+  );
+}
+
+function PoolGamesChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      className={['shrink-0 text-faint transition-transform duration-150', open ? 'rotate-90' : ''].join(' ')}
+    >
+      <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -1195,23 +1238,20 @@ function GameRow({
   /** Event's US state — times render as the venue's wall clock. */
   venueState?: string | null;
 }) {
-  // A forfeit is a decided game (one side scored, one didn't show) — it must
-  // render won/lost like any other final, not fall through to "upcoming"
-  // styling just because the raw status string isn't literally 'final'.
   const status = game.status.toLowerCase();
-  const isDecided = status === 'final' || status === 'forfeit';
-  const aWon =
-    isDecided && game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
-  const bWon =
-    isDecided && game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
   const isCancelled = status === 'cancelled';
-  const statusLabel = isDecided ? 'Final' : isCancelled ? 'Cancelled' : game.status;
-  const statusClass = isDecided ? 'text-accent' : 'text-muted';
 
-  // Bracket name and field are NOT mutually exclusive. This used to be an
-  // either/or — bracket views showed the round and silently dropped the field
-  // number, so "where is this game being played" was unavailable on exactly the
-  // games people travel to watch. Show both when we have both.
+  // Mobile parity (GameCard): a game is FINAL when scores are present or its
+  // status is final — not by the raw status string, which can leak values
+  // like 'in_progress' straight into the UI.
+  const hasScore = game.scoreA != null && game.scoreB != null;
+  const isFinal = hasScore || status === 'final';
+  const aWon = hasScore && isFinal && (game.scoreA ?? 0) > (game.scoreB ?? 0);
+  const bWon = hasScore && isFinal && (game.scoreB ?? 0) > (game.scoreA ?? 0);
+
+  // Bracket name is shown on the left (crossovers span several bracket_names
+  // in one list). Field + time fold into the right-hand status strip along
+  // with FINAL/TBD (mobile parity) instead of the raw status string.
   const bracket = showBracket && game.bracketName
     ? (bracketLabel ? bracketLabel(game.bracketName) : game.bracketName)
     : null;
@@ -1224,15 +1264,20 @@ function GameRow({
       : game.location.trim()
     : null;
   const time = formatGameTime(game.scheduledAt, venueState ?? null);
-  const meta = [bracket, fieldLabel, time || null].filter(Boolean).join(' · ') || null;
+  // Time stays visible on FINAL games too (mobile parity) — previously it was
+  // replaced by the word FINAL, which threw away when/where the game was played.
+  const statusLabel = isCancelled
+    ? 'Cancelled'
+    : [isFinal ? 'FINAL' : '', time || (isFinal ? '' : 'TBD'), fieldLabel].filter(Boolean).join(' · ');
+  const statusClass = isCancelled ? 'text-muted' : isFinal ? 'text-faint' : 'text-muted';
 
   return (
     <li className="bg-surface rounded-card-sm shadow-soft p-3">
       <div className="flex items-center justify-between mb-2 text-[10px] font-bold tracking-[0.14em] uppercase font-tight">
-        {meta ? (
-          <span className="text-muted truncate">{meta}</span>
+        {bracket ? (
+          <span className="text-muted truncate">{bracket}</span>
         ) : (
-          <span className="text-faint">—</span>
+          <span />
         )}
         <span className={statusClass}>{statusLabel}</span>
       </div>
@@ -1240,7 +1285,7 @@ function GameRow({
         name={game.teamAName}
         seed={game.seedA}
         teamId={game.teamAId}
-        score={game.scoreA}
+        score={hasScore ? game.scoreA : null}
         won={aWon}
         lost={bWon}
       />
@@ -1248,7 +1293,7 @@ function GameRow({
         name={game.teamBName}
         seed={game.seedB}
         teamId={game.teamBId}
-        score={game.scoreB}
+        score={hasScore ? game.scoreB : null}
         won={bWon}
         lost={aWon}
       />
@@ -1299,14 +1344,16 @@ function TeamLine({
       ) : (
         <span className="flex-1 min-w-0">{inner}</span>
       )}
-      <span
-        className={[
-          'tabular text-[16px] font-bold font-tight leading-none w-8 text-right',
-          won ? 'text-ink' : lost ? 'text-faint' : 'text-muted',
-        ].join(' ')}
-      >
-        {score ?? '—'}
-      </span>
+      {score != null && (
+        <span
+          className={[
+            'tabular text-[16px] font-bold font-tight leading-none w-8 text-right',
+            won ? 'text-ink' : lost ? 'text-faint' : 'text-muted',
+          ].join(' ')}
+        >
+          {score}
+        </span>
+      )}
     </div>
   );
 }

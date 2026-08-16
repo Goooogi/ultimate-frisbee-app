@@ -25,6 +25,11 @@ export interface BracketNode {
    *  Nulls (byes / TBD) are ignored. */
   homeId: string | null;
   awayId: string | null;
+  /** Explicit previous-round feeder game ids. Team-id overlap can't link a
+   *  slot whose teams aren't decided yet (placeholder "W of Quarters G1"
+   *  cards), so adapters that know the bracket structure pass the linkage
+   *  directly; sourcesFor unions it with the team-id matches. */
+  sourceIds?: readonly string[];
 }
 
 /** One round, ordered earliest → latest (left → right on desktop).
@@ -46,9 +51,13 @@ export const ROW_PITCH_PX = 104;
  */
 export function sourcesFor<T extends BracketNode>(game: T, prev: readonly T[]): T[] {
   const ids = [game.homeId, game.awayId].filter((x): x is string => !!x);
-  if (ids.length === 0) return [];
+  const explicit = game.sourceIds;
+  if (ids.length === 0 && !explicit?.length) return [];
   return prev.filter(
-    (c) => (c.homeId && ids.includes(c.homeId)) || (c.awayId && ids.includes(c.awayId)),
+    (c) =>
+      (c.homeId && ids.includes(c.homeId)) ||
+      (c.awayId && ids.includes(c.awayId)) ||
+      explicit?.includes(c.id),
   );
 }
 
@@ -230,9 +239,12 @@ export function bracketBucket(name: string | null | undefined): BracketBucket {
     t.includes('championship') ||
     /\b1st\b/.test(t) ||
     t.includes('first place') ||
-    t === 'finals' || t === 'final' ||
+    t === 'finals' || t === 'final' || t === 'champs' ||
     t === 'bracket' || t === 'bracket play' || t === 'sunday bracket' ||
-    t === 'champion bracket'
+    t === 'champion bracket' ||
+    // Championship play-in rounds stored as their own bracket ("Pre-Quarters")
+    // belong to the championship bucket, not an "Other Brackets" group.
+    t === 'pre-quarters' || t === 'prequarters' || t === 'pre quarters'
   ) {
     // "5th Place Championship" is a side bracket, not the main one.
     const ord = t.match(/\b(\d+)(st|nd|rd|th)\b/);

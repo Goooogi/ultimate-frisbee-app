@@ -79,6 +79,9 @@ export interface WfdfGameRow {
   isBracket: boolean;
   status: string;
   scheduledAt: string | null;
+  /** Field number ("1", "12") or venue string from the reservation join;
+   *  null on legacy events and rows ingested before 2026-08-16. */
+  fieldName: string | null;
 }
 
 export interface WfdfRosterPlayer {
@@ -302,7 +305,7 @@ export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
     db
       .from('wfdf_games')
       .select(
-        'id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, ' +
+        'id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
           'division:division_id(name), ' +
           'home:home_team_id(id, name, country_code), away:away_team_id(id, name, country_code)',
       )
@@ -380,7 +383,7 @@ export async function getTeam(teamId: string): Promise<WfdfTeamSummary | null> {
     db
       .from('wfdf_games')
       .select(
-        'id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, ' +
+        'id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
           'division:division_id(name), home:home_team_id(id, name, country_code), away:away_team_id(id, name, country_code)',
       )
       .or(`home_team_id.eq.${teamId},away_team_id.eq.${teamId}`)
@@ -888,6 +891,7 @@ function mapGameRow(g: Row): WfdfGameRow {
     isBracket: !!g.is_bracket,
     status: g.status as string,
     scheduledAt: (g.scheduled_at as string) ?? null,
+    fieldName: (g.field_name as string) ?? null,
   };
 }
 

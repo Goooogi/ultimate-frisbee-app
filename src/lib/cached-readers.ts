@@ -17,9 +17,10 @@ import 'server-only';
 import { unstable_cache } from 'next/cache';
 
 import {
-  recentUsauTournamentCards as _recentUsauTournamentCards,
+  recentUsauTournamentPage as _recentUsauTournamentPage,
   listOfficialUsauRankings as _listOfficialUsauRankings,
   listUsauPlayers as _listUsauPlayers,
+  listSeasons as _listSeasons,
   type CompetitionLevel,
 } from '@/lib/usau/data';
 import type { Flight } from '@/lib/usau/flights';
@@ -39,14 +40,26 @@ const REVALIDATE_SECONDS = 300;
 
 // Wrapped as a closure so the reader's `now: Date` default stays out of
 // the cache key (a Date wouldn't serialize into one cleanly). Callers never
-// pass `now`, so this preserves behavior exactly. competitionLevel + flights ARE
-// serialized cache-key args, so each (level, flights) combo memoizes
+// pass `now`, so this preserves behavior exactly. competitionLevel, flights,
+// season and page ARE serialized cache-key args, so each combination memoizes
 // independently. `flights` must be passed in canonical order (see
 // parseFlightsParam) so the same selection always yields the same cache key.
-export const recentUsauTournamentCardsCached = unstable_cache(
-  (competitionLevel: CompetitionLevel = 'CLUB', flights: Flight[] = []) =>
-    _recentUsauTournamentCards(undefined, undefined, competitionLevel, flights),
-  ['usau-recent-tournament-cards'],
+export const recentUsauTournamentPageCached = unstable_cache(
+  (
+    competitionLevel: CompetitionLevel = 'CLUB',
+    flights: Flight[] = [],
+    season: number | null = null,
+    page = 0,
+  ) => _recentUsauTournamentPage(undefined, undefined, competitionLevel, flights, season, page),
+  ['usau-recent-tournament-page'],
+  { revalidate: REVALIDATE_SECONDS },
+);
+
+// Seasons list for /scores' server-side season default (absent ?season ⇒
+// latest season with data). Tiny query, long-lived data.
+export const listUsauSeasonsCached = unstable_cache(
+  _listSeasons,
+  ['usau-seasons'],
   { revalidate: REVALIDATE_SECONDS },
 );
 

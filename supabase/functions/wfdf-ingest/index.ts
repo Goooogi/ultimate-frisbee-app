@@ -243,6 +243,12 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
   const teamsById = new Map<number, any>((ref.teams ?? []).map((t: any) => [t.team_id, t]));
   const countriesById = new Map<number, any>((ref.countries ?? []).map((c: any) => [c.country_id, c]));
   const poolsById = new Map<number, any>((ref.pools ?? []).map((p: any) => [p.pool_id, p]));
+  // Field reservations: id → { fieldname ("1", "2", …), location, name }.
+  // fieldname carries the field number at WUCC; other events may only populate
+  // name/location, so those are the fallbacks.
+  const reservationsById = new Map<number, any>(
+    (ref.reservations ?? []).map((r: any) => [r.id, r]),
+  );
 
   const year = Number(String(season.starttime || '').slice(0, 4)) || new Date().getUTCFullYear();
   const isNational = Number(season.isnationalteams) === 1;
@@ -469,6 +475,13 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
       home_sotg: g.homesotg ?? null,
       away_sotg: g.visitorsotg ?? null,
       pool_name: pool?.poolname ?? null,
+      field_name: (() => {
+        const r = reservationsById.get(g.reservation);
+        if (!r) return null;
+        const v = r.fieldname ?? r.name ?? r.location;
+        const s = v != null ? String(v).trim() : '';
+        return s || null;
+      })(),
       is_bracket: isBracket,
       status: statusMap[String(g.status)] ?? 'scheduled',
       scheduled_at: t ? new Date(t.replace(' ', 'T') + 'Z').toISOString() : null,

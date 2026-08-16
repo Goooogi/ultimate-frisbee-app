@@ -15,17 +15,19 @@ import { GameCard } from '@/components/game-card';
 import { FeedHero } from '@/components/feed-hero';
 import { AppShell } from '@/components/page-shell';
 import { UsauMajorGrid } from '@/components/home/multi-league-grid-section';
-import type { UsauMajorWithChampions } from '@/lib/usau/data';
+import type { UsauTournamentPage } from '@/lib/usau/data';
 import { useLeague } from '@/lib/use-league';
 import { buildLeagueQs, levelLabel, type UsauLevel } from '@/lib/league';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { UsauFlightSelect } from '@/components/usau/usau-flight-select';
+import { UsauSeasonSelect } from '@/components/usau/usau-season-select';
 import { UsauFilterButton, UsauFilterRow } from '@/components/usau/usau-filter-button';
 
 interface FeedPageProps {
   games: UfaGame[];
   today: Today;
-  usauCards: UsauMajorWithChampions[];
+  /** One page of the USAU results feed (pre-filtered + paged server-side). */
+  usauPage: UsauTournamentPage;
   /** Active USAU competition level (cards are pre-filtered server-side). */
   usauLevel: UsauLevel;
 }
@@ -40,7 +42,7 @@ export function FeedPage(props: FeedPageProps) {
   );
 }
 
-function FeedPageInner({ games, today, usauCards, usauLevel }: FeedPageProps) {
+function FeedPageInner({ games, today, usauPage, usauLevel }: FeedPageProps) {
   // League state lives in ?league= — see lib/use-league.ts. We don't pass
   // a topNavSlot so AppShell's default renders: pill tabs on desktop, a
   // dropdown on mobile. Both write to the same useLeague() state via the
@@ -54,7 +56,7 @@ function FeedPageInner({ games, today, usauCards, usauLevel }: FeedPageProps) {
         {league === 'ufa' ? (
           <UfaFeed games={games} today={today} counts={counts} />
         ) : league === 'usau' ? (
-          <UsauFeed cards={usauCards} level={usauLevel} />
+          <UsauFeed page={usauPage} level={usauLevel} />
         ) : league === 'pul' ? (
           <PulComingSoon page="scores" />
         ) : null}
@@ -103,23 +105,42 @@ function UfaFeed({
 // detail (games/pools/bracket) at /usau/events/[slug]. This "results overview"
 // replaced the old single-auto-picked-tournament view so we can show winners
 // across every division without choosing just one event.
-function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: UsauLevel }) {
+function UsauFeed({ page, level }: { page: UsauTournamentPage; level: UsauLevel }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const cards = page.cards;
 
-  // Non-default filters, for the Filters badge. `level` defaults to CLUB and
-  // `flight` is absent when "all flights" — anything else counts as applied.
+  // Non-default filters, for the Filters badge. `level` defaults to CLUB,
+  // `flight` is absent when "all flights", `season` absent when latest —
+  // anything else counts as applied.
   const usauFilterCount =
-    (searchParams.get('level') ? 1 : 0) + (searchParams.get('flight') ? 1 : 0);
+    (searchParams.get('level') ? 1 : 0) +
+    (searchParams.get('flight') ? 1 : 0) +
+    (searchParams.get('season') ? 1 : 0);
 
   const clearUsauFilters = useCallback(() => {
     const params = new URLSearchParams(searchParams.toString());
     params.delete('level');
     params.delete('flight');
+    params.delete('season');
+    params.delete('page');
     const qs = params.toString();
     router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
   }, [router, pathname, searchParams]);
+
+  // Prev/Next hrefs preserve every other param; page is 1-based in the URL and
+  // omitted at 1 to keep URLs clean.
+  const pageHref = useCallback(
+    (oneBased: number) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (oneBased <= 1) params.delete('page');
+      else params.set('page', String(oneBased));
+      const qs = params.toString();
+      return `${pathname}${qs ? `?${qs}` : ''}`;
+    },
+    [pathname, searchParams],
+  );
 
   // Carry the active level into the schedule links so the division context
   // survives the hop (buildLeagueQs omits the default CLUB for clean URLs;
@@ -142,6 +163,9 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
             dropdowns wrapped on mobile and pushed the tournament grid down. */}
         <div className="flex items-center gap-2 flex-wrap">
           <UsauFilterButton activeCount={usauFilterCount} onClear={clearUsauFilters}>
+            <UsauFilterRow label="Season">
+              <UsauSeasonSelect />
+            </UsauFilterRow>
             <UsauFilterRow label="Level">
               <UsauLevelSelect />
             </UsauFilterRow>
@@ -157,11 +181,16 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
       </div>
 
       {cards.length > 0 ? (
-        <UsauMajorGrid majors={cards} fill />
+        <>
+          <UsauMajorGrid majors={cards} fill />
+          {page.pageCount > 1 && (
+            <UsauPager page={page} pageHref={pageHref} />
+          )}
+        </>
       ) : (
         <div className="rounded-card-lg bg-surface shadow-card p-10 text-center">
           <p className="text-[14px] text-muted font-tight">
-            No completed {levelLabel(level)} tournaments in the last couple of weekends yet.
+            No completed {levelLabel(level)} tournaments match these filters.
           </p>
           <Link
             href={scheduleHref}
@@ -172,6 +201,46 @@ function UsauFeed({ cards, level }: { cards: UsauMajorWithChampions[]; level: Us
         </div>
       )}
     </>
+  );
+}
+
+// Prev / "Page N of M" / count / Next — deliberately not numbered page buttons
+// (Club alone has ~150+ pages of history). Mirrors mobile's Pager.
+function UsauPager({
+  page,
+  pageHref,
+}: {
+  page: UsauTournamentPage;
+  pageHref: (oneBased: number) => string;
+}) {
+  const current = page.page + 1; // 1-based for display/URLs
+  const linkCls =
+    'inline-flex items-center min-h-[40px] px-4 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent';
+  const enabledCls = 'bg-ink/5 text-ink hover:bg-ink/10 cursor-pointer';
+  const disabledCls = 'bg-ink/5 text-faint';
+  return (
+    <nav aria-label="Tournament pages" className="mt-6 flex items-center justify-between gap-3">
+      {current > 1 ? (
+        <Link href={pageHref(current - 1)} scroll={false} className={`${linkCls} ${enabledCls}`}>
+          ← Prev
+        </Link>
+      ) : (
+        <span aria-disabled className={`${linkCls} ${disabledCls}`}>← Prev</span>
+      )}
+      <span className="text-[11px] font-bold tracking-[0.14em] uppercase text-muted font-tight text-center">
+        Page {current} of {page.pageCount}
+        <span className="hidden sm:inline text-faint font-medium normal-case tracking-normal">
+          {' '}· {page.total} tournaments
+        </span>
+      </span>
+      {current < page.pageCount ? (
+        <Link href={pageHref(current + 1)} scroll={false} className={`${linkCls} ${enabledCls}`}>
+          Next →
+        </Link>
+      ) : (
+        <span aria-disabled className={`${linkCls} ${disabledCls}`}>Next →</span>
+      )}
+    </nav>
   );
 }
 

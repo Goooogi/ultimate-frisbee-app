@@ -28,6 +28,9 @@ export function useLevel(): [UsauLevel, (next: UsauLevel) => void] {
       const params = new URLSearchParams(searchParams.toString());
       if (next === DEFAULT_LEVEL) params.delete('level');
       else params.set('level', levelToParam(next));
+      // A level change re-defines any paged result set (/scores) — restart at
+      // page 1. No-op on pages without paging.
+      params.delete('page');
       const qs = params.toString();
       router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
     },

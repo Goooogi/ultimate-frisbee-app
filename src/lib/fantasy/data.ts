@@ -570,9 +570,26 @@ export async function createMyTeam(
   const name = teamName.trim();
   if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
 
+  // Attach the team to the global UFA contest (the beta pool became a real
+  // contest row). Falls back to a contest-less legacy insert if the row is
+  // somehow missing so the beta path can't hard-break.
+  const { data: contest } = await supabase
+    .from('fantasy_contests')
+    .select('id')
+    .is('league_id', null)
+    .eq('competition', 'ufa')
+    .eq('season_year', year)
+    .maybeSingle();
+
   const { data, error } = await supabase
     .from('fantasy_teams')
-    .insert({ owner_id: user.id, team_name: name, season_year: year, league_id: null })
+    .insert({
+      owner_id: user.id,
+      team_name: name,
+      season_year: year,
+      league_id: null,
+      contest_id: (contest?.id as string | undefined) ?? null,
+    })
     .select('id')
     .single();
   if (error) throw error;

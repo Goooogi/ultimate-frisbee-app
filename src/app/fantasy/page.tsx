@@ -5,13 +5,20 @@
 
 import Link from 'next/link';
 import { PageShell } from '@/components/page-shell';
-import { getLeaderboard } from '@/lib/fantasy/data';
+import { getLeaderboard, fantasySeasonYear } from '@/lib/fantasy/data';
+import { getGlobalContest } from '@/lib/fantasy/leagues';
 import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
+import { YourLeagues } from '@/components/fantasy/your-leagues';
 
 export const revalidate = 60;
 
 export default async function FantasyLandingPage() {
-  const leaderboard = await getLeaderboard().catch(() => []);
+  const [leaderboard, globalContest] = await Promise.all([
+    getLeaderboard().catch(() => []),
+    // The open-to-everyone UFA pool (the original beta), pinned in the leagues
+    // section so it stays one tap away alongside private leagues.
+    getGlobalContest('ufa', fantasySeasonYear()).catch(() => null),
+  ]);
 
   return (
     <PageShell
@@ -20,6 +27,11 @@ export default async function FantasyLandingPage() {
       subtitle="Every team, ranked by cumulative points."
       hideFooterMobile
     >
+      {/* ── Your Leagues (client island) ─────────────────────────────────── */}
+      <YourLeagues
+        globalPool={globalContest ? { name: `UFA ${globalContest.seasonYear} · Global Pool` } : null}
+      />
+
       {/* ── Global Leaderboard ────────────────────────────────────────────── */}
       <section aria-labelledby="leaderboard-heading">
         <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">

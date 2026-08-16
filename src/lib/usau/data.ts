@@ -1735,12 +1735,29 @@ export async function getTeamNationalsMedals(
 
 // ─── Recent USAU Majors with Champions ─────────────────────────────────────
 
+/** Minimum ranked entrants an event needs before its average rank is treated as
+ *  a meaningful field-strength signal. Below this, a tiny invite with a couple
+ *  of strong teams outranks a 48-team Nationals on a raw mean (measured: a
+ *  6-team event scored 15.0, ahead of Club Nationals at 12.0). Events under the
+ *  threshold get `fieldStrength: null` and sort after every ranked event. */
+export const MIN_RANKED_ENTRANTS_FOR_STRENGTH = 8;
+
 export interface UsauMajorWithChampions {
   slug: string;
   name: string;
   startDate: string | null;
   endDate: string | null;
   flight: Flight | null;
+  /** Mean official USAU rank across every ranked entrant, ALL divisions pooled
+   *  (division lives on usau_teams, so one tournament spans Men/Women/Mixed and
+   *  gets ONE number). Lower = stronger field. Null when the event has fewer
+   *  than MIN_RANKED_ENTRANTS_FOR_STRENGTH ranked entrants — i.e. "not enough
+   *  signal", which is NOT the same as "weak field". Purely an ordering
+   *  tiebreaker (sortTournamentsByStrength) — never rendered. */
+  fieldStrength: number | null;
+  /** How many entrants carried an official ranking — the sample behind
+   *  fieldStrength. */
+  rankedEntrants: number;
   champions: Array<{
     division: 'Men' | 'Women' | 'Mixed';
     teamName: string;
@@ -1879,6 +1896,10 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
       startDate: e.start_date,
       endDate: e.end_date,
       flight: flightForName(e.name),
+      // Home "recent majors" cards never sort by strength — skip the rankings
+      // queries entirely rather than paying for an unused signal.
+      fieldStrength: null,
+      rankedEntrants: 0,
       champions: champions.sort(
         (a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9),
       ),
@@ -1887,6 +1908,184 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   }
 
   return results;
+}
+
+/**
+ * Mean official USAU rank of each event's entrants, keyed by event id.
+ *
+ * Matched by NAME + division rather than usau_event_teams.team_id: ranking rows
+ * and event-team rows routinely point at different usau_teams rows for the same
+ * real team (USAU issues a new EventTeamId per scrape), so an id join silently
+ * drops real entrants. Division is part of the key because a name-only match
+ * crosses RankSets and would score a field off a false positive.
+ *
+ * All divisions at an event are POOLED into one number: gender_division lives
+ * on usau_teams, not usau_events, so a tournament is inherently multi-division
+ * and the /scores card is one card per tournament.
+ *
+ * Returns mean rank + ranked-entrant count per event. Events with no ranked
+ * entrant are absent. Callers apply MIN_RANKED_ENTRANTS_FOR_STRENGTH.
+ */
+async function fieldStrengthByEvent(
+  db: Awaited<ReturnType<typeof supabase>>,
+  eventIds: string[],
+  competitionLevel: CompetitionLevel,
+): Promise<Map<string, { mean: number; ranked: number }>> {
+  const out = new Map<string, { mean: number; ranked: number }>();
+  if (eventIds.length === 0) return out;
+
+  // Which RankSets can this level even produce? D-III/Masters publish none, so
+  // those events legitimately come back empty rather than mis-keyed.
+  const divisions: Array<'Men' | 'Women' | 'Mixed'> = ['Men', 'Women', 'Mixed'];
+  const rankSets = new Map<string, OfficialRankDivision>();
+  for (const g of divisions) {
+    const rs = officialRankSetFor(competitionLevel, g);
+    if (rs) rankSets.set(g, rs);
+  }
+  if (rankSets.size === 0) return out;
+
+  // Latest (season, week) per RankSet — rankings are scraped weekly and we want
+  // the current standings, not an average across every historical week.
+  const heads = new Map<OfficialRankDivision, { season: number; week: number }>();
+  await Promise.all(
+    [...new Set(rankSets.values())].map(async (division) => {
+      const { data } = await db
+        .from('usau_rankings')
+        .select('season, week')
+        .eq('division', division)
+        .order('season', { ascending: false })
+        .order('week', { ascending: false })
+        .limit(1);
+      const head = (data ?? [])[0] as { season: number; week: number } | undefined;
+      if (head) heads.set(division, head);
+    }),
+  );
+  if (heads.size === 0) return out;
+
+  // rankByKey: "division|lowercased team name" → best rank.
+  const rankByKey = new Map<string, number>();
+  await Promise.all(
+    [...heads.entries()].map(async ([division, head]) => {
+      // Paginate: a full division head-week can exceed PostgREST's 1000-row cap,
+      // which truncates SILENTLY and would quietly under-count strong entrants.
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data: page } = await db
+          .from('usau_rankings')
+          .select('rank, team_name')
+          .eq('division', division)
+          .eq('season', head.season)
+          .eq('week', head.week)
+          .order('rank', { ascending: true })
+          .range(from, from + PAGE - 1);
+        const rows = (page ?? []) as Array<{ rank: number; team_name: string | null }>;
+        for (const r of rows) {
+          if (!r.team_name) continue;
+          const key = `${division}|${r.team_name.trim().toLowerCase()}`;
+          // Rows arrive rank-ascending, so the first write is the best rank.
+          if (!rankByKey.has(key)) rankByKey.set(key, r.rank);
+        }
+        if (rows.length < PAGE) break;
+      }
+    }),
+  );
+  if (rankByKey.size === 0) return out;
+
+  // Entrants per event. Paginated for the same silent-truncation reason.
+  const sums = new Map<string, { total: number; ranked: number }>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('usau_event_teams')
+      .select('event_id, usau_teams!team_id(name, gender_division)')
+      .in('event_id', eventIds)
+      .range(from, from + PAGE - 1);
+    const rows = (page ?? []) as unknown as Array<{
+      event_id: string;
+      usau_teams: { name: string | null; gender_division: string | null } | null;
+    }>;
+    for (const row of rows) {
+      const team = row.usau_teams;
+      if (!team?.name || !team.gender_division) continue;
+      const division = rankSets.get(team.gender_division);
+      if (!division) continue;
+      const rank = rankByKey.get(`${division}|${team.name.trim().toLowerCase()}`);
+      if (rank == null) continue;
+      const acc = sums.get(row.event_id) ?? { total: 0, ranked: 0 };
+      acc.total += rank;
+      acc.ranked += 1;
+      sums.set(row.event_id, acc);
+    }
+    if (rows.length < PAGE) break;
+  }
+
+  for (const [eventId, acc] of sums) {
+    if (acc.ranked === 0) continue;
+    out.set(eventId, { mean: acc.total / acc.ranked, ranked: acc.ranked });
+  }
+  return out;
+}
+
+/**
+ * The Sunday that "owns" a tournament, used as the weekend grouping key.
+ *
+ * Tournaments start Thursday/Friday/Saturday but almost always END Sunday, so
+ * end_date is the stable signal. Grouping by the RAW end date still splits one
+ * weekend in two, because a minority of events finish Saturday. Rolling any end
+ * date forward to its own week's Sunday puts the whole weekend in one bucket,
+ * so field strength orders within a weekend rather than across a spurious
+ * one-day split. (Mirrors mobile's weekendKey — keep in sync.)
+ */
+function weekendKey(endDate: string | null): string {
+  if (!endDate) return '';
+  // Parse as UTC — these are date-only strings; local parsing would shift the
+  // day backwards for anyone west of UTC and mis-bucket Sunday events.
+  const d = new Date(`${endDate}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return endDate;
+  const dow = d.getUTCDay(); // 0 = Sunday
+  if (dow !== 0) d.setUTCDate(d.getUTCDate() + (7 - dow));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * THE ordering for the recent-tournaments feed: WEEKEND first (newest weekend
+ * first), then field strength within each weekend (lowest mean entrant rank =
+ * strongest field). Applied unconditionally by recentUsauTournamentPage — there
+ * is no user-facing sort control; strength is purely the tiebreaker.
+ *
+ * Within a weekend, events without a strength score — too few ranked entrants,
+ * or a level USAU publishes no rankings for (D-III, Masters) — sort BELOW every
+ * scored event rather than being dropped. Unscored means "not enough signal",
+ * not "weak field". Returns a new array; does not mutate the input.
+ * (Mirrors mobile's sortTournamentsByStrength — keep in sync.)
+ */
+export function sortTournamentsByStrength(
+  cards: UsauMajorWithChampions[],
+): UsauMajorWithChampions[] {
+  return [...cards].sort((a, b) => {
+    // 1. Weekend, newest first.
+    const wk = weekendKey(b.endDate).localeCompare(weekendKey(a.endDate));
+    if (wk !== 0) return wk;
+
+    // 2. Field strength within the weekend.
+    const as = a.fieldStrength;
+    const bs = b.fieldStrength;
+    if (as != null && bs != null) {
+      if (as !== bs) return as - bs;
+      // Tie on strength — the deeper ranked field wins.
+      if (a.rankedEntrants !== b.rankedEntrants) return b.rankedEntrants - a.rankedEntrants;
+    } else if (as != null) {
+      return -1;
+    } else if (bs != null) {
+      return 1;
+    }
+
+    // 3. Exact end date, then name — a total order so paging can't drop or
+    //    duplicate a card between pages on re-sort.
+    const ed = (b.endDate ?? '').localeCompare(a.endDate ?? '');
+    if (ed !== 0) return ed;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 /**
@@ -1911,63 +2110,138 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
  */
 export async function recentUsauTournamentCards(
   now: Date = new Date(),
-  limit = 200,
+  limit = 10,
   competitionLevel: CompetitionLevel = 'CLUB',
   /** Optional Triple Crown Tour flight filter (Club only) — mirrors /schedule.
    *  Only events whose name maps to ONE OF these flights are returned. Empty ⇒
    *  all flights. */
   flights: Flight[] = [],
+  /** Optional season — "which season's results am I looking at". null ⇒ every
+   *  season (the original "most recent completed events" behavior). */
+  season?: number | null,
+  /** Zero-based page of `limit`-sized pages over the completed-event history.
+   *  Page 0 is the most recent. */
+  page = 0,
 ): Promise<UsauMajorWithChampions[]> {
+  return (await recentUsauTournamentPage(now, limit, competitionLevel, flights, season, page))
+    .cards;
+}
+
+/**
+ * Paged form of recentUsauTournamentCards: one page of cards plus the total
+ * event count, so a pager can render "Page 2 of 158" without a second request.
+ *
+ * Paging strategy differs by filter, because `flight` is a NAME-DERIVED tag
+ * rather than a column and so cannot be expressed in the query:
+ *   • No flight filter → true server-side paging via .range(). Constant cost
+ *     per page regardless of how deep the user goes.
+ *   • Flight filter active → the flight test only exists in JS, so the matching
+ *     set must be materialized before it can be paged. Bounded by
+ *     FLIGHT_SCAN_CAP pages of scanning rather than fetching the whole table.
+ *
+ * The 2026-08-12 outage guidance applies: page size stays small and the
+ * per-page enrichment (champions, field strength) runs only over the events on
+ * the CURRENT page, never the whole history.
+ * (Ported from mobile's recentUsauTournamentPage — keep in sync.)
+ */
+export interface UsauTournamentPage {
+  cards: UsauMajorWithChampions[];
+  /** Total matching events across all pages — drives "Page N of M". */
+  total: number;
+  /** Zero-based index of the page returned. */
+  page: number;
+  /** Total page count (always ≥ 1, even when empty). */
+  pageCount: number;
+}
+
+export async function recentUsauTournamentPage(
+  now: Date = new Date(),
+  limit = 10,
+  competitionLevel: CompetitionLevel = 'CLUB',
+  flights: Flight[] = [],
+  season?: number | null,
+  page = 0,
+): Promise<UsauTournamentPage> {
   const db = await supabase();
   const today = now.toISOString().slice(0, 10);
 
-  // The 10 most recent COMPLETED events at this level that actually have
-  // games — no date window. A "last 2 weeks" window (the original rule) left
-  // sparse calendars (Masters/GM play a handful of weekends a year, College
-  // in summer, everyone in the offseason) with an empty scores page while
-  // /schedule clearly had data. A fixed count keeps the page populated
-  // year-round: in-season it reads the same as before, offseason it shows
-  // the final tournaments of the season. The games inner-join keeps
-  // result-less catalog shells from wasting one of the 10 slots.
-  // Show 10 recent events normally. When filtering to a single flight, fetch a
-  // wider candidate pool first (flight is a name-derived tag, not a column, so
-  // it's filtered in JS below) — otherwise a 10-event window that happens to
-  // contain few of the requested flight would show an almost-empty scores page.
-  const RECENT_EVENT_COUNT = 10;
   const hasFlightFilter = flights.length > 0;
-  const FETCH_COUNT = hasFlightFilter ? 120 : RECENT_EVENT_COUNT;
-  const { data: events } = await db
-    .from('usau_events')
-    .select('id, usau_slug, name, start_date, end_date, usau_games!inner(id)')
-    .eq('competition_level', competitionLevel)
-    .lt('end_date', today)
-    .order('end_date', { ascending: false, nullsFirst: false })
-    .limit(1, { foreignTable: 'usau_games' })
-    .limit(FETCH_COUNT);
+  const flightSet = hasFlightFilter ? new Set(flights) : null;
+  const pageSize = Math.max(1, limit);
+  const safePage = Math.max(0, Math.floor(page));
 
-  // ALL events at the level (not just ranked-flight flagships), ordered by
-  // flight status below. Flight tags exist only on marquee events today, so
-  // most sort to the bottom (no flight) — that's expected until more get tagged.
-  const allRecent = ((events ?? []) as Array<{
+  type EventRow = {
     id: string;
     usau_slug: string;
     name: string;
     start_date: string | null;
     end_date: string | null;
-  }>);
-  // Apply the flight filter (name-derived) here, then cap to the display count.
-  // Without a flight, keep the original 10 most-recent. Multiple flights ⇒ match
-  // ANY of them.
-  const flightSet = hasFlightFilter ? new Set(flights) : null;
-  const recent = (
-    flightSet
-      ? allRecent.filter((e) => {
-          const f = flightForName(e.name);
-          return f != null && flightSet.has(f);
-        })
-      : allRecent
-  ).slice(0, RECENT_EVENT_COUNT);
-  if (recent.length === 0) return [];
+  };
+
+  const baseQuery = (head: boolean) => {
+    let q = db
+      .from('usau_events')
+      .select(
+        'id, usau_slug, name, start_date, end_date, usau_games!inner(id)',
+        head ? { count: 'exact', head: false } : undefined,
+      )
+      .eq('competition_level', competitionLevel)
+      // Completed OR CURRENTLY IN PLAY. Was `.lt('end_date', today)` — strictly
+      // completed — which left a tournament that had started but not finished
+      // showing in neither place: too late for the future-facing schedule, not
+      // yet eligible here. A tournament being played right now is exactly when
+      // its scores matter most, so `start_date <= today` admits it and the
+      // games inner-join still keeps result-less shells out until it has games.
+      .lte('start_date', today);
+    if (season != null) q = q.eq('season', season);
+    return q
+      .order('end_date', { ascending: false, nullsFirst: false })
+      // Secondary key so the server-side order is TOTAL. Without it Postgres may
+      // return same-end_date rows in a different order per request, which would
+      // let a card appear on two pages or on none.
+      .order('id', { ascending: true })
+      .limit(1, { foreignTable: 'usau_games' });
+  };
+
+  let recent: EventRow[];
+  let total: number;
+
+  if (!flightSet) {
+    // Server-side paging — constant cost per page however deep the user goes.
+    const from = safePage * pageSize;
+    const { data, count } = await baseQuery(true).range(from, from + pageSize - 1);
+    recent = (data ?? []) as EventRow[];
+    total = count ?? recent.length;
+  } else {
+    // Flight is name-derived, so the matching set has to be materialized in JS
+    // before it can be paged. Scan in bounded chunks rather than pulling the
+    // whole table.
+    const SCAN_PAGE = 500;
+    const FLIGHT_SCAN_CAP = 6; // ≤3000 events — covers every level's history
+    const matched: EventRow[] = [];
+    let scanned = 0;
+    for (let i = 0; i < FLIGHT_SCAN_CAP; i++) {
+      const from = i * SCAN_PAGE;
+      const { data } = await baseQuery(false).range(from, from + SCAN_PAGE - 1);
+      const rows = (data ?? []) as EventRow[];
+      scanned += rows.length;
+      for (const e of rows) {
+        const f = flightForName(e.name);
+        if (f != null && flightSet.has(f)) matched.push(e);
+      }
+      if (rows.length < SCAN_PAGE) break;
+    }
+    total = matched.length;
+    recent = matched.slice(safePage * pageSize, safePage * pageSize + pageSize);
+    if (scanned >= SCAN_PAGE * FLIGHT_SCAN_CAP) {
+      console.warn(
+        `[usau] flight scan hit its ${SCAN_PAGE * FLIGHT_SCAN_CAP}-event cap; deep flight-filtered pages may be incomplete.`,
+      );
+    }
+  }
+
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  if (recent.length === 0) return { cards: [], total, page: safePage, pageCount };
 
   const eventIds = recent.map((e) => e.id);
 
@@ -2088,6 +2362,10 @@ export async function recentUsauTournamentCards(
     });
   }
 
+  // Field strength (avg official rank of entrants) for the events on the
+  // CURRENT page only — the extra rankings queries stay bounded to ≤10 events.
+  const strengthByEvent = await fieldStrengthByEvent(db, eventIds, competitionLevel);
+
   const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
   const results: UsauMajorWithChampions[] = [];
   for (const e of recent) {
@@ -2095,6 +2373,8 @@ export async function recentUsauTournamentCards(
     // (no bracket final and no unique pool leader). Champions may be empty; the
     // card renders the event header with no winner row in that case.
     const champions = championsByEvent.get(e.id) ?? [];
+    const strength = strengthByEvent.get(e.id);
+    const ranked = strength?.ranked ?? 0;
     // Cancelled finals with no champion for that division (a later replayed
     // final that DID decide it clears the flag via the champions check).
     const cancelledFinals = [...cancelledKeys]
@@ -2112,24 +2392,31 @@ export async function recentUsauTournamentCards(
       startDate: e.start_date,
       endDate: e.end_date,
       flight: flightForName(e.name),
+      fieldStrength:
+        strength && ranked >= MIN_RANKED_ENTRANTS_FOR_STRENGTH ? strength.mean : null,
+      rankedEntrants: ranked,
       champions: champions.sort((a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9)),
       ...(cancelledFinals.length > 0 ? { cancelledFinals } : {}),
     });
   }
 
-  // Ordering:
-  //  - No flight filter → FLIGHT status first (marquee events float to the top),
-  //    then recency. Untagged events fall to the bottom, most-recent-first.
-  //  - Flight filter active → the user already chose the tier(s), so tier
-  //    ordering is noise. Order purely by DATE (newest weekend first).
-  results.sort((a, b) => {
-    if (!hasFlightFilter) {
-      const tier = flightRankForName(b.name) - flightRankForName(a.name);
-      if (tier !== 0) return tier;
-    }
-    return (b.endDate ?? '').localeCompare(a.endDate ?? '');
-  });
-  return results.slice(0, limit);
+  // Ordering WITHIN the page: WEEKEND first, then field strength as the
+  // tiebreaker. Rows already arrive newest-end_date-first from the server,
+  // which is what defines page membership; re-sorting here can only reorder
+  // inside that page.
+  //
+  // NOTE: the pre-paging version floated marquee (high-flight) events to the
+  // top across the whole result set. That is deliberately gone — with
+  // server-side paging it would hoist a card above events the server placed on
+  // an EARLIER page, so the same tournament could appear twice or vanish
+  // depending on which page you were viewing. Date is the page key, so date
+  // leads here too.
+  return {
+    cards: sortTournamentsByStrength(results),
+    total,
+    page: safePage,
+    pageCount,
+  };
 }
 
 /**
@@ -3167,7 +3454,58 @@ export interface UsauEventSummary {
     location: string | null;
     scheduledAt: string | null;
     status: string;
+    /** USAU's own schedule-row number (usau_game_id, falling back to a numeric
+     *  usau_event_game_id — the scraper populates one or the other per batch).
+     *  Within one bracket these are assigned in bracket-sheet order: a round's
+     *  games sort into USAU's G1…Gn, and slot k of the next round is fed by
+     *  games 2k-1/2k. The bracket tree uses this for game numbering, "W of
+     *  Quarters G1" placeholder labels, and feeder linkage. null when USAU's id
+     *  is absent or non-numeric (some batches store an opaque hash). */
+    usauGameOrder: number | null;
   }>;
+}
+
+/** Numeric USAU schedule-row id, preferring usau_game_id. Hash-form ids → null. */
+function parseUsauGameOrder(gameId: string | null, eventGameId: string | null): number | null {
+  for (const v of [gameId, eventGameId]) {
+    if (v && /^\d+$/.test(v.trim())) return parseInt(v, 10);
+  }
+  return null;
+}
+
+type EventGameRow = UsauEventSummary['games'][number];
+
+/**
+ * Drop stale scheduled rows that a played game has already superseded.
+ *
+ * USAU publishes a provisional schedule, then rewrites slots as the day runs (a
+ * rain delay, a reseed, a pool finishing early). The scraper inserts the
+ * replacement as a NEW row, and the abandoned one is never updated again —
+ * leaving a 0-0 'scheduled' ghost in a field/time slot that a completed game
+ * already owns.
+ *
+ * Two games cannot occupy one field at one time, so a 'scheduled' row sharing a
+ * slot with a completed one is the abandoned row. Anchoring on the COMPLETED
+ * game (rather than on which row is newer) is what keeps this safe: a genuinely
+ * upcoming game has no completed game in its slot and is always kept. That
+ * matters because the bracket now shows scheduled games rather than hiding
+ * them — without this, every ghost would become a visible phantom matchup.
+ */
+function dropSupersededGames(games: EventGameRow[]): EventGameRow[] {
+  const playedSlots = new Set<string>();
+  for (const g of games) {
+    const status = g.status.toLowerCase();
+    if (status !== 'final' && status !== 'forfeit') continue;
+    if (!g.location || !g.scheduledAt) continue;
+    playedSlots.add(`${g.location.trim().toLowerCase()}|${g.scheduledAt}`);
+  }
+  if (playedSlots.size === 0) return games;
+
+  return games.filter((g) => {
+    if (g.status.toLowerCase() !== 'scheduled') return true;
+    if (!g.location || !g.scheduledAt) return true;
+    return !playedSlots.has(`${g.location.trim().toLowerCase()}|${g.scheduledAt}`);
+  });
 }
 
 export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
@@ -3199,6 +3537,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
         // hint PostgREST with the !<columnName> syntax to disambiguate.
         `id, round, bracket_name, team_a_id, team_b_id,
          seed_a, seed_b, score_a, score_b, location, scheduled_at, status,
+         usau_game_id, usau_event_game_id,
          team_a:usau_teams!team_a_id(name),
          team_b:usau_teams!team_b_id(name)`,
       )
@@ -3218,26 +3557,29 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
     };
   });
 
-  const games = (gameRes.data ?? []).map((g) => {
-    const ta = (g as { team_a: { name: string } | null }).team_a;
-    const tb = (g as { team_b: { name: string } | null }).team_b;
-    return {
-      id: g.id,
-      round: g.round,
-      bracketName: g.bracket_name,
-      teamAId: g.team_a_id,
-      teamAName: ta?.name ?? null,
-      teamBId: g.team_b_id,
-      teamBName: tb?.name ?? null,
-      seedA: g.seed_a,
-      seedB: g.seed_b,
-      scoreA: g.score_a,
-      scoreB: g.score_b,
-      location: g.location,
-      scheduledAt: g.scheduled_at,
-      status: g.status,
-    };
-  });
+  const games = dropSupersededGames(
+    (gameRes.data ?? []).map((g) => {
+      const ta = (g as { team_a: { name: string } | null }).team_a;
+      const tb = (g as { team_b: { name: string } | null }).team_b;
+      return {
+        id: g.id,
+        round: g.round,
+        bracketName: g.bracket_name,
+        teamAId: g.team_a_id,
+        teamAName: ta?.name ?? null,
+        teamBId: g.team_b_id,
+        teamBName: tb?.name ?? null,
+        seedA: g.seed_a,
+        seedB: g.seed_b,
+        scoreA: g.score_a,
+        scoreB: g.score_b,
+        location: g.location,
+        scheduledAt: g.scheduled_at,
+        status: g.status,
+        usauGameOrder: parseUsauGameOrder(g.usau_game_id, g.usau_event_game_id),
+      };
+    }),
+  );
 
   return {
     id: event.id,

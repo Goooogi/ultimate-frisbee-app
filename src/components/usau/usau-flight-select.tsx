@@ -45,6 +45,9 @@ export function UsauFlightSelect() {
       const params = new URLSearchParams(searchParams.toString());
       if (ordered.length === 0) params.delete('flight');
       else params.set('flight', value);
+      // A flight change re-defines any paged result set (/scores) — restart at
+      // page 1. No-op on pages without paging.
+      params.delete('page');
       const qs = params.toString();
       router.replace(`${pathname}${qs ? `?${qs}` : ''}`, { scroll: false });
     },

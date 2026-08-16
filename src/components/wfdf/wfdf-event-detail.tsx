@@ -123,7 +123,11 @@ export function WfdfEventDetail({ event }: Props) {
   //     Without this, null-standing teams sorted alphabetically, which put a
   //     9-0 USA at the BOTTOM. Record is the meaningful ranking when there's no
   //     official final placement.
-  //  3. Name as the final tie-break.
+  //  3. SEED asc, then SOTG desc — pre-tournament every record ties 0-0, and a
+  //     name tie-break rendered WUCC standings A→Z. Seed is the pre-play order
+  //     (all WUCC teams are seeded); spirit is the live tie-break for legacy
+  //     events with no seeds. (Mobile parity 2026-08-16.)
+  //  4. Name as the final tie-break.
   // Whether the source gave us official final placements (modern events) or we
   // must rank by record (legacy pool-only events).
   const hasOfficialStanding = useMemo(() => teams.some((t) => t.finalStanding != null), [teams]);
@@ -146,6 +150,10 @@ export function WfdfEventDetail({ event }: Props) {
       if (wd !== 0) return wd;
       const ld = (a.losses ?? 0) - (b.losses ?? 0);
       if (ld !== 0) return ld;
+      const sd = (a.seed ?? 9999) - (b.seed ?? 9999);
+      if (sd !== 0) return sd;
+      const gd = (b.spiritAvg ?? -1) - (a.spiritAvg ?? -1);
+      if (gd !== 0) return gd;
       return a.name.localeCompare(b.name);
     });
   }, [teams, hasOfficialStanding]);
@@ -544,7 +552,15 @@ function GameRow({ game: g }: { game: Game }) {
   // there is no separate home value in the source, so we show it once.
   const sotg = g.awaySotg ?? g.homeSotg;
   const timeLabel = wfdfGameTime(g.scheduledAt);
-  const hasFooter = timeLabel != null || sotg != null || (!done && g.status === 'scheduled');
+  // Field number from the reservation join. Bare numbers ("12") get a "Field"
+  // prefix (USAU-card convention); full venue strings render as-is.
+  const fieldLabel = g.fieldName
+    ? /^\d+[A-Za-z]?$/.test(g.fieldName.trim())
+      ? `Field ${g.fieldName.trim()}`
+      : g.fieldName.trim()
+    : null;
+  const hasFooter =
+    timeLabel != null || fieldLabel != null || sotg != null || (!done && g.status === 'scheduled');
   return (
     <div className="bg-surface rounded-card shadow-card px-3 py-2.5">
       <TeamLine
@@ -567,7 +583,9 @@ function GameRow({ game: g }: { game: Game }) {
       {hasFooter && (
         <div className="flex items-center justify-between gap-2 mt-1.5 pt-1.5 border-t border-hairline text-[10px] font-tight text-faint">
           <span className="truncate">
-            {timeLabel ?? (g.status === 'scheduled' ? 'Scheduled' : '')}
+            {[fieldLabel, timeLabel ?? (g.status === 'scheduled' ? 'Scheduled' : null)]
+              .filter(Boolean)
+              .join(' · ')}
           </span>
           {sotg != null && (
             <span className="tabular flex-shrink-0" title="Spirit of the Game">
