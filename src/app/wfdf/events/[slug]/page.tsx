@@ -44,10 +44,13 @@ export default async function WfdfEventPage({ params }: Props) {
   const subParts = [fmtDates(ev.startDate, ev.endDate), ev.location].filter(Boolean).join(' · ');
 
   return (
-    <PageShell
+    <>
+      {/* Preload the hero mark so it lands with the HTML instead of after
+          hydration (same hint the events grid uses for its logo batch). */}
+      {ev.logoUrl && <link rel="preload" as="image" href={ev.logoUrl} />}
+      <PageShell
       title={ev.name}
       eyebrow={`WFDF · ${ev.isNationalTeams ? 'National Teams' : 'Club'}`}
-      subtitle={subParts || undefined}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'WFDF', href: '/wfdf/events' },
@@ -57,8 +60,9 @@ export default async function WfdfEventPage({ params }: Props) {
       {/* Suspense is load-bearing: the detail reads useSearchParams (?div/?tab
           view state), which otherwise bails the whole static render to CSR. */}
       <Suspense fallback={null}>
-        <WfdfEventDetail event={ev} />
+        <WfdfEventDetail event={ev} meta={subParts || undefined} />
       </Suspense>
-    </PageShell>
+      </PageShell>
+    </>
   );
 }

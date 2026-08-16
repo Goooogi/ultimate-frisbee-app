@@ -3,8 +3,9 @@
 // EUF event detail — one EUCS tournament, structured to match the USAU event
 // page (src/components/usau/usau-event-detail.tsx):
 //
-//   Champion banner  →  division tabs  →  view tabs (Standings / Pools /
-//   Crossovers / Bracket)
+//   Champion banner  →  view tabs (Standings / Pools / Crossovers / Bracket)
+//   →  centered division pills + swipeable division content (DivisionPager,
+//   ported from the mobile app)
 //
 // It used to render every section stacked on one endless scroll — standings,
 // then the bracket tree, then a flat list per round — which put a 40-game pool
@@ -25,6 +26,7 @@ import type { EufDivision, EufGameCard, EufStandingRow } from '@/lib/euf/data';
 import { eufGameDate, eufGameTime, eufDayKey } from '@/lib/euf/format-date';
 import { EufFlag } from './euf-flag';
 import { EufBracketTree, hasEufBracket } from './euf-bracket-tree';
+import { DivisionPager } from '@/components/division-pager';
 
 interface Props {
   divisions: EufDivision[];
@@ -142,34 +144,11 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Row 1 — "View on EUCS" link (left) + division tabs (right), one
-          compact header row on mobile — mirrors the USAU event page's
-          link + Level/Division row. */}
-      {(sourceUrl || divisions.length > 1) && (
+      {/* Row 1 — "View on EUCS" link. The division pills moved below the view
+          tabs (DivisionPager), mirroring the mobile app's layout. */}
+      {sourceUrl && (
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-          {sourceUrl ? <EufExternalLink url={sourceUrl} /> : <span />}
-          {divisions.length > 1 && (
-            <div className="flex flex-wrap gap-1.5">
-              {divisions.map((d) => (
-                <button
-                  key={d}
-                  type="button"
-                  onClick={() => setActiveDiv(d)}
-                  aria-pressed={d === activeDiv}
-                  className={[
-                    'px-3 py-1.5 rounded-full text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
-                    'transition-colors cursor-pointer border',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                    d === activeDiv
-                      ? 'bg-ink text-surface border-ink'
-                      : 'bg-transparent text-muted border-hairline hover:text-ink',
-                  ].join(' ')}
-                >
-                  {d}
-                </button>
-              ))}
-            </div>
-          )}
+          <EufExternalLink url={sourceUrl} />
         </div>
       )}
 
@@ -208,6 +187,15 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
         </div>
       )}
 
+      {/* Centered division pills (below the view tabs) + swipeable division
+          content — tap a pill or swipe the content left/right on touch to
+          change division (ported from the mobile app). */}
+      <DivisionPager
+        divisions={divisions.map((d) => ({ value: d, label: d }))}
+        active={activeDiv}
+        onChange={setActiveDiv}
+        contentClassName="flex flex-col gap-6"
+      >
       {/* ── Standings ─────────────────────────────────────────────────────── */}
       {active === 'standings' && (
         <section aria-label="Standings">
@@ -283,6 +271,7 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
           No games or standings loaded for this division yet.
         </p>
       )}
+      </DivisionPager>
     </div>
   );
 }

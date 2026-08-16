@@ -25,7 +25,7 @@ import { USAU_LEVELS } from '@/lib/league';
 import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
 import { formatGameTime } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
-import { UsauDivisionSelect } from '@/components/usau/usau-division-select';
+import { DivisionPager } from '@/components/division-pager';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 
 // Masters combined events prefix every bracket with its group ("GM Women ·
@@ -587,6 +587,7 @@ function EventTabsView(props: {
   // Tab lives in the URL (?tab=) so back-nav from a team page and hard refresh
   // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
   const [tabParam, setTabParam] = useViewParam('tab');
+  const [, setDivision] = useDivision();
   const tab: ViewTab = tabParam === 'pools' || tabParam === 'bracket' ? tabParam : defaultTab;
   const setTab = (next: ViewTab) => setTabParam(next);
   // If the div/level switch changes which tabs exist, keep the active tab valid.
@@ -594,35 +595,24 @@ function EventTabsView(props: {
 
   return (
     <>
-      {/* Row 1 — "View on USAU" link (left) + Level/Division selects (right).
-          One compact header row on mobile. Level/Division each only render
-          when the event fielded 2+ (Level: combined masters championships;
-          Division: multi-gender TCT/Nationals events — both write URL params
-          read via useLevel()/useDivision() above). */}
-      {(event.url || availableLevels.length > 1 || eventDivisions.length > 1) && (
+      {/* Row 1 — "View on USAU" link (left) + Level select (right). One
+          compact header row on mobile. Level only renders when the event
+          fielded 2+ (combined masters championships; writes the URL param
+          read via useLevel() above). The Division switcher moved below the
+          view tabs as centered pills (DivisionPager), mirroring the mobile
+          app's layout. */}
+      {(event.url || availableLevels.length > 1) && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
           {event.url ? <UsauExternalLink url={event.url} name={event.name} /> : <span />}
-          {(availableLevels.length > 1 || eventDivisions.length > 1) && (
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-              {availableLevels.length > 1 && (
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                    Level
-                  </span>
-                  <UsauLevelSelect
-                    restrictTo={availableLevels}
-                    value={level || undefined}
-                  />
-                </div>
-              )}
-              {eventDivisions.length > 1 && (
-                <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                    Division
-                  </span>
-                  <UsauDivisionSelect restrictTo={eventDivisions} />
-                </div>
-              )}
+          {availableLevels.length > 1 && (
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+                Level
+              </span>
+              <UsauLevelSelect
+                restrictTo={availableLevels}
+                value={level || undefined}
+              />
             </div>
           )}
         </div>
@@ -685,6 +675,15 @@ function EventTabsView(props: {
         </div>
       )}
 
+      {/* Centered division pills (below the view tabs) + swipeable division
+          content — tap a pill or swipe the content left/right on touch to
+          change division (ported from the mobile app; replaces the header's
+          Division dropdown). Writes the same ?div= URL param. */}
+      <DivisionPager
+        divisions={eventDivisions.map((d) => ({ value: d, label: d }))}
+        active={eventDivisions.includes(gender as UsauDivision) ? (gender as UsauDivision) : null}
+        onChange={setDivision}
+      >
       {/* ── Pools — standings cards + per-pool game lists (merged) ───────── */}
       {active === 'pools' && (
         <section aria-labelledby="pools-heading" className="flex flex-col gap-8">
@@ -747,6 +746,7 @@ function EventTabsView(props: {
             : 'No pool or bracket data scraped for this event yet.'}
         </div>
       )}
+      </DivisionPager>
     </>
   );
 }

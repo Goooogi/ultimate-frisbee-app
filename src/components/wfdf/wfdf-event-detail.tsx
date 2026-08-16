@@ -12,12 +12,17 @@ import Link from 'next/link';
 import { useViewParam } from '@/lib/use-view-param';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
-import { PillSelect } from '@/components/pill-select';
+import { DivisionPager } from '@/components/division-pager';
+import { WfdfEventLogo } from './wfdf-event-logo';
 import { WfdfFlag } from './wfdf-flag';
 import { WfdfBracketTree, hasWfdfBracket, wfdfBracketCoveredIds } from './wfdf-bracket-tree';
 
 interface Props {
   event: WfdfEvent;
+  // Dates · location, pre-formatted by the page (which owns fmtDates). Renders
+  // beside the event logo in the header row rather than as PageShell's
+  // subtitle, matching the mobile screen.
+  meta?: string;
 }
 
 type WfdfTabKey = 'pools' | 'bracket' | 'standings';
@@ -104,7 +109,7 @@ function buildWfdfPoolTeams(
   return out;
 }
 
-export function WfdfEventDetail({ event }: Props) {
+export function WfdfEventDetail({ event, meta }: Props) {
   const divisions = event.divisions;
   // Division lives in the URL (?div=) so back-nav from a team page and hard
   // refresh both keep the filter (Hunter ruling 2026-08-16; default omitted
@@ -212,27 +217,29 @@ export function WfdfEventDetail({ event }: Props) {
     [divisions],
   );
 
+  // Logo + dates/location, above the section tabs (mobile parity: the event
+  // title/eyebrow come from PageShell, this row is the hero mark beside the
+  // meta line). The logo hides itself when absent or dead, in which case the
+  // meta line simply sits alone.
+  const header = (event.logoUrl != null || !!meta) && (
+    <div className="flex items-center gap-3">
+      <WfdfEventLogo logoUrl={event.logoUrl} year={event.year} variant="hero" />
+      {meta && <p className="min-w-0 flex-1 text-[12px] font-tight text-muted">{meta}</p>}
+    </div>
+  );
+
   if (divisions.length === 0) {
-    return <p className="text-muted font-tight text-[13px]">No divisions found for this event.</p>;
+    return (
+      <div className="flex flex-col gap-6">
+        {header}
+        <p className="text-muted font-tight text-[13px]">No divisions found for this event.</p>
+      </div>
+    );
   }
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Division filter — WMUCC has up to 9 divisions, so a dropdown reads
-          cleaner than a wrapping tab row. PillSelect is the app-wide idiom for
-          5+ options (see the USAU division select), so the WFDF control matches
-          the rest of the chrome rather than rendering an OS <select> popover. */}
-      <div className="flex items-center gap-2 self-start">
-        <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight select-none">
-          Division
-        </span>
-        <PillSelect
-          value={activeDiv}
-          options={divisionOptions}
-          onChange={setActiveDiv}
-          ariaLabel="Filter by division"
-        />
-      </div>
+      {header}
 
       {/* Section tabs — Pools / Bracket / Standings, mirroring the USAU event
           page. Each tab appears only when this division can fill it, so a
@@ -267,6 +274,16 @@ export function WfdfEventDetail({ event }: Props) {
         </div>
       )}
 
+      {/* Centered division pills (below the section tabs) + swipeable division
+          content — tap a pill or swipe the content left/right on touch to
+          change division (ported from the mobile app; replaces the old
+          Division dropdown). */}
+      <DivisionPager
+        divisions={divisionOptions}
+        active={activeDiv}
+        onChange={setActiveDiv}
+        contentClassName="flex flex-col gap-8"
+      >
       {/* Bracket — the trees when the shape parses, else the flat list. Games
           the trees don't place (Pre-quarter, Crossover, Round of 32, placement
           round-robins) still list below, so no played game is ever invisible. */}
@@ -357,6 +374,7 @@ export function WfdfEventDetail({ event }: Props) {
       {standings.length === 0 && games.length === 0 && (
         <p className="text-muted font-tight text-[13px]">No results in this division yet.</p>
       )}
+      </DivisionPager>
     </div>
   );
 }

@@ -11,9 +11,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 interface WfdfEventLogoProps {
   logoUrl: string | null;
   year: number;
+  // 'disc' is the events-grid chip (44px, white disc). 'hero' is the event
+  // detail header mark (64px, no disc — the logo sits on the page like the
+  // mobile screen's headerLogo) and renders nothing at all when there's no
+  // logo, rather than falling back to a year bubble.
+  variant?: 'disc' | 'hero';
 }
 
-export function WfdfEventLogo({ logoUrl, year }: WfdfEventLogoProps) {
+export function WfdfEventLogo({ logoUrl, year, variant = 'disc' }: WfdfEventLogoProps) {
   const [failed, setFailed] = useState(false);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
@@ -35,9 +40,16 @@ export function WfdfEventLogo({ logoUrl, year }: WfdfEventLogoProps) {
     checkSettled(imgRef.current);
   }, [logoUrl, checkSettled]);
 
+  const hero = variant === 'hero';
+
   if (logoUrl && !failed) {
     return (
-      <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-white overflow-hidden flex-shrink-0">
+      <span
+        className={[
+          'inline-flex items-center justify-center overflow-hidden flex-shrink-0',
+          hero ? 'w-16 h-16' : 'w-11 h-11 rounded-full bg-white',
+        ].join(' ')}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           // Key by url so a src change across client-side navigations remounts
@@ -49,16 +61,18 @@ export function WfdfEventLogo({ logoUrl, year }: WfdfEventLogoProps) {
           }}
           src={logoUrl}
           alt=""
-          width={44}
-          height={44}
+          width={hero ? 64 : 44}
+          height={hero ? 64 : 44}
           loading="eager"
           fetchPriority="high"
           onError={() => setFailed(true)}
-          className="w-full h-full object-contain p-1"
+          className={hero ? 'w-full h-full object-contain' : 'w-full h-full object-contain p-1'}
         />
       </span>
     );
   }
+
+  if (hero) return null;
 
   return (
     <span className="inline-flex items-center justify-center w-11 h-11 rounded-full bg-ink/[0.06] text-[10px] font-bold text-ink font-tight flex-shrink-0">
