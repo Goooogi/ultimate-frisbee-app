@@ -115,6 +115,9 @@ interface PageShellProps {
   eyebrow?: string;
   /** Optional right-side controls in the page header (filter dropdowns, year selector, etc.). */
   controls?: React.ReactNode;
+  /** Optional mark rendered left of the big title on the same row (e.g. the
+   *  WFDF event logo). Mirrors the mobile app's PageShell `titleLeft`. */
+  titleLeft?: React.ReactNode;
   /** Optional content for the top-bar slot. Empty by default (the league
    *  switcher was retired — see AppShell). */
   topNavSlot?: React.ReactNode;
@@ -130,13 +133,6 @@ interface PageShellProps {
    *  profiles) never lose their "whose stats are these" context. Desktop
    *  is unaffected (plenty of vertical space there already). */
   stickyName?: string;
-  /** Rich replacement for `stickyName`'s text span — e.g. the WFDF event bar's
-   *  logo + name on the left, dates over location on the right. Requires
-   *  `stickyName` to be set too (that's what mounts the bar and its sentinel;
-   *  the string stays the accessible/no-JS text). Unlike the plain bar this
-   *  one shows on desktop as well, since the content is worth keeping in view
-   *  at every width. */
-  stickyContent?: React.ReactNode;
   /** Hide the SiteFooter on mobile (<lg) only; desktop keeps it. See AppShell. */
   hideFooterMobile?: boolean;
   /** Wider content cap for dashboard/bento layouts (e.g. For You) that need more
@@ -150,11 +146,11 @@ export function PageShell({
   subtitle,
   eyebrow,
   controls,
+  titleLeft,
   topNavSlot,
   breadcrumbs,
   breadcrumbsSlot,
   stickyName,
-  stickyContent,
   hideFooterMobile,
   wide,
   children,
@@ -165,10 +161,16 @@ export function PageShell({
         'px-5 pt-4 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto',
         wide ? 'lg:px-10 xl:px-8 lg:max-w-[1320px]' : 'lg:px-14 lg:max-w-[1080px]',
       ].join(' ')}>
-        {stickyName && <StickyName name={stickyName} content={stickyContent} />}
+        {stickyName && <StickyName name={stickyName} />}
         {breadcrumbsSlot ??
           (breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />)}
-        <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />
+        <PageHeader
+          title={title}
+          subtitle={subtitle}
+          eyebrow={eyebrow}
+          titleLeft={titleLeft}
+          controls={controls}
+        />
         {stickyName && <StickySentinel />}
         {children}
       </div>
@@ -188,7 +190,7 @@ function StickySentinel() {
   return <div id={STICKY_NAME_ID} aria-hidden="true" />;
 }
 
-function StickyName({ name, content }: { name: string; content?: React.ReactNode }) {
+function StickyName({ name }: { name: string }) {
   const [titleVisible, setTitleVisible] = useState(true);
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -215,25 +217,16 @@ function StickyName({ name, content }: { name: string; content?: React.ReactNode
       ref={barRef}
       aria-hidden={titleVisible}
       className={[
-        'sticky top-[52px] z-40 overflow-hidden',
-        // The plain text bar is mobile-only (desktop has vertical room to
-        // spare); a rich bar earns its keep at every width.
-        content ? '' : 'lg:hidden',
-        // The rich bar overlays full-bleed white cards, where a translucent
-        // strip reads as a seam cutting through the card rather than as
-        // chrome sitting above it — so it goes fully opaque with a hairline.
-        content ? 'bg-bg border-b border-hairline shadow-soft' : 'bg-bg/95 backdrop-blur shadow-soft',
+        // Mobile-only — desktop has vertical room to spare.
+        'sticky top-[52px] z-40 overflow-hidden lg:hidden',
+        'bg-bg/95 backdrop-blur shadow-soft',
         'transition-[max-height,opacity] duration-150',
-        // A two-line rich bar (dates over location) needs more headroom than
-        // the single-line name bar's 44px clamp.
-        titleVisible ? 'max-h-0 opacity-0' : content ? 'max-h-24 opacity-100' : 'max-h-11 opacity-100',
+        titleVisible ? 'max-h-0 opacity-0' : 'max-h-11 opacity-100',
       ].join(' ')}
     >
-      {content ?? (
-        <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
-          {name}
-        </span>
-      )}
+      <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
+        {name}
+      </span>
     </div>
   );
 }
@@ -242,24 +235,36 @@ function PageHeader({
   title,
   subtitle,
   eyebrow,
+  titleLeft,
   controls,
 }: {
   title: string;
   subtitle?: string;
   eyebrow?: string;
+  titleLeft?: React.ReactNode;
   controls?: React.ReactNode;
 }) {
+  const h1 = (
+    <h1 className="m-0 font-display italic text-[36px] lg:text-[56px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
+      {title}
+    </h1>
+  );
   return (
     <div className="flex flex-wrap items-end justify-between gap-6 mb-5 lg:mb-7">
-      <div>
+      <div className="min-w-0">
         {eyebrow && (
           <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent mb-2 font-sans">
             {eyebrow}
           </div>
         )}
-        <h1 className="m-0 font-display italic text-[36px] lg:text-[56px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
-          {title}
-        </h1>
+        {titleLeft ? (
+          <div className="flex items-center gap-3 lg:gap-4 min-w-0">
+            {titleLeft}
+            {h1}
+          </div>
+        ) : (
+          h1
+        )}
         {subtitle && (
           <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[15px]">
             {subtitle}

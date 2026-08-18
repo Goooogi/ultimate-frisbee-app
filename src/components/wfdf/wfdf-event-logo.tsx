@@ -42,7 +42,13 @@ export function WfdfEventLogo({ logoUrl, year, variant = 'disc' }: WfdfEventLogo
 
   const bare = variant === 'hero' || variant === 'sticky';
   const px = variant === 'hero' ? 64 : variant === 'sticky' ? 32 : 44;
-  const box = variant === 'hero' ? 'w-16 h-16' : variant === 'sticky' ? 'w-8 h-8' : 'w-11 h-11';
+  // Hero sits beside the 36px page title on phones — 48px there, 64px on lg+.
+  const box =
+    variant === 'hero'
+      ? 'w-12 h-12 lg:w-16 lg:h-16'
+      : variant === 'sticky'
+        ? 'w-8 h-8'
+        : 'w-11 h-11';
 
   if (logoUrl && !failed) {
     return (

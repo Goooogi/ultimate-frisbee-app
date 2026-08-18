@@ -44,41 +44,28 @@ export default async function WfdfEventPage({ params }: Props) {
 
   const dates = fmtDates(ev.startDate, ev.endDate);
 
-  // Frozen event bar — logo + event name on the left, dates over location on
-  // the right. Sticks under the app rail once the big title scrolls past, so
-  // "which event am I in" survives long standings/game lists. Data-driven, so
-  // every WFDF event gets it (logo hides itself when absent or dead).
-  const stickyBar = (
-    <div className="flex items-center justify-between gap-3 px-5 py-2">
-      <div className="flex items-center gap-2.5 min-w-0">
-        <WfdfEventLogo logoUrl={ev.logoUrl} year={ev.year} variant="sticky" />
-        <span className="font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
-          {ev.name}
-        </span>
-      </div>
-      {(dates || ev.location) && (
-        <div className="flex flex-col items-end flex-shrink-0 text-right font-tight leading-tight">
-          {dates && <span className="text-[11px] font-semibold text-ink">{dates}</span>}
-          {ev.location && (
-            <span className="text-[11px] text-muted max-w-[40vw] sm:max-w-none truncate">
-              {ev.location}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <>
-      {/* Preload the sticky-bar mark so it lands with the HTML instead of after
+      {/* Preload the header mark so it lands with the HTML instead of after
           hydration (same hint the events grid uses for its logo batch). */}
       {ev.logoUrl && <link rel="preload" as="image" href={ev.logoUrl} />}
       <PageShell
       title={ev.name}
       eyebrow={`WFDF · ${ev.isNationalTeams ? 'National Teams' : 'Club'}`}
-      stickyName={ev.name}
-      stickyContent={stickyBar}
+      // Logo sits left of the big title; dates over location right-align on the
+      // same row (mirrors the mobile app header — replaces the old sticky
+      // event bar, which floated over content on scroll).
+      titleLeft={<WfdfEventLogo logoUrl={ev.logoUrl} year={ev.year} variant="hero" />}
+      controls={
+        (dates || ev.location) && (
+          <div className="flex flex-col items-end text-right font-tight leading-tight">
+            {dates && <span className="text-[12px] lg:text-[14px] font-semibold text-ink">{dates}</span>}
+            {ev.location && (
+              <span className="text-[11px] lg:text-[13px] text-muted">{ev.location}</span>
+            )}
+          </div>
+        )
+      }
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'WFDF', href: '/wfdf/events' },

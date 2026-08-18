@@ -418,7 +418,7 @@ function buildBrackets(divisionName: string, games: Game[], teams: Team[]): Brac
       // a wide group it stops above the base (the base is winner-split below).
       let frontier: BracketGame[] = [finalGame];
       for (const lvl of walkLevels) {
-        const src = frontier.flatMap((f) => sourcesFor(f, byLevel.get(lvl) ?? []));
+        const src = frontier.flatMap((f) => winnerSources(f, byLevel.get(lvl) ?? []));
         collect(src, bracketGames, teamSet);
         frontier = src;
       }
@@ -509,7 +509,7 @@ function assembleBracket(
   const columnsDesc: BracketGame[][] = [];
   let frontier: BracketGame[] = [topFinal];
   for (const lvl of levelsDesc) {
-    const src = dedupe(frontier.flatMap((f) => sourcesFor(f, byLevel.get(lvl) ?? [])));
+    const src = dedupe(frontier.flatMap((f) => winnerSources(f, byLevel.get(lvl) ?? [])));
     if (src.length > 0) {
       columnsDesc.push(src);
       frontier = src;
@@ -621,6 +621,20 @@ function sourcesFor(game: BracketGame, prev: BracketGame[]): BracketGame[] {
     }
   }
   return out;
+}
+
+// Winner-path-aware version of sourcesFor: a DECIDED source game only feeds
+// `game` if its winner actually advanced into it. Every round spans ALL
+// placement rails at once, so a loose either-team match lets a sibling rail's
+// losers (e.g. 5th-8th's semifinalists, who are the championship QF losers)
+// re-absorb the championship's own QF/R1 games. Undecided games keep the
+// loose match so mid-event trees still chain before results are in.
+function winnerSources(game: BracketGame, prev: BracketGame[]): BracketGame[] {
+  const ids = new Set([game.homeId, game.awayId].filter((x): x is string => !!x));
+  return sourcesFor(game, prev).filter((c) => {
+    const w = winnerOf(c);
+    return w == null || ids.has(w);
+  });
 }
 
 function startRank(group: string): number {
