@@ -111,6 +111,11 @@ export interface StructuralRail {
   fallbacks: Map<string, { home: string | null; away: string | null }>;
   /** gameId → same-group Winner-ref feeder game ids (for engine linkage). */
   sources: Map<string, string[]>;
+  /** gameId → placement label for final-column games ("3rd Place", "5th
+   *  Place") — set for every final EXCEPT the championship pair (1/2), whose
+   *  column label already reads "Final". Disambiguates the sibling finals
+   *  sharing the final column (gold + bronze stacked under one "Final"). */
+  finalLabels: Map<string, string>;
 }
 
 // ─── Derivation ───────────────────────────────────────────────────────────────
@@ -281,7 +286,14 @@ export function buildStructuralRails(
     const maxRank = siblings.length
       ? Math.max(...siblings.map((s) => pairs.get(s.id)![1]), pair[1])
       : pair[1];
-    rails.push({ group, minRank: pair[0], maxRank, columns, fallbacks, sources });
+
+    const finalLabels = new Map<string, string>();
+    for (const f of [final, ...siblings]) {
+      const p = pairs.get(f.id)!;
+      if (p[0] !== 1) finalLabels.set(f.id, `${ordinal(p[0])} Place`);
+    }
+
+    rails.push({ group, minRank: pair[0], maxRank, columns, fallbacks, sources, finalLabels });
   }
 
   rails.sort((a, b) => a.minRank - b.minRank);

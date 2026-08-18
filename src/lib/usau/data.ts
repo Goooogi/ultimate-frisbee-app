@@ -3462,6 +3462,12 @@ export interface UsauEventSummary {
      *  Quarters G1" placeholder labels, and feeder linkage. null when USAU's id
      *  is absent or non-numeric (some batches store an opaque hash). */
     usauGameOrder: number | null;
+    /** USAU's own placeholder text for a TBD side, scraped verbatim from the
+     *  bracket cell ("P1 of Saturday Pool Play Pool A", "W of Quarterfinals
+     *  G1"). Null once the side is seeded, and on rows scraped before
+     *  2026-08-18. */
+    teamAPlaceholder: string | null;
+    teamBPlaceholder: string | null;
   }>;
 }
 
@@ -3537,7 +3543,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
         // hint PostgREST with the !<columnName> syntax to disambiguate.
         `id, round, bracket_name, team_a_id, team_b_id,
          seed_a, seed_b, score_a, score_b, location, scheduled_at, status,
-         usau_game_id, usau_event_game_id,
+         usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
          team_a:usau_teams!team_a_id(name),
          team_b:usau_teams!team_b_id(name)`,
       )
@@ -3577,6 +3583,8 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
         scheduledAt: g.scheduled_at,
         status: g.status,
         usauGameOrder: parseUsauGameOrder(g.usau_game_id, g.usau_event_game_id),
+        teamAPlaceholder: g.team_a_placeholder ?? null,
+        teamBPlaceholder: g.team_b_placeholder ?? null,
       };
     }),
   );

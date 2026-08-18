@@ -280,6 +280,7 @@ export type Database = {
           id: string
           jersey_number: string | null
           name_key: string | null
+          name_last_norm: string | null
           team_id: string
           total: number | null
         }
@@ -294,6 +295,7 @@ export type Database = {
           id?: string
           jersey_number?: string | null
           name_key?: string | null
+          name_last_norm?: string | null
           team_id: string
           total?: number | null
         }
@@ -308,6 +310,7 @@ export type Database = {
           id?: string
           jersey_number?: string | null
           name_key?: string | null
+          name_last_norm?: string | null
           team_id?: string
           total?: number | null
         }
@@ -393,6 +396,233 @@ export type Database = {
           },
         ]
       }
+      fantasy_contest_periods: {
+        Row: {
+          complete: boolean
+          contest_id: string
+          game_count: number | null
+          lock_at: string
+          period: string
+          unlock_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          complete?: boolean
+          contest_id: string
+          game_count?: number | null
+          lock_at: string
+          period: string
+          unlock_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          complete?: boolean
+          contest_id?: string
+          game_count?: number | null
+          lock_at?: string
+          period?: string
+          unlock_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_contest_periods_contest_id_fkey"
+            columns: ["contest_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_contests"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fantasy_contests: {
+        Row: {
+          competition: string
+          created_at: string
+          created_by: string | null
+          id: string
+          league_id: string | null
+          name: string
+          season_year: number
+          settings: Json
+          status: string
+        }
+        Insert: {
+          competition: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          league_id?: string | null
+          name: string
+          season_year: number
+          settings?: Json
+          status?: string
+        }
+        Update: {
+          competition?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          league_id?: string | null
+          name?: string
+          season_year?: number
+          settings?: Json
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_contests_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_contests_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_contests_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_contests_league_id_fkey"
+            columns: ["league_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_leagues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fantasy_league_invites: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string
+          last_sent_at: string | null
+          league_id: string
+          token: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by: string
+          last_sent_at?: string | null
+          league_id: string
+          token: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string
+          last_sent_at?: string | null
+          league_id?: string
+          token?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_league_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_league_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_league_invites_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_league_invites_league_id_fkey"
+            columns: ["league_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_leagues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fantasy_league_members: {
+        Row: {
+          id: string
+          joined_at: string
+          league_id: string
+          member_display_name: string | null
+          member_username: string | null
+          role: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          joined_at?: string
+          league_id: string
+          member_display_name?: string | null
+          member_username?: string | null
+          role?: string
+          user_id: string
+        }
+        Update: {
+          id?: string
+          joined_at?: string
+          league_id?: string
+          member_display_name?: string | null
+          member_username?: string | null
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_league_members_league_id_fkey"
+            columns: ["league_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_leagues"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_league_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profile_contact"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_league_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fantasy_league_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles_public"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       fantasy_leagues: {
         Row: {
           created_at: string
@@ -400,7 +630,6 @@ export type Database = {
           invite_token: string | null
           name: string
           owner_id: string
-          season_year: number
         }
         Insert: {
           created_at?: string
@@ -408,7 +637,6 @@ export type Database = {
           invite_token?: string | null
           name: string
           owner_id: string
-          season_year: number
         }
         Update: {
           created_at?: string
@@ -416,7 +644,6 @@ export type Database = {
           invite_token?: string | null
           name?: string
           owner_id?: string
-          season_year?: number
         }
         Relationships: [
           {
@@ -447,6 +674,7 @@ export type Database = {
           created_at: string
           id: string
           player_id: string
+          player_league: string
           role: string
           team_id: string
           week: string
@@ -455,6 +683,7 @@ export type Database = {
           created_at?: string
           id?: string
           player_id: string
+          player_league?: string
           role: string
           team_id: string
           week: string
@@ -463,18 +692,12 @@ export type Database = {
           created_at?: string
           id?: string
           player_id?: string
+          player_league?: string
           role?: string
           team_id?: string
           week?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "fantasy_roster_slots_player_id_fkey"
-            columns: ["player_id"]
-            isOneToOne: false
-            referencedRelation: "ufa_players"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "fantasy_roster_slots_team_id_fkey"
             columns: ["team_id"]
@@ -516,8 +739,33 @@ export type Database = {
           },
         ]
       }
+      fantasy_scores_backup_20260815: {
+        Row: {
+          computed_at: string | null
+          id: string | null
+          points: number | null
+          team_id: string | null
+          week: string | null
+        }
+        Insert: {
+          computed_at?: string | null
+          id?: string | null
+          points?: number | null
+          team_id?: string | null
+          week?: string | null
+        }
+        Update: {
+          computed_at?: string | null
+          id?: string | null
+          points?: number | null
+          team_id?: string | null
+          week?: string | null
+        }
+        Relationships: []
+      }
       fantasy_teams: {
         Row: {
+          contest_id: string | null
           created_at: string
           id: string
           league_id: string | null
@@ -529,6 +777,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          contest_id?: string | null
           created_at?: string
           id?: string
           league_id?: string | null
@@ -540,6 +789,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          contest_id?: string | null
           created_at?: string
           id?: string
           league_id?: string | null
@@ -551,6 +801,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "fantasy_teams_contest_id_fkey"
+            columns: ["contest_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_contests"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "fantasy_teams_league_id_fkey"
             columns: ["league_id"]
@@ -2883,7 +3140,9 @@ export type Database = {
           source_url: string | null
           status: Database["public"]["Enums"]["usau_game_status"]
           team_a_id: string | null
+          team_a_placeholder: string | null
           team_b_id: string | null
+          team_b_placeholder: string | null
           updated_at: string
           usau_event_game_id: string | null
           usau_game_id: string | null
@@ -2904,7 +3163,9 @@ export type Database = {
           source_url?: string | null
           status?: Database["public"]["Enums"]["usau_game_status"]
           team_a_id?: string | null
+          team_a_placeholder?: string | null
           team_b_id?: string | null
+          team_b_placeholder?: string | null
           updated_at?: string
           usau_event_game_id?: string | null
           usau_game_id?: string | null
@@ -2925,7 +3186,9 @@ export type Database = {
           source_url?: string | null
           status?: Database["public"]["Enums"]["usau_game_status"]
           team_a_id?: string | null
+          team_a_placeholder?: string | null
           team_b_id?: string | null
+          team_b_placeholder?: string | null
           updated_at?: string
           usau_event_game_id?: string | null
           usau_game_id?: string | null
@@ -3760,14 +4023,148 @@ export type Database = {
         }
         Relationships: []
       }
+      wfdf_game_goals: {
+        Row: {
+          assist_wfdf_player_id: number | null
+          away_score: number
+          created_at: string
+          event_id: string
+          game_id: string
+          home_score: number
+          id: string
+          is_callahan: boolean
+          is_home_goal: boolean
+          num: number
+          scored_at: string | null
+          scorer_wfdf_player_id: number | null
+          time_s: number | null
+        }
+        Insert: {
+          assist_wfdf_player_id?: number | null
+          away_score: number
+          created_at?: string
+          event_id: string
+          game_id: string
+          home_score: number
+          id?: string
+          is_callahan?: boolean
+          is_home_goal: boolean
+          num: number
+          scored_at?: string | null
+          scorer_wfdf_player_id?: number | null
+          time_s?: number | null
+        }
+        Update: {
+          assist_wfdf_player_id?: number | null
+          away_score?: number
+          created_at?: string
+          event_id?: string
+          game_id?: string
+          home_score?: number
+          id?: string
+          is_callahan?: boolean
+          is_home_goal?: boolean
+          num?: number
+          scored_at?: string | null
+          scorer_wfdf_player_id?: number | null
+          time_s?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wfdf_game_goals_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "wfdf_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wfdf_game_goals_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "wfdf_games"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wfdf_game_player_stats: {
+        Row: {
+          assists: number
+          callahans: number
+          created_at: string
+          event_id: string
+          game_id: string
+          goals: number
+          id: string
+          jersey_number: string | null
+          team_id: string | null
+          total: number
+          wfdf_player_id: number
+        }
+        Insert: {
+          assists?: number
+          callahans?: number
+          created_at?: string
+          event_id: string
+          game_id: string
+          goals?: number
+          id?: string
+          jersey_number?: string | null
+          team_id?: string | null
+          total?: number
+          wfdf_player_id: number
+        }
+        Update: {
+          assists?: number
+          callahans?: number
+          created_at?: string
+          event_id?: string
+          game_id?: string
+          goals?: number
+          id?: string
+          jersey_number?: string | null
+          team_id?: string | null
+          total?: number
+          wfdf_player_id?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wfdf_game_player_stats_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "wfdf_events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wfdf_game_player_stats_game_id_fkey"
+            columns: ["game_id"]
+            isOneToOne: false
+            referencedRelation: "wfdf_games"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wfdf_game_player_stats_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "wfdf_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       wfdf_games: {
         Row: {
+          away_scheduling_name: string | null
+          away_scheduling_pool: string | null
           away_score: number | null
           away_sotg: number | null
           away_team_id: string | null
           created_at: string
+          detail_synced_at: string | null
           division_id: string | null
           event_id: string
+          field_name: string | null
+          goals_count: number | null
+          home_scheduling_name: string | null
+          home_scheduling_pool: string | null
           home_score: number | null
           home_sotg: number | null
           home_team_id: string | null
@@ -3780,12 +4177,19 @@ export type Database = {
           wfdf_game_id: number
         }
         Insert: {
+          away_scheduling_name?: string | null
+          away_scheduling_pool?: string | null
           away_score?: number | null
           away_sotg?: number | null
           away_team_id?: string | null
           created_at?: string
+          detail_synced_at?: string | null
           division_id?: string | null
           event_id: string
+          field_name?: string | null
+          goals_count?: number | null
+          home_scheduling_name?: string | null
+          home_scheduling_pool?: string | null
           home_score?: number | null
           home_sotg?: number | null
           home_team_id?: string | null
@@ -3798,12 +4202,19 @@ export type Database = {
           wfdf_game_id: number
         }
         Update: {
+          away_scheduling_name?: string | null
+          away_scheduling_pool?: string | null
           away_score?: number | null
           away_sotg?: number | null
           away_team_id?: string | null
           created_at?: string
+          detail_synced_at?: string | null
           division_id?: string | null
           event_id?: string
+          field_name?: string | null
+          goals_count?: number | null
+          home_scheduling_name?: string | null
+          home_scheduling_pool?: string | null
           home_score?: number | null
           home_sotg?: number | null
           home_team_id?: string | null
@@ -4298,6 +4709,22 @@ export type Database = {
         }
         Relationships: []
       }
+      usau_player_prestige: {
+        Row: {
+          played_nats: boolean | null
+          player_id: string | null
+          won_nats: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "usau_rosters_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "usau_players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       utcg_card_pool: {
         Row: {
           division: string | null
@@ -4369,6 +4796,10 @@ export type Database = {
           season: number
         }[]
       }
+      fantasy_accept_league_invite: {
+        Args: { p_token: string }
+        Returns: string
+      }
       fantasy_carry_over_rosters: {
         Args: { p_year?: number }
         Returns: {
@@ -4378,8 +4809,41 @@ export type Database = {
           team_id: string
         }[]
       }
+      fantasy_create_league: { Args: { p_name: string }; Returns: string }
+      fantasy_create_league_invite: {
+        Args: { p_email: string; p_league: string }
+        Returns: {
+          expires_at: string
+          token: string
+        }[]
+      }
+      fantasy_get_league_code: { Args: { p_league: string }; Returns: string }
       fantasy_handle_available: { Args: { p_handle: string }; Returns: boolean }
+      fantasy_is_commissioner: { Args: { p_league: string }; Returns: boolean }
+      fantasy_is_league_member: { Args: { p_league: string }; Returns: boolean }
+      fantasy_join_league: { Args: { p_code: string }; Returns: string }
+      fantasy_leave_league: { Args: { p_league: string }; Returns: undefined }
       fantasy_owns_team: { Args: { t_id: string }; Returns: boolean }
+      fantasy_preview_league_invite: {
+        Args: { p_token: string }
+        Returns: {
+          email: string
+          league_name: string
+        }[]
+      }
+      fantasy_rebuild_all_periods: { Args: never; Returns: undefined }
+      fantasy_rebuild_contest_periods: {
+        Args: { p_contest: string }
+        Returns: undefined
+      }
+      fantasy_regenerate_league_code: {
+        Args: { p_league: string }
+        Returns: string
+      }
+      fantasy_remove_league_member: {
+        Args: { p_league: string; p_user: string }
+        Returns: undefined
+      }
       fantasy_roster_is_valid: {
         Args: { t_id: string; wk: string }
         Returns: boolean
@@ -4692,6 +5156,10 @@ export type Database = {
           name: string
           nationals_placement: number
         }[]
+      }
+      trickle_rebuild_player_profiles: {
+        Args: { p_limit?: number }
+        Returns: number
       }
       ufa_complete_stat_game_ids: {
         Args: { p_ids: string[] }

@@ -60,6 +60,12 @@ interface BracketGame {
   awayScore: number | null;
   status: string;
   scheduledAt: string | null;
+  /** Field number for the card's header strip — every matchup shows where and
+   *  when it's played (Hunter, 2026-08-18). */
+  fieldName: string | null;
+  /** Placement tag for final-column games ("3rd Place") — the sibling finals
+   *  share the "Final" column, so cards carry their own rank. */
+  finalLabel: string | null;
   /** Placeholder labels for unseeded sides ("W of R1 G3", "1st Pool A") —
    *  structural rails only; legacy results-walk games leave them null. */
   homeFallback: string | null;
@@ -181,25 +187,11 @@ function BracketSection({ bracket }: { bracket: Bracket }) {
         )}
       </div>
 
-      {/* Mobile: rounds stacked latest-first. Final placements live in the
-          collapsible "Final Standings" table on the event page, so no rail. */}
-      <div className="lg:hidden flex flex-col gap-5">
-        {[...rendered].reverse().map((col) => (
-          <div key={col.label}>
-            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-              {col.label}
-            </div>
-            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {col.games.map((g) => (
-                <MatchCard key={g.id} game={g} compact />
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
-
-      {/* Desktop: horizontal columns only (no placement rail). */}
-      <div className="hidden lg:block overflow-x-auto pb-2">
+      {/* Horizontal tree at EVERY width — scroll right for later rounds, the
+          same way the USAU bracket reads (Hunter, 2026-08-18; replaces the
+          old stacked-rounds mobile variant, whose latest-first list read as
+          "the Final has two games"). */}
+      <div className="overflow-x-auto pb-2">
         <DesktopBracket columns={rendered} positions={positions} />
       </div>
     </section>
@@ -243,13 +235,68 @@ function DesktopBracket({
   );
 }
 
-function MatchCard({ game, compact = false }: { game: BracketGame; compact?: boolean }) {
+// Field number for the header strip — bare numbers get the "Field " prefix,
+// same rule as the game cards / USAU's fieldLabel.
+function fieldLabel(fieldName: string | null): string | null {
+  const f = fieldName?.trim();
+  if (!f) return null;
+  return /^\d+[A-Za-z]?$/.test(f) ? `Field ${f}` : f;
+}
+
+// Compact header time, USAU-card shape ("Sat 1:30 PM"). WFDF scheduled_at is
+// the venue wall clock stored as UTC (see lib/wfdf/format-date) — render in
+// UTC so it reads unshifted.
+function headerTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'UTC',
+  });
+}
+
+// `compact` (tighter team-line padding) is now the norm: the header strip
+// added ~28px, and the shared 104px row pitch only fits the card with the
+// USAU-style compact lines.
+function MatchCard({ game, compact = true }: { game: BracketGame; compact?: boolean }) {
   const done = game.status === 'completed' && game.homeScore != null && game.awayScore != null;
   const homeWon = done && (game.homeScore ?? 0) > (game.awayScore ?? 0);
   const awayWon = done && (game.awayScore ?? 0) > (game.homeScore ?? 0);
+  const live = game.status === 'in_progress';
+  const statusLabel = done ? 'Final' : live ? 'Live' : 'Upcoming';
+  const whenWhere = [fieldLabel(game.fieldName), headerTime(game.scheduledAt)]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <article className="bg-surface rounded-card shadow-card overflow-hidden">
+      {/* Status strip: placement tag ("3RD PLACE") disambiguates sibling
+          finals sharing the Final column; field + venue wall clock ALWAYS
+          show (Hunter, 2026-08-18). */}
+      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
+        <span className="flex items-center gap-2 min-w-0">
+          {game.finalLabel && (
+            <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-ink font-tight whitespace-nowrap">
+              {game.finalLabel}
+            </span>
+          )}
+          <span
+            className={`text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${
+              live ? 'text-accent' : 'text-faint'
+            }`}
+          >
+            {statusLabel}
+          </span>
+        </span>
+        {whenWhere && (
+          <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular truncate">
+            {whenWhere}
+          </span>
+        )}
+      </div>
       <TeamLine
         teamId={game.homeId}
         name={game.homeName}
@@ -527,6 +574,7 @@ function railToBracket(rail: StructuralRail, teamById: Map<string, Team>): Brack
       const fb = rail.fallbacks.get(g.id);
       bg.homeFallback = fb?.home ?? null;
       bg.awayFallback = fb?.away ?? null;
+      bg.finalLabel = rail.finalLabels.get(g.id) ?? null;
       const src = rail.sources.get(g.id);
       if (src && src.length > 0) bg.sourceIds = src;
       return bg;
@@ -623,6 +671,13 @@ function assembleBracket(
   const orderedGameCols = [...columnsDesc].reverse();
   orderedGameCols.push([topFinal]);
 
+  // Placement tag when this section's final ISN'T the gold-medal game — legacy
+  // events derive it from the finalists' final standings.
+  {
+    const r = Math.min(standingOf(topFinal.homeId), standingOf(topFinal.awayId));
+    if (r > 1 && r < 9000) topFinal.finalLabel = `${ordinal(r)} Place`;
+  }
+
   // Relative labels: last col = Final, filling backward SF/QF/Round 1.
   const relLabels = relativeRoundLabels(orderedGameCols.length);
   const columns: RoundColumn[] = orderedGameCols.map((gs, i) => ({
@@ -701,6 +756,8 @@ function enrich(g: Game, level: RoundLevel, teamById: Map<string, Team>): Bracke
     awayScore: g.awayScore,
     status: g.status,
     scheduledAt: g.scheduledAt,
+    fieldName: g.fieldName,
+    finalLabel: null,
     homeFallback: null,
     awayFallback: null,
   };

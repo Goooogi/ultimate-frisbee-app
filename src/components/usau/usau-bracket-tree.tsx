@@ -824,6 +824,18 @@ function wOf(prevKey: string, n: number): string {
   return `W of ${FEEDER_SHORT[prevKey] ?? 'Round'} G${n}`;
 }
 
+/** USAU's scraped placeholder text, shortened for a bracket card:
+ *  "P1 of Saturday Pool Play Pool A" → "P1 Pool A"; round words compressed
+ *  ("L of Ninth Place Semifinals G2" → "L of Ninth Place Semis G2"). Used when
+ *  structural feeder linkage can't derive a label itself — most usefully the
+ *  pool-fed opening round, which has no feeder games at all. */
+function shortPlaceholder(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const pool = raw.match(/^P(\d+) of .*?(Pool\s+\S+)$/i);
+  if (pool) return `P${pool[1]} ${pool[2]}`;
+  return raw.replace(/Quarterfinals?/g, 'Quarters').replace(/Semifinals?/g, 'Semis');
+}
+
 function isDecidedForTree(g: Game): boolean {
   const s = g.status.toLowerCase();
   if (s === 'forfeit') return true;
@@ -881,8 +893,11 @@ function makeRealSlot(g: Game, idx: number, feeders: Slot[], prevKey: string): S
     game: g,
     number: idx + 1,
     sourceIds: fs.map((f) => f.id),
-    aFallback,
-    bFallback,
+    // Structure-derived labels win (consistent wording with synthesized
+    // slots); USAU's scraped text fills slots the linkage couldn't label —
+    // unlinked play-in rounds, non-halving columns, pool-fed sides.
+    aFallback: aFallback ?? (g.teamAId ? null : shortPlaceholder(g.teamAPlaceholder)),
+    bFallback: bFallback ?? (g.teamBId ? null : shortPlaceholder(g.teamBPlaceholder)),
   };
 }
 
@@ -924,8 +939,10 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
         game: g,
         number: i + 1,
         sourceIds: [],
-        aFallback: null,
-        bFallback: null,
+        // The opening round has no feeder games to derive labels from, but
+        // USAU's own scraped text covers it ("P1 Pool A" pool-fed slots).
+        aFallback: g.teamAId ? null : shortPlaceholder(g.teamAPlaceholder),
+        bFallback: g.teamBId ? null : shortPlaceholder(g.teamBPlaceholder),
       })),
     },
   ];

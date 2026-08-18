@@ -98,6 +98,12 @@ interface ParsedGame {
   location: string | null;
   scheduled_at: string | null;
   status: GameStatus;
+  /** USAU's own placeholder text for a TBD side ("P1 of Saturday Pool Play
+   *  Pool A", "W of Quarterfinals G1") — the bracket cell's plain text when it
+   *  has no team link. Null whenever the side has a real team, so a later
+   *  scrape clears it as slots fill. */
+  home_placeholder: string | null;
+  away_placeholder: string | null;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -515,6 +521,9 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
             location: fieldText || null,
             scheduled_at,
             status: classifyStatus(rawStatus),
+            // Pool rows always have both teams — no placeholder text exists.
+            home_placeholder: null,
+            away_placeholder: null,
           });
         });
       }
@@ -567,6 +576,17 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
       const rawStatus = $game.find(SELECTORS.schedule.bracketStatus).first().text().trim() || null;
       const rawDate = $game.find(SELECTORS.schedule.bracketDate).first().text().trim() || null;
 
+      // A TBD side has no team link — the span's plain text is USAU's own
+      // placeholder ("P1 of Saturday Pool Play Pool A", "W of Quarterfinals
+      // G1"). Captured only when the side is unlinked; a seeded side stores
+      // null, so the next scrape clears stale text as slots fill.
+      const homePlaceholder = homeEventTeamId
+        ? null
+        : $game.find('[data-type="game-team-home"]').first().text().trim() || null;
+      const awayPlaceholder = awayEventTeamId
+        ? null
+        : $game.find('[data-type="game-team-away"]').first().text().trim() || null;
+
       games.push({
         usau_game_id,
         usau_event_game_id,
@@ -581,6 +601,8 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         location,
         scheduled_at: parseSchedDate(rawDate, tz),
         status: classifyStatus(rawStatus),
+        home_placeholder: homePlaceholder,
+        away_placeholder: awayPlaceholder,
       });
     }
   });
@@ -1025,6 +1047,8 @@ async function persistSchedulePage(
       scheduled_at: g.scheduled_at,
       status: g.status,
       source_url: url,
+      team_a_placeholder: g.home_placeholder,
+      team_b_placeholder: g.away_placeholder,
     };
     // Only set an id column when we actually have one, so an UPDATE that
     // reconciled the OTHER pipeline's row doesn't null out its id.
