@@ -181,6 +181,8 @@ interface IngestResult {
   teams: number;
   rosterPlayers: number;
   games: number;
+  gamesDetailed: number;
+  goalLogRows: number;
 }
 
 async function ingest(base: string, seasonOverride?: string): Promise<IngestResult> {
@@ -498,6 +500,135 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
     }
   }
 
+  // 8. Per-game detail: point-by-point goal log + per-player game stats
+  //    (games_{id}.json) — powers the matchup screen's Game Progress chart.
+  //    Fetched only for games that have started; a completed game whose goal
+  //    log is already complete (goals_count = home+away) is skipped, so
+  //    steady-state live refreshes only touch in-progress and newly-finished
+  //    games. Never-live-scored games keep goals_count 0 and re-check each
+  //    run — bounded, since live refresh only runs during the event window.
+  let gamesDetailed = 0;
+  let goalLogRows = 0;
+  // Page the read: PostgREST silently caps un-ranged selects at 1000 rows.
+  const dbGames: any[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from('wfdf_games')
+      .select('id, wfdf_game_id, home_team_id, away_team_id, home_score, away_score, status, goals_count')
+      .eq('event_id', eventId)
+      .range(from, from + 999);
+    if (error) throw error;
+    dbGames.push(...(data ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  const detailCandidates = dbGames.filter((g: any) => {
+    if (g.status === 'scheduled') return false;
+    if (g.status !== 'completed') return true; // in-progress: always refresh
+    const logComplete =
+      g.goals_count != null &&
+      g.home_score != null &&
+      g.away_score != null &&
+      g.goals_count >= g.home_score + g.away_score;
+    // Checked after completion and found no goal log at all → the game was
+    // never live-scored; don't re-fetch it every cron cycle for the rest of
+    // the event (a large non-WUCC event can have hundreds of these).
+    const confirmedUnscored = g.detail_synced_at != null && g.goals_count === 0;
+    return !logComplete && !confirmedUnscored;
+  });
+  for (let i = 0; i < detailCandidates.length; i += ROSTER_CONCURRENCY) {
+    const batch = detailCandidates.slice(i, i + ROSTER_CONCURRENCY);
+    await Promise.all(
+      batch.map(async (g: any) => {
+        let detail: any;
+        try {
+          detail = await getJson(dataUrl(`games_${g.wfdf_game_id}`));
+        } catch {
+          // No per-game file. For a COMPLETED game, record the miss so the
+          // candidate filter stops re-fetching it every run; an in-progress
+          // game's file may simply not exist yet, so leave it unmarked.
+          if (g.status === 'completed') {
+            await supabase
+              .from('wfdf_games')
+              .update({ goals_count: 0, detail_synced_at: new Date().toISOString() })
+              .eq('id', g.id);
+          }
+          return;
+        }
+        const goals = (detail.goals ?? []).filter((x: any) => x && x.homescore != null);
+        // Replace wholesale: a refetch can shrink the log (score corrections),
+        // so delete-and-insert beats upsert-and-strand.
+        const { error: delGoals } = await supabase
+          .from('wfdf_game_goals')
+          .delete()
+          .eq('game_id', g.id);
+        if (delGoals) throw delGoals;
+        if (goals.length) {
+          // Chunked like the gameRows write; also a cap against a corrupted
+          // source file ballooning a single insert.
+          const goalRows = goals.slice(0, 2000).map((x: any, idx: number) => ({
+              game_id: g.id,
+              event_id: eventId,
+              num: x.num ?? idx,
+              time_s: x.time ?? null,
+              // Goal timestamps ARE real UTC in the source (unlike game `time`,
+              // which is venue-local — see the scheduled_at note above).
+              scored_at: x.timestamp
+                ? new Date(x.timestamp.replace(' ', 'T') + 'Z').toISOString()
+                : null,
+              is_home_goal: !!x.ishomegoal,
+              is_callahan: !!x.iscallahan,
+              home_score: x.homescore,
+              away_score: x.visitorscore,
+              scorer_wfdf_player_id: x.scorer ?? null,
+              assist_wfdf_player_id: x.assist ?? null,
+            }));
+          for (let j = 0; j < goalRows.length; j += 500) {
+            const { error } = await supabase
+              .from('wfdf_game_goals')
+              .insert(goalRows.slice(j, j + 500));
+            if (error) throw error;
+          }
+        }
+        const statRows = [
+          ...(detail.hometeam_scoreboard ?? []).map((p: any) => ({ p, teamId: g.home_team_id })),
+          ...(detail.visitorteam_scoreboard ?? []).map((p: any) => ({ p, teamId: g.away_team_id })),
+        ].filter(({ p }: { p: any }) => p && p.player_id != null);
+        const { error: delStats } = await supabase
+          .from('wfdf_game_player_stats')
+          .delete()
+          .eq('game_id', g.id);
+        if (delStats) throw delStats;
+        if (statRows.length) {
+          const statInsertRows = statRows
+            .slice(0, 500)
+            .map(({ p, teamId }: { p: any; teamId: string | null }) => ({
+              game_id: g.id,
+              event_id: eventId,
+              team_id: teamId ?? null,
+              wfdf_player_id: p.player_id,
+              jersey_number: p.num != null ? String(p.num) : null,
+              goals: p.done ?? 0,
+              assists: p.fedin ?? 0,
+              callahans: p.callahan ?? 0,
+              total: p.total ?? 0,
+            }));
+          const { error } = await supabase
+            .from('wfdf_game_player_stats')
+            .insert(statInsertRows);
+          if (error) throw error;
+        }
+        const { error: mark } = await supabase
+          .from('wfdf_games')
+          .update({ goals_count: goals.length, detail_synced_at: new Date().toISOString() })
+          .eq('id', g.id);
+        if (mark) throw mark;
+        gamesDetailed++;
+        goalLogRows += goals.length;
+        await sleep(FETCH_DELAY_MS);
+      }),
+    );
+  }
+
   return {
     season: seasonId,
     event: season.name || seasonId,
@@ -505,6 +636,8 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
     teams: teamRows.length,
     rosterPlayers,
     games: gameRows.length,
+    gamesDetailed,
+    goalLogRows,
   };
 }
 

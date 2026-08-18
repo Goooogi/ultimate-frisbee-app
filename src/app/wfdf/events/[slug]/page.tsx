@@ -8,6 +8,7 @@ import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { getEvent } from '@/lib/wfdf/data';
 import { WfdfEventDetail } from '@/components/wfdf/wfdf-event-detail';
+import { WfdfEventLogo } from '@/components/wfdf/wfdf-event-logo';
 
 export const revalidate = 120;
 
@@ -41,16 +42,43 @@ export default async function WfdfEventPage({ params }: Props) {
   const ev = await getEvent(params.slug);
   if (!ev) notFound();
 
-  const subParts = [fmtDates(ev.startDate, ev.endDate), ev.location].filter(Boolean).join(' · ');
+  const dates = fmtDates(ev.startDate, ev.endDate);
+
+  // Frozen event bar — logo + event name on the left, dates over location on
+  // the right. Sticks under the app rail once the big title scrolls past, so
+  // "which event am I in" survives long standings/game lists. Data-driven, so
+  // every WFDF event gets it (logo hides itself when absent or dead).
+  const stickyBar = (
+    <div className="flex items-center justify-between gap-3 px-5 py-2">
+      <div className="flex items-center gap-2.5 min-w-0">
+        <WfdfEventLogo logoUrl={ev.logoUrl} year={ev.year} variant="sticky" />
+        <span className="font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
+          {ev.name}
+        </span>
+      </div>
+      {(dates || ev.location) && (
+        <div className="flex flex-col items-end flex-shrink-0 text-right font-tight leading-tight">
+          {dates && <span className="text-[11px] font-semibold text-ink">{dates}</span>}
+          {ev.location && (
+            <span className="text-[11px] text-muted max-w-[40vw] sm:max-w-none truncate">
+              {ev.location}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   return (
     <>
-      {/* Preload the hero mark so it lands with the HTML instead of after
+      {/* Preload the sticky-bar mark so it lands with the HTML instead of after
           hydration (same hint the events grid uses for its logo batch). */}
       {ev.logoUrl && <link rel="preload" as="image" href={ev.logoUrl} />}
       <PageShell
       title={ev.name}
       eyebrow={`WFDF · ${ev.isNationalTeams ? 'National Teams' : 'Club'}`}
+      stickyName={ev.name}
+      stickyContent={stickyBar}
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'WFDF', href: '/wfdf/events' },
@@ -60,7 +88,7 @@ export default async function WfdfEventPage({ params }: Props) {
       {/* Suspense is load-bearing: the detail reads useSearchParams (?div/?tab
           view state), which otherwise bails the whole static render to CSR. */}
       <Suspense fallback={null}>
-        <WfdfEventDetail event={ev} meta={subParts || undefined} />
+        <WfdfEventDetail event={ev} />
       </Suspense>
       </PageShell>
     </>

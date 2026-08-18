@@ -42,8 +42,11 @@ interface DivisionPagerProps<V extends string> {
 
 // Swipe must travel this fraction of the container (or flick faster than
 // FLICK_VELOCITY, px/ms) to commit a division change; less springs back.
-const COMMIT_FRACTION = 0.28;
-const FLICK_VELOCITY = 0.4;
+const COMMIT_FRACTION = 0.22;
+const FLICK_VELOCITY = 0.3;
+// Minimum travel before a fast flick counts — guards a jittery tap from
+// registering as a page change.
+const FLICK_MIN_TRAVEL = 16;
 const SLIDE_MS = 280;
 const EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'; // ease-out cubic
 
@@ -106,7 +109,7 @@ export function DivisionPager<V extends string>({
     const content = contentRef.current;
     const prev = prevRef.current;
     if (!container || !content || !prev) return;
-    const w = container.clientWidth;
+    const w = contentWidth(container);
     const { dir, fromDx } = transition;
     content.style.transition = 'none';
     prev.style.transition = 'none';
@@ -125,6 +128,14 @@ export function DivisionPager<V extends string>({
     }, SLIDE_MS + 40);
     return () => window.clearTimeout(done);
   }, [transition]);
+
+  // Slide/commit distance = the CONTENT width, excluding the edge-bleed
+  // padding. clientWidth includes that padding, which would inflate the
+  // commit threshold by the gutter (and stretch the slide) on mobile.
+  const contentWidth = (container: HTMLDivElement) => {
+    const cs = getComputedStyle(container);
+    return container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  };
 
   const springBack = () => {
     const content = contentRef.current;
@@ -166,7 +177,10 @@ export function DivisionPager<V extends string>({
         g.ignored = true;
         return;
       }
-      if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.6) {
+      // Any decisively horizontal move claims the gesture — requiring a 1.6×
+      // horizontal bias meant a natural, slightly-diagonal thumb swipe never
+      // registered (Hunter, 2026-08-18).
+      if (Math.abs(dx) > 8 && Math.abs(dx) > Math.abs(dy)) {
         g.claimed = true;
         // Measure from the claim point so content doesn't jump on frame one.
         g.claimOffset = dx;
@@ -194,10 +208,11 @@ export function DivisionPager<V extends string>({
     const { activeIndex: i, count: n, divisions: divs, onChange: change } = stateRef.current;
     const t = e.changedTouches[0];
     const dx = t.clientX - g.startX;
-    const w = container.clientWidth;
+    const w = contentWidth(container);
     const commit = w * COMMIT_FRACTION;
-    const goNext = i < n - 1 && (dx < -commit || (dx < -24 && g.vx < -FLICK_VELOCITY));
-    const goPrev = i > 0 && (dx > commit || (dx > 24 && g.vx > FLICK_VELOCITY));
+    const goNext =
+      i < n - 1 && (dx < -commit || (dx < -FLICK_MIN_TRAVEL && g.vx < -FLICK_VELOCITY));
+    const goPrev = i > 0 && (dx > commit || (dx > FLICK_MIN_TRAVEL && g.vx > FLICK_VELOCITY));
     const dir = goNext ? 1 : goPrev ? -1 : 0;
     if (dir === 0) {
       springBack();
@@ -245,9 +260,15 @@ export function DivisionPager<V extends string>({
         ))}
       </div>
 
+      {/* Edge-bleed the TOUCH surface, not the layout: PageShell's px-5 gutter
+          left 20px dead strips down both screen edges where a swipe that
+          started there never reached this handler at all (Hunter, 2026-08-18).
+          The negative margin + equal padding cancel out, so content sits
+          exactly where it did — same trick the view-tab rows use. Desktop
+          (lg) keeps its own gutter, where there's no touch to catch. */}
       <div
         ref={containerRef}
-        className="relative overflow-hidden"
+        className="relative overflow-hidden -mx-5 px-5 lg:mx-0 lg:px-0"
         onTouchStart={onTouchStart}
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
@@ -260,7 +281,10 @@ export function DivisionPager<V extends string>({
           <div
             ref={prevRef}
             className={[
-              'absolute inset-x-0 top-0 pointer-events-none will-change-transform',
+              // inset-x-0 resolves against the PADDING box, so the snapshot
+              // must carry the same px-5 as the container or it renders 40px
+              // wider than the live content and shifts mid-slide.
+              'absolute inset-x-0 top-0 px-5 lg:px-0 pointer-events-none will-change-transform',
               contentClassName ?? '',
             ].join(' ')}
             aria-hidden

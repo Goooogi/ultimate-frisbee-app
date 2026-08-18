@@ -130,6 +130,13 @@ interface PageShellProps {
    *  profiles) never lose their "whose stats are these" context. Desktop
    *  is unaffected (plenty of vertical space there already). */
   stickyName?: string;
+  /** Rich replacement for `stickyName`'s text span — e.g. the WFDF event bar's
+   *  logo + name on the left, dates over location on the right. Requires
+   *  `stickyName` to be set too (that's what mounts the bar and its sentinel;
+   *  the string stays the accessible/no-JS text). Unlike the plain bar this
+   *  one shows on desktop as well, since the content is worth keeping in view
+   *  at every width. */
+  stickyContent?: React.ReactNode;
   /** Hide the SiteFooter on mobile (<lg) only; desktop keeps it. See AppShell. */
   hideFooterMobile?: boolean;
   /** Wider content cap for dashboard/bento layouts (e.g. For You) that need more
@@ -147,6 +154,7 @@ export function PageShell({
   breadcrumbs,
   breadcrumbsSlot,
   stickyName,
+  stickyContent,
   hideFooterMobile,
   wide,
   children,
@@ -157,7 +165,7 @@ export function PageShell({
         'px-5 pt-4 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto',
         wide ? 'lg:px-10 xl:px-8 lg:max-w-[1320px]' : 'lg:px-14 lg:max-w-[1080px]',
       ].join(' ')}>
-        {stickyName && <StickyName name={stickyName} />}
+        {stickyName && <StickyName name={stickyName} content={stickyContent} />}
         {breadcrumbsSlot ??
           (breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />)}
         <PageHeader title={title} subtitle={subtitle} eyebrow={eyebrow} controls={controls} />
@@ -180,7 +188,7 @@ function StickySentinel() {
   return <div id={STICKY_NAME_ID} aria-hidden="true" />;
 }
 
-function StickyName({ name }: { name: string }) {
+function StickyName({ name, content }: { name: string; content?: React.ReactNode }) {
   const [titleVisible, setTitleVisible] = useState(true);
   const barRef = useRef<HTMLDivElement>(null);
 
@@ -207,15 +215,25 @@ function StickyName({ name }: { name: string }) {
       ref={barRef}
       aria-hidden={titleVisible}
       className={[
-        'lg:hidden sticky top-[52px] z-40 overflow-hidden',
-        'bg-bg/95 backdrop-blur shadow-soft',
+        'sticky top-[52px] z-40 overflow-hidden',
+        // The plain text bar is mobile-only (desktop has vertical room to
+        // spare); a rich bar earns its keep at every width.
+        content ? '' : 'lg:hidden',
+        // The rich bar overlays full-bleed white cards, where a translucent
+        // strip reads as a seam cutting through the card rather than as
+        // chrome sitting above it — so it goes fully opaque with a hairline.
+        content ? 'bg-bg border-b border-hairline shadow-soft' : 'bg-bg/95 backdrop-blur shadow-soft',
         'transition-[max-height,opacity] duration-150',
-        titleVisible ? 'max-h-0 opacity-0' : 'max-h-11 opacity-100',
+        // A two-line rich bar (dates over location) needs more headroom than
+        // the single-line name bar's 44px clamp.
+        titleVisible ? 'max-h-0 opacity-0' : content ? 'max-h-24 opacity-100' : 'max-h-11 opacity-100',
       ].join(' ')}
     >
-      <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
-        {name}
-      </span>
+      {content ?? (
+        <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
+          {name}
+        </span>
+      )}
     </div>
   );
 }
