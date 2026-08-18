@@ -69,12 +69,78 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
       : defaultDiv;
   const setActiveDiv = (next: EufDivision) => setDivParam(next === defaultDiv ? null : next);
 
+  // Tab in the URL too (?tab=), same survival rules as the division. The
+  // per-division fallback (which tabs exist, and which one to land on when
+  // the URL's tab isn't valid for THIS division) now lives in DivisionContent
+  // — DivisionPager can render any division, not just the active one, so a
+  // single shared "active tab" resolved only against activeDiv would show the
+  // wrong tab on a division that lacks it (e.g. mid-swipe preview, or a
+  // division with no bracket landing on a global "bracket" tab).
+  const [tabParam, setTabParam] = useViewParam('tab');
+  const setTab = (next: ViewTab) => setTabParam(next);
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Row 1 — "View on EUCS" link. The division pills moved below the view
+          tabs (DivisionPager), mirroring the mobile app's layout. */}
+      {sourceUrl && (
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+          <EufExternalLink url={sourceUrl} />
+        </div>
+      )}
+
+      {/* Centered division pills (below the view tabs) + swipeable division
+          content — tap a pill or swipe the content left/right on touch to
+          change division (ported from the mobile app). Each division builds
+          its own champion banner, view tabs, and section content — DivisionPager
+          can call renderDivision for the swipe-neighbor too, not just activeDiv. */}
+      <DivisionPager
+        divisions={divisions.map((d) => ({ value: d, label: d }))}
+        active={activeDiv}
+        onChange={setActiveDiv}
+        renderDivision={(division) => (
+          <DivisionContent
+            division={division}
+            standings={standings}
+            games={games}
+            tabParam={tabParam as ViewTab | null}
+            setTab={setTab}
+          />
+        )}
+        contentClassName="flex flex-col gap-6"
+      />
+    </div>
+  );
+}
+
+/** Everything scoped to one division: champion banner, view tabs, and the
+ *  active tab's section content. Parameterized by `division` (rather than
+ *  closing over the page's active division) so DivisionPager can call it for
+ *  the swipe-neighbor mid-gesture, not just the committed active division.
+ *
+ *  The tab param is shared (URL-level, same as before) but its FALLBACK is
+ *  per-division: a division lacking the URL's tab falls back to its OWN
+ *  bracket-biased default, not to whatever tab happens to be valid for the
+ *  page's active division. */
+function DivisionContent({
+  division,
+  standings,
+  games,
+  tabParam,
+  setTab,
+}: {
+  division: EufDivision;
+  standings: EufStandingRow[];
+  games: EufGameCard[];
+  tabParam: ViewTab | null;
+  setTab: (next: ViewTab) => void;
+}) {
   const divStandings = useMemo(
-    () => standings.filter((s) => s.division === activeDiv),
-    [standings, activeDiv],
+    () => standings.filter((s) => s.division === division),
+    [standings, division],
   );
 
-  const divGames = useMemo(() => games.filter((g) => g.division === activeDiv), [games, activeDiv]);
+  const divGames = useMemo(() => games.filter((g) => g.division === division), [games, division]);
   const showTree = useMemo(() => hasEufBracket(divGames), [divGames]);
 
   // Placement labels on the bracket cards come from the STORED final_placement
@@ -131,27 +197,19 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
   ];
   const visibleTabs = TABS.filter((t) => t.show);
   // Bias to Bracket — the headline of a finished tournament — then standings.
+  // This is THIS division's own fallback, not the page's shared one: a
+  // division with no bracket falls back to its own first-filled section.
   const defaultTab: ViewTab = hasBracket
     ? 'bracket'
     : (visibleTabs[0]?.key ?? 'standings');
 
-  // Tab in the URL too (?tab=), same survival rules as the division.
-  const [tabParam, setTabParam] = useViewParam('tab');
-  const tab = (tabParam as ViewTab | null) ?? defaultTab;
-  const setTab = (next: ViewTab) => setTabParam(next);
-  // Switching division can change which tabs exist; keep the active one valid.
+  // Switching division can change which tabs exist; keep the active one valid
+  // FOR THIS DIVISION specifically.
+  const tab = tabParam ?? defaultTab;
   const active = visibleTabs.some((t) => t.key === tab) ? tab : defaultTab;
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Row 1 — "View on EUCS" link. The division pills moved below the view
-          tabs (DivisionPager), mirroring the mobile app's layout. */}
-      {sourceUrl && (
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-          <EufExternalLink url={sourceUrl} />
-        </div>
-      )}
-
       {/* Champion — leads the page so the headline result is the first thing
           seen, even though the bracket tree scrolls horizontally on mobile. */}
       {champion && <ChampionBanner row={champion.row} derived={champion.derived} />}
@@ -162,7 +220,7 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
         <div
           role="tablist"
           aria-label="Tournament views"
-          className="-mx-5 px-5 md:mx-0 md:px-0 flex gap-2 overflow-x-auto scrollbar-none"
+          className="self-start mb-2.5 inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 max-w-full overflow-x-auto scrollbar-none"
         >
           {visibleTabs.map((t) => {
             const on = t.key === active;
@@ -174,10 +232,10 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
                 aria-selected={on}
                 onClick={() => setTab(t.key)}
                 className={[
-                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
-                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
+                  'shrink-0 inline-flex items-center justify-center px-3.5 py-[5px] rounded-[15px]',
+                  'text-[11px] font-bold tracking-[0.06em] uppercase font-tight cursor-pointer',
                   'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  on ? 'bg-ink text-bg' : 'bg-ink/5 text-muted hover:text-ink',
+                  on ? 'bg-ink text-bg' : 'text-muted hover:text-ink',
                 ].join(' ')}
               >
                 {t.label}
@@ -187,15 +245,6 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
         </div>
       )}
 
-      {/* Centered division pills (below the view tabs) + swipeable division
-          content — tap a pill or swipe the content left/right on touch to
-          change division (ported from the mobile app). */}
-      <DivisionPager
-        divisions={divisions.map((d) => ({ value: d, label: d }))}
-        active={activeDiv}
-        onChange={setActiveDiv}
-        contentClassName="flex flex-col gap-6"
-      >
       {/* ── Standings ─────────────────────────────────────────────────────── */}
       {active === 'standings' && (
         <section aria-label="Standings">
@@ -271,7 +320,6 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
           No games or standings loaded for this division yet.
         </p>
       )}
-      </DivisionPager>
     </div>
   );
 }

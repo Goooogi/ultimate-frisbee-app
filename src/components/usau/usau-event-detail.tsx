@@ -128,35 +128,53 @@ export function UsauEventDetail({ event }: Props) {
       ? division
       : (availableGenders[0] ?? '');
 
+  // Per-division derivation (teams/games filter, pools, brackets, tabs, …) is
+  // pulled out into buildDivisionData() below, called once per division by
+  // DivisionPager's renderDivision — this component no longer computes it for
+  // a single closed-over "active" division.
+
+  // Divisions this event actually fielded, in canonical order — drives the
+  // scoped division switcher below (only shown when there's more than one).
+  const eventDivisions = (['Men', 'Women', 'Mixed'] as const).filter((d) =>
+    availableGenders.includes(d),
+  ) as UsauDivision[];
+
+  return (
+    <EventTabsView
+      event={event}
+      level={level}
+      availableLevels={availableLevels}
+      levelTeams={levelTeams}
+      eventDivisions={eventDivisions}
+      gender={gender}
+    />
+  );
+}
+
+type ViewTab = 'pools' | 'bracket';
+
+/** Everything derived FOR ONE DIVISION — pools, games, brackets, standings,
+ *  and which view tabs it can fill. DivisionPager's renderDivision calls this
+ *  for the active division every render, and for the neighbor division mid-
+ *  swipe, so it must be a pure function of `division` (not the closed-over
+ *  active gender that the pre-pager version relied on). */
+function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division: string) {
   // ── Filter teams + games by gender ────────────────────────────────────
-  // Filter to teams whose gender_division matches, then keep only games
-  // where at least one participant is in the filtered set. Pool play
-  // assignment lives on event_teams (with team.gender), so this approach
-  // cleanly partitions pools per gender. For single-gender events the
-  // filter is a no-op (every team passes).
-  //
-  // Future bracket slots (semis/final before their teams are decided) have NO
-  // participants, so the roster test alone silently dropped every one of
-  // them — a multi-division event's tree died at the quarters in each
-  // division tab. They can't be attributed by bracket_name either (e.g. Men
-  // AND Women both using "Championship Bracket"), but within one bracket_name
-  // group the FIELD cluster splits divisions cleanly (Men on 7-9/11, Women on
-  // 12): USAU keeps a bracket on its field block. So a team-less row is kept
-  // when a rostered game in the SAME bracket_name group already plays on its
-  // field cluster; a row that matches nothing stays dropped (old behavior).
-  const { teams, games } = useMemo(() => {
-    const filteredTeams = gender
-      ? levelTeams.filter((t) => t.genderDivision === gender)
-      : levelTeams;
-    // Nothing narrowed (single-level, single-gender event) → pass through.
-    if (filteredTeams.length === event.teams.length) {
-      return { teams: event.teams, games: event.games };
-    }
+  // (Same logic/comments as the pre-pager version — see git history — just
+  // parameterized on `division` instead of the closed-over `gender`.)
+  const filteredTeams = division
+    ? levelTeams.filter((t) => t.genderDivision === division)
+    : levelTeams;
+  let teams: Team[];
+  let games: Game[];
+  if (filteredTeams.length === event.teams.length) {
+    teams = event.teams;
+    games = event.games;
+  } else {
     const teamIds = new Set(filteredTeams.map((t) => t.teamId));
     const inDivision = (g: Game) =>
       (g.teamAId != null && teamIds.has(g.teamAId)) ||
       (g.teamBId != null && teamIds.has(g.teamBId));
-    // "8a" / "8b" → cluster "8"; non-numeric venue strings cluster verbatim.
     const fieldCluster = (loc: string) =>
       loc.trim().toLowerCase().replace(/^(\d+)[a-z]$/, '$1');
     const divisionFields = new Map<string, Set<string>>();
@@ -166,32 +184,16 @@ export function UsauEventDetail({ event }: Props) {
       set.add(fieldCluster(g.location));
       divisionFields.set(g.bracketName, set);
     }
-    const filteredGames = event.games.filter((g) => {
+    games = event.games.filter((g) => {
       if (inDivision(g)) return true;
-      if (g.teamAId != null || g.teamBId != null) return false; // other division's team
+      if (g.teamAId != null || g.teamBId != null) return false;
       if (!g.bracketName || !g.location) return false;
       return divisionFields.get(g.bracketName)?.has(fieldCluster(g.location)) ?? false;
     });
-    return { teams: filteredTeams, games: filteredGames };
-  }, [event.teams, event.games, levelTeams, gender]);
+    teams = filteredTeams;
+  }
 
   // ── Second-phase pools ("Pool E") ─────────────────────────────────────
-  // Teams' pool assignments come from the Saturday standings (A–D). When a
-  // game claims a pool OUTSIDE that set ("Pool E" at PEC West 2026 — really
-  // the Ninth Place Pool; USAU reuses generic pool markup for late-added
-  // placement/power pools), it isn't a Saturday pool and shouldn't render
-  // in the Pools tab or count toward pool records. Route those games to the
-  // Bracket tab as their own filter entry instead.
-  //
-  // GUARDS (verified against the full DB, 2026-07-12):
-  //   • Compare pool TOKENS, not full names — assignments can carry
-  //     qualifiers the game rows drop ("Pool C - Clipped" vs "Pool C" at
-  //     weather-shortened regionals). A token mismatch there would misfile
-  //     real pools.
-  //   • Active only when EVERY team in this (division-filtered) view has a
-  //     pool. ultirzr-only events have no assignments at all, and a real
-  //     pool whose standings failed to scrape shows up as unassigned teams
-  //     — both must disable the heuristic rather than misfile real pools.
   const poolToken = (name: string): string | null => {
     const m = name.trim().toLowerCase().match(/^pool\s+(\S+)/);
     return m ? m[1] : null;
@@ -212,25 +214,15 @@ export function UsauEventDetail({ event }: Props) {
   };
 
   // ── Group-prefix awareness ────────────────────────────────────────────
-  // A filtered view can still contain MULTIPLE independent bracket groups:
-  // a combined masters championships runs Masters / GM / GGM brackets under
-  // one event, so a single gender view can hold both "GM Women · …" and
-  // "GGM Women · …" games. When that happens, show FULL bracket names (the
-  // group prefix is the disambiguator); single-group views strip it.
-  const showGroupPrefixes = useMemo(() => {
-    const set = new Set<string>();
-    for (const g of games) {
-      const p = bracketGroupPrefix(g.bracketName);
-      if (p) set.add(p);
-    }
-    return set.size > 1;
-  }, [games]);
+  const groupPrefixSet = new Set<string>();
+  for (const g of games) {
+    const p = bracketGroupPrefix(g.bracketName);
+    if (p) groupPrefixSet.add(p);
+  }
+  const showGroupPrefixes = groupPrefixSet.size > 1;
   const bracketLabel = (name: string) => (showGroupPrefixes ? name : bracketTail(name));
 
   // ── Pools (from filtered teams) ───────────────────────────────────────
-  // Entry-level pool values ("Pool D") carry no group scoping, so on a
-  // multi-group view two groups' Pool D would merge — prefer the
-  // game-derived pools (group-prefixed bracket names) in that case.
   let pools: Array<{ name: string; teams: Team[] }> = [];
   const teamsByPool = new Map<string, Team[]>();
   if (!showGroupPrefixes) {
@@ -248,8 +240,6 @@ export function UsauEventDetail({ event }: Props) {
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   } else {
-    // Derive pools from games whose bracket_name is a pool ("Pool A", or
-    // group-prefixed "Masters Mixed · Pool A" on combined masters events).
     const poolTeamIds = new Map<string, Set<string>>();
     for (const g of games) {
       if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
@@ -270,18 +260,11 @@ export function UsauEventDetail({ event }: Props) {
   }
 
   // ── Placement brackets (filtered games) ───────────────────────────────
-  // The championship bracket ("1st Place") is rendered as the visual tree
-  // above, so skip it here. What's left is placement (13th-place ties, 17th-
-  // place ties, …) AND crossovers ("Pool B-C Crossover") — mobile parity:
-  // crossovers have no tab of their own, they render as their own flat
-  // group in the Bracket tab, ordered alongside the other placement groups.
   const bracketKey = (g: Game) => g.bracketName ?? 'Bracket';
   const byBracket = new Map<string, Game[]>();
   for (const g of games) {
-    // Real Saturday pools stay out; second-phase pools ("Pool E") fall
-    // through and become a placement-bracket group of their own.
     if (isPoolBracket(g.bracketName) && !isSecondPhasePool(g.bracketName)) continue;
-    if (isMatchupRound(g)) continue; // Saturday matchup rounds have their own tab
+    if (isMatchupRound(g)) continue;
     if (isChampionshipBracket(g)) continue;
     const k = bracketKey(g);
     if (!byBracket.has(k)) byBracket.set(k, []);
@@ -295,8 +278,6 @@ export function UsauEventDetail({ event }: Props) {
     .sort((a, b) => bracketOrder(a.name) - bracketOrder(b.name));
 
   // ── Matchup rounds ("Sat Round 1/2/3") — pool-less Saturday phases. ─────
-  // Grouped by bracket_name; groups sort by name (the labels are ordinal),
-  // games inside by scheduled time.
   const roundGroupsMap = new Map<string, Game[]>();
   for (const g of games) {
     if (!isMatchupRound(g)) continue;
@@ -309,15 +290,9 @@ export function UsauEventDetail({ event }: Props) {
       name,
       games: gs.slice().sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')),
     }))
-    // Ordered by each group's EARLIEST scheduled game, not alphabetically —
-    // "Sat Round 2" should follow "Sat Round 1" by when it's actually played.
     .sort((a, b) => (a.games[0]?.scheduledAt ?? '').localeCompare(b.games[0]?.scheduledAt ?? ''));
 
   // ── Pool play games ───────────────────────────────────────────────────
-  // Second-phase pools are excluded — they render under Bracket, and their
-  // results must not pollute the Saturday-pool W-L records tallied below.
-  // Sorted by scheduled time (mobile parity) so each pool's slate reads as
-  // its actual schedule, earliest first.
   const poolGames = new Map<string, Game[]>();
   for (const g of games) {
     if (!g.bracketName || !isPoolBracket(g.bracketName)) continue;
@@ -330,18 +305,6 @@ export function UsauEventDetail({ event }: Props) {
   }
 
   // ── Pool-play records (per team, from that pool's completed games) ──────
-  // W-L within pool play, shown in the standings card next to each team.
-  // Only counts finished games with a decisive score. A team with no
-  // completed pool games gets no record (rendered as "—") rather than 0-0,
-  // so a pool that hasn't started reads as pending, not all-tied.
-  //
-  // ROBUSTNESS (dual-pipeline dedup): the HTML + ultirzr ingest can write the
-  // SAME real game twice with DIFFERENT team_ids/game_ids for the same team
-  // (e.g. two "Brute Squad" rows). Left unchecked that doubles every record and
-  // makes one team look like two 6-0 teams → a false tie that suppressed the
-  // pool leader. So we (1) dedup games by matchup+score, and (2) tally by
-  // NORMALIZED TEAM NAME, then mirror each name's record onto every team_id
-  // sharing that name so PoolCard's per-id lookups still resolve.
   const normName = (n: string | null | undefined) => (n ?? '').trim().toLowerCase();
   const nameRecords = new Map<string, { wins: number; losses: number; diff: number; name: string }>();
   const seenGameKeys = new Set<string>();
@@ -352,8 +315,6 @@ export function UsauEventDetail({ event }: Props) {
       const na = normName(g.teamAName);
       const nb = normName(g.teamBName);
       if (!na || !nb) continue;
-      // Dedup: one row per (unordered matchup + unordered score). A repeat of
-      // the same result from the other pipeline is dropped.
       const pair = [na, nb].sort();
       const scores = [g.scoreA, g.scoreB].sort((x, y) => x - y);
       const gkey = `${pair[0]}|${pair[1]}|${scores[0]}|${scores[1]}`;
@@ -376,8 +337,6 @@ export function UsauEventDetail({ event }: Props) {
       nameRecords.set(loseName, rl);
     }
   }
-  // Mirror each name's record onto every team_id that carries that name, so
-  // PoolCard (keyed by teamId) reads the deduped record for either dup row.
   const poolRecords = new Map<string, { wins: number; losses: number; diff: number }>();
   for (const t of teams) {
     const rec = nameRecords.get(normName(t.teamName));
@@ -385,127 +344,74 @@ export function UsauEventDetail({ event }: Props) {
   }
 
   // ── Championship finals (for the top-of-page result banners) ───────────
-  // The completed title game(s). Surfaced ABOVE the bracket tree so a
-  // finished tournament leads with its champion — most valuable on mobile,
-  // where the horizontal bracket tree otherwise buries the final off-screen.
-  // One per bracket GROUP: a multi-group view (GM + GGM Women in a combined
-  // championships) gets one labeled banner per group.
-  //
-  // "Decided" covers two shapes:
-  //   1. The normal, tagged case — round='final', status='final', a real
-  //      score split.
-  //   2. The recovered-final case: USAU sometimes mislabels a bracket's
-  //      final as round='other' (see usau-bracket-tree's buildColumns finals
-  //      recovery) — recovered here the same way, by finding a non-tree-round
-  //      game whose two teams are both winners of a championship-bracket semi.
-  // A forfeit counts as decided (one side scored, one didn't show), same as
-  // everywhere else on this page.
-  const champFinals = useMemo(() => {
-    const championshipGames = games.filter(isChampionshipBracket);
-    const isDecided = (g: Game) => {
-      const status = g.status.toLowerCase();
-      if (status === 'forfeit') return true;
-      if (status !== 'final') return false;
-      return g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
-    };
+  const championshipGames = games.filter(isChampionshipBracket);
+  const isDecided = (g: Game) => {
+    const status = g.status.toLowerCase();
+    if (status === 'forfeit') return true;
+    if (status !== 'final') return false;
+    return g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
+  };
 
-    const explicitFinals = championshipGames.filter((g) => g.round === 'final' && isDecided(g));
+  const explicitFinals = championshipGames.filter((g) => g.round === 'final' && isDecided(g));
 
-    // Recovered finals: per bracket group, find semi winners, then a
-    // non-tree-round game between two of those winners.
-    const byGroupSemis = new Map<string, Game[]>();
-    for (const g of championshipGames) {
-      if (g.round !== 'semi') continue;
-      const k = bracketGroupPrefix(g.bracketName);
-      if (!byGroupSemis.has(k)) byGroupSemis.set(k, []);
-      byGroupSemis.get(k)!.push(g);
-    }
-    const recoveredFinals: Game[] = [];
-    for (const [k, semis] of byGroupSemis) {
-      // A group that already has an explicit decided final doesn't need
-      // recovery — avoid promoting some unrelated 'other' game to champion.
-      if (explicitFinals.some((g) => bracketGroupPrefix(g.bracketName) === k)) continue;
-      const semiWinners = new Set(
-        semis
-          .map((g) =>
-            g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB
-              ? (g.scoreA > g.scoreB ? g.teamAId : g.teamBId)
-              : null,
-          )
-          .filter((id): id is string => !!id),
-      );
-      const recovered = championshipGames.find(
-        (g) =>
-          g.round !== 'prequarter' && g.round !== 'quarter' && g.round !== 'semi' && g.round !== 'final' &&
-          bracketGroupPrefix(g.bracketName) === k &&
-          !!g.teamAId && !!g.teamBId &&
-          semiWinners.has(g.teamAId) && semiWinners.has(g.teamBId) &&
-          isDecided(g),
-      );
-      if (recovered) recoveredFinals.push(recovered);
-    }
+  const byGroupSemis = new Map<string, Game[]>();
+  for (const g of championshipGames) {
+    if (g.round !== 'semi') continue;
+    const k = bracketGroupPrefix(g.bracketName);
+    if (!byGroupSemis.has(k)) byGroupSemis.set(k, []);
+    byGroupSemis.get(k)!.push(g);
+  }
+  const recoveredFinals: Game[] = [];
+  for (const [k, semis] of byGroupSemis) {
+    if (explicitFinals.some((g) => bracketGroupPrefix(g.bracketName) === k)) continue;
+    const semiWinners = new Set(
+      semis
+        .map((g) =>
+          g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB
+            ? (g.scoreA > g.scoreB ? g.teamAId : g.teamBId)
+            : null,
+        )
+        .filter((id): id is string => !!id),
+    );
+    const recovered = championshipGames.find(
+      (g) =>
+        g.round !== 'prequarter' && g.round !== 'quarter' && g.round !== 'semi' && g.round !== 'final' &&
+        bracketGroupPrefix(g.bracketName) === k &&
+        !!g.teamAId && !!g.teamBId &&
+        semiWinners.has(g.teamAId) && semiWinners.has(g.teamBId) &&
+        isDecided(g),
+    );
+    if (recovered) recoveredFinals.push(recovered);
+  }
 
-    const finals = [...explicitFinals, ...recoveredFinals];
-    // USAU sometimes labels BOTH the semi and the title game round='final'
-    // under "1st Place". The actual title game is the LAST one played, so
-    // keep the latest scheduledAt per group.
-    const byGroup = new Map<string, Game>();
-    for (const g of finals) {
-      const k = bracketGroupPrefix(g.bracketName);
-      const prev = byGroup.get(k);
-      if (!prev || (g.scheduledAt ?? '') > (prev.scheduledAt ?? '')) byGroup.set(k, g);
-    }
-    return Array.from(byGroup.entries())
-      .map(([label, game]) => ({ label, game }))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [games]);
+  const finals = [...explicitFinals, ...recoveredFinals];
+  const byGroup = new Map<string, Game>();
+  for (const g of finals) {
+    const k = bracketGroupPrefix(g.bracketName);
+    const prev = byGroup.get(k);
+    if (!prev || (g.scheduledAt ?? '') > (prev.scheduledAt ?? '')) byGroup.set(k, g);
+  }
+  const champFinals = Array.from(byGroup.entries())
+    .map(([label, game]) => ({ label, game }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   // ── Pool leader (fallback winner when there's no bracket final) ─────────
-  // A pool-play-only division has no championship game. The de-facto winner
-  // is the team with the best pool record — but only when it's UNIQUE (a tie
-  // for first is ambiguous, so we show no banner). Skipped entirely when a
-  // bracket final exists (that's the real champion).
-  const poolLeader = useMemo(() => {
-    if (champFinals.length > 0) return null;
-    // Standings from the NAME-keyed records (already dedup'd across duplicate
-    // team_ids), so two rows of the same real team can't read as a tie. Resolve
-    // a display Team for the winner by matching name back to a team row.
+  let poolLeader: { team: Team; wins: number; losses: number } | null = null;
+  if (champFinals.length === 0) {
     const teamByName = new Map(teams.map((t) => [normName(t.teamName), t] as const));
     const standings = Array.from(nameRecords.values())
       .map((r) => ({ team: teamByName.get(normName(r.name)) ?? null, name: r.name, wins: r.wins, losses: r.losses }))
       .sort((a, b) => b.wins - a.wins || a.losses - b.losses);
-    if (standings.length === 0) return null;
     const top = standings[0];
-    if (top.wins === 0 && top.losses === 0) return null; // no games played yet
-    if (!top.team) return null; // couldn't resolve the team row for display
-    const tiedForFirst = standings.filter(
-      (s) => s.wins === top.wins && s.losses === top.losses,
-    ).length;
-    if (tiedForFirst > 1) return null;
-    return { team: top.team, wins: top.wins, losses: top.losses };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [champFinals, teams, games]);
-
-  // Divisions this event actually fielded, in canonical order — drives the
-  // scoped division switcher below (only shown when there's more than one).
-  const eventDivisions = (['Men', 'Women', 'Mixed'] as const).filter((d) =>
-    availableGenders.includes(d),
-  ) as UsauDivision[];
+    if (top && !(top.wins === 0 && top.losses === 0) && top.team) {
+      const tiedForFirst = standings.filter(
+        (s) => s.wins === top.wins && s.losses === top.losses,
+      ).length;
+      if (tiedForFirst <= 1) poolLeader = { team: top.team, wins: top.wins, losses: top.losses };
+    }
+  }
 
   // ── View tabs (#6): Pools / Bracket ──────────────────────────────────────
-  // Static set of button tabs. Each tab appears only when it has data. "Pools"
-  // holds the standings cards, per-pool game lists, AND matchup-round groups
-  // ("Sat Round 1/2/3" — no separate Rounds tab). "Bracket" holds the
-  // championship tree + every placement group (including crossovers, which
-  // have no tab of their own — mobile parity) stacked below it. Default to
-  // the first tab that has content, biased toward Bracket (the headline)
-  // when finished.
-  // A bracket game with both teams NULL is a feeder slot waiting on pool play,
-  // not data. An event whose bracket is ENTIRELY placeholders (a schedule
-  // published before the tournament starts) has nothing to show, so it gets no
-  // tab — otherwise the headline tab renders a tree of "— vs —" cards and
-  // reads as missing data. Show everything we have as soon as we have it; the
-  // tab returns the moment any bracket game gets a real team.
   const bracketHasTeams = games.some(
     (g) =>
       (isChampionshipBracket(g) || isPlacementName(g.bracketName) || isCrossoverBracket(g.bracketName)) &&
@@ -520,37 +426,14 @@ export function UsauEventDetail({ event }: Props) {
     { key: 'bracket',    label: 'Bracket',    show: hasBracket },
   ];
   const visibleTabs = TABS.filter((t) => t.show);
-  // Bias to Bracket only once it has real content — a bracket that is all TBD
-  // feeder slots (Cooler Classic Men pre-Sunday: 24 placeholder games) should
-  // not outrank the phase people are actually watching. hasBracket now carries
-  // that condition, so a visible Bracket tab is by definition a started one.
   const defaultTab: ViewTab = hasBracket ? 'bracket' : (visibleTabs[0]?.key ?? 'pools');
 
-  return (
-    <EventTabsView
-      event={event}
-      champFinals={champFinals}
-      poolLeader={poolLeader}
-      showGroupPrefixes={showGroupPrefixes}
-      level={level}
-      gender={gender}
-      availableLevels={availableLevels}
-      eventDivisions={eventDivisions}
-      games={games}
-      teams={teams}
-      pools={pools}
-      poolGames={poolGames}
-      poolRecords={poolRecords}
-      roundGroups={roundGroups}
-      placementBrackets={placementBrackets}
-      bracketLabel={bracketLabel}
-      visibleTabs={visibleTabs}
-      defaultTab={defaultTab}
-    />
-  );
+  return {
+    teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
+    roundGroups, poolGames, poolRecords, champFinals, poolLeader,
+    visibleTabs, defaultTab,
+  };
 }
-
-type ViewTab = 'pools' | 'bracket';
 
 /**
  * Presentational tabbed body. Split out from UsauEventDetail so it can hold the
@@ -560,41 +443,23 @@ type ViewTab = 'pools' | 'bracket';
  */
 function EventTabsView(props: {
   event: UsauEventSummary;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  champFinals: Array<{ label: string; game: any }>;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  poolLeader: any;
-  showGroupPrefixes: boolean;
   level: UsauLevel | '';
-  gender: string;
   availableLevels: UsauLevel[];
+  levelTeams: Team[];
   eventDivisions: UsauDivision[];
-  games: Game[];
-  teams: Team[];
-  pools: Array<{ name: string; teams: Team[] }>;
-  poolGames: Map<string, Game[]>;
-  poolRecords: Map<string, { wins: number; losses: number; diff: number }>;
-  roundGroups: Array<{ name: string; games: Game[] }>;
-  placementBrackets: Array<{ name: string; games: Game[] }>;
-  bracketLabel: (name: string) => string;
-  visibleTabs: Array<{ key: ViewTab; label: string; show: boolean }>;
-  defaultTab: ViewTab;
+  gender: string;
 }) {
-  const {
-    event, champFinals, poolLeader, showGroupPrefixes, level, gender,
-    availableLevels, eventDivisions, games, teams, pools, poolGames,
-    poolRecords, roundGroups, placementBrackets, bracketLabel,
-    visibleTabs, defaultTab,
-  } = props;
+  const { event, level, availableLevels, levelTeams, eventDivisions, gender } = props;
 
   // Tab lives in the URL (?tab=) so back-nav from a team page and hard refresh
   // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
   const [tabParam, setTabParam] = useViewParam('tab');
   const [, setDivision] = useDivision();
-  const tab: ViewTab = tabParam === 'pools' || tabParam === 'bracket' ? tabParam : defaultTab;
-  const setTab = (next: ViewTab) => setTabParam(next);
-  // If the div/level switch changes which tabs exist, keep the active tab valid.
-  const active = visibleTabs.some((t) => t.key === tab) ? tab : defaultTab;
+  const tabRequested = tabParam === 'pools' || tabParam === 'bracket' ? tabParam : null;
+
+  const activeGender = eventDivisions.includes(gender as UsauDivision)
+    ? (gender as UsauDivision)
+    : null;
 
   return (
     <>
@@ -621,6 +486,74 @@ function EventTabsView(props: {
         </div>
       )}
 
+      {/* Centered division pills + swipeable division content — tap a pill or
+          swipe the content left/right on touch to change division (ported
+          from the mobile app; replaces the header's Division dropdown).
+          Writes the same ?div= URL param. renderDivision is called for the
+          active division every render, AND for the neighbor division while a
+          swipe is in flight (live preview), so every per-division value
+          (pools/games/brackets/tabs) is derived fresh per call via
+          buildDivisionData/DivisionContent — nothing here closes over a
+          single "active" division anymore. */}
+      <DivisionPager
+        divisions={eventDivisions.map((d) => ({ value: d, label: d }))}
+        active={activeGender}
+        onChange={setDivision}
+        renderDivision={(division) => (
+          <DivisionContent
+            event={event}
+            level={level}
+            levelTeams={levelTeams}
+            division={division}
+            tabRequested={tabRequested}
+            setTab={setTabParam}
+          />
+        )}
+        contentClassName="flex flex-col gap-6"
+      />
+    </>
+  );
+}
+
+/** One division's full body: champion/pool-leader banners, the Pools/Bracket
+ *  view-tab row, and the active tab's content — everything that used to live
+ *  directly in EventTabsView, now parameterized by `division` so DivisionPager
+ *  can render it for any division (not just the globally-active one). */
+function DivisionContent({
+  event,
+  level,
+  levelTeams,
+  division,
+  tabRequested,
+  setTab,
+}: {
+  event: UsauEventSummary;
+  level: UsauLevel | '';
+  levelTeams: Team[];
+  division: string;
+  tabRequested: ViewTab | null;
+  setTab: (next: string) => void;
+}) {
+  const {
+    teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
+    roundGroups, poolGames, poolRecords, champFinals, poolLeader,
+    visibleTabs, defaultTab,
+  } = useMemo(
+    () => buildDivisionData(event, levelTeams, division),
+    [event, levelTeams, division],
+  );
+
+  // A tab requested via the URL only applies here when THIS division can fill
+  // it — otherwise this division falls back to its OWN first-filled tab, not
+  // whatever tab another division resolved to (fixes a blank swipe-preview
+  // when swiping into a division lacking the currently-active tab's content).
+  const active: ViewTab =
+    tabRequested != null && visibleTabs.some((t) => t.key === tabRequested)
+      ? tabRequested
+      : defaultTab;
+
+  return (
+    <>
       {/* Champion banner — leads the page for a finished tournament so the
           title result is the first thing seen (esp. on mobile, where the
           bracket tree scrolls horizontally and hides the final). */}
@@ -630,7 +563,7 @@ function EventTabsView(props: {
           game={game}
           label={showGroupPrefixes ? label || null : null}
           competitionLevel={level || event.competitionLevel}
-          genderDivision={gender || null}
+          genderDivision={division || null}
         />
       ))}
 
@@ -651,7 +584,7 @@ function EventTabsView(props: {
         <div
           role="tablist"
           aria-label="Tournament views"
-          className="mb-6 -mx-5 px-5 md:mx-0 md:px-0 flex gap-2 overflow-x-auto scrollbar-none"
+          className="self-start mb-2.5 inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 max-w-full overflow-x-auto scrollbar-none"
         >
           {visibleTabs.map((t) => {
             const on = t.key === active;
@@ -663,12 +596,10 @@ function EventTabsView(props: {
                 aria-selected={on}
                 onClick={() => setTab(t.key)}
                 className={[
-                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
-                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
+                  'shrink-0 inline-flex items-center justify-center px-3.5 py-[5px] rounded-[15px]',
+                  'text-[11px] font-bold tracking-[0.06em] uppercase font-tight cursor-pointer',
                   'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  on
-                    ? 'bg-ink text-bg'
-                    : 'bg-ink/5 text-muted hover:text-ink',
+                  on ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink',
                 ].join(' ')}
               >
                 {t.label}
@@ -678,15 +609,6 @@ function EventTabsView(props: {
         </div>
       )}
 
-      {/* Centered division pills (below the view tabs) + swipeable division
-          content — tap a pill or swipe the content left/right on touch to
-          change division (ported from the mobile app; replaces the header's
-          Division dropdown). Writes the same ?div= URL param. */}
-      <DivisionPager
-        divisions={eventDivisions.map((d) => ({ value: d, label: d }))}
-        active={eventDivisions.includes(gender as UsauDivision) ? (gender as UsauDivision) : null}
-        onChange={setDivision}
-      >
       {/* ── Pools — standings cards + per-pool game lists (merged) ───────── */}
       {active === 'pools' && (
         <section aria-labelledby="pools-heading" className="flex flex-col gap-8">
@@ -749,7 +671,6 @@ function EventTabsView(props: {
             : 'No pool or bracket data scraped for this event yet.'}
         </div>
       )}
-      </DivisionPager>
     </>
   );
 }

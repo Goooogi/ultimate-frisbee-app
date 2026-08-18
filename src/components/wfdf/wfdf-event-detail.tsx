@@ -151,40 +151,46 @@ export function WfdfEventDetail({ event }: Props) {
     divParam != null && divisions.some((d) => d.name === divParam) ? divParam : defaultDiv;
   const setActiveDiv = (next: string) => setDivParam(next === defaultDiv ? null : next);
 
-  const teams = useMemo(
-    () => event.teams.filter((t) => t.divisionName === activeDiv),
-    [event.teams, activeDiv],
-  );
-  const games = useMemo(
-    () => event.games.filter((g) => g.divisionName === activeDiv),
-    [event.games, activeDiv],
-  );
+  // Tab in the URL too (?tab=), same survival rules as the division. The
+  // param itself is global/shared — but which tab is EFFECTIVE (falls back
+  // to the division's own first-filled section when the param names a tab
+  // this division can't fill) must be resolved per-division, since with live
+  // preview the neighbor division renders mid-swipe independently of
+  // whatever the active division's tab is.
+  const [tabParam, setTabParam] = useViewParam('tab');
+  const activeTab = (tabParam as WfdfTabKey | null) ?? 'pools';
+  const setActiveTab = (next: WfdfTabKey) => setTabParam(next);
 
-  // Standings order:
-  //  1. final_standing when the source provides it (modern events do; legacy
-  //     Ultiorganizer events — e.g. WUC 2024 — leave it null for every team).
-  //  2. Otherwise fall back to RECORD: win% desc → more wins → fewer losses.
-  //     Without this, null-standing teams sorted alphabetically, which put a
-  //     9-0 USA at the BOTTOM. Record is the meaningful ranking when there's no
-  //     official final placement.
-  //  3. SEED asc, then SOTG desc — pre-tournament every record ties 0-0, and a
-  //     name tie-break rendered WUCC standings A→Z. Seed is the pre-play order
-  //     (all WUCC teams are seeded); spirit is the live tie-break for legacy
-  //     events with no seeds. (Mobile parity 2026-08-16.)
-  //  4. Name as the final tie-break.
-  // Whether the source gave us official final placements (modern events) or we
-  // must rank by record (legacy pool-only events).
-  const hasOfficialStanding = useMemo(() => teams.some((t) => t.finalStanding != null), [teams]);
+  // Per-division derivation — must be callable for ANY division in the list,
+  // not just activeDiv, because DivisionPager's renderDivision also mounts
+  // the neighbor division live while a swipe is in flight.
+  const deriveDivision = (div: string) => {
+    const teams = event.teams.filter((t) => t.divisionName === div);
+    const games = event.games.filter((g) => g.divisionName === div);
 
-  const standings = useMemo(() => {
-    const anyStanding = hasOfficialStanding;
+    // Standings order:
+    //  1. final_standing when the source provides it (modern events do; legacy
+    //     Ultiorganizer events — e.g. WUC 2024 — leave it null for every team).
+    //  2. Otherwise fall back to RECORD: win% desc → more wins → fewer losses.
+    //     Without this, null-standing teams sorted alphabetically, which put a
+    //     9-0 USA at the BOTTOM. Record is the meaningful ranking when there's no
+    //     official final placement.
+    //  3. SEED asc, then SOTG desc — pre-tournament every record ties 0-0, and a
+    //     name tie-break rendered WUCC standings A→Z. Seed is the pre-play order
+    //     (all WUCC teams are seeded); spirit is the live tie-break for legacy
+    //     events with no seeds. (Mobile parity 2026-08-16.)
+    //  4. Name as the final tie-break.
+    // Whether the source gave us official final placements (modern events) or we
+    // must rank by record (legacy pool-only events).
+    const hasOfficialStanding = teams.some((t) => t.finalStanding != null);
+
     const winPct = (t: (typeof teams)[number]) => {
       const w = t.wins ?? 0;
       const l = t.losses ?? 0;
       return w + l > 0 ? w / (w + l) : -1; // teams with no games sink below 0-x
     };
-    return [...teams].sort((a, b) => {
-      if (anyStanding) {
+    const standings = [...teams].sort((a, b) => {
+      if (hasOfficialStanding) {
         const d = (a.finalStanding ?? 999) - (b.finalStanding ?? 999);
         if (d !== 0) return d;
       }
@@ -200,52 +206,59 @@ export function WfdfEventDetail({ event }: Props) {
       if (gd !== 0) return gd;
       return a.name.localeCompare(b.name);
     });
-  }, [teams, hasOfficialStanding]);
 
-  const poolGames = useMemo(() => games.filter((g) => !g.isBracket), [games]);
-  const bracketGames = useMemo(() => games.filter((g) => g.isBracket), [games]);
-  const hasBracketTree = useMemo(
-    () => hasWfdfBracket(activeDiv, event.games, event.teams),
-    [activeDiv, event.games, event.teams],
-  );
+    const poolGames = games.filter((g) => !g.isBracket);
+    const bracketGames = games.filter((g) => g.isBracket);
+    const hasBracketTree = hasWfdfBracket(div, event.games, event.teams);
 
-  // Bracket games the trees DON'T place (Pre-quarter, Crossover, Round of 32,
-  // the placement round-robins) still render as a flat section below the trees
-  // — a played game must never be invisible. 307 games across 13 events fall
-  // through classifyRound, so without this they vanish wherever a tree renders.
-  const uncoveredBracketGames = useMemo(() => {
-    if (!hasBracketTree) return [];
-    const covered = wfdfBracketCoveredIds(activeDiv, event.games, event.teams);
-    // Unplaced games with neither team decided are pure structure (e.g. a
-    // standalone placement pool's TBD slots) — hidden until a team lands.
-    return bracketGames.filter(
-      (g) => !covered.has(g.id) && (g.homeTeamId != null || g.awayTeamId != null),
-    );
-  }, [hasBracketTree, activeDiv, event.games, event.teams, bracketGames]);
+    // Bracket games the trees DON'T place (Pre-quarter, Crossover, Round of 32,
+    // the placement round-robins) still render as a flat section below the trees
+    // — a played game must never be invisible. 307 games across 13 events fall
+    // through classifyRound, so without this they vanish wherever a tree renders.
+    let uncoveredBracketGames: WfdfEvent['games'] = [];
+    if (hasBracketTree) {
+      const covered = wfdfBracketCoveredIds(div, event.games, event.teams);
+      // Unplaced games with neither team decided are pure structure (e.g. a
+      // standalone placement pool's TBD slots) — hidden until a team lands.
+      uncoveredBracketGames = bracketGames.filter(
+        (g) => !covered.has(g.id) && (g.homeTeamId != null || g.awayTeamId != null),
+      );
+    }
 
-  // Which section tabs this division can actually fill. Standings is gated on
-  // having teams at all (it ranks by record when no official final_standing
-  // exists); pools/bracket on having those games. Order is the reading order:
-  // pools → bracket → standings.
-  const visibleTabs = useMemo<WfdfTabKey[]>(() => {
-    const out: WfdfTabKey[] = [];
-    if (poolGames.length > 0) out.push('pools');
-    if (bracketGames.length > 0) out.push('bracket');
-    if (standings.length > 0) out.push('standings');
-    return out;
-  }, [poolGames.length, bracketGames.length, standings.length]);
+    // Which section tabs this division can actually fill. Standings is gated on
+    // having teams at all (it ranks by record when no official final_standing
+    // exists); pools/bracket on having those games. Order is the reading order:
+    // pools → bracket → standings.
+    const visibleTabs: WfdfTabKey[] = [];
+    if (poolGames.length > 0) visibleTabs.push('pools');
+    if (bracketGames.length > 0) visibleTabs.push('bracket');
+    if (standings.length > 0) visibleTabs.push('standings');
 
-  // Tab in the URL too (?tab=), same survival rules as the division.
-  const [tabParam, setTabParam] = useViewParam('tab');
-  const activeTab = (tabParam as WfdfTabKey | null) ?? 'pools';
-  const setActiveTab = (next: WfdfTabKey) => setTabParam(next);
+    // Resolve synchronously rather than via an effect — switching divisions can
+    // invalidate the current tab (a division with no bracket), and waiting a
+    // render to correct it paints one frame of an empty section. Per-division
+    // so the neighbor being live-previewed mid-swipe falls back to ITS OWN
+    // first-filled section instead of inheriting the active division's tab.
+    const effectiveTab: WfdfTabKey = visibleTabs.includes(activeTab)
+      ? activeTab
+      : (visibleTabs[0] ?? 'pools');
 
-  // Resolve synchronously rather than via an effect — switching divisions can
-  // invalidate the current tab (a division with no bracket), and waiting a
-  // render to correct it paints one frame of an empty section.
-  const effectiveTab: WfdfTabKey = visibleTabs.includes(activeTab)
-    ? activeTab
-    : (visibleTabs[0] ?? 'pools');
+    return {
+      teams,
+      games,
+      standings,
+      hasOfficialStanding,
+      poolGames,
+      bracketGames,
+      hasBracketTree,
+      uncoveredBracketGames,
+      visibleTabs,
+      effectiveTab,
+    };
+  };
+
+  const active = deriveDivision(activeDiv);
+  const { visibleTabs, effectiveTab } = active;
 
   const divisionOptions = useMemo(
     () => divisions.map((d) => ({ value: d.name, label: d.name })),
@@ -266,7 +279,7 @@ export function WfdfEventDetail({ event }: Props) {
         <div
           role="tablist"
           aria-label="Event views"
-          className="-mx-5 px-5 md:mx-0 md:px-0 flex gap-2 overflow-x-auto scrollbar-none"
+          className="self-start mb-2.5 inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 max-w-full overflow-x-auto scrollbar-none"
         >
           {visibleTabs.map((t) => {
             const on = t === effectiveTab;
@@ -278,10 +291,10 @@ export function WfdfEventDetail({ event }: Props) {
                 aria-selected={on}
                 onClick={() => setActiveTab(t)}
                 className={[
-                  'shrink-0 inline-flex items-center justify-center px-4 min-h-[40px] rounded-full',
-                  'text-[11px] font-bold tracking-[0.14em] uppercase font-tight cursor-pointer',
+                  'shrink-0 inline-flex items-center justify-center px-3.5 py-[5px] rounded-[15px]',
+                  'text-[11px] font-bold tracking-[0.06em] uppercase font-tight cursor-pointer',
                   'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  on ? 'bg-ink text-bg' : 'bg-ink/5 text-muted hover:text-ink',
+                  on ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink',
                 ].join(' ')}
               >
                 {TAB_LABELS[t]}
@@ -299,15 +312,56 @@ export function WfdfEventDetail({ event }: Props) {
         divisions={divisionOptions}
         active={activeDiv}
         onChange={setActiveDiv}
+        renderDivision={(div) => (
+          <DivisionContent div={div} event={event} derive={deriveDivision} />
+        )}
         contentClassName="flex flex-col gap-8"
-      >
+      />
+    </div>
+  );
+}
+
+function DivisionContent({
+  div,
+  event,
+  derive,
+}: {
+  div: string;
+  event: WfdfEvent;
+  derive: (div: string) => {
+    teams: WfdfEvent['teams'];
+    games: WfdfEvent['games'];
+    standings: WfdfEvent['teams'];
+    hasOfficialStanding: boolean;
+    poolGames: WfdfEvent['games'];
+    bracketGames: WfdfEvent['games'];
+    hasBracketTree: boolean;
+    uncoveredBracketGames: WfdfEvent['games'];
+    visibleTabs: WfdfTabKey[];
+    effectiveTab: WfdfTabKey;
+  };
+}) {
+  const {
+    teams,
+    games,
+    standings,
+    hasOfficialStanding,
+    poolGames,
+    bracketGames,
+    hasBracketTree,
+    uncoveredBracketGames,
+    effectiveTab,
+  } = derive(div);
+
+  return (
+    <>
       {/* Bracket — the trees when the shape parses, else the flat list. Games
           the trees don't place (Pre-quarter, Crossover, Round of 32, placement
           round-robins) still list below, so no played game is ever invisible. */}
       {effectiveTab === 'bracket' && bracketGames.length > 0 && (
         hasBracketTree ? (
           <>
-            <WfdfBracketTree divisionName={activeDiv} games={event.games} teams={event.teams} />
+            <WfdfBracketTree divisionName={div} games={event.games} teams={event.teams} />
             {uncoveredBracketGames.length > 0 && (
               <GameSection heading="More bracket games" games={uncoveredBracketGames} groupByPool />
             )}
@@ -391,8 +445,7 @@ export function WfdfEventDetail({ event }: Props) {
       {standings.length === 0 && games.length === 0 && (
         <p className="text-muted font-tight text-[13px]">No results in this division yet.</p>
       )}
-      </DivisionPager>
-    </div>
+    </>
   );
 }
 
