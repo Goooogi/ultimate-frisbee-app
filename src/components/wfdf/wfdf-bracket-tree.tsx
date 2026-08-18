@@ -26,6 +26,11 @@ import { useMemo } from 'react';
 import { assignPositions as sharedAssignPositions } from '@/lib/bracket-tree';
 import Link from 'next/link';
 import type { WfdfEventDetail } from '@/lib/wfdf/data';
+import {
+  buildStructuralRails,
+  classifyStructRound,
+  type StructuralRail,
+} from '@/lib/wfdf/bracket-structure';
 import { WfdfFlag } from './wfdf-flag';
 
 type Game = WfdfEventDetail['games'][number];
@@ -55,6 +60,13 @@ interface BracketGame {
   awayScore: number | null;
   status: string;
   scheduledAt: string | null;
+  /** Placeholder labels for unseeded sides ("W of R1 G3", "1st Pool A") —
+   *  structural rails only; legacy results-walk games leave them null. */
+  homeFallback: string | null;
+  awayFallback: string | null;
+  /** Explicit feeder game ids (structural rails) — lets the layout engine
+   *  order and connect columns whose teams aren't decided yet. */
+  sourceIds?: string[];
 }
 
 // Canonical round LEVEL within a playoff group. A group has whatever levels
@@ -241,6 +253,7 @@ function MatchCard({ game, compact = false }: { game: BracketGame; compact?: boo
       <TeamLine
         teamId={game.homeId}
         name={game.homeName}
+        fallback={game.homeFallback}
         seed={game.homeSeed}
         flag={game.homeFlag}
         country={game.homeCountry}
@@ -254,6 +267,7 @@ function MatchCard({ game, compact = false }: { game: BracketGame; compact?: boo
       <TeamLine
         teamId={game.awayId}
         name={game.awayName}
+        fallback={game.awayFallback}
         seed={game.awaySeed}
         flag={game.awayFlag}
         country={game.awayCountry}
@@ -270,6 +284,7 @@ function MatchCard({ game, compact = false }: { game: BracketGame; compact?: boo
 function TeamLine({
   teamId,
   name,
+  fallback,
   seed,
   flag,
   country,
@@ -281,6 +296,8 @@ function TeamLine({
 }: {
   teamId: string | null;
   name: string | null;
+  /** Placeholder text for an unseeded slot ("W of R1 G3", "1st Pool A"). */
+  fallback?: string | null;
   seed: number | null;
   flag: string | null;
   country: string | null;
@@ -290,9 +307,10 @@ function TeamLine({
   done: boolean;
   compact?: boolean;
 }) {
-  const labelColor = won ? 'text-ink' : lost ? 'text-faint' : 'text-muted';
+  const isPlaceholder = name == null;
+  const labelColor = won ? 'text-ink' : lost || isPlaceholder ? 'text-faint' : 'text-muted';
   const scoreColor = won ? 'text-accent' : lost ? 'text-faint' : 'text-muted';
-  const fontWeight = won ? 'font-bold' : 'font-semibold';
+  const fontWeight = won ? 'font-bold' : isPlaceholder ? 'font-medium' : 'font-semibold';
 
   const inner = (
     <span className={`flex items-center gap-2 flex-1 min-w-0 ${labelColor}`}>
@@ -300,7 +318,9 @@ function TeamLine({
         <span className="tabular text-[10px] text-faint font-bold w-4 text-right shrink-0">{seed}</span>
       )}
       <WfdfFlag flagFile={flag} countryCode={country} size={14} />
-      <span className={`text-[13px] font-tight truncate ${fontWeight}`}>{name ?? 'TBD'}</span>
+      <span className={`text-[13px] font-tight truncate ${fontWeight}`}>
+        {name ?? fallback ?? 'TBD'}
+      </span>
     </span>
   );
 
@@ -342,19 +362,46 @@ function MedalTag({ place, name }: { place: 'gold' | 'silver' | 'bronze'; name: 
 
 function buildBrackets(divisionName: string, games: Game[], teams: Team[]): Bracket[] {
   const teamById = new Map(teams.map((t) => [t.id, t]));
+  const divisionGames = games.filter((g) => g.divisionName === divisionName);
 
+  // ── Structural pass (modern events with scheduling metadata) ──────────────
+  // Each playoff group first tries the source-described full structure —
+  // future rounds included, TBD slots showing their placeholder text. Groups
+  // the metadata can't fully describe fall through to the legacy results-walk
+  // below, so legacy events render exactly as before.
+  const structuralBrackets: Bracket[] = [];
+  const structuralGroups = new Set<string>();
+  {
+    const groupNames = new Set<string>();
+    for (const g of divisionGames) {
+      if (!g.isBracket) continue;
+      const c = classifyStructRound(g.poolName);
+      if (c) groupNames.add(c.group);
+    }
+    for (const group of groupNames) {
+      const rails = buildStructuralRails(group, divisionGames);
+      if (!rails) continue;
+      structuralGroups.add(group);
+      for (const rail of rails) structuralBrackets.push(railToBracket(rail, teamById));
+    }
+  }
+
+  // ── Legacy results-walk (groups without usable scheduling metadata) ───────
   // Collect this division's numbered-playoff bracket games, tagged by round +
   // group. Multiple groups may coexist (e.g. "Playoff (1-16)" and
   // "Placement (17-24)") — we handle each group's brackets independently.
   const byGroup = new Map<string, BracketGame[]>();
-  for (const g of games) {
-    if (g.divisionName !== divisionName || !g.isBracket) continue;
+  for (const g of divisionGames) {
+    if (!g.isBracket) continue;
     const c = classifyRound(g.poolName);
-    if (!c) continue;
+    if (!c || structuralGroups.has(c.group)) continue;
     if (!byGroup.has(c.group)) byGroup.set(c.group, []);
     byGroup.get(c.group)!.push(enrich(g, c.level, teamById));
   }
-  if (byGroup.size === 0) return [];
+  if (byGroup.size === 0) {
+    structuralBrackets.sort((a, b) => bracketMinRank(a) - bracketMinRank(b));
+    return structuralBrackets;
+  }
 
   const standingOf = (id: string | null) => (id ? teamById.get(id)?.finalStanding ?? 9999 : 9999);
 
@@ -466,8 +513,64 @@ function buildBrackets(divisionName: string, games: Game[], teams: Team[]): Brac
   }
 
   // Order: championship (contains rank 1) first, then by starting rank.
-  brackets.sort((a, b) => bracketMinRank(a) - bracketMinRank(b));
-  return brackets;
+  const merged = [...structuralBrackets, ...brackets];
+  merged.sort((a, b) => bracketMinRank(a) - bracketMinRank(b));
+  return merged;
+}
+
+// ─── Structural rail → Bracket (rendering shape) ─────────────────────────────
+
+function railToBracket(rail: StructuralRail, teamById: Map<string, Team>): Bracket {
+  const gameCols = rail.columns.map((col) =>
+    col.map((g) => {
+      const bg = enrich(g, LEVEL_BASE as RoundLevel, teamById);
+      const fb = rail.fallbacks.get(g.id);
+      bg.homeFallback = fb?.home ?? null;
+      bg.awayFallback = fb?.away ?? null;
+      const src = rail.sources.get(g.id);
+      if (src && src.length > 0) bg.sourceIds = src;
+      return bg;
+    }),
+  );
+  const relLabels = relativeRoundLabels(gameCols.length);
+  const columns: RoundColumn[] = gameCols.map((gs, i) => ({
+    level: (i === gameCols.length - 1 ? LEVEL_FINAL : LEVEL_BASE) as RoundLevel,
+    label: relLabels[i],
+    games: gs,
+  }));
+
+  // Rail = the teams whose final placements land in this section's rank range
+  // (drives medals; empty until standings post).
+  const railRows = [...teamById.values()]
+    .filter(
+      (t) =>
+        t.finalStanding != null &&
+        t.finalStanding >= rail.minRank &&
+        t.finalStanding <= rail.maxRank,
+    )
+    .sort((a, b) => (a.finalStanding ?? 0) - (b.finalStanding ?? 0))
+    .map((t) => ({
+      rank: t.finalStanding as number,
+      teamName: t.name,
+      countryCode: t.countryCode,
+      flagFile: t.flagFile,
+    }));
+
+  let title: string;
+  let medals: Bracket['medals'] = null;
+  if (rail.minRank === 1) {
+    title = 'Championship Bracket';
+    medals = {
+      gold: railRows.find((r) => r.rank === 1)?.teamName ?? null,
+      silver: railRows.find((r) => r.rank === 2)?.teamName ?? null,
+      bronze: railRows.find((r) => r.rank === 3)?.teamName ?? null,
+    };
+    if (!medals.gold && !medals.silver && !medals.bronze) medals = null;
+  } else {
+    title = `${ordinal(rail.minRank)}–${ordinal(rail.maxRank)} Place`;
+  }
+
+  return { id: `${rail.group}-${rail.minRank}`, title, columns, rail: railRows, medals };
 }
 
 function winnerOf(g: BracketGame): string | null {
@@ -598,6 +701,8 @@ function enrich(g: Game, level: RoundLevel, teamById: Map<string, Team>): Bracke
     awayScore: g.awayScore,
     status: g.status,
     scheduledAt: g.scheduledAt,
+    homeFallback: null,
+    awayFallback: null,
   };
 }
 

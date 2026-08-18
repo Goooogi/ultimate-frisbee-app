@@ -82,6 +82,17 @@ export interface WfdfGameRow {
   /** Field number ("1", "12") or venue string from the reservation join;
    *  null on legacy events and rows ingested before 2026-08-16. */
   fieldName: string | null;
+  /** Source's numeric game id — orders games within a pool for the bracket
+   *  placeholder resolver ("R1 Winner 3" = 3rd game of that pool by this id). */
+  wfdfGameId: number | null;
+  /** Placeholder slot metadata for unseeded bracket games ("R1 Winner 3",
+   *  "1A") + the NAME of the pool the slot is fed from. Populated on events
+   *  ingested since 2026-08-18; null on legacy events and seeded games where
+   *  the source drops them. */
+  homeSchedulingName: string | null;
+  awaySchedulingName: string | null;
+  homeSchedulingPool: string | null;
+  awaySchedulingPool: string | null;
 }
 
 export interface WfdfRosterPlayer {
@@ -305,7 +316,8 @@ export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
     db
       .from('wfdf_games')
       .select(
-        'id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
+        'id, wfdf_game_id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
+          'home_scheduling_name, away_scheduling_name, home_scheduling_pool, away_scheduling_pool, ' +
           'division:division_id(name), ' +
           'home:home_team_id(id, name, country_code), away:away_team_id(id, name, country_code)',
       )
@@ -332,6 +344,121 @@ export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
     })),
     teams: ((teams ?? []) as Row[]).map(mapTeamCard),
     games: ((games ?? []) as Row[]).map(mapGameRow),
+  };
+}
+
+// ─── Game detail (matchup page) ────────────────────────────────────────────────
+
+/** One point in the goal log, with scorer/assist resolved to roster names.
+ *  homeScore/awayScore are the running score AFTER the point. */
+export interface WfdfGoalRow {
+  num: number;
+  timeS: number | null;
+  isHomeGoal: boolean;
+  isCallahan: boolean;
+  homeScore: number;
+  awayScore: number;
+  scorerName: string | null;
+  assistName: string | null;
+}
+
+/** Per-player line for THIS game (from the source's game scoreboard — every
+ *  player who took the field, including 0-stat rows). */
+export interface WfdfGameStatLine {
+  wfdfPlayerId: number;
+  teamId: string | null;
+  fullName: string | null;
+  jerseyNumber: string | null;
+  goals: number;
+  assists: number;
+  callahans: number;
+  total: number;
+}
+
+export interface WfdfGameDetail {
+  game: WfdfGameRow;
+  eventId: string;
+  eventSlug: string;
+  eventName: string;
+  goals: WfdfGoalRow[];
+  playerStats: WfdfGameStatLine[];
+}
+
+export async function getGameDetail(gameId: string): Promise<WfdfGameDetail | null> {
+  const db = supabase();
+  const { data: g } = await db
+    .from('wfdf_games')
+    .select(
+      'id, event_id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
+        'division:division_id(name), ' +
+        'home:home_team_id(id, name, country_code), away:away_team_id(id, name, country_code), ' +
+        'event:event_id(id, slug, name)',
+    )
+    .eq('id', gameId)
+    .maybeSingle();
+  if (!g) return null;
+  const row = g as Row;
+  const event = row.event as Row | null;
+  const eventId = row.event_id as string;
+
+  const [{ data: goals }, { data: stats }] = await Promise.all([
+    db
+      .from('wfdf_game_goals')
+      .select(
+        'num, time_s, is_home_goal, is_callahan, home_score, away_score, scorer_wfdf_player_id, assist_wfdf_player_id',
+      )
+      .eq('game_id', gameId)
+      .order('num'),
+    db
+      .from('wfdf_game_player_stats')
+      .select('wfdf_player_id, team_id, jersey_number, goals, assists, callahans, total')
+      .eq('game_id', gameId),
+  ]);
+
+  // Resolve names in one roster read scoped to the players actually involved.
+  const playerIds = new Set<number>();
+  for (const r of (goals ?? []) as Row[]) {
+    if (r.scorer_wfdf_player_id != null) playerIds.add(r.scorer_wfdf_player_id as number);
+    if (r.assist_wfdf_player_id != null) playerIds.add(r.assist_wfdf_player_id as number);
+  }
+  for (const r of (stats ?? []) as Row[]) playerIds.add(r.wfdf_player_id as number);
+  let nameById = new Map<number, string>();
+  if (playerIds.size > 0) {
+    const { data: roster } = await db
+      .from('wfdf_rosters')
+      .select('wfdf_player_id, full_name')
+      .eq('event_id', eventId)
+      .in('wfdf_player_id', [...playerIds]);
+    nameById = new Map(
+      ((roster ?? []) as Row[]).map((r) => [r.wfdf_player_id as number, r.full_name as string]),
+    );
+  }
+
+  return {
+    game: mapGameRow(g as Row),
+    eventId,
+    eventSlug: (event?.slug as string) ?? '',
+    eventName: (event?.name as string) ?? '',
+    goals: ((goals ?? []) as Row[]).map((r) => ({
+      num: r.num as number,
+      timeS: (r.time_s as number) ?? null,
+      isHomeGoal: !!r.is_home_goal,
+      isCallahan: !!r.is_callahan,
+      homeScore: r.home_score as number,
+      awayScore: r.away_score as number,
+      scorerName: nameById.get(r.scorer_wfdf_player_id as number) ?? null,
+      assistName: nameById.get(r.assist_wfdf_player_id as number) ?? null,
+    })),
+    playerStats: ((stats ?? []) as Row[]).map((r) => ({
+      wfdfPlayerId: r.wfdf_player_id as number,
+      teamId: (r.team_id as string) ?? null,
+      fullName: nameById.get(r.wfdf_player_id as number) ?? null,
+      jerseyNumber: normalizeJersey((r.jersey_number as string) ?? null),
+      goals: (r.goals as number) ?? 0,
+      assists: (r.assists as number) ?? 0,
+      callahans: (r.callahans as number) ?? 0,
+      total: (r.total as number) ?? 0,
+    })),
   };
 }
 
@@ -892,6 +1019,11 @@ function mapGameRow(g: Row): WfdfGameRow {
     status: g.status as string,
     scheduledAt: (g.scheduled_at as string) ?? null,
     fieldName: (g.field_name as string) ?? null,
+    wfdfGameId: (g.wfdf_game_id as number) ?? null,
+    homeSchedulingName: (g.home_scheduling_name as string) ?? null,
+    awaySchedulingName: (g.away_scheduling_name as string) ?? null,
+    homeSchedulingPool: (g.home_scheduling_pool as string) ?? null,
+    awaySchedulingPool: (g.away_scheduling_pool as string) ?? null,
   };
 }
 

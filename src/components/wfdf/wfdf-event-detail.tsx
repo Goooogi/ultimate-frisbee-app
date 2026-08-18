@@ -9,6 +9,7 @@
 
 import { useMemo } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useViewParam } from '@/lib/use-view-param';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
@@ -67,14 +68,16 @@ function poolDisplayLabel(pool: string): string {
 // a division (AOBUC24's "Pool A" spans several divisions' pools), so grouping
 // across divisions would merge unrelated pools into one oversized card.
 //
-// Teams are ordered by seed when present, then name — WFDF pool play has no
-// per-pool standings to rank by, so this is presentation order, not a table.
+// Teams are ordered by RECORD in that pool's games as results come through —
+// wins desc, then point diff desc (Hunter, 2026-08-18), then seed/name for
+// the pre-play state where nobody has a result yet.
 function buildWfdfPoolTeams(
   games: WfdfEvent['games'],
   teams: WfdfEvent['teams'],
 ): Map<string, WfdfEvent['teams']> {
   const byId = new Map(teams.map((t) => [t.id, t]));
   const byPool = new Map<string, Map<string, WfdfEvent['teams'][number]>>();
+  const gamesByPool = new Map<string, WfdfEvent['games']>();
 
   for (const g of games) {
     if (!isRealPoolName(g.poolName)) continue;
@@ -89,13 +92,46 @@ function buildWfdfPoolTeams(
       if (team) bucket.set(team.id, team);
     }
     byPool.set(pool, bucket);
+    const pg = gamesByPool.get(pool) ?? [];
+    pg.push(g);
+    gamesByPool.set(pool, pg);
   }
 
   const out = new Map<string, WfdfEvent['teams']>();
   for (const [pool, bucket] of byPool) {
+    // In-pool record and point diff from this pool's scored games only —
+    // event-wide W-L would drag bracket results into pool order.
+    const stats = new Map<string, { w: number; l: number; diff: number }>();
+    const stat = (id: string) => {
+      let s = stats.get(id);
+      if (!s) {
+        s = { w: 0, l: 0, diff: 0 };
+        stats.set(id, s);
+      }
+      return s;
+    };
+    for (const g of gamesByPool.get(pool) ?? []) {
+      if (g.homeTeamId == null || g.awayTeamId == null) continue;
+      if (g.homeScore == null || g.awayScore == null) continue;
+      stat(g.homeTeamId).diff += g.homeScore - g.awayScore;
+      stat(g.awayTeamId).diff += g.awayScore - g.homeScore;
+      if (g.homeScore > g.awayScore) {
+        stat(g.homeTeamId).w += 1;
+        stat(g.awayTeamId).l += 1;
+      } else if (g.awayScore > g.homeScore) {
+        stat(g.awayTeamId).w += 1;
+        stat(g.homeTeamId).l += 1;
+      }
+    }
+    const EMPTY = { w: 0, l: 0, diff: 0 };
     out.set(
       pool,
       [...bucket.values()].sort((a, b) => {
+        const sa = stats.get(a.id) ?? EMPTY;
+        const sb = stats.get(b.id) ?? EMPTY;
+        if (sb.w !== sa.w) return sb.w - sa.w;
+        if (sa.l !== sb.l) return sa.l - sb.l;
+        if (sb.diff !== sa.diff) return sb.diff - sa.diff;
         const sd = (a.seed ?? 9999) - (b.seed ?? 9999);
         return sd !== 0 ? sd : a.name.localeCompare(b.name);
       }),
@@ -180,7 +216,11 @@ export function WfdfEventDetail({ event }: Props) {
   const uncoveredBracketGames = useMemo(() => {
     if (!hasBracketTree) return [];
     const covered = wfdfBracketCoveredIds(activeDiv, event.games, event.teams);
-    return bracketGames.filter((g) => !covered.has(g.id));
+    // Unplaced games with neither team decided are pure structure (e.g. a
+    // standalone placement pool's TBD slots) — hidden until a team lands.
+    return bracketGames.filter(
+      (g) => !covered.has(g.id) && (g.homeTeamId != null || g.awayTeamId != null),
+    );
   }, [hasBracketTree, activeDiv, event.games, event.teams, bracketGames]);
 
   // Which section tabs this division can actually fill. Standings is gated on
@@ -551,6 +591,7 @@ function GameSection({
 }
 
 function GameRow({ game: g }: { game: Game }) {
+  const router = useRouter();
   const done = g.status === 'completed' && g.homeScore != null && g.awayScore != null;
   const homeWon = done && (g.homeScore ?? 0) > (g.awayScore ?? 0);
   const awayWon = done && (g.awayScore ?? 0) > (g.homeScore ?? 0);
@@ -568,7 +609,15 @@ function GameRow({ game: g }: { game: Game }) {
   const hasFooter =
     timeLabel != null || fieldLabel != null || sotg != null || (!done && g.status === 'scheduled');
   return (
-    <div className="bg-surface rounded-card shadow-card px-3 py-2.5">
+    <div
+      className="bg-surface rounded-card shadow-card px-3 py-2.5 cursor-pointer hover:shadow-card-hover transition-shadow"
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(`/wfdf/g/${g.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') router.push(`/wfdf/g/${g.id}`);
+      }}
+    >
       <TeamLine
         name={g.homeTeam}
         teamId={g.homeTeamId}
@@ -635,7 +684,11 @@ function TeamLine({
   return (
     <div className="flex items-center justify-between gap-2">
       {teamId ? (
-        <Link href={`/wfdf/teams/${teamId}`} className="min-w-0 no-underline hover:text-accent">
+        <Link
+          href={`/wfdf/teams/${teamId}`}
+          className="min-w-0 no-underline hover:text-accent"
+          onClick={(e) => e.stopPropagation()}
+        >
           {label}
         </Link>
       ) : (

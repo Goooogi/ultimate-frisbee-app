@@ -469,9 +469,25 @@ async function ingest(base: string, seasonOverride?: string): Promise<IngestResu
     return {
       event_id: eventId,
       wfdf_game_id: g.game_id,
-      division_id: home ? divUuidBySeries.get(home.series) ?? null : null,
+      // Division from the home team's series when seeded; a TBD future bracket
+      // slot has no home team, so fall back to the game's POOL's series —
+      // without this every unseeded bracket game had division_id null and was
+      // invisible to the division-filtered event screens.
+      division_id: home
+        ? divUuidBySeries.get(home.series) ?? null
+        : pool
+          ? divUuidBySeries.get(pool.series_id) ?? null
+          : null,
       home_team_id: teamUuidByWfdf.get(g.hometeam) ?? null,
       away_team_id: teamUuidByWfdf.get(g.visitorteam) ?? null,
+      // Placeholder slot metadata — display text ("R1 Winner 3", "1A") plus the
+      // NAME of the pool the slot is fed from (unique within a division), which
+      // the bracket-structure resolver keys on. Null once/if the source drops
+      // them; harmless on seeded games.
+      home_scheduling_name: g.homeschedulingname != null ? String(g.homeschedulingname) : null,
+      away_scheduling_name: g.visitorschedulingname != null ? String(g.visitorschedulingname) : null,
+      home_scheduling_pool: poolsById.get(g.home_scheduling_frompool)?.poolname ?? null,
+      away_scheduling_pool: poolsById.get(g.visitor_scheduling_frompool)?.poolname ?? null,
       home_score: g.homescore ?? null,
       away_score: g.visitorscore ?? null,
       home_sotg: g.homesotg ?? null,

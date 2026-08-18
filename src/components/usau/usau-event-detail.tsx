@@ -343,7 +343,7 @@ export function UsauEventDetail({ event }: Props) {
   // NORMALIZED TEAM NAME, then mirror each name's record onto every team_id
   // sharing that name so PoolCard's per-id lookups still resolve.
   const normName = (n: string | null | undefined) => (n ?? '').trim().toLowerCase();
-  const nameRecords = new Map<string, { wins: number; losses: number; name: string }>();
+  const nameRecords = new Map<string, { wins: number; losses: number; diff: number; name: string }>();
   const seenGameKeys = new Set<string>();
   for (const gs of poolGames.values()) {
     for (const g of gs) {
@@ -365,20 +365,23 @@ export function UsauEventDetail({ event }: Props) {
       const loseName = aWon ? nb : na;
       const winDisplay = aWon ? (g.teamAName ?? '') : (g.teamBName ?? '');
       const loseDisplay = aWon ? (g.teamBName ?? '') : (g.teamAName ?? '');
-      const rw = nameRecords.get(winName) ?? { wins: 0, losses: 0, name: winDisplay };
+      const margin = Math.abs(g.scoreA - g.scoreB);
+      const rw = nameRecords.get(winName) ?? { wins: 0, losses: 0, diff: 0, name: winDisplay };
       rw.wins += 1;
+      rw.diff += margin;
       nameRecords.set(winName, rw);
-      const rl = nameRecords.get(loseName) ?? { wins: 0, losses: 0, name: loseDisplay };
+      const rl = nameRecords.get(loseName) ?? { wins: 0, losses: 0, diff: 0, name: loseDisplay };
       rl.losses += 1;
+      rl.diff -= margin;
       nameRecords.set(loseName, rl);
     }
   }
   // Mirror each name's record onto every team_id that carries that name, so
   // PoolCard (keyed by teamId) reads the deduped record for either dup row.
-  const poolRecords = new Map<string, { wins: number; losses: number }>();
+  const poolRecords = new Map<string, { wins: number; losses: number; diff: number }>();
   for (const t of teams) {
     const rec = nameRecords.get(normName(t.teamName));
-    if (rec) poolRecords.set(t.teamId, { wins: rec.wins, losses: rec.losses });
+    if (rec) poolRecords.set(t.teamId, { wins: rec.wins, losses: rec.losses, diff: rec.diff });
   }
 
   // ── Championship finals (for the top-of-page result banners) ───────────
@@ -570,7 +573,7 @@ function EventTabsView(props: {
   teams: Team[];
   pools: Array<{ name: string; teams: Team[] }>;
   poolGames: Map<string, Game[]>;
-  poolRecords: Map<string, { wins: number; losses: number }>;
+  poolRecords: Map<string, { wins: number; losses: number; diff: number }>;
   roundGroups: Array<{ name: string; games: Game[] }>;
   placementBrackets: Array<{ name: string; games: Game[] }>;
   bracketLabel: (name: string) => string;
@@ -1058,24 +1061,26 @@ function PoolCard({
 }: {
   pool: { name: string; teams: Team[] };
   competitionLevel: string;
-  records: Map<string, { wins: number; losses: number }>;
+  records: Map<string, { wins: number; losses: number; diff: number }>;
   /** That pool's games, sorted by scheduled time — rendered in a collapsed-
    *  by-default "Games" disclosure beneath the standings (mobile parity:
    *  per-pool games merge under the pool's standings card). */
   games: Game[];
   venueState?: string | null;
 }) {
-  // Rank by pool record when we have any completed games; the incoming
-  // team order is by seed, which stays as the tiebreak within equal records.
+  // Rank by pool record when we have any completed games — tied records break
+  // on point diff (Hunter, 2026-08-18); the incoming team order is by seed,
+  // which stays as the final tiebreak within equal records.
   const anyRecords = pool.teams.some((t) => t.teamId && records.has(t.teamId));
   const ranked = anyRecords
     ? pool.teams
         .slice()
         .sort((a, b) => {
-          const ra = (a.teamId && records.get(a.teamId)) || { wins: 0, losses: 0 };
-          const rb = (b.teamId && records.get(b.teamId)) || { wins: 0, losses: 0 };
+          const ra = (a.teamId && records.get(a.teamId)) || { wins: 0, losses: 0, diff: 0 };
+          const rb = (b.teamId && records.get(b.teamId)) || { wins: 0, losses: 0, diff: 0 };
           if (rb.wins !== ra.wins) return rb.wins - ra.wins;
           if (ra.losses !== rb.losses) return ra.losses - rb.losses;
+          if (rb.diff !== ra.diff) return rb.diff - ra.diff;
           return (a.seed ?? 99) - (b.seed ?? 99);
         })
     : pool.teams;

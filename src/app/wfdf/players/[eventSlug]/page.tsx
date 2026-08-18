@@ -1,7 +1,8 @@
 // /wfdf/players/[eventSlug] — participating players for a single WFDF event.
-// The Players hub's event cards land here (not the event overview), grouped
-// by team, each name linking to the by-name resolver.
+// The Players hub's event cards land here (not the event overview), filtered
+// by division and ranked by stats, each name linking to the by-name resolver.
 
+import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
@@ -42,7 +43,12 @@ export default async function WfdfEventPlayersPage({ params }: Props) {
         { label: ev.name },
       ]}
     >
-      <WfdfEventPlayers event={ev} />
+      {/* Suspense is load-bearing: the view reads useSearchParams (?div=
+          division state), which otherwise bails the whole static render to
+          CSR (same pattern as /wfdf/events/[slug]). */}
+      <Suspense fallback={null}>
+        <WfdfEventPlayers event={ev} />
+      </Suspense>
     </PageShell>
   );
 }
