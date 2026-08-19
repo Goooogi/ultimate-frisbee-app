@@ -7,13 +7,26 @@
 // component), and the division-scoped content swipes left/right on touch.
 //
 // LIVE PREVIEW WHILE DRAGGING: content renders through `renderDivision(value)`
-// so the pager can mount the INCOMING division's REAL content on the vacated
-// side the instant a drag's direction is known — no blank page tracking the
-// finger. On commit, BOTH layers stay live (outgoing keeps rendering the old
-// division while it exits) and slide on a progress value; onChange fires at
-// release so the incoming layer becomes the active render seamlessly. Only
-// the active division (+ its neighbor mid-gesture) is ever mounted — Worlds
+// so the pager can mount the incoming division's REAL content beside the
+// active one — no blank page tracking the finger. The prev/next neighbors are
+// ALWAYS mounted (not on first drag movement — mounting mid-gesture cost a
+// jank frame, Hunter 2026-08-19), parked off-screen at ±stride and riding the
+// drag translation; a drag frame is then pure transform work, zero React
+// mounting. On commit, the active/outgoing pair takes over as two live layers
+// (outgoing keeps rendering the old division while it exits) and slides on a
+// progress value; onChange fires at release so the incoming layer becomes the
+// active render seamlessly. Mounting ceiling is active+2 neighbors — Worlds
 // events field 10+ divisions, mounting all of them would be too heavy.
+//
+// STRIDE = the content width EXCLUDING the edge-bleed gutter (contentWidth()
+// below). Parking a neighbor at a bare ±clientWidth (gutter included) or
+// leaving the side layers unpadded relative to the active layer both collapse
+// the visual gap between two divisions' cards to less than the page's own
+// edge margin — half-swiped cards then look like they're touching. Every
+// side layer carries the identical px-5 gutter as the active layer, and every
+// offset (park position + commit interpolation) uses this same stride, so the
+// gap between two divisions' cards at any point in the gesture exactly equals
+// the cards' own screen-edge margin (Hunter, 2026-08-19).
 //
 // Gesture negotiation mirrors the mobile component: only decisively-horizontal
 // moves are claimed (vertical page scroll passes through untouched), and a
@@ -54,6 +67,15 @@ const FLICK_MIN_TRAVEL = 16;
 const SLIDE_MS = 280;
 const EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'; // ease-out cubic
 
+// Slide/commit distance = the CONTENT width, excluding the edge-bleed
+// padding (the "stride" — see the header note). clientWidth includes that
+// padding, which would inflate the commit threshold by the gutter (and
+// collapse the inter-page gap below the page's own edge margin).
+function contentWidth(container: HTMLDivElement): number {
+  const cs = getComputedStyle(container);
+  return container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+}
+
 /** True when the touch landed inside a descendant that scrolls horizontally
  *  itself (bracket trees) — that scroller owns the gesture. */
 function insideHorizontalScroller(target: EventTarget | null, stop: HTMLElement): boolean {
@@ -82,7 +104,8 @@ export function DivisionPager<V extends string>({
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const prevRef = useRef<HTMLDivElement>(null);
-  const nextRef = useRef<HTMLDivElement>(null);
+  const parkedPrevRef = useRef<HTMLDivElement>(null);
+  const parkedNextRef = useRef<HTMLDivElement>(null);
   const tabRowRef = useRef<HTMLDivElement>(null);
   const tabFramesRef = useRef<Map<string, { offsetLeft: number; width: number }>>(new Map());
 
@@ -103,14 +126,38 @@ export function DivisionPager<V extends string>({
     ignored: boolean;
   } | null>(null);
   const transitioningRef = useRef(false);
-  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
-  const previewIndexRef = useRef<number | null>(null);
-  previewIndexRef.current = previewIndex;
   const [transition, setTransition] = useState<{
     prevValue: V;
     dir: 1 | -1;
     fromDx: number;
   } | null>(null);
+
+  // The parked neighbors are ALWAYS mounted (not spun up on first drag
+  // movement) so a drag frame is pure transform work — see the header note.
+  const prevIndex = activeIndex > 0 ? activeIndex - 1 : null;
+  const nextIndex = activeIndex < count - 1 ? activeIndex + 1 : null;
+  const parkedPrev = prevIndex != null ? divisions[prevIndex] : null;
+  const parkedNext = nextIndex != null ? divisions[nextIndex] : null;
+
+  // Re-park both neighbors at rest whenever the active division changes
+  // (including after a commit) — clears any transform left over from the
+  // previous gesture/transition so they sit exactly at ±stride again.
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const w = contentWidth(container);
+    const p = parkedPrevRef.current;
+    const n = parkedNextRef.current;
+    if (p) {
+      p.style.transition = 'none';
+      p.style.transform = `translateX(${-w}px)`;
+    }
+    if (n) {
+      n.style.transition = 'none';
+      n.style.transform = `translateX(${w}px)`;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex]);
 
   // Runs the committed slide: both layers positioned from where the finger
   // left off, then transitioned — outgoing to off-screen, incoming to 0.
@@ -150,23 +197,34 @@ export function DivisionPager<V extends string>({
     row.scrollTo({ left: Math.max(0, target), behavior: 'smooth' });
   }, [activeValue]);
 
-  // Slide/commit distance = the CONTENT width, excluding the edge-bleed
-  // padding. clientWidth includes that padding, which would inflate the
-  // commit threshold by the gutter (and stretch the slide) on mobile.
-  const contentWidth = (container: HTMLDivElement) => {
-    const cs = getComputedStyle(container);
-    return container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-  };
-
   const springBack = () => {
+    const container = containerRef.current;
     const content = contentRef.current;
-    if (!content) return;
+    if (!container || !content) return;
+    const w = contentWidth(container);
+    const p = parkedPrevRef.current;
+    const n = parkedNextRef.current;
     content.style.transition = `transform 200ms ${EASE}`;
     content.style.transform = 'translateX(0px)';
+    if (p) {
+      p.style.transition = `transform 200ms ${EASE}`;
+      p.style.transform = `translateX(${-w}px)`;
+    }
+    if (n) {
+      n.style.transition = `transform 200ms ${EASE}`;
+      n.style.transform = `translateX(${w}px)`;
+    }
     window.setTimeout(() => {
       content.style.transition = '';
       content.style.transform = '';
-      setPreviewIndex(null);
+      if (p) {
+        p.style.transition = '';
+        p.style.transform = `translateX(${-w}px)`;
+      }
+      if (n) {
+        n.style.transition = '';
+        n.style.transform = `translateX(${w}px)`;
+      }
     }, 240);
   };
 
@@ -217,27 +275,27 @@ export function DivisionPager<V extends string>({
     g.lastT = e.timeStamp;
     const { activeIndex: i, count: n } = stateRef.current;
     let visual = dx - g.claimOffset;
-    // Rubber-band past the first/last division; no neighbor to preview.
+    // Rubber-band past the first/last division — nothing parked past the end.
     const atStart = i === 0 && visual > 0;
     const atEnd = i === n - 1 && visual < 0;
-    if (atStart || atEnd) {
-      visual /= 3;
-      if (previewIndexRef.current !== null) setPreviewIndex(null);
-    } else if (visual !== 0) {
-      // Mount the incoming division's live content on the vacated side.
-      const idx = visual < 0 ? i + 1 : i - 1;
-      if (previewIndexRef.current !== idx) setPreviewIndex(idx);
-      // Track the finger every frame — the incoming page slides in beside
-      // the active one instead of sitting static off-screen.
-      const container = containerRef.current;
-      const next = nextRef.current;
-      if (container && next) {
-        const w = contentWidth(container);
-        next.style.transition = 'none';
-        next.style.transform = `translateX(${visual + (visual < 0 ? w : -w)}px)`;
+    if (atStart || atEnd) visual /= 3;
+    content.style.transform = `translateX(${visual}px)`;
+    // Both parked neighbors ride the same drag translation every frame —
+    // pure transform work, no React mount/unmount mid-gesture.
+    const container = containerRef.current;
+    if (container) {
+      const w = contentWidth(container);
+      const p = parkedPrevRef.current;
+      const nEl = parkedNextRef.current;
+      if (p) {
+        p.style.transition = 'none';
+        p.style.transform = `translateX(${visual - w}px)`;
+      }
+      if (nEl) {
+        nEl.style.transition = 'none';
+        nEl.style.transform = `translateX(${visual + w}px)`;
       }
     }
-    content.style.transform = `translateX(${visual}px)`;
   };
 
   const onTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -259,7 +317,6 @@ export function DivisionPager<V extends string>({
       return;
     }
     transitioningRef.current = true;
-    setPreviewIndex(null);
     setTransition({ prevValue: divs[i].value, dir, fromDx: dx - g.claimOffset });
     change(divs[i + dir].value);
   };
@@ -274,11 +331,6 @@ export function DivisionPager<V extends string>({
     const only = activeValue ?? divisions[0]?.value;
     return only != null ? <>{renderRef.current(only)}</> : null;
   }
-
-  const neighbor =
-    previewIndex != null && previewIndex !== activeIndex && divisions[previewIndex]
-      ? divisions[previewIndex]
-      : null;
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -361,21 +413,35 @@ export function DivisionPager<V extends string>({
           </div>
         )}
 
-        {/* Incoming neighbor while the finger is down — the real page slides
-            with the drag instead of a blank vacated side. */}
-        {!transition && neighbor && (
+        {/* Parked neighbors — ALWAYS mounted (see header note), riding the
+            drag transform every frame so a swipe never has to spin up React
+            mid-gesture. Same px-5 gutter as the active layer so the gap
+            between two divisions' cards at any point equals the page's own
+            edge margin, not zero. Hidden while the commit transition owns
+            the prev/content pair above (transition already carries the
+            outgoing division; showing both would double-render it). */}
+        {!transition && parkedPrev && (
           <div
-            ref={nextRef}
+            ref={parkedPrevRef}
             className={[
               'absolute inset-x-0 top-0 px-5 lg:px-0 pointer-events-none will-change-transform',
               contentClassName ?? '',
             ].join(' ')}
-            style={{
-              transform: `translateX(${previewIndex! > activeIndex ? '100%' : '-100%'})`,
-            }}
             aria-hidden
           >
-            {renderRef.current(neighbor.value)}
+            {renderRef.current(parkedPrev.value)}
+          </div>
+        )}
+        {!transition && parkedNext && (
+          <div
+            ref={parkedNextRef}
+            className={[
+              'absolute inset-x-0 top-0 px-5 lg:px-0 pointer-events-none will-change-transform',
+              contentClassName ?? '',
+            ].join(' ')}
+            aria-hidden
+          >
+            {renderRef.current(parkedNext.value)}
           </div>
         )}
       </div>

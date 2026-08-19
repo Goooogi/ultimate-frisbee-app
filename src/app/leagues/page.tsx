@@ -19,9 +19,8 @@ export const metadata: Metadata = {
 export default function LeaguesPage() {
   return (
     <PageShell
-      eyebrow="The League"
+      eyebrow="The Layout"
       title="Leagues"
-      subtitle="Every league, one place. Pick one to see its scores, schedule, teams, and players."
       breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Leagues' }]}
     >
       <LeaguesDirectory />
