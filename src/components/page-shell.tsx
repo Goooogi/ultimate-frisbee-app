@@ -204,8 +204,11 @@ function StickyName({ name }: { name: string }) {
     const root = bar.closest('.overflow-y-auto');
     const observer = new IntersectionObserver(([entry]) => setTitleVisible(entry.isIntersecting), {
       root,
-      // Fires as soon as the title crosses under the sticky 52px app rail.
-      rootMargin: '-52px 0px 0px 0px',
+      // Fires as soon as the title scrolls out of the pane. The AppRail sits
+      // OUTSIDE this scroll pane, so no rail-height offset — a -52px margin
+      // here (and top-[52px] on the bar) left the bar stuck 52px below the
+      // pane top, floating mid-screen over content.
+      rootMargin: '0px',
       threshold: 0,
     });
     observer.observe(el);
@@ -217,8 +220,10 @@ function StickyName({ name }: { name: string }) {
       ref={barRef}
       aria-hidden={titleVisible}
       className={[
-        // Mobile-only — desktop has vertical room to spare.
-        'sticky top-[52px] z-40 overflow-hidden lg:hidden',
+        // Mobile-only — desktop has vertical room to spare. top-0 because the
+        // sticky offset resolves against the scroll pane, whose top edge is
+        // already below the AppRail.
+        'sticky top-0 z-40 overflow-hidden lg:hidden',
         'bg-bg/95 backdrop-blur shadow-soft',
         'transition-[max-height,opacity] duration-150',
         titleVisible ? 'max-h-0 opacity-0' : 'max-h-11 opacity-100',

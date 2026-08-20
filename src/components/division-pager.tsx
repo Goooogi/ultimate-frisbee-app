@@ -396,17 +396,25 @@ export function DivisionPager<V extends string>({
 
   // Segmented control — one rounded box, active division a raised chip
   // inside it. Horizontal-scrolls (never wraps) when 10+ divisions overflow.
-  // Right-aligned beside the leading view tabs when a slot is passed;
-  // centered on its own row otherwise.
+  // With a leading view-tabs slot: full-width on its own line under the tabs
+  // on mobile (the shared row overflowed the screen — Hunter, 2026-08-20),
+  // right-aligned beside them on lg+. Centered on its own row otherwise.
   const segmentScroller = (
       <div
         ref={tabRowRef}
         className={[
           'flex overflow-x-auto scrollbar-none',
-          tabRowLeading != null ? 'justify-end min-w-0 flex-1' : 'justify-center pb-2',
+          tabRowLeading != null
+            ? 'min-w-0 w-full lg:w-auto lg:flex-1 lg:justify-end'
+            : 'justify-center pb-2',
         ].join(' ')}
       >
-        <div className="inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 flex-shrink-0">
+        <div
+          className={[
+            'inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 flex-shrink-0',
+            tabRowLeading != null ? 'min-w-full lg:min-w-0' : '',
+          ].join(' ')}
+        >
           {divisions.map((d, i) => {
             const isActive = i === activeIndex;
             return (
@@ -432,6 +440,7 @@ export function DivisionPager<V extends string>({
                   'text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
                   'transition-colors cursor-pointer',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                  tabRowLeading != null ? 'flex-1 lg:flex-none' : '',
                   isActive ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
                 ].join(' ')}
               >
@@ -446,7 +455,7 @@ export function DivisionPager<V extends string>({
   return (
     <div className="flex flex-col gap-2.5">
       {tabRowLeading != null ? (
-        <div className="flex items-center justify-between gap-3 pb-2">
+        <div className="flex flex-col gap-2.5 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
           <div className="shrink-0">{tabRowLeading}</div>
           {segmentScroller}
         </div>

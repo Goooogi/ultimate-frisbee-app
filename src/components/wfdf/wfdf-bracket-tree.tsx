@@ -266,37 +266,42 @@ function MatchCard({ game, compact = true }: { game: BracketGame; compact?: bool
   const homeWon = done && (game.homeScore ?? 0) > (game.awayScore ?? 0);
   const awayWon = done && (game.awayScore ?? 0) > (game.homeScore ?? 0);
   const live = game.status === 'in_progress';
-  const statusLabel = done ? 'Final' : live ? 'Live' : 'Upcoming';
   const whenWhere = [fieldLabel(game.fieldName), headerTime(game.scheduledAt)]
     .filter(Boolean)
     .join(' · ');
+  const hasLeft = Boolean(game.finalLabel) || live;
 
   return (
     <article className="bg-surface rounded-card shadow-card overflow-hidden">
       {/* Status strip: placement tag ("3RD PLACE") disambiguates sibling
           finals sharing the Final column; field + venue wall clock ALWAYS
-          show (Hunter, 2026-08-18). */}
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
-        <span className="flex items-center gap-2 min-w-0">
-          {game.finalLabel && (
-            <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-ink font-tight whitespace-nowrap">
-              {game.finalLabel}
+          show (Hunter, 2026-08-18). No Upcoming/Final text label — it crowded
+          the strip and truncated the field/time on narrow cards (Hunter,
+          2026-08-20); only Live earns a label. */}
+      {(hasLeft || whenWhere) && (
+        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
+          {hasLeft && (
+            <span className="flex items-center gap-2 min-w-0">
+              {game.finalLabel && (
+                <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-ink font-tight whitespace-nowrap">
+                  {game.finalLabel}
+                </span>
+              )}
+              {live && (
+                <span className="flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight text-accent">
+                  <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
+                  Live
+                </span>
+              )}
             </span>
           )}
-          <span
-            className={`text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${
-              live ? 'text-accent' : 'text-faint'
-            }`}
-          >
-            {statusLabel}
-          </span>
-        </span>
-        {whenWhere && (
-          <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular truncate">
-            {whenWhere}
-          </span>
-        )}
-      </div>
+          {whenWhere && (
+            <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular truncate">
+              {whenWhere}
+            </span>
+          )}
+        </div>
+      )}
       <TeamLine
         teamId={game.homeId}
         name={game.homeName}

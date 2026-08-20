@@ -313,7 +313,7 @@ function MatchCard({
     return (
       <article className="bg-surface rounded-card-sm overflow-hidden shadow-card">
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline">
-          <StatusPill tone="upcoming" label="Upcoming" tag={tag} />
+          <StatusPill tone="upcoming" label="" tag={tag} />
         </div>
         <TeamLine
           teamId={null}
@@ -345,13 +345,12 @@ function MatchCard({
   const bWon =
     game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
   let tone = matchTone(game);
-  let label = statusLabel(game);
+  const label = statusLabel(game);
   // A slot that names its origin isn't a bare "TBD" card anymore — it's a
   // scheduled game whose participants are pending, so it reads as upcoming
   // (cancelled keeps its own treatment via matchTone/statusLabel).
   if ((slot.aFallback || slot.bFallback) && tone === 'tbd' && game.status !== 'cancelled') {
     tone = 'upcoming';
-    label = 'Upcoming';
   }
   // Cancelled games carry 0–0 in the DB; showing "0 0" under a Cancelled pill
   // reads like a played shutout, so blank the scores instead.
@@ -498,14 +497,16 @@ function StatusPill({
           {tag}
         </span>
       )}
-      <span
-        className={`inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${toneClass}`}
-      >
-        {tone === 'live' && (
-          <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
-        )}
-        {label}
-      </span>
+      {label && (
+        <span
+          className={`inline-flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight ${toneClass}`}
+        >
+          {tone === 'live' && (
+            <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
+          )}
+          {label}
+        </span>
+      )}
     </span>
   );
 }
@@ -521,12 +522,13 @@ function matchTone(game: Game): Tone {
   return 'upcoming';
 }
 
+// Only Live and Cancelled earn a text label — Upcoming/Final/TBD crowded the
+// strip and truncated the field/time on narrow cards (Hunter, 2026-08-20);
+// scores already say "final" and blank scores say "upcoming".
 function statusLabel(game: Game): string {
   if (game.status === 'in_progress') return 'Live';
-  if (game.status === 'final' || game.status === 'forfeit') return 'Final';
   if (game.status === 'cancelled') return 'Cancelled';
-  if (!game.teamAName && !game.teamBName) return 'TBD';
-  return 'Upcoming';
+  return '';
 }
 
 // ── Helpers: filter, columns, position assignment ────────────────────────
