@@ -11,6 +11,7 @@
 //   The league pill lives IN the AppRail on mobile — no separate below-rail strip.
 
 import { Suspense, useEffect, useRef, useState } from 'react';
+import { usePaneScrollRestoration } from '@/lib/nav-history';
 import { AppRail } from '@/components/app-rail';
 import { SectionNavForRoute } from '@/components/games-subnav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
@@ -56,6 +57,14 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
     <Suspense fallback={SUSPENSE_FALLBACK}>{topNavSlot}</Suspense>
   ) : null;
 
+  // The app scrolls in these nested panes, not the body, so browser scroll
+  // restoration never applies — back-nav landed at the top of every page.
+  // These save/restore each pane's position across back/forward.
+  const mobilePaneRef = useRef<HTMLDivElement>(null);
+  const desktopPaneRef = useRef<HTMLElement>(null);
+  usePaneScrollRestoration(mobilePaneRef, 'm');
+  usePaneScrollRestoration(desktopPaneRef, 'd');
+
   return (
     // h-screen + flex-col: AppRail (flex-shrink-0, now the only chrome bar)
     // then the content area gets the remaining height via flex-1.
@@ -83,7 +92,10 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
           sits above the floating hub nav's reserved space. The hub floats
           bottom-3 (12px) off the screen edge and is ~64px tall, so content
           needs clearance so the last row isn't hidden behind it. */}
-      <div className="lg:hidden flex-1 overflow-y-auto pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]">
+      <div
+        ref={mobilePaneRef}
+        className="lg:hidden flex-1 overflow-y-auto pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]"
+      >
         {children}
         {!hideFooterMobile && <SiteFooter />}
       </div>
@@ -92,7 +104,7 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
           is mobile-only now (MobileBottomNav is lg:hidden), so desktop needs no
           floating-bar clearance — content flows straight into the footer. ── */}
       <div className="hidden lg:flex flex-1 min-h-0 overflow-hidden">
-        <main className="flex-1 overflow-y-auto flex flex-col pb-14">
+        <main ref={desktopPaneRef} className="flex-1 overflow-y-auto flex flex-col pb-14">
           <div className="flex-1">{children}</div>
           <SiteFooter />
         </main>

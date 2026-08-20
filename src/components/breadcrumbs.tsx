@@ -1,3 +1,5 @@
+'use client';
+
 // Back-arrow "breadcrumb" — a single chevron + the parent page's label.
 //
 // Detail pages still pass an ordered crumb array (shallowest → deepest)
@@ -5,9 +7,15 @@
 // parent. The current page (last entry) isn't rendered — the page's
 // own <h1> already says where you are.
 //
-// Stays a Server Component: just a <Link> + an inline SVG.
+// Client component (was a Server Component) for SMART BACK: when the user
+// actually came FROM the parent page, the chevron calls router.back() so
+// the real history entry — its ?div=/?tab= filters and scroll position —
+// is restored instead of a fresh top-of-page default render (Hunter,
+// 2026-08-20). Any other arrival path keeps the plain link navigation.
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { previousUrl } from '@/lib/nav-history';
 
 export interface Crumb {
   /** The text shown for this crumb. */
@@ -25,14 +33,25 @@ interface Props {
 }
 
 export function Breadcrumbs({ crumbs }: Props) {
+  const router = useRouter();
   if (crumbs.length < 2) return null;
   const parent = crumbs[crumbs.length - 2];
-  if (!parent.href) return null;
+  const href = parent.href;
+  if (!href) return null;
 
   return (
     <nav aria-label="Breadcrumb" className="mb-4 lg:mb-5">
       <Link
-        href={parent.href}
+        href={href}
+        onClick={(e) => {
+          // Came here from the parent page? Go BACK to its history entry
+          // (keeps filters + scroll) rather than freshly navigating to it.
+          const prev = previousUrl();
+          if (prev != null && prev.split('?')[0] === href.split('?')[0]) {
+            e.preventDefault();
+            router.back();
+          }
+        }}
         className="inline-flex items-center gap-1.5 text-[12px] font-semibold font-tight text-muted hover:text-ink transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
       >
         <BackArrow />

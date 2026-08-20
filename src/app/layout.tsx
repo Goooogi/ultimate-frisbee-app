@@ -6,6 +6,7 @@ import { ThemeBootstrap } from '@/components/theme-bootstrap';
 import { AuthProvider } from '@/lib/auth/auth-provider';
 import { FavoritesOnboardingModal } from '@/components/favorites/favorites-onboarding-modal';
 import { MobileBottomNav } from '@/components/mobile-bottom-nav';
+import { NavHistoryTracker } from '@/lib/nav-history';
 
 const interTight = Inter_Tight({
   subsets: ['latin'],
@@ -70,6 +71,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               transformed shell ancestor. Suspense: it reads usePathname. */}
           <Suspense fallback={null}>
             <MobileBottomNav />
+          </Suspense>
+          {/* Records the previous in-app route for the breadcrumbs' smart
+              back (see lib/nav-history). Suspense: reads useSearchParams. */}
+          <Suspense fallback={null}>
+            <NavHistoryTracker />
           </Suspense>
         </AuthProvider>
       </body>
