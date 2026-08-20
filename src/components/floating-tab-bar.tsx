@@ -1,10 +1,13 @@
 'use client';
 
-// FloatingTabBar — the shared "liquid glass" bottom tab switcher (Instagram-
-// style). A frosted, heavily-blurred translucent pill that floats above the
-// safe-area on every breakpoint, with a smoothly-sliding accent indicator that
-// tracks the active tab. Theme-aware via semantic tokens, so it reads correctly
-// on light, dark, and the UTCG navy theme.
+// FloatingTabBar — the shared bottom tab switcher.
+//
+// Flat, edge-to-edge bar pinned to the bottom: a solid `surface` fill with a
+// single hairline top border, no float / blur / sliding indicator (Hunter,
+// 2026-08-20 — replaces the dark "liquid glass" floating pill; it read heavy
+// against the app's light editorial pages). The ACTIVE tab is signalled by
+// color alone: icon + label go `accent` orange, inactive stay `muted`.
+// Theme-aware via semantic tokens, so it reads on light, dark, and UTCG navy.
 //
 // Two flavors of consumer:
 //   - state-driven (UTCG's internal tabs): pass `activeId` + `onChange`.
@@ -13,7 +16,6 @@
 // Rendering is identical; only how you compute active/navigate differs.
 
 import Link from 'next/link';
-import { useLayoutEffect, useRef, useState } from 'react';
 
 export interface FloatingTab {
   id: string;
@@ -32,8 +34,8 @@ interface FloatingTabBarProps {
   /** State-driven bars: called on tap. Route-driven bars omit this (use href). */
   onChange?: (id: string) => void;
   ariaLabel: string;
-  /** Cap the pill width so it reads as a deliberate floating control, not a
-   *  stretched bar. Default keeps it compact + centered. */
+  /** Caps the TAB ROW's width on wide screens so the tabs stay grouped instead
+   *  of drifting to the far edges. The bar itself is always edge-to-edge. */
   maxWidthClass?: string;
 }
 
@@ -44,105 +46,37 @@ export function FloatingTabBar({
   ariaLabel,
   maxWidthClass = 'max-w-md',
 }: FloatingTabBarProps) {
-  const listRef = useRef<HTMLDivElement | null>(null);
-  const itemRefs = useRef<Record<string, HTMLElement | null>>({});
-  // Position + size of the sliding active indicator, measured from the active
-  // item's box so it tracks any tab count / label width.
-  const [pill, setPill] = useState<{ x: number; w: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const el = itemRefs.current[activeId];
-    const wrap = listRef.current;
-    if (!el || !wrap) return;
-    const measure = () => {
-      const e = itemRefs.current[activeId];
-      if (!e || !listRef.current) return;
-      setPill({ x: e.offsetLeft, w: e.offsetWidth });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(wrap);
-    return () => ro.disconnect();
-  }, [activeId, tabs.length]);
-
   return (
     <nav
       aria-label={ariaLabel}
       className={[
-        'fixed bottom-[max(env(safe-area-inset-bottom),0.75rem)] inset-x-3 z-40 mx-auto',
-        maxWidthClass,
-        // Apple/Instagram liquid glass: a near-BLACK, heavily-blurred + saturated
-        // frost so whatever scrolls behind shows through, tinted, brightened.
-        // The glass "material" reads via three stacked edges: a hairline white
-        // outer border, an inset top-highlight ring, and a soft deep shadow.
-        // A faint top-down gloss overlay (::before) adds the wet sheen.
-        // Tint is near-pure black (rgb 8/9/11) at high opacity so the bar reads
-        // black, not translucent grey, while the blur still lets motion through.
-        // `isolate` (not `relative`) establishes the stacking context for the
-        // ::before gloss — using `relative` here would override the `fixed`
-        // above (same CSS `position` property) and un-pin the bar.
-        'isolate rounded-[24px] p-1',
-        // Tint matches the mobile app's GlassTabBar EXACTLY — rgba(8,9,11,0.72),
-        // the same GLASS_FILL constant in src/components/nav/GlassTabBar.tsx.
-        //
-        // Do NOT re-add a lower opacity behind `supports-[backdrop-filter]` and
-        // do NOT re-add `backdrop-brightness-*`: together they were dropping the
-        // fill to 0.62 and then lifting the blurred page behind it, so the bar
-        // read washed-out GREY on web while mobile stayed near-black. Mobile's
-        // BlurView (intensity 78, dark tint) applies no brightness lift, so the
-        // web side shouldn't either.
-        'bg-[rgb(8_9_11/0.72)]',
-        // `backdrop-brightness-[0.55]` stands in for the `tint="dark"` on
-        // mobile's <BlurView>. Expo's dark tint DARKENS the sampled backdrop;
-        // CSS backdrop-blur does not, so without this the same 0.72 fill reads
-        // noticeably lighter/greyer on web over a pale page. This darkens the
-        // backdrop rather than lightening it — the opposite of the
-        // `backdrop-brightness-110` that was here before.
-        'backdrop-blur-2xl backdrop-saturate-[1.8] backdrop-brightness-[0.55]',
-        'border border-white/15 shadow-[0_10px_50px_-10px_rgba(0,0,0,0.6)]',
-        'ring-1 ring-inset ring-white/[0.12]',
-        // Glossy top sheen — a subtle white gradient over the top third.
-        'before:pointer-events-none before:absolute before:inset-0 before:rounded-[24px] before:-z-[1]',
-        'before:bg-[linear-gradient(180deg,rgba(255,255,255,0.14),transparent_42%)]',
+        // Flat, edge-to-edge, pinned to the bottom. Solid surface fill — no
+        // blur/translucency, so nothing scrolls through and the bar stays
+        // readable over any page.
+        'fixed bottom-0 inset-x-0 z-40',
+        'bg-surface border-t border-hairline',
+        // Safe-area inset lives on the PADDING, not the offset, so the fill
+        // extends under the home indicator instead of leaving a gap below it.
+        'pb-[env(safe-area-inset-bottom)]',
       ].join(' ')}
     >
-      <div ref={listRef} className="relative flex items-stretch justify-around gap-1">
-        {/* Sliding active indicator — a translucent frosted-WHITE lozenge (the
-            Apple/IG look), not an accent fill. Its own inset highlight + hairline
-            edge make it read as raised glass; the active icon/label carry the
-            accent instead. Animated between positions. */}
-        {pill && (
-          <span
-            aria-hidden="true"
-            className={[
-              // Inset 4px top/bottom (like the app's GlassTabBar indicator) so
-              // the lozenge floats inside the item rather than filling its height.
-              'absolute top-1 bottom-1 rounded-[18px]',
-              'bg-white/[0.14] ring-1 ring-inset ring-white/25',
-              'shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_2px_10px_-2px_rgba(0,0,0,0.4)]',
-              'motion-safe:transition-all motion-safe:duration-300 motion-safe:ease-[cubic-bezier(0.22,0.7,0.25,1)]',
-            ].join(' ')}
-            style={{ left: pill.x, width: pill.w }}
-          />
-        )}
-
+      <div className={`flex items-stretch justify-around gap-1 mx-auto ${maxWidthClass}`}>
         {tabs.map((t) => {
           const active = t.id === activeId;
           const inner = (
             <>
-              {/* Icon color is driven here (light tones on the dark glass) so
-                  every consumer's icon reads consistently. Icons that render
-                  with currentColor inherit this; ones that hardcode their own
-                  color keep it (acceptable fallback). */}
-              <span className={t.disabled ? 'text-white/30' : active ? 'text-white' : 'text-white/60'}>
+              {/* Icon color is driven here so every consumer's icon reads
+                  consistently. Icons that render with currentColor inherit
+                  this; ones that hardcode their own color keep it (acceptable
+                  fallback). Active = accent orange, the ONLY active signal now
+                  that the sliding indicator is gone. */}
+              <span className={t.disabled ? 'text-faint' : active ? 'text-accent' : 'text-muted'}>
                 {t.icon({ active, size: 22 })}
               </span>
               <span
                 className={[
-                  'text-[9px] font-bold tracking-[0.08em] uppercase font-tight leading-none whitespace-nowrap',
-                  // The glass is always a dark frost, so use light tones for
-                  // legibility regardless of the surrounding app theme.
-                  t.disabled ? 'text-white/30' : active ? 'text-white' : 'text-white/55',
+                  'text-[10px] font-bold tracking-[0.08em] uppercase font-tight leading-none whitespace-nowrap',
+                  t.disabled ? 'text-faint' : active ? 'text-accent' : 'text-muted',
                 ].join(' ')}
               >
                 {t.label}
@@ -153,22 +87,20 @@ export function FloatingTabBar({
             // Item geometry matches the mobile app's GlassTabBar: 56px tall,
             // 56px min-width, 3px icon↔label gap (was slimmed to 44/20/2 in an
             // earlier pass — realigned to the app per the parity request).
-            'relative z-[1] flex flex-1 flex-col items-center justify-center gap-[3px] min-w-[56px] px-2 h-[56px] rounded-[18px]',
+            'flex flex-1 flex-col items-center justify-center gap-[5px] min-w-[56px] px-2 h-[58px]',
+            // Tap feedback: the label/icon flash accent on press, so the tab
+            // reads as "clicked" before the route transition lands.
+            'active:text-accent [&:active_span]:text-accent',
             'motion-safe:transition-colors motion-safe:duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
             t.disabled ? 'cursor-not-allowed select-none' : 'cursor-pointer',
           ].join(' ');
-
-          const setRef = (el: HTMLElement | null) => {
-            itemRefs.current[t.id] = el;
-          };
 
           // Disabled ("coming soon") → non-interactive span.
           if (t.disabled) {
             return (
               <span
                 key={t.id}
-                ref={setRef as React.Ref<HTMLSpanElement>}
                 aria-disabled="true"
                 aria-label={`${t.label} (coming soon)`}
                 className={cls}
@@ -182,7 +114,6 @@ export function FloatingTabBar({
           return t.href ? (
             <Link
               key={t.id}
-              ref={setRef as React.Ref<HTMLAnchorElement>}
               href={t.href}
               aria-current={active ? 'page' : undefined}
               aria-label={t.label}
@@ -193,7 +124,6 @@ export function FloatingTabBar({
           ) : (
             <button
               key={t.id}
-              ref={setRef as React.Ref<HTMLButtonElement>}
               type="button"
               onClick={() => onChange?.(t.id)}
               aria-current={active ? 'page' : undefined}

@@ -31,6 +31,9 @@ import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
 import { BracketConnectors } from '@/components/bracket-connectors';
 import { EufFlag } from './euf-flag';
 
+/** Height of the placement tag rendered above a card (text + mb-1). */
+const PLACE_TAG_H_PX = 16;
+
 /** "Bracket 1-8 Semifinals" → "Bracket 1-8"
  *
  *  Upstream writes the bracket range on EITHER side of the word: the tour stops
@@ -367,13 +370,17 @@ function DesktopBracket({
           </div>
           {col.games.map((g) => {
             const top = positions.get(g.id) ?? 0;
+            const places = col.key === 'final' ? placesOf(g) : null;
             return (
+              // The placement tag renders ABOVE the card, so tagged cards start
+              // higher — offset by the tag's height to keep the card body
+              // aligned with the connector elbows.
               <div
                 key={g.id}
                 className="absolute left-0 right-0"
-                style={{ top: `${top + 32}px` }}
+                style={{ top: `${top + 32 - (places ? PLACE_TAG_H_PX : 0)}px` }}
               >
-                <MatchCard game={g} places={col.key === 'final' ? placesOf(g) : null} />
+                <MatchCard game={g} places={places} />
               </div>
             );
           })}
@@ -406,7 +413,6 @@ function MatchCard({
       : game.field.trim()
     : null;
   const meta = [
-    places ? `${ORDINAL(places[0])} / ${ORDINAL(places[1])} place` : null,
     fieldLabel,
     eufGameDate(game.scheduledAt) || null,
     eufGameTime(game.scheduledAt) || null,
@@ -415,51 +421,60 @@ function MatchCard({
     .join(' · ');
 
   return (
-    <article className="bg-surface rounded-card-sm shadow-card overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline gap-2">
-        <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight truncate">
-          {meta || (isForfeit ? 'Forfeit' : '')}
-        </span>
-        {isForfeit && (
-          <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight flex-shrink-0">
-            FF
+    <>
+      {/* Placement tag sits ABOVE the card — inside the status strip it
+          competed with field + date + time and truncated them all. */}
+      {places && (
+        <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight whitespace-nowrap mb-1 px-0.5">
+          {`${ORDINAL(places[0])} / ${ORDINAL(places[1])} place`}
+        </div>
+      )}
+      <article className="bg-surface rounded-card-sm shadow-card overflow-hidden">
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-hairline gap-2">
+          <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight truncate">
+            {meta || (isForfeit ? 'Forfeit' : '')}
           </span>
-        )}
-        {/* Box score lives on the game page. Team names below are their own
-            links, so this is a separate affordance rather than wrapping the
-            whole node — same rule as the flat game rows elsewhere in EUF. */}
-        {game.eufGameId != null && (
-          <Link
-            href={`/euf/g/${game.id}`}
-            aria-label={`Box score: ${game.homeName} vs ${game.awayName}`}
-            className="text-muted no-underline hover:text-accent transition-colors flex-shrink-0 text-[9px] font-bold tracking-[0.16em] uppercase font-tight"
-          >
-            Box
-          </Link>
-        )}
-      </div>
-      <TeamLine
-        teamId={game.homeTeamId}
-        name={game.homeName}
-        division={game.division}
-        country={game.homeCountry}
-        score={game.homeScore}
-        won={homeWon}
-        lost={awayWon}
-        compact={compact}
-      />
-      <div className="h-px bg-hairline" />
-      <TeamLine
-        teamId={game.awayTeamId}
-        name={game.awayName}
-        division={game.division}
-        country={game.awayCountry}
-        score={game.awayScore}
-        won={awayWon}
-        lost={homeWon}
-        compact={compact}
-      />
-    </article>
+          {isForfeit && (
+            <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight flex-shrink-0">
+              FF
+            </span>
+          )}
+          {/* Box score lives on the game page. Team names below are their own
+              links, so this is a separate affordance rather than wrapping the
+              whole node — same rule as the flat game rows elsewhere in EUF. */}
+          {game.eufGameId != null && (
+            <Link
+              href={`/euf/g/${game.id}`}
+              aria-label={`Box score: ${game.homeName} vs ${game.awayName}`}
+              className="text-muted no-underline hover:text-accent transition-colors flex-shrink-0 text-[9px] font-bold tracking-[0.16em] uppercase font-tight"
+            >
+              Box
+            </Link>
+          )}
+        </div>
+        <TeamLine
+          teamId={game.homeTeamId}
+          name={game.homeName}
+          division={game.division}
+          country={game.homeCountry}
+          score={game.homeScore}
+          won={homeWon}
+          lost={awayWon}
+          compact={compact}
+        />
+        <div className="h-px bg-hairline" />
+        <TeamLine
+          teamId={game.awayTeamId}
+          name={game.awayName}
+          division={game.division}
+          country={game.awayCountry}
+          score={game.awayScore}
+          won={awayWon}
+          lost={homeWon}
+          compact={compact}
+        />
+      </article>
+    </>
   );
 }
 

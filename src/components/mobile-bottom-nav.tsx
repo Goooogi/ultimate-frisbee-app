@@ -1,6 +1,7 @@
 'use client';
 
-// MobileBottomNav — the app's GLOBAL bottom bar (liquid-glass floating pill).
+// MobileBottomNav — the app's GLOBAL bottom bar (flat, edge-to-edge, surface
+// fill with a hairline top border; active tab reads accent orange).
 //
 // Mobile-parity rewrite (matches altiusapps/mobileapp-thelayout's GlassTabBar):
 // a FIXED 5-tab set of top-level destinations — Home · Leagues · Playbook ·
@@ -77,7 +78,8 @@ export function MobileBottomNav() {
         ariaLabel="App navigation"
         activeId={active ?? ''}
         tabs={bars}
-        // 5 tabs — a touch wider so labels ("Playbook"/"For You") don't cramp.
+        // Caps the tab ROW on wide phones/tablets; the bar itself is
+        // edge-to-edge. 5 labels ("Playbook"/"For You") need the extra width.
         maxWidthClass="max-w-lg"
       />
     </div>

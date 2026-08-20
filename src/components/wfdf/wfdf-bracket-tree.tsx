@@ -107,6 +107,8 @@ interface Bracket {
 }
 
 const ROW_PITCH_PX = 104;
+/** Height of the placement tag rendered above a card (text + mb-1). */
+const PLACE_TAG_H_PX = 16;
 
 // Classify a bracket game's pool_name into { group, level }. The base
 // "Playoff (N-M)" name (no round suffix) is the FIRST round of that group.
@@ -227,7 +229,14 @@ function DesktopBracket({
           {col.games.map((g) => {
             const top = positions.get(g.id) ?? 0;
             return (
-              <div key={g.id} className="absolute left-0 right-0" style={{ top: `${top + 32}px` }}>
+              // The placement tag renders ABOVE the card, so cards that carry
+              // one start higher — offset by the tag's height to keep the card
+              // body aligned with the connector elbows.
+              <div
+                key={g.id}
+                className="absolute left-0 right-0"
+                style={{ top: `${top + 32 - (g.finalLabel ? PLACE_TAG_H_PX : 0)}px` }}
+              >
                 <MatchCard game={g} />
               </div>
             );
@@ -273,77 +282,76 @@ function MatchCard({ game, compact = true }: { game: BracketGame; compact?: bool
   const whenWhere = [fieldLabel(game.fieldName), headerTime(game.scheduledAt)]
     .filter(Boolean)
     .join(' · ');
-  const hasLeft = Boolean(game.finalLabel) || live;
-
   // Whole card opens the game matchup page — same pattern as the flat game
   // rows (role=link + push; team links inside stopPropagation).
   return (
-    <article
-      className="bg-surface rounded-card shadow-card overflow-hidden cursor-pointer hover:shadow-card-hover transition-shadow"
-      role="link"
-      tabIndex={0}
-      onClick={() => router.push(`/wfdf/g/${game.id}`)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') router.push(`/wfdf/g/${game.id}`);
-      }}
-    >
-      {/* Status strip: placement tag ("3RD PLACE") disambiguates sibling
-          finals sharing the Final column; field + venue wall clock ALWAYS
-          show (Hunter, 2026-08-18). No Upcoming/Final text label — it crowded
-          the strip and truncated the field/time on narrow cards (Hunter,
-          2026-08-20); only Live earns a label. */}
-      {(hasLeft || whenWhere) && (
-        <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
-          {hasLeft && (
-            <span className="flex items-center gap-2 min-w-0">
-              {game.finalLabel && (
-                <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-ink font-tight whitespace-nowrap">
-                  {game.finalLabel}
-                </span>
-              )}
-              {live && (
-                <span className="flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight text-accent">
-                  <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
-                  Live
-                </span>
-              )}
-            </span>
-          )}
-          {whenWhere && (
-            <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular truncate">
-              {whenWhere}
-            </span>
-          )}
+    <>
+      {/* Placement tag ("3RD PLACE") disambiguates sibling finals sharing the
+          Final column. It sits ABOVE the card rather than inside the status
+          strip: in-strip it competed with field + time and truncated both on
+          narrow cards (Hunter, 2026-08-20). */}
+      {game.finalLabel && (
+        <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight whitespace-nowrap mb-1 px-0.5">
+          {game.finalLabel}
         </div>
       )}
-      <TeamLine
-        teamId={game.homeId}
-        name={game.homeName}
-        fallback={game.homeFallback}
-        seed={game.homeSeed}
-        flag={game.homeFlag}
-        country={game.homeCountry}
-        score={game.homeScore}
-        won={homeWon}
-        lost={awayWon}
-        done={done}
-        compact={compact}
-      />
-      <div className="h-px bg-hairline" />
-      <TeamLine
-        teamId={game.awayId}
-        name={game.awayName}
-        fallback={game.awayFallback}
-        seed={game.awaySeed}
-        flag={game.awayFlag}
-        country={game.awayCountry}
-        score={game.awayScore}
-        won={awayWon}
-        lost={homeWon}
-        done={done}
-        compact={compact}
-      />
-    </article>
+      <article
+        className="bg-surface rounded-card shadow-card overflow-hidden cursor-pointer hover:shadow-card-hover transition-shadow"
+        role="link"
+        tabIndex={0}
+        onClick={() => router.push(`/wfdf/g/${game.id}`)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') router.push(`/wfdf/g/${game.id}`);
+        }}
+      >
+        {/* Status strip: field + venue wall clock ALWAYS show (Hunter,
+            2026-08-18). No Upcoming/Final text label — it crowded the strip and
+            truncated the field/time on narrow cards (Hunter, 2026-08-20); only
+            Live earns a label. */}
+        {(live || whenWhere) && (
+          <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-hairline">
+            {live && (
+              <span className="flex items-center gap-1.5 text-[9px] font-bold tracking-[0.16em] uppercase font-tight text-accent">
+                <span className="w-[6px] h-[6px] rounded-full bg-accent animate-pulse" aria-hidden />
+                Live
+              </span>
+            )}
+            {whenWhere && (
+              <span className="text-[9px] font-bold tracking-[0.16em] uppercase text-faint font-tight tabular truncate ml-auto">
+                {whenWhere}
+              </span>
+            )}
+          </div>
+        )}
+        <TeamLine
+          teamId={game.homeId}
+          name={game.homeName}
+          fallback={game.homeFallback}
+          seed={game.homeSeed}
+          flag={game.homeFlag}
+          country={game.homeCountry}
+          score={game.homeScore}
+          won={homeWon}
+          lost={awayWon}
+          done={done}
+          compact={compact}
+        />
+        <div className="h-px bg-hairline" />
+        <TeamLine
+          teamId={game.awayId}
+          name={game.awayName}
+          fallback={game.awayFallback}
+          seed={game.awaySeed}
+          flag={game.awayFlag}
+          country={game.awayCountry}
+          score={game.awayScore}
+          won={awayWon}
+          lost={homeWon}
+          done={done}
+          compact={compact}
+        />
+      </article>
+    </>
   );
 }
 

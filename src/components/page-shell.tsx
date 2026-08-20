@@ -89,12 +89,12 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
       <SectionNavForRoute />
 
       {/* ── Mobile (<lg) ── SiteFooter scrolls up from below the content and
-          sits above the floating hub nav's reserved space. The hub floats
-          bottom-3 (12px) off the screen edge and is ~64px tall, so content
-          needs clearance so the last row isn't hidden behind it. */}
+          sits above the bottom nav's reserved space. The bar is flat and
+          edge-to-edge: 58px of tabs sitting on top of the safe-area inset, so
+          clearance is exactly that plus a little breathing room. */}
       <div
         ref={mobilePaneRef}
-        className="lg:hidden flex-1 overflow-y-auto pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)]"
+        className="lg:hidden flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+70px)]"
       >
         {children}
         {!hideFooterMobile && <SiteFooter />}
