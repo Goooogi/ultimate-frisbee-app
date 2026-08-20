@@ -281,47 +281,41 @@ export function WfdfEventDetail({ event }: Props) {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* Section tabs — Pools / Bracket / Standings, mirroring the USAU event
-          page. Each tab appears only when this division can fill it, so a
-          pool-only legacy event never shows an empty Bracket tab. Edge-bleed
-          horizontal scroll on mobile so nothing clips. */}
-      {visibleTabs.length > 1 && (
-        <div
-          role="tablist"
-          aria-label="Event views"
-          className="self-start mb-2.5 inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 max-w-full overflow-x-auto scrollbar-none"
-        >
-          {visibleTabs.map((t) => {
-            const on = t === effectiveTab;
-            return (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setActiveTab(t)}
-                className={[
-                  'shrink-0 inline-flex items-center justify-center px-3.5 py-[5px] rounded-[15px]',
-                  'text-[11px] font-bold tracking-[0.06em] uppercase font-tight cursor-pointer',
-                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  on ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink',
-                ].join(' ')}
-              >
-                {TAB_LABELS[t]}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Centered division pills (below the section tabs) + swipeable division
-          content — tap a pill or swipe the content left/right on touch to
-          change division (ported from the mobile app; replaces the old
-          Division dropdown). */}
+      {/* Section tabs (underline style, left) share a row with the division
+          control (right) — Hunter's tournament-header layout, 2026-08-20.
+          Each tab appears only when this division can fill it, so a pool-only
+          legacy event never shows an empty Bracket tab. Tap a division pill
+          or swipe the content on touch to change division. */}
       <DivisionPager
         divisions={divisionOptions}
         active={activeDiv}
         onChange={setActiveDiv}
+        tabRowLeading={
+          visibleTabs.length > 1 ? (
+            <div role="tablist" aria-label="Event views" className="flex items-center gap-5">
+              {visibleTabs.map((t) => {
+                const on = t === effectiveTab;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setActiveTab(t)}
+                    className={[
+                      'shrink-0 pb-1 border-b-2 whitespace-nowrap',
+                      'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',
+                      'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                      on ? 'text-ink border-accent' : 'text-muted border-transparent hover:text-ink',
+                    ].join(' ')}
+                  >
+                    {TAB_LABELS[t]}
+                  </button>
+                );
+              })}
+            </div>
+          ) : undefined
+        }
         renderDivision={(div) => (
           <DivisionContent div={div} event={event} derive={deriveDivision} />
         )}

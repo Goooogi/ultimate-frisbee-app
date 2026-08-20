@@ -461,6 +461,21 @@ function EventTabsView(props: {
     ? (gender as UsauDivision)
     : null;
 
+  // The ACTIVE division's view tabs render in the shared control row (left of
+  // the division pills — Hunter's tournament-header layout, 2026-08-20), so
+  // they're derived here rather than inside the per-division content.
+  // buildDivisionData is pure and memoized; DivisionContent still runs it per
+  // rendered division for the sections themselves.
+  const effectiveDivision = activeGender ?? eventDivisions[0] ?? '';
+  const { visibleTabs, defaultTab } = useMemo(
+    () => buildDivisionData(event, levelTeams, effectiveDivision),
+    [event, levelTeams, effectiveDivision],
+  );
+  const activeTab: ViewTab =
+    tabRequested != null && visibleTabs.some((t) => t.key === tabRequested)
+      ? tabRequested
+      : defaultTab;
+
   return (
     <>
       {/* Row 1 — "View on USAU" link (left) + Level select (right). One
@@ -499,6 +514,32 @@ function EventTabsView(props: {
         divisions={eventDivisions.map((d) => ({ value: d, label: d }))}
         active={activeGender}
         onChange={setDivision}
+        tabRowLeading={
+          visibleTabs.length > 1 ? (
+            <div role="tablist" aria-label="Tournament views" className="flex items-center gap-5">
+              {visibleTabs.map((t) => {
+                const on = t.key === activeTab;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setTabParam(t.key)}
+                    className={[
+                      'shrink-0 pb-1 border-b-2 whitespace-nowrap',
+                      'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',
+                      'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                      on ? 'text-ink border-accent' : 'text-muted border-transparent hover:text-ink',
+                    ].join(' ')}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : undefined
+        }
         renderDivision={(division) => (
           <DivisionContent
             event={event}
@@ -506,7 +547,6 @@ function EventTabsView(props: {
             levelTeams={levelTeams}
             division={division}
             tabRequested={tabRequested}
-            setTab={setTabParam}
           />
         )}
         contentClassName="flex flex-col gap-6"
@@ -515,24 +555,22 @@ function EventTabsView(props: {
   );
 }
 
-/** One division's full body: champion/pool-leader banners, the Pools/Bracket
- *  view-tab row, and the active tab's content — everything that used to live
- *  directly in EventTabsView, now parameterized by `division` so DivisionPager
- *  can render it for any division (not just the globally-active one). */
+/** One division's full body: champion/pool-leader banners and the active
+ *  tab's content — parameterized by `division` so DivisionPager can render it
+ *  for any division (not just the globally-active one). The view-tab row
+ *  itself lives up in EventTabsView's shared control row. */
 function DivisionContent({
   event,
   level,
   levelTeams,
   division,
   tabRequested,
-  setTab,
 }: {
   event: UsauEventSummary;
   level: UsauLevel | '';
   levelTeams: Team[];
   division: string;
   tabRequested: ViewTab | null;
-  setTab: (next: string) => void;
 }) {
   const {
     teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
@@ -578,36 +616,9 @@ function DivisionContent({
         />
       )}
 
-      {/* Row 2 — Pools / Crossovers / Bracket view tabs on their own row
-          (edge-bleed horizontal scroll on mobile so nothing clips). */}
-      {visibleTabs.length > 1 && (
-        <div
-          role="tablist"
-          aria-label="Tournament views"
-          className="self-start mb-2.5 inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 max-w-full overflow-x-auto scrollbar-none"
-        >
-          {visibleTabs.map((t) => {
-            const on = t.key === active;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setTab(t.key)}
-                className={[
-                  'shrink-0 inline-flex items-center justify-center px-3.5 py-[5px] rounded-[15px]',
-                  'text-[11px] font-bold tracking-[0.06em] uppercase font-tight cursor-pointer',
-                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  on ? 'bg-accent text-accent-ink' : 'text-muted hover:text-ink',
-                ].join(' ')}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* View tabs render in the shared control row up in EventTabsView
+          (DivisionPager's tabRowLeading) — this content keeps only its own
+          per-division `active` fallback. */}
 
       {/* ── Pools — standings cards + per-pool game lists (merged) ───────── */}
       {active === 'pools' && (

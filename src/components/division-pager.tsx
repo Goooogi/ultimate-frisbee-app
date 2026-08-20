@@ -54,6 +54,11 @@ interface DivisionPagerProps<V extends string> {
    *  pass it here, since the pager re-parents them. Applied to every layer
    *  (active/outgoing/incoming) so mid-slide layout matches. */
   contentClassName?: string;
+  /** Rendered LEFT of the division control on the same row (the screen's
+   *  view tabs — Pools/Bracket/Standings). With it, the control right-aligns
+   *  and its scroller shrinks to the leftover width; without it, the control
+   *  centers as before (Hunter's tournament-header layout, 2026-08-20). */
+  tabRowLeading?: ReactNode;
 }
 
 // Swipe must travel this fraction of the container (or flick faster than
@@ -98,6 +103,7 @@ export function DivisionPager<V extends string>({
   onChange,
   renderDivision,
   contentClassName,
+  tabRowLeading,
 }: DivisionPagerProps<V>) {
   // Optimistic active. Screens hold `active` in the URL (?div= via
   // useViewParam → router.replace), so the prop updates FRAMES after
@@ -376,17 +382,29 @@ export function DivisionPager<V extends string>({
 
   if (count <= 1) {
     const only = activeValue ?? divisions[0]?.value;
-    return only != null ? <>{renderRef.current(only)}</> : null;
+    if (only == null) return null;
+    // Single division: no segmented control, but the leading view tabs still
+    // belong on the page.
+    if (tabRowLeading == null) return <>{renderRef.current(only)}</>;
+    return (
+      <div className="flex flex-col gap-2.5">
+        <div className="pb-2">{tabRowLeading}</div>
+        {renderRef.current(only)}
+      </div>
+    );
   }
 
-  return (
-    <div className="flex flex-col gap-2.5">
-      {/* Segmented control — one rounded box, active division a raised chip
-          inside it. Horizontal-scrolls (never wraps) when 10+ divisions
-          overflow; centered when it fits. */}
+  // Segmented control — one rounded box, active division a raised chip
+  // inside it. Horizontal-scrolls (never wraps) when 10+ divisions overflow.
+  // Right-aligned beside the leading view tabs when a slot is passed;
+  // centered on its own row otherwise.
+  const segmentScroller = (
       <div
         ref={tabRowRef}
-        className="flex justify-center overflow-x-auto scrollbar-none pb-2"
+        className={[
+          'flex overflow-x-auto scrollbar-none',
+          tabRowLeading != null ? 'justify-end min-w-0 flex-1' : 'justify-center pb-2',
+        ].join(' ')}
       >
         <div className="inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 flex-shrink-0">
           {divisions.map((d, i) => {
@@ -423,6 +441,18 @@ export function DivisionPager<V extends string>({
           })}
         </div>
       </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-2.5">
+      {tabRowLeading != null ? (
+        <div className="flex items-center justify-between gap-3 pb-2">
+          <div className="shrink-0">{tabRowLeading}</div>
+          {segmentScroller}
+        </div>
+      ) : (
+        segmentScroller
+      )}
 
       {/* Edge-bleed the TOUCH surface, not the layout: PageShell's px-5 gutter
           left 20px dead strips down both screen edges where a swipe that

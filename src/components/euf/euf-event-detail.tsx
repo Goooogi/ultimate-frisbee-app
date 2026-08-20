@@ -57,6 +57,37 @@ const STAGE_ORDER: Record<string, number> = {
  *  and EUCF 2023's "1-16 Bracket Finals"). */
 const TREE_ROUND_RE = /^(?:Bracket \d+-\d+|\d+-\d+ Bracket)(?:\s+(?:Quarterfinals|Semifinals|Finals))?$/;
 
+/** Which view tabs a division can fill, and its own default — used by the
+ *  shared control row (for the ACTIVE division) and by DivisionContent's
+ *  per-division fallback. Mirrors the section buckets DivisionContent renders:
+ *  keep the two in sync. */
+function deriveEufTabs(
+  standings: EufStandingRow[],
+  games: EufGameCard[],
+  division: EufDivision,
+): { visibleTabs: Array<{ key: ViewTab; label: string }>; defaultTab: ViewTab } {
+  const divStandings = standings.filter((s) => s.division === division);
+  const divGames = games.filter((g) => g.division === division);
+  const showTree = hasEufBracket(divGames);
+  const hasOtherBracket = divGames.some(
+    (g) =>
+      g.stage !== 'pool' &&
+      g.stage !== 'crossover' &&
+      !(showTree && TREE_ROUND_RE.test(g.roundName ?? '')),
+  );
+  const hasBracket = showTree || hasOtherBracket;
+  const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
+    { key: 'standings',  label: 'Standings',  show: divStandings.length > 0 },
+    { key: 'pools',      label: 'Pools',      show: divGames.some((g) => g.stage === 'pool') },
+    { key: 'crossovers', label: 'Crossovers', show: divGames.some((g) => g.stage === 'crossover') },
+    { key: 'bracket',    label: 'Bracket',    show: hasBracket },
+  ];
+  const visibleTabs = TABS.filter((t) => t.show).map(({ key, label }) => ({ key, label }));
+  // Bias to Bracket — the headline of a finished tournament — then standings.
+  const defaultTab: ViewTab = hasBracket ? 'bracket' : (visibleTabs[0]?.key ?? 'standings');
+  return { visibleTabs, defaultTab };
+}
+
 export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props) {
   // Division lives in the URL (?div=) so back-nav from a team page and hard
   // refresh both keep the filter (Hunter ruling 2026-08-16; default omitted
@@ -79,6 +110,15 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
   const [tabParam, setTabParam] = useViewParam('tab');
   const setTab = (next: ViewTab) => setTabParam(next);
 
+  // The ACTIVE division's view tabs render in the shared control row (left of
+  // the division pills — Hunter's tournament-header layout, 2026-08-20).
+  const { visibleTabs, defaultTab } = useMemo(
+    () => deriveEufTabs(standings, games, activeDiv),
+    [standings, games, activeDiv],
+  );
+  const requestedTab = (tabParam as ViewTab | null) ?? defaultTab;
+  const activeTab = visibleTabs.some((t) => t.key === requestedTab) ? requestedTab : defaultTab;
+
   return (
     <div className="flex flex-col gap-6">
       {/* Row 1 — "View on EUCS" link. The division pills moved below the view
@@ -98,13 +138,38 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
         divisions={divisions.map((d) => ({ value: d, label: d }))}
         active={activeDiv}
         onChange={setActiveDiv}
+        tabRowLeading={
+          visibleTabs.length > 1 ? (
+            <div role="tablist" aria-label="Tournament views" className="flex items-center gap-5">
+              {visibleTabs.map((t) => {
+                const on = t.key === activeTab;
+                return (
+                  <button
+                    key={t.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    onClick={() => setTab(t.key)}
+                    className={[
+                      'shrink-0 pb-1 border-b-2 whitespace-nowrap',
+                      'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',
+                      'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                      on ? 'text-ink border-accent' : 'text-muted border-transparent hover:text-ink',
+                    ].join(' ')}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : undefined
+        }
         renderDivision={(division) => (
           <DivisionContent
             division={division}
             standings={standings}
             games={games}
             tabParam={tabParam as ViewTab | null}
-            setTab={setTab}
           />
         )}
         contentClassName="flex flex-col gap-6"
@@ -113,10 +178,11 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
   );
 }
 
-/** Everything scoped to one division: champion banner, view tabs, and the
- *  active tab's section content. Parameterized by `division` (rather than
- *  closing over the page's active division) so DivisionPager can call it for
- *  the swipe-neighbor mid-gesture, not just the committed active division.
+/** Everything scoped to one division: champion banner and the active tab's
+ *  section content. Parameterized by `division` (rather than closing over the
+ *  page's active division) so DivisionPager can call it for the swipe-neighbor
+ *  mid-gesture, not just the committed active division. The view-tab row
+ *  itself lives up in EufEventDetail's shared control row.
  *
  *  The tab param is shared (URL-level, same as before) but its FALLBACK is
  *  per-division: a division lacking the URL's tab falls back to its OWN
@@ -127,13 +193,11 @@ function DivisionContent({
   standings,
   games,
   tabParam,
-  setTab,
 }: {
   division: EufDivision;
   standings: EufStandingRow[];
   games: EufGameCard[];
   tabParam: ViewTab | null;
-  setTab: (next: ViewTab) => void;
 }) {
   const divStandings = useMemo(
     () => standings.filter((s) => s.division === division),
@@ -188,23 +252,13 @@ function DivisionContent({
     [divGames, showTree],
   );
 
-  const hasBracket = showTree || otherBracketRounds.length > 0;
-  const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
-    { key: 'standings',  label: 'Standings',  show: divStandings.length > 0 },
-    { key: 'pools',      label: 'Pools',      show: poolRounds.length > 0 },
-    { key: 'crossovers', label: 'Crossovers', show: crossoverGames.length > 0 },
-    { key: 'bracket',    label: 'Bracket',    show: hasBracket },
-  ];
-  const visibleTabs = TABS.filter((t) => t.show);
-  // Bias to Bracket — the headline of a finished tournament — then standings.
-  // This is THIS division's own fallback, not the page's shared one: a
-  // division with no bracket falls back to its own first-filled section.
-  const defaultTab: ViewTab = hasBracket
-    ? 'bracket'
-    : (visibleTabs[0]?.key ?? 'standings');
-
-  // Switching division can change which tabs exist; keep the active one valid
-  // FOR THIS DIVISION specifically.
+  // Tab availability + default via the same helper the shared control row
+  // uses. This is THIS division's own fallback, not the page's shared one: a
+  // division lacking the URL's tab falls back to its own first-filled section.
+  const { visibleTabs, defaultTab } = useMemo(
+    () => deriveEufTabs(standings, games, division),
+    [standings, games, division],
+  );
   const tab = tabParam ?? defaultTab;
   const active = visibleTabs.some((t) => t.key === tab) ? tab : defaultTab;
 
@@ -214,36 +268,9 @@ function DivisionContent({
           seen, even though the bracket tree scrolls horizontally on mobile. */}
       {champion && <ChampionBanner row={champion.row} derived={champion.derived} />}
 
-      {/* View tabs — edge-bleed horizontal scroll on mobile so nothing clips
-          (same treatment as the USAU event page). */}
-      {visibleTabs.length > 1 && (
-        <div
-          role="tablist"
-          aria-label="Tournament views"
-          className="self-start mb-2.5 inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 max-w-full overflow-x-auto scrollbar-none"
-        >
-          {visibleTabs.map((t) => {
-            const on = t.key === active;
-            return (
-              <button
-                key={t.key}
-                type="button"
-                role="tab"
-                aria-selected={on}
-                onClick={() => setTab(t.key)}
-                className={[
-                  'shrink-0 inline-flex items-center justify-center px-3.5 py-[5px] rounded-[15px]',
-                  'text-[11px] font-bold tracking-[0.06em] uppercase font-tight cursor-pointer',
-                  'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  on ? 'bg-ink text-bg' : 'text-muted hover:text-ink',
-                ].join(' ')}
-              >
-                {t.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* View tabs render in the shared control row up in EufEventDetail
+          (DivisionPager's tabRowLeading) — this content keeps only its own
+          per-division `active` fallback. */}
 
       {/* ── Standings ─────────────────────────────────────────────────────── */}
       {active === 'standings' && (
