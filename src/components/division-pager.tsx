@@ -18,15 +18,14 @@
 // active render seamlessly. Mounting ceiling is active+2 neighbors — Worlds
 // events field 10+ divisions, mounting all of them would be too heavy.
 //
-// STRIDE = the content width EXCLUDING the edge-bleed gutter (contentWidth()
-// below). Parking a neighbor at a bare ±clientWidth (gutter included) or
-// leaving the side layers unpadded relative to the active layer both collapse
-// the visual gap between two divisions' cards to less than the page's own
-// edge margin — half-swiped cards then look like they're touching. Every
-// side layer carries the identical px-5 gutter as the active layer, and every
-// offset (park position + commit interpolation) uses this same stride, so the
-// gap between two divisions' cards at any point in the gesture exactly equals
-// the cards' own screen-edge margin (Hunter, 2026-08-19).
+// STRIDE = clientWidth minus ONE gutter (contentWidth() below) — the same
+// math as mobile's `width - gutterBleed`. Every side layer carries the
+// identical px-5 gutter as the active layer, and every offset (park position
+// + commit interpolation) uses this same stride, so a parked neighbor's cards
+// sit exactly at the clip edge at rest (fully hidden) and the gap between two
+// divisions' cards at any point mid-swipe equals the cards' own screen-edge
+// margin (Hunter, 2026-08-20 — subtracting both gutters parked neighbors 20px
+// too close: card slivers visible at rest, cards touching mid-swipe).
 //
 // Gesture negotiation mirrors the mobile component: only decisively-horizontal
 // moves are claimed (vertical page scroll passes through untouched), and a
@@ -67,13 +66,16 @@ const FLICK_MIN_TRAVEL = 16;
 const SLIDE_MS = 280;
 const EASE = 'cubic-bezier(0.33, 1, 0.68, 1)'; // ease-out cubic
 
-// Slide/commit distance = the CONTENT width, excluding the edge-bleed
-// padding (the "stride" — see the header note). clientWidth includes that
-// padding, which would inflate the commit threshold by the gutter (and
-// collapse the inter-page gap below the page's own edge margin).
+// Slide/park distance ("stride") = clientWidth minus ONE gutter — the web
+// equivalent of mobile's `width - gutterBleed`. The side layers span the full
+// padding box (inset-x-0) and carry the same px-5 as the container, so a
+// layer parked at ±(clientWidth − gutter) puts its cards exactly at the clip
+// edge at rest (nothing peeks through the gutter) and one full gutter away
+// from the active cards mid-swipe. Subtracting BOTH paddings parked neighbors
+// a gutter short: card slivers visible at rest, zero gap mid-swipe.
 function contentWidth(container: HTMLDivElement): number {
   const cs = getComputedStyle(container);
-  return container.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  return container.clientWidth - parseFloat(cs.paddingLeft);
 }
 
 /** True when the touch landed inside a descendant that scrolls horizontally
