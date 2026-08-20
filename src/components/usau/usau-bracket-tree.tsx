@@ -23,6 +23,7 @@ import {
   assignPositions as sharedAssignPositions,
   ROW_PITCH_PX,
 } from '@/lib/bracket-tree';
+import { BracketConnectors } from '@/components/bracket-connectors';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { formatGameTime } from '@/lib/usau/venue-tz';
@@ -62,16 +63,20 @@ interface RoundColumn {
 // homeId/awayId shape at this boundary rather than renaming fields through a
 // shipped component. Placeholder slots carry no team ids, so their linkage
 // rides entirely on sourceIds — see slotToNode below for real-slot fallback.
+function slotNode(s: Slot) {
+  return {
+    id: s.id,
+    homeId: s.game?.teamAId ?? null,
+    awayId: s.game?.teamBId ?? null,
+    sourceIds: s.sourceIds,
+  };
+}
+
 function assignPositions(columns: SlotColumn[]): Map<string, number> {
   const adapted = columns.map((c) => ({
     key: c.key,
     label: c.label,
-    games: c.slots.map((s) => ({
-      id: s.id,
-      homeId: s.game?.teamAId ?? null,
-      awayId: s.game?.teamBId ?? null,
-      sourceIds: s.sourceIds,
-    })),
+    games: c.slots.map(slotNode),
   }));
   const positions = sharedAssignPositions(adapted);
   // The engine re-sorts each column into vertical order; mirror that ordering
@@ -253,6 +258,10 @@ function DesktopBracket({
         height: `${totalHeight}px`,
       }}
     >
+      <BracketConnectors
+        columns={renderedColumns.map((c) => ({ games: c.slots.map(slotNode) }))}
+        positions={positions}
+      />
       {renderedColumns.map((col) => (
         <div key={col.key} className="relative h-full">
           <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">

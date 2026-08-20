@@ -23,6 +23,7 @@ import { PageShell } from '@/components/page-shell';
 import { FromPreservingCrumbs } from '@/components/players/from-aware-crumbs';
 import { PlayerHeadshot } from '@/components/players/player-headshot';
 import type { PlayerThread, ThreadNode, ThreadEdge } from '@/lib/players/connections';
+import { resolveThreadPlayerByName } from '@/lib/ufa/search-actions';
 
 interface Props {
   thread: PlayerThread;
@@ -79,6 +80,7 @@ export function PlayerThreadView({ thread, anchorDisplayName, anchorHeadshotUrl,
         edges={edges}
         anchorDisplayName={anchorDisplayName}
         anchorHeadshotUrl={anchorHeadshotUrl}
+        anchorHref={backHref}
       />
     </PageShell>
   );
@@ -462,12 +464,14 @@ function ThreadGraph({
   edges,
   anchorDisplayName,
   anchorHeadshotUrl,
+  anchorHref,
 }: {
   anchor: ThreadNode;
   nodes: ThreadNode[];
   edges: ThreadEdge[];
   anchorDisplayName: string;
   anchorHeadshotUrl: string | null;
+  anchorHref: string;
 }) {
   const [lens, setLens] = useState<Lens>('all');
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -637,6 +641,7 @@ function ThreadGraph({
             node={popoverNode}
             isAnchor={popoverNode.id === anchor.id}
             anchorDisplayName={anchorDisplayName}
+            anchorHref={anchorHref}
             resolveVia={(id) => nodeById.get(id)?.label ?? null}
             onClose={() => setPopoverId(null)}
           />
@@ -989,12 +994,14 @@ function NodePopover({
   node,
   isAnchor,
   anchorDisplayName,
+  anchorHref,
   resolveVia,
   onClose,
 }: {
   node: ThreadNode;
   isAnchor: boolean;
   anchorDisplayName: string;
+  anchorHref: string;
   resolveVia: (id: string) => string | null;
   onClose: () => void;
 }) {
@@ -1006,6 +1013,29 @@ function NodePopover({
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Resolve the node's unified-profile route. The anchor already has one (this
+  // thread's page); everyone else is name-resolved on open the same way the
+  // Connections card does (findUsauPlayerByName — USAU ids have the widest
+  // coverage, and the unified profile merges the other leagues from there).
+  // Unresolvable → the name stays plain text rather than a dead link.
+  const [resolvedId, setResolvedId] = useState<string | null>(null);
+  useEffect(() => {
+    if (isAnchor) return;
+    setResolvedId(null);
+    let cancelled = false;
+    resolveThreadPlayerByName(node.label)
+      .then((found) => {
+        if (!cancelled) setResolvedId(found);
+      })
+      .catch(() => {
+        if (!cancelled) setResolvedId(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [node.id, node.label, isAnchor]);
+  const profileHref = isAnchor ? anchorHref : resolvedId ? `/players/${resolvedId}` : null;
+
   const isElite = node.kind === 'elite';
   const isConnection = node.kind === 'connection';
   const viaName = node.via ? resolveVia(node.via) : null;
@@ -1014,7 +1044,19 @@ function NodePopover({
     <div className="absolute bottom-3 left-3 right-3 sm:left-4 sm:right-auto sm:w-72 z-10">
       <div className="rounded-card bg-bg shadow-lift px-4 py-3.5 flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <p className="font-display italic text-[16px] font-bold text-ink truncate">{node.label}</p>
+          {profileHref ? (
+            <Link
+              href={profileHref}
+              aria-label={`View ${node.label}'s profile`}
+              className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+            >
+              <p className="font-display italic text-[16px] font-bold text-ink truncate hover:text-accent transition-colors duration-150">
+                {node.label}
+              </p>
+            </Link>
+          ) : (
+            <p className="font-display italic text-[16px] font-bold text-ink truncate">{node.label}</p>
+          )}
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
             {node.leagues.map((lg) => (
               <span

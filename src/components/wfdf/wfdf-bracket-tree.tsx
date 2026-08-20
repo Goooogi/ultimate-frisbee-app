@@ -32,6 +32,7 @@ import {
   classifyStructRound,
   type StructuralRail,
 } from '@/lib/wfdf/bracket-structure';
+import { BracketConnectors } from '@/components/bracket-connectors';
 import { WfdfFlag } from './wfdf-flag';
 
 type Game = WfdfEventDetail['games'][number];
@@ -217,6 +218,7 @@ function DesktopBracket({
         height: `${totalHeight}px`,
       }}
     >
+      <BracketConnectors columns={columns} positions={positions} />
       {columns.map((col) => (
         <div key={col.label} className="relative h-full">
           <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
@@ -740,17 +742,20 @@ function assembleBracket(
 }
 
 // Round labels for a bracket with `n` columns, ending in Final. e.g. n=4 →
-// [Round 1, Quarterfinals, Semifinals, Final]; n=2 → [Semifinals, Final].
+// [Round of 16, Quarterfinals, Semifinals, Final]; n=2 → [Semifinals, Final].
+// Beyond the named tail the label comes from the round's SLOT count — a column
+// k rounds before the final nominally holds 2^(k+1) teams, so n=5 leads with
+// "Round of 32" (the old fixed tail made every early column read "Round 1",
+// so WUCC showed two "Round 1" columns side by side — Hunter, 2026-08-20).
+// Derived from position, not this column's game count, so byes/partial data
+// don't mislabel the round.
 function relativeRoundLabels(n: number): string[] {
-  const tail = ['Final', 'Semifinals', 'Quarterfinals', 'Round 1'];
+  const tail = ['Final', 'Semifinals', 'Quarterfinals'];
   const out: string[] = [];
   for (let i = 0; i < n; i++) {
-    // The earliest column (i=0) should be "Round 1" when n is large; fill from
-    // the tail so the LAST column is always "Final".
     const fromEnd = n - 1 - i;
-    out.push(tail[Math.min(fromEnd, tail.length - 1)]);
+    out.push(fromEnd < tail.length ? tail[fromEnd] : `Round of ${2 ** (fromEnd + 1)}`);
   }
-  // If deeper than our tail vocabulary, the earliest columns all read "Round 1".
   return out;
 }
 

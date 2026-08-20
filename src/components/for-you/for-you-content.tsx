@@ -1205,11 +1205,12 @@ function FeedTeamRow({
   );
 }
 
-// ─── Section: tournaments (USAU favorite teams) ─────────────────────────────────
-// USAU teams are event-based, so their "feed" is tournament entries — upcoming
-// + played, current year. Each links to the event page. Grouped upcoming/past.
+// ─── Section: tournaments (USAU/WFDF/EUCS favorite teams) ────────────────────────
+// Event-based leagues have no per-team schedule, so their "feed" is tournament
+// entries — upcoming + played, selected year. Each links to its own league's
+// event page. Grouped upcoming/past.
 
-// A bento tile: a titled card grouping the favorite USAU teams' tournaments
+// A bento tile: a titled card grouping the favorite teams' tournaments
 // (upcoming then results) as a stacked list.
 function TournamentsTile({ tournaments }: { tournaments: FeedTournament[] }) {
   const upcoming = tournaments.filter((t) => t.status === 'upcoming');
@@ -1251,6 +1252,14 @@ function SubLabel({ text }: { text: string }) {
   );
 }
 
+function tournamentRoute(league: FavoriteLeague, slug: string): string {
+  switch (league) {
+    case 'wfdf': return `/wfdf/events/${slug}`;
+    case 'euf': return `/euf/events/${slug}`;
+    default: return `/usau/events/${slug}`;
+  }
+}
+
 function TournamentRow({ tournament: t }: { tournament: FeedTournament }) {
   const dateLabel = t.startDate
     ? new Date(t.startDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -1259,7 +1268,7 @@ function TournamentRow({ tournament: t }: { tournament: FeedTournament }) {
   return (
     <li>
       <Link
-        href={`/usau/events/${t.slug}`}
+        href={tournamentRoute(t.league, t.slug)}
         className="group flex items-center gap-3 px-5 py-2.5 hover:bg-surface-hi transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset border-t border-hairline first:border-t-0"
       >
         <span className="flex-1 min-w-0">
@@ -1267,7 +1276,7 @@ function TournamentRow({ tournament: t }: { tournament: FeedTournament }) {
             {t.name}
           </span>
           <span className="block text-[10.5px] text-faint font-tight mt-0.5 truncate">
-            {t.favoriteTeamName} · {dateLabel}
+            {t.favoriteTeamName} · {dateLabel} · {LEAGUE_DISPLAY[t.league]}
           </span>
         </span>
         {ord ? (

@@ -28,6 +28,7 @@ import {
   type BracketColumn,
 } from '@/lib/bracket-tree';
 import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
+import { BracketConnectors } from '@/components/bracket-connectors';
 import { EufFlag } from './euf-flag';
 
 /** "Bracket 1-8 Semifinals" → "Bracket 1-8"
@@ -346,12 +347,19 @@ function DesktopBracket({
 
   return (
     <div
-      className="grid gap-x-6 min-w-[700px] relative"
+      // Fixed 180px columns (USAU/WFDF-tree parity) — the connector overlay
+      // computes elbow x-positions from the fixed column width, and the tree
+      // pans horizontally instead of stretching on minmax.
+      className="grid gap-x-6 relative flex-shrink-0"
       style={{
-        gridTemplateColumns: `repeat(${renderedColumns.length}, minmax(200px, 1fr))`,
+        gridTemplateColumns: `repeat(${renderedColumns.length}, 180px)`,
         height: `${totalHeight}px`,
       }}
     >
+      <BracketConnectors
+        columns={renderedColumns.map((c) => ({ games: c.games.map(gameNode) }))}
+        positions={positions}
+      />
       {renderedColumns.map((col) => (
         <div key={col.key} className="relative h-full">
           <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
@@ -510,11 +518,15 @@ function TeamLine({
 // EUF games name their teams homeTeamId/awayTeamId; the shared engine wants
 // homeId/awayId. Adapt at this boundary rather than renaming fields through a
 // shipped component (same pattern as usau-bracket-tree.tsx's assignPositions).
+function gameNode(g: EufGameCard) {
+  return { id: g.id, homeId: g.homeTeamId, awayId: g.awayTeamId };
+}
+
 function assignPositions(columns: RoundColumn[]): Map<string, number> {
   const adapted: BracketColumn[] = columns.map((c) => ({
     key: c.key,
     label: c.label,
-    games: c.games.map((g) => ({ id: g.id, homeId: g.homeTeamId, awayId: g.awayTeamId })),
+    games: c.games.map(gameNode),
   }));
   const positions = sharedAssignPositions(adapted);
   columns.forEach((col, i) => {

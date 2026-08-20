@@ -65,8 +65,13 @@ import {
   getTeam as getWfdfTeam,
   getCurrentWfdfEvent,
   getEvent as getWfdfEvent,
+  listEvents as listWfdfEvents,
 } from '@/lib/wfdf/data';
-import { getTeam as getEufTeam, listTeamGames as listEufTeamGames } from '@/lib/euf/data';
+import {
+  getTeam as getEufTeam,
+  listTeamGames as listEufTeamGames,
+  getClubProfile as getEufClubProfile,
+} from '@/lib/euf/data';
 
 // ─── Output shapes (mirror preview-data, isPreview:false) ───────────────────
 
@@ -160,7 +165,7 @@ export interface FeedTournament {
   id: string;
   league: FavoriteLeague;
   name: string;
-  /** Event page slug → /usau/events/[slug] or /wfdf/events/[slug]. */
+  /** Event page slug → /usau/events/[slug], /wfdf/events/[slug], or /euf/events/[slug]. */
   slug: string;
   /** YYYY-MM-DD or null. */
   startDate: string | null;
@@ -713,6 +718,80 @@ async function usauTournamentsFor(team: FavoriteTeam, now: number, year: number)
       sortTs: ts,
     };
   });
+}
+
+/** Events for the user's favorited WFDF teams. A WFDF team row is per-event
+ *  (its summary carries exactly one eventSlug), so each favorite contributes
+ *  at most one tournament row — for the selected year only. Event dates come
+ *  from the events list (the team summary doesn't carry them); one shared
+ *  fetch covers every favorite. */
+async function wfdfTournamentsFor(
+  favTeams: FavoriteTeam[],
+  now: number,
+  year: number,
+): Promise<FeedTournament[]> {
+  if (favTeams.length === 0) return [];
+  const [summaries, events] = await Promise.all([
+    Promise.all(favTeams.map((t) => getWfdfTeam(t.teamId).catch(() => null))),
+    listWfdfEvents().catch(() => []),
+  ]);
+  const eventBySlug = new Map(events.map((e) => [e.slug, e]));
+  const out: FeedTournament[] = [];
+  favTeams.forEach((fav, i) => {
+    const t = summaries[i];
+    if (!t || t.eventYear !== year) return;
+    const ev = eventBySlug.get(t.eventSlug);
+    const startDate = ev?.startDate ?? null;
+    const ts = startDate ? new Date(startDate).getTime() : now;
+    // A multi-day event in progress isn't "past" — run out the END date
+    // (inclusive) before flipping, unless a final standing already exists.
+    const endTs = ev?.endDate ? new Date(ev.endDate).getTime() + MS_DAY : ts;
+    const past = t.finalStanding != null || (startDate != null && endTs < now);
+    out.push({
+      id: `wfdf-${t.eventSlug}-${t.id}`,
+      league: 'wfdf',
+      name: t.eventName,
+      slug: t.eventSlug,
+      startDate,
+      placement: t.finalStanding,
+      status: past ? 'past' : 'upcoming',
+      favoriteTeamName: fav.name,
+      sortTs: ts,
+    });
+  });
+  return out;
+}
+
+/** Events for one favorited EUCS club. The favorite's `teamId` carries
+ *  "name|division" (club identity — see resultRoute); the club profile's
+ *  appearances are its event history, filtered to the selected year. */
+async function eufTournamentsFor(
+  team: FavoriteTeam,
+  now: number,
+  year: number,
+): Promise<FeedTournament[]> {
+  const sep = team.teamId.lastIndexOf('|');
+  const name = sep >= 0 ? team.teamId.slice(0, sep) : team.teamId;
+  const division = sep >= 0 ? team.teamId.slice(sep + 1) : '';
+  const profile = await getEufClubProfile(name, division).catch(() => null);
+  if (!profile) return [];
+  return profile.appearances
+    .filter((a) => a.year === year)
+    .map((a) => {
+      const ts = a.startDate ? new Date(a.startDate).getTime() : now;
+      const past = a.finalPlacement != null || (a.startDate != null && ts < now);
+      return {
+        id: `euf-${a.eventSlug}-${a.teamId}`,
+        league: 'euf' as const,
+        name: a.eventName,
+        slug: a.eventSlug,
+        startDate: a.startDate,
+        placement: a.finalPlacement,
+        status: past ? ('past' as const) : ('upcoming' as const),
+        favoriteTeamName: team.name,
+        sortTs: ts,
+      };
+    });
 }
 
 /**
@@ -1343,20 +1422,25 @@ export async function getForYouFeed(
     }),
   );
 
-  // ── Tournaments (USAU favorite teams — current year, upcoming + played) ──
-  // USAU has no per-team game schedule, so a favorite USAU team's "feed" is its
-  // tournament entries. WFDF teams are single-event so their snapshot already
-  // names the event; only USAU gets the tournament list. (currentYear +
-  // usauFavTeams are computed above with the USAU games fetch.)
-  const tournamentLists = await Promise.all(
-    usauFavTeams.map((t) => usauTournamentsFor(t, now, selectedYear).catch(() => [] as FeedTournament[])),
-  );
+  // ── Tournaments (USAU/WFDF/EUCS favorite teams — selected year) ──
+  // These leagues are event-based with no per-team game schedule, so a
+  // favorite's "feed" is its tournament entries. WFDF favorites share one
+  // events-list fetch; each EUCS favorite is a club-profile fetch. (currentYear
+  // + usauFavTeams are computed above with the USAU games fetch.)
+  const wfdfFavTeams = teams.filter((t) => t.league === 'wfdf');
+  const eufFavTeams = teams.filter((t) => t.league === 'euf');
+  const tournamentLists = await Promise.all([
+    ...usauFavTeams.map((t) => usauTournamentsFor(t, now, selectedYear).catch(() => [] as FeedTournament[])),
+    wfdfTournamentsFor(wfdfFavTeams, now, selectedYear).catch(() => [] as FeedTournament[]),
+    ...eufFavTeams.map((t) => eufTournamentsFor(t, now, selectedYear).catch(() => [] as FeedTournament[])),
+  ]);
   const tournaments = tournamentLists.flat().sort((a, b) => {
-    // Upcoming first (soonest first), then past (most recent first).
+    // Upcoming first, then past — latest event leads within BOTH groups
+    // (mobile parity, Hunter 2026-08-16).
     const aPast = a.status === 'past';
     const bPast = b.status === 'past';
     if (aPast !== bPast) return aPast ? 1 : -1;
-    return aPast ? b.sortTs - a.sortTs : a.sortTs - b.sortTs;
+    return b.sortTs - a.sortTs;
   });
 
   // ── Hero game: the one game to feature big ──

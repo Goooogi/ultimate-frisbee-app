@@ -1,11 +1,13 @@
 'use client';
 
 // FavoritesPicker — league-first favorites editor (leagues.ts LEAGUE_DISPLAY
-// order: UFA, USAU, PUL, WUL, Worlds). Each league is a toggle row; turning a
-// league ON expands it inline to a team search (scoped to that league only)
-// plus the user's favorited teams in that league, each removable. Turning a
-// league OFF removes the league AND cascades to remove every team nested
-// under it (optimistic, no confirm — it's the user's own data).
+// order: UFA, USAU, PUL, WUL, Worlds). Each league row splits selection from
+// expansion (mobile parity, 2026-08-20): the checkbox follows/unfollows the
+// league, the rest of the row expands/collapses its inline editor (league-
+// scoped team/player search + the user's picks, each removable). Followed
+// leagues start collapsed; newly following a league auto-expands it. Turning
+// a league OFF (checkbox only) cascades to remove every pick nested under it
+// (optimistic, no confirm — it's the user's own data) and force-collapses.
 //
 // Self-contained + chrome-less by design: the parent (a settings card or a
 // modal) supplies the surrounding container/header, passes in the initial
@@ -364,6 +366,13 @@ function LeagueRow({
   // have no rich stats, but they're still favoritable (their profile resolves),
   // so we allow the players tab for every league.
   const [mode, setMode] = useState<'team' | 'player'>('team');
+  // Expansion is SEPARATE from selection (mobile parity, Hunter 2026-08-04):
+  // followed leagues start collapsed (one row each) and open on demand.
+  // Deselection force-collapses.
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!isSelected) setExpanded(false);
+  }, [isSelected]);
 
   const count = teams.length + players.length;
 
@@ -393,24 +402,26 @@ function LeagueRow({
         isSelected ? 'bg-bg' : 'bg-transparent',
       ].join(' ')}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-pressed={isSelected}
-        aria-label={
-          isSelected ? `Remove ${LEAGUE_DISPLAY[league]} from favorites` : `Add ${LEAGUE_DISPLAY[league]} to favorites`
-        }
-        className={[
-          'flex w-full items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-card-sm',
-          'font-tight text-left transition-colors cursor-pointer',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        ].join(' ')}
-      >
-        {/* Checkbox-style indicator */}
-        <span
-          aria-hidden="true"
+      {/* Row = two sibling controls (HTML can't nest buttons): the checkbox
+          follows/unfollows; the rest of the row only expands/collapses a
+          followed league. Removal stays the checkbox's job so it can't happen
+          by accident (it cascade-deletes the nested picks). */}
+      <div className="flex w-full items-center gap-3 px-3 py-2.5 min-h-[44px] rounded-card-sm font-tight">
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={isSelected}
+          onClick={() => {
+            const selecting = !isSelected;
+            onToggle();
+            setExpanded(selecting);
+          }}
+          aria-label={
+            isSelected ? `Remove ${LEAGUE_DISPLAY[league]} from favorites` : `Add ${LEAGUE_DISPLAY[league]} to favorites`
+          }
           className={[
             'inline-flex items-center justify-center w-5 h-5 rounded-full flex-shrink-0 transition-colors',
+            'p-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
             isSelected ? 'bg-accent text-accent-ink' : 'bg-ink/10',
           ].join(' ')}
         >
@@ -419,24 +430,49 @@ function LeagueRow({
               <path d="M2.5 6.2l2.3 2.3L9.5 3.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           )}
-        </span>
+        </button>
 
-        <span className="flex-1 text-[14px] font-bold text-ink tracking-[0.01em]">
-          {LEAGUE_DISPLAY[league]}
-        </span>
-
-        {isSelected && count > 0 && (
-          <span className="text-[10px] font-semibold text-faint font-tight normal-case tracking-normal">
-            {count} {count === 1 ? 'pick' : 'picks'}
+        <button
+          type="button"
+          onClick={() => {
+            if (isSelected) {
+              // Row tap on a followed league only expands/collapses — never
+              // deselects.
+              setExpanded((v) => !v);
+            } else {
+              onToggle();
+              setExpanded(true);
+            }
+          }}
+          aria-expanded={isSelected ? expanded : undefined}
+          aria-label={
+            isSelected
+              ? `${LEAGUE_DISPLAY[league]}, ${expanded ? 'collapse' : 'expand'} favorites editor`
+              : `Add ${LEAGUE_DISPLAY[league]} to favorites`
+          }
+          className={[
+            'flex flex-1 items-center gap-3 min-h-[44px] -my-2.5 rounded-card-sm',
+            'text-left transition-colors cursor-pointer',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+          ].join(' ')}
+        >
+          <span className="flex-1 text-[14px] font-bold text-ink tracking-[0.01em]">
+            {LEAGUE_DISPLAY[league]}
           </span>
-        )}
 
-        {isSelected && status !== 'idle' && <SaveIndicator status={status} />}
+          {isSelected && count > 0 && (
+            <span className="text-[10px] font-semibold text-faint font-tight normal-case tracking-normal">
+              {count} {count === 1 ? 'pick' : 'picks'}
+            </span>
+          )}
 
-        <Chevron open={isSelected} />
-      </button>
+          {isSelected && status !== 'idle' && <SaveIndicator status={status} />}
 
-      {isSelected && (
+          {isSelected && <Chevron open={expanded} />}
+        </button>
+      </div>
+
+      {isSelected && expanded && (
         <div className="px-3 pb-3 pt-0.5 flex flex-col gap-2">
           {/* Teams / Players sub-toggle */}
           <div className="flex items-center gap-1 self-start rounded-full bg-surface p-0.5">

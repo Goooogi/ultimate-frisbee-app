@@ -14,7 +14,12 @@
 import { createClient } from '@supabase/supabase-js';
 import { getAllPlayerStats, currentSeasonYear } from '@/lib/ufa/client';
 import type { UfaPlayerStat } from '@/lib/ufa/types';
-import { search as searchUsau, compareByNameThenYearDesc, type SearchResult } from '@/lib/usau/data';
+import {
+  search as searchUsau,
+  compareByNameThenYearDesc,
+  findUsauPlayerByName,
+  type SearchResult,
+} from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
 import { allUfaTeams, teamEras } from '@/lib/ufa/teams';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
@@ -440,6 +445,16 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
  * every EXPORT to be an async server action. A plain sync helper must stay
  * module-private (it's only used by searchAll above).
  */
+/**
+ * Thread-popover name → unified-profile id (client-callable). USAU ids have
+ * the widest coverage and the unified profile merges the other leagues from
+ * there — same resolution the Connections card uses. Null = no match; the
+ * caller leaves the name as plain text rather than a dead link.
+ */
+export async function resolveThreadPlayerByName(name: string): Promise<string | null> {
+  return findUsauPlayerByName(name);
+}
+
 function matchTier(name: string, needle: string): number {
   const n = name.toLowerCase();
   if (n === needle) return 0;
