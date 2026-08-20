@@ -188,6 +188,21 @@ async function dispatchEvent(
   // Bound BOTH the per-run count (global budget) and the in-flight concurrency.
   // Teams beyond the budget are simply left for the next firing — the
   // already-rostered filter above re-computes the remainder each time.
+  //
+  // SHUFFLE before slicing: the DB query above has no ORDER BY, so Postgres
+  // returns teamIds in a stable-ish but arbitrary storage order. A large
+  // event (40+ teams) blows through MAX_TEAMS_PER_EVENT_PER_RUN every firing,
+  // and without a shuffle the SAME ~8 front-of-list teams win the slice every
+  // single time — teams past that position starve indefinitely (confirmed:
+  // "2026 Elite Select Challenge" dispatched only 11 of 47 teams across 4+
+  // days of cron firings; Chain Lightning and 35 others never got a single
+  // scrape attempt). Shuffling gives every unrostered team a fair chance each
+  // firing, so a large event's roster completes over a few runs instead of
+  // never finishing (Hunter, 2026-08-20).
+  for (let i = teamIds.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [teamIds[i], teamIds[j]] = [teamIds[j], teamIds[i]];
+  }
   const totalNeeded = teamIds.length;
   const allowance = Math.max(0, Math.min(budget, MAX_TEAMS_PER_EVENT_PER_RUN));
   const slice = allowance >= totalNeeded ? teamIds : teamIds.slice(0, allowance);

@@ -3358,9 +3358,27 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
     });
   }
 
-  // Roster: dedupe by (season, lowercased name, jersey). When the same
-  // human shows up under multiple player_ids in the same season we keep
-  // the first one we see — same caveat as the player profile clustering.
+  // Roster: dedupe by (season, lowercased name) — NAME ONLY, not name+jersey.
+  // When the same human shows up under multiple player_ids in the same
+  // season, the scraper can also disagree on their jersey number across
+  // event registrations (a placeholder '0' from one event, the real number
+  // from another) — keying on name+jersey let both survive as separate rows
+  // (Hunter, 2026-08-20: "Robert Mitchell McCarthy" listed as both #0 and
+  // #59 on the same roster). A real jersey number always wins over a missing
+  // or '0' one; between two real numbers, the first one seen wins (same
+  // "first wins" caveat as the player profile clustering elsewhere in this
+  // file — we have no signal for which registration is more authoritative).
+  //
+  // The jersey value itself is also NUMERICALLY normalized: different event
+  // registrations of the same club get scraped with different zero-padding,
+  // so one row says '03' and another '3' — without normalizing, the display
+  // value (not just the key) would flip depending on which row won.
+  // Non-numeric jerseys pass through as trimmed strings.
+  const normalizeJersey = (j: string | null): string | null => {
+    const raw = (j ?? '').trim();
+    if (raw === '') return null;
+    return /^\d+$/.test(raw) ? String(parseInt(raw, 10)) : raw;
+  };
   const rosterBySeason = new Map<
     number,
     Map<string, UsauTeamSummary['seasons'][number]['roster'][number]>
@@ -3368,14 +3386,18 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
   for (const r of (rosterRes.data ?? []) as unknown as RosterRow[]) {
     const player = r.usau_players;
     if (!player) continue;
-    const key = `${player.display_name.toLowerCase()}|${(r.jersey_number ?? '').trim()}`;
+    const jersey = normalizeJersey(r.jersey_number);
+    const key = player.display_name.toLowerCase();
     if (!rosterBySeason.has(r.season)) rosterBySeason.set(r.season, new Map());
     const seasonMap = rosterBySeason.get(r.season)!;
-    if (!seasonMap.has(key)) {
+    const existing = seasonMap.get(key);
+    const existingIsReal = existing?.jerseyNumber != null && existing.jerseyNumber !== '0';
+    const candidateIsReal = jersey != null && jersey !== '0';
+    if (!existing || (!existingIsReal && candidateIsReal)) {
       seasonMap.set(key, {
         playerId: r.player_id,
         name: player.display_name,
-        jerseyNumber: r.jersey_number,
+        jerseyNumber: jersey,
       });
     }
   }

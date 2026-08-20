@@ -139,10 +139,8 @@ export function DivisionPager<V extends string>({
   const parkedPrev = prevIndex != null ? divisions[prevIndex] : null;
   const parkedNext = nextIndex != null ? divisions[nextIndex] : null;
 
-  // Re-park both neighbors at rest whenever the active division changes
-  // (including after a commit) — clears any transform left over from the
-  // previous gesture/transition so they sit exactly at ±stride again.
-  useLayoutEffect(() => {
+  // Park both neighbors at rest at ±stride, clearing any leftover transform.
+  const parkNeighbors = () => {
     const container = containerRef.current;
     if (!container) return;
     const w = contentWidth(container);
@@ -156,8 +154,35 @@ export function DivisionPager<V extends string>({
       n.style.transition = 'none';
       n.style.transform = `translateX(${w}px)`;
     }
+  };
+
+  // Re-park on active-division change AND when a commit transition ends. The
+  // parked layers are unmounted for the whole transition, so the activeIndex
+  // pass runs against null refs; when they remount on transition-end they'd
+  // otherwise sit untransformed at translateX(0) — stacked directly over the
+  // active division, painting the WRONG division's cards on top of it.
+  useLayoutEffect(() => {
+    parkNeighbors();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIndex]);
+  }, [activeIndex, transition]);
+
+  // Park offsets are px values measured at park time — a viewport resize (or
+  // the lg breakpoint toggling the gutter) leaves them stale, pulling a
+  // neighbor inside the clip where it renders as a phantom second division
+  // on desktop. Re-measure whenever the container resizes at rest.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => {
+      if (transitioningRef.current || gestureRef.current?.claimed) return;
+      parkNeighbors();
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+    // count > 1 gates the container's existence — divisions arrive async, so
+    // the observer must attach when the pager goes from bare to paged.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [count > 1]);
 
   // Runs the committed slide: both layers positioned from where the finger
   // left off, then transitioned — outgoing to off-screen, incoming to 0.
