@@ -111,7 +111,10 @@ export default async function WfdfTeamPage({ params }: Props) {
             <span className="text-faint tabular">{team.roster.length}</span>
           </h2>
           <div className="overflow-x-auto bg-surface rounded-card-lg shadow-card">
-            <table className="w-full min-w-[480px] border-collapse">
+            {/* No min-width: five narrow columns fit a phone viewport; a 480px
+                floor forced a scroll just to reach GP. Rare over-long names
+                truncate (cap on the Link) instead of widening the table. */}
+            <table className="w-full border-collapse">
               <thead>
                 <tr>
                   {['#', 'Player', 'G', 'A', 'GP'].map((h, i) => (
@@ -144,7 +147,8 @@ export default async function WfdfTeamPage({ params }: Props) {
                     <td className={`px-3 py-2.5 text-[13px] text-left font-medium font-tight ${i > 0 ? 'border-t border-hairline' : ''}`}>
                       <Link
                         href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
-                        className="text-ink hover:text-accent transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                        className="block max-w-[24ch] truncate text-ink hover:text-accent transition-colors duration-150 no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
+                        title={p.fullName}
                       >
                         {p.fullName}
                       </Link>

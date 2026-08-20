@@ -71,10 +71,15 @@ function poolDisplayLabel(pool: string): string {
 // Teams are ordered by RECORD in that pool's games as results come through —
 // wins desc, then point diff desc (Hunter, 2026-08-18), then seed/name for
 // the pre-play state where nobody has a result yet.
+// Each returned team carries its IN-POOL record (poolWins/poolLosses) — the
+// pool card must display that, not wfdf_teams' event-wide W-L, which counts
+// bracket games too (Hunter, 2026-08-20).
+type WfdfPoolTeam = WfdfEvent['teams'][number] & { poolWins: number; poolLosses: number };
+
 function buildWfdfPoolTeams(
   games: WfdfEvent['games'],
   teams: WfdfEvent['teams'],
-): Map<string, WfdfEvent['teams']> {
+): Map<string, WfdfPoolTeam[]> {
   const byId = new Map(teams.map((t) => [t.id, t]));
   const byPool = new Map<string, Map<string, WfdfEvent['teams'][number]>>();
   const gamesByPool = new Map<string, WfdfEvent['games']>();
@@ -97,7 +102,7 @@ function buildWfdfPoolTeams(
     gamesByPool.set(pool, pg);
   }
 
-  const out = new Map<string, WfdfEvent['teams']>();
+  const out = new Map<string, WfdfPoolTeam[]>();
   for (const [pool, bucket] of byPool) {
     // In-pool record and point diff from this pool's scored games only —
     // event-wide W-L would drag bracket results into pool order.
@@ -126,15 +131,20 @@ function buildWfdfPoolTeams(
     const EMPTY = { w: 0, l: 0, diff: 0 };
     out.set(
       pool,
-      [...bucket.values()].sort((a, b) => {
-        const sa = stats.get(a.id) ?? EMPTY;
-        const sb = stats.get(b.id) ?? EMPTY;
-        if (sb.w !== sa.w) return sb.w - sa.w;
-        if (sa.l !== sb.l) return sa.l - sb.l;
-        if (sb.diff !== sa.diff) return sb.diff - sa.diff;
-        const sd = (a.seed ?? 9999) - (b.seed ?? 9999);
-        return sd !== 0 ? sd : a.name.localeCompare(b.name);
-      }),
+      [...bucket.values()]
+        .map((t) => {
+          const s = stats.get(t.id) ?? EMPTY;
+          return { ...t, poolWins: s.w, poolLosses: s.l };
+        })
+        .sort((a, b) => {
+          const sa = stats.get(a.id) ?? EMPTY;
+          const sb = stats.get(b.id) ?? EMPTY;
+          if (sb.w !== sa.w) return sb.w - sa.w;
+          if (sa.l !== sb.l) return sa.l - sb.l;
+          if (sb.diff !== sa.diff) return sb.diff - sa.diff;
+          const sd = (a.seed ?? 9999) - (b.seed ?? 9999);
+          return sd !== 0 ? sd : a.name.localeCompare(b.name);
+        }),
     );
   }
   return out;
@@ -534,8 +544,10 @@ function PoolPlaySection({
                             <span className="flex-1 min-w-0 font-tight text-[14px] font-semibold text-ink truncate">
                               {t.name}
                             </span>
+                            {/* In-pool record only — event-wide t.wins/t.losses
+                                include bracket games (those live on Standings). */}
                             <span className="text-[11px] tabular text-faint font-tight">
-                              {t.wins ?? '—'}–{t.losses ?? '—'}
+                              {t.poolWins}–{t.poolLosses}
                             </span>
                           </Link>
                         </li>

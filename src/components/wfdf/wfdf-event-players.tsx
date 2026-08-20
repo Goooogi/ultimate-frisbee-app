@@ -107,7 +107,10 @@ function RankedPlayersTable({ rows, query }: { rows: WfdfEventPlayerRow[]; query
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[480px] border-collapse">
+      {/* No min-width: the 480px floor forced a horizontal scroll to reach
+          the stat columns on phones. Player/Team instead cap + truncate the
+          rare over-long value, so G/A/Pts stay on screen. */}
+      <table className="w-full border-collapse">
         <thead>
           <tr className="text-[10px] font-bold tracking-[0.12em] uppercase text-muted font-tight">
             <th className="text-right py-2 pr-2 font-bold w-8">#</th>
@@ -126,20 +129,25 @@ function RankedPlayersTable({ rows, query }: { rows: WfdfEventPlayerRow[]; query
                 <td className="text-right py-2 pr-2 text-[12px] font-tight tabular-nums text-faint">
                   {i + 1}
                 </td>
-                <td className="py-2 px-2 text-[13px] font-tight text-ink whitespace-nowrap">
+                <td className="py-2 px-2 text-[13px] font-tight text-ink">
                   <Link
                     href={`/wfdf/players/by-name/${encodeURIComponent(p.fullName)}`}
-                    className="no-underline hover:underline text-ink font-semibold"
+                    className="block max-w-[20ch] truncate no-underline hover:underline text-ink font-semibold"
+                    title={p.fullName}
                   >
                     {p.fullName}
                   </Link>
                 </td>
                 <td className="py-2 px-2 text-[13px] font-tight text-muted">
-                  <span className="inline-flex items-center gap-1.5 min-w-0">
+                  {/* flex (not inline-flex) so the max-w cap + truncate on the
+                      link actually constrain — inline-flex let the cell grow
+                      to the longest team name instead of truncating it. */}
+                  <span className="flex items-center gap-1.5 max-w-[18ch]">
                     <WfdfFlag flagFile={null} countryCode={p.countryCode} size={13} />
                     <Link
                       href={`/wfdf/teams/${p.teamId}`}
-                      className="truncate no-underline hover:underline text-muted"
+                      className="min-w-0 truncate no-underline hover:underline text-muted"
+                      title={p.teamName}
                     >
                       {p.teamName}
                     </Link>

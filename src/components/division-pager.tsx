@@ -99,9 +99,28 @@ export function DivisionPager<V extends string>({
   renderDivision,
   contentClassName,
 }: DivisionPagerProps<V>) {
-  const activeIndex = Math.max(0, divisions.findIndex((d) => d.value === active));
+  // Optimistic active. Screens hold `active` in the URL (?div= via
+  // useViewParam → router.replace), so the prop updates FRAMES after
+  // onChange. Rendering from the prop alone painted the OLD division into
+  // the incoming layer at release — the preview blipped to stale content,
+  // then snapped back once the router caught up. `pending` is set
+  // synchronously at commit and wins until the prop agrees.
+  const [pending, setPending] = useState<V | null>(null);
+  if (pending != null && pending === active) {
+    setPending(null); // prop caught up — render-phase reset, same output
+  }
+  const pendingIndex = pending != null ? divisions.findIndex((d) => d.value === pending) : -1;
+  const activeIndex =
+    pendingIndex >= 0
+      ? pendingIndex
+      : Math.max(0, divisions.findIndex((d) => d.value === active));
   const count = divisions.length;
   const activeValue = divisions[activeIndex]?.value ?? active;
+
+  const commitChange = (v: V) => {
+    setPending(v);
+    onChange(v);
+  };
 
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -112,8 +131,9 @@ export function DivisionPager<V extends string>({
   const tabFramesRef = useRef<Map<string, { offsetLeft: number; width: number }>>(new Map());
 
   // Latest values for the touch handlers without re-binding them mid-gesture.
-  const stateRef = useRef({ activeIndex, count, divisions, onChange });
-  stateRef.current = { activeIndex, count, divisions, onChange };
+  // onChange routes through commitChange so a swipe commit lands optimistically.
+  const stateRef = useRef({ activeIndex, count, divisions, onChange: commitChange });
+  stateRef.current = { activeIndex, count, divisions, onChange: commitChange };
   const renderRef = useRef(renderDivision);
   renderRef.current = renderDivision;
 
@@ -384,7 +404,7 @@ export function DivisionPager<V extends string>({
                 }}
                 type="button"
                 onClick={() => {
-                  if (i !== activeIndex) onChange(d.value);
+                  if (i !== activeIndex) commitChange(d.value);
                 }}
                 role="tab"
                 aria-selected={isActive}

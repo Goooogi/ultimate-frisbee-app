@@ -61,7 +61,7 @@ export const LEAGUE_ROWS: LeagueRow[] = [
   },
   {
     id: 'wfdf',
-    label: 'WFDF Worlds',
+    label: 'WFDF',
     abbr: 'WFDF',
     subtitle: 'World Flying Disc Federation',
     // Event-based league — lands on the Worlds event browser, not /scores.
