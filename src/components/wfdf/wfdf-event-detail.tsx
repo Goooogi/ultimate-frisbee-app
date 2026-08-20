@@ -292,7 +292,7 @@ export function WfdfEventDetail({ event }: Props) {
         onChange={setActiveDiv}
         tabRowLeading={
           visibleTabs.length > 1 ? (
-            <div role="tablist" aria-label="Event views" className="flex items-center gap-5">
+            <div role="tablist" aria-label="Event views" className="flex items-center justify-between gap-5 lg:justify-start">
               {visibleTabs.map((t) => {
                 const on = t === effectiveTab;
                 return (

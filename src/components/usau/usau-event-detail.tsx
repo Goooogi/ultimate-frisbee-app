@@ -516,7 +516,7 @@ function EventTabsView(props: {
         onChange={setDivision}
         tabRowLeading={
           visibleTabs.length > 1 ? (
-            <div role="tablist" aria-label="Tournament views" className="flex items-center gap-5">
+            <div role="tablist" aria-label="Tournament views" className="flex items-center justify-between gap-5 lg:justify-start">
               {visibleTabs.map((t) => {
                 const on = t.key === activeTab;
                 return (

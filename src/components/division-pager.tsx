@@ -388,7 +388,7 @@ export function DivisionPager<V extends string>({
     if (tabRowLeading == null) return <>{renderRef.current(only)}</>;
     return (
       <div className="flex flex-col gap-2.5">
-        <div className="pb-2">{tabRowLeading}</div>
+        <div className="pt-2 pb-2 lg:pt-0">{tabRowLeading}</div>
         {renderRef.current(only)}
       </div>
     );
@@ -455,7 +455,7 @@ export function DivisionPager<V extends string>({
   return (
     <div className="flex flex-col gap-2.5">
       {tabRowLeading != null ? (
-        <div className="flex flex-col gap-2.5 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+        <div className="flex flex-col gap-3.5 pt-2 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3 lg:pt-0">
           <div className="shrink-0">{tabRowLeading}</div>
           {segmentScroller}
         </div>
