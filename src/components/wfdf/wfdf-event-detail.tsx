@@ -303,13 +303,15 @@ export function WfdfEventDetail({ event }: Props) {
                     aria-selected={on}
                     onClick={() => setActiveTab(t)}
                     className={[
-                      'shrink-0 pb-1 border-b-2 whitespace-nowrap',
+                      'flex-1 lg:flex-none flex justify-center lg:justify-start whitespace-nowrap',
                       'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',
                       'transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                      on ? 'text-ink border-accent' : 'text-muted border-transparent hover:text-ink',
+                      on ? 'text-ink' : 'text-muted hover:text-ink',
                     ].join(' ')}
                   >
-                    {TAB_LABELS[t]}
+                    <span className={['pb-1 border-b-2 transition-colors', on ? 'border-accent' : 'border-transparent'].join(' ')}>
+                      {TAB_LABELS[t]}
+                    </span>
                   </button>
                 );
               })}

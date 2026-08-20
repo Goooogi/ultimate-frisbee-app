@@ -23,6 +23,7 @@
 //   vertical midpoint of its source cards, so the feed reads without connectors.
 
 import { useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { assignPositions as sharedAssignPositions } from '@/lib/bracket-tree';
 import Link from 'next/link';
 import type { WfdfEventDetail } from '@/lib/wfdf/data';
@@ -262,6 +263,7 @@ function headerTime(iso: string | null): string | null {
 // added ~28px, and the shared 104px row pitch only fits the card with the
 // USAU-style compact lines.
 function MatchCard({ game, compact = true }: { game: BracketGame; compact?: boolean }) {
+  const router = useRouter();
   const done = game.status === 'completed' && game.homeScore != null && game.awayScore != null;
   const homeWon = done && (game.homeScore ?? 0) > (game.awayScore ?? 0);
   const awayWon = done && (game.awayScore ?? 0) > (game.homeScore ?? 0);
@@ -271,8 +273,18 @@ function MatchCard({ game, compact = true }: { game: BracketGame; compact?: bool
     .join(' · ');
   const hasLeft = Boolean(game.finalLabel) || live;
 
+  // Whole card opens the game matchup page — same pattern as the flat game
+  // rows (role=link + push; team links inside stopPropagation).
   return (
-    <article className="bg-surface rounded-card shadow-card overflow-hidden">
+    <article
+      className="bg-surface rounded-card shadow-card overflow-hidden cursor-pointer hover:shadow-card-hover transition-shadow"
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(`/wfdf/g/${game.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') router.push(`/wfdf/g/${game.id}`);
+      }}
+    >
       {/* Status strip: placement tag ("3RD PLACE") disambiguates sibling
           finals sharing the Final column; field + venue wall clock ALWAYS
           show (Hunter, 2026-08-18). No Upcoming/Final text label — it crowded
@@ -382,6 +394,7 @@ function TeamLine({
         <Link
           href={`/wfdf/teams/${teamId}`}
           className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
+          onClick={(e) => e.stopPropagation()}
         >
           {inner}
         </Link>
