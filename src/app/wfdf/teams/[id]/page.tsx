@@ -9,6 +9,8 @@ import { PageShell } from '@/components/page-shell';
 import { getTeam, findClubTwin } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
+import { WfdfSourceLink } from '@/components/wfdf/wfdf-source-link';
+import { wfdfTeamUrl } from '@/lib/wfdf/source-links';
 
 export const revalidate = 120;
 
@@ -44,6 +46,14 @@ export default async function WfdfTeamPage({ params }: Props) {
     <PageShell
       title={team.name}
       eyebrow={`WFDF${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}
+      controls={
+        <WfdfSourceLink
+          href={wfdfTeamUrl(
+            { sourceOrigin: team.eventSourceOrigin, staticBase: team.eventStaticBase },
+            { wfdfTeamId: team.wfdfTeamId, name: team.name, divisionName: team.divisionName },
+          )}
+        />
+      }
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'WFDF', href: '/wfdf/events' },

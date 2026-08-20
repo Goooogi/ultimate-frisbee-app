@@ -109,6 +109,9 @@ export interface WfdfEventDetail extends WfdfEventCard {
   divisions: WfdfDivision[];
   teams: WfdfTeamCard[];
   games: WfdfGameRow[];
+  /** Source-site fields for outbound "view on WFDF" links (source-links.ts). */
+  sourceOrigin: string | null;
+  staticBase: string | null;
 }
 
 export interface WfdfTeamSummary {
@@ -130,6 +133,10 @@ export interface WfdfTeamSummary {
   scoresFor: number | null;
   scoresAgainst: number | null;
   spiritAvg: number | null;
+  /** Source-site team id + event fields for the outbound WFDF link. */
+  wfdfTeamId: number | null;
+  eventSourceOrigin: string | null;
+  eventStaticBase: string | null;
   roster: WfdfRosterPlayer[];
   games: WfdfGameRow[];
 }
@@ -299,7 +306,9 @@ export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
   const db = supabase();
   const { data: ev } = await db
     .from('wfdf_events')
-    .select('id, slug, name, year, kind, location, start_date, end_date, is_national_teams, logo_url')
+    .select(
+      'id, slug, name, year, kind, location, start_date, end_date, is_national_teams, logo_url, source_origin, static_base',
+    )
     .eq('slug', slug)
     .maybeSingle();
   if (!ev) return null;
@@ -336,6 +345,8 @@ export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {
     endDate: (ev.end_date as string) ?? null,
     isNationalTeams: !!ev.is_national_teams,
     logoUrl: (ev.logo_url as string) ?? null,
+    sourceOrigin: (ev.source_origin as string) ?? null,
+    staticBase: (ev.static_base as string) ?? null,
     teamCount: (teams ?? []).length,
     divisions: (divs ?? []).map((d: Record<string, unknown>) => ({
       id: d.id as string,
@@ -380,6 +391,9 @@ export interface WfdfGameDetail {
   eventId: string;
   eventSlug: string;
   eventName: string;
+  /** Source-site fields for the outbound WFDF link. */
+  eventSourceOrigin: string | null;
+  eventStaticBase: string | null;
   goals: WfdfGoalRow[];
   playerStats: WfdfGameStatLine[];
 }
@@ -389,10 +403,10 @@ export async function getGameDetail(gameId: string): Promise<WfdfGameDetail | nu
   const { data: g } = await db
     .from('wfdf_games')
     .select(
-      'id, event_id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
+      'id, event_id, wfdf_game_id, home_score, away_score, home_sotg, away_sotg, pool_name, is_bracket, status, scheduled_at, field_name, ' +
         'division:division_id(name), ' +
         'home:home_team_id(id, name, country_code), away:away_team_id(id, name, country_code), ' +
-        'event:event_id(id, slug, name)',
+        'event:event_id(id, slug, name, source_origin, static_base)',
     )
     .eq('id', gameId)
     .maybeSingle();
@@ -439,6 +453,8 @@ export async function getGameDetail(gameId: string): Promise<WfdfGameDetail | nu
     eventId,
     eventSlug: (event?.slug as string) ?? '',
     eventName: (event?.name as string) ?? '',
+    eventSourceOrigin: (event?.source_origin as string) ?? null,
+    eventStaticBase: (event?.static_base as string) ?? null,
     goals: ((goals ?? []) as Row[]).map((r) => ({
       num: r.num as number,
       timeS: (r.time_s as number) ?? null,
@@ -494,8 +510,8 @@ export async function getTeam(teamId: string): Promise<WfdfTeamSummary | null> {
   const { data: t } = await db
     .from('wfdf_teams')
     .select(
-      'id, name, abbreviation, country_code, country_name, flag_file, seed, final_standing, wins, losses, scores_for, scores_against, spirit_avg, event_id, ' +
-        'division:division_id(name), event:event_id(name, slug, year)',
+      'id, wfdf_team_id, name, abbreviation, country_code, country_name, flag_file, seed, final_standing, wins, losses, scores_for, scores_against, spirit_avg, event_id, ' +
+        'division:division_id(name), event:event_id(name, slug, year, source_origin, static_base)',
     )
     .eq('id', teamId)
     .maybeSingle<Row>();
@@ -538,6 +554,9 @@ export async function getTeam(teamId: string): Promise<WfdfTeamSummary | null> {
     scoresFor: (t.scores_for as number) ?? null,
     scoresAgainst: (t.scores_against as number) ?? null,
     spiritAvg: (t.spirit_avg as number) ?? null,
+    wfdfTeamId: (t.wfdf_team_id as number) ?? null,
+    eventSourceOrigin: (event?.source_origin as string) ?? null,
+    eventStaticBase: (event?.static_base as string) ?? null,
     roster: dedupeRoster(
       ((roster ?? []) as Row[]).map((r: Row) => ({
         wfdfPlayerId: r.wfdf_player_id as number,

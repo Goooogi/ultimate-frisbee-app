@@ -17,6 +17,8 @@ import {
 } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
 import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
+import { WfdfSourceLink } from '@/components/wfdf/wfdf-source-link';
+import { wfdfGameUrl } from '@/lib/wfdf/source-links';
 
 export const revalidate = 300;
 
@@ -90,6 +92,14 @@ export default async function WfdfGamePage({ params }: Props) {
       title={`${game.homeTeam ?? 'TBD'} vs ${game.awayTeam ?? 'TBD'}`}
       eyebrow={`WFDF · ${game.divisionName ?? ''}`}
       subtitle={lede}
+      controls={
+        <WfdfSourceLink
+          href={wfdfGameUrl(
+            { sourceOrigin: detail.eventSourceOrigin, staticBase: detail.eventStaticBase },
+            game,
+          )}
+        />
+      }
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'WFDF', href: '/wfdf/events' },
