@@ -157,3 +157,36 @@ export function metaRight(game: UfaGame, state: GameUiState): string {
   if (state.isFinal) return formatStartDateShort(game);
   return formatStartCompact(game);
 }
+
+/**
+ * Feed sort order (shared by the /scores server render and the client-side
+ * live-poll re-sort so a refreshed slate keeps the same ordering):
+ *   1. Live games — earliest start first (active now → kick-off-soon).
+ *   2. Upcoming games — earliest start first (next up at top).
+ *   3. Final games — most recent first (today's results above last night's).
+ *
+ * Falls back to gameID alphabetical when a startTimestamp is missing on either
+ * side so the order is still stable.
+ */
+export function sortForFeed(games: UfaGame[]): UfaGame[] {
+  const rank = (g: UfaGame): number => {
+    const s = gameUiState(g);
+    if (s.isLive) return 0;
+    if (s.isUpcoming) return 1;
+    return 2;
+  };
+  const ts = (g: UfaGame): number =>
+    g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0;
+
+  return [...games].sort((a, b) => {
+    const ra = rank(a);
+    const rb = rank(b);
+    if (ra !== rb) return ra - rb;
+    const ta = ts(a);
+    const tb = ts(b);
+    if (ta && tb && ta !== tb) {
+      return ra === 2 ? tb - ta : ta - tb;
+    }
+    return a.gameID.localeCompare(b.gameID);
+  });
+}

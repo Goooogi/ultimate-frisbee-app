@@ -201,30 +201,11 @@ function BracketTreeGroup({
         </h3>
       )}
 
-      {/* Mobile: vertical stack by round, latest round FIRST (Final → SF → QF
-          → R1). On a phone the result you care about is the championship, so it
-          leads; the desktop bracket below keeps the natural left-to-right
-          feed into the final on the right. */}
-      <div className="lg:hidden flex flex-col gap-5">
-        {[...columns].reverse().map(
-          (col) =>
-            col.slots.length > 0 && (
-              <div key={col.key}>
-                <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-                  {col.label}
-                </div>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {col.slots.map((s) => (
-                    <MatchCard key={s.id} slot={s} venueState={venueState} compact />
-                  ))}
-                </ul>
-              </div>
-            ),
-        )}
-      </div>
-
-      {/* Desktop: horizontal columns with absolute-positioned cards */}
-      <div className="hidden lg:block overflow-x-auto pb-2">
+      {/* Horizontal tree at EVERY width — scroll right for later rounds, same
+          as the WFDF bracket and the native app (Hunter, 2026-08-20; replaces
+          the old stacked-rounds mobile variant, whose latest-first list read
+          as "the Final has two games"). */}
+      <div className="overflow-x-auto pb-2">
         <DesktopBracket columns={columns} positions={positions} venueState={venueState} />
       </div>
     </div>
@@ -264,9 +245,11 @@ function DesktopBracket({
 
   return (
     <div
-      className="grid gap-x-6 min-w-[920px] relative"
+      // Fixed 180px columns (WFDF-tree parity) so the tree pans horizontally
+      // on a phone instead of forcing a 920px canvas onto minmax stretch.
+      className="grid gap-x-6 relative flex-shrink-0"
       style={{
-        gridTemplateColumns: `repeat(${renderedColumns.length}, minmax(180px, 1fr))`,
+        gridTemplateColumns: `repeat(${renderedColumns.length}, 180px)`,
         height: `${totalHeight}px`,
       }}
     >

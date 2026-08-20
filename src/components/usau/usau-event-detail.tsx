@@ -1074,7 +1074,7 @@ function PoolCard({
           >
             <span className="flex items-center gap-2 min-w-0">
               <PoolGamesChevron open={gamesOpen} />
-              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
                 Games
               </span>
             </span>
@@ -1272,7 +1272,7 @@ function TeamLine({
           {seed}
         </span>
       )}
-      <span className="text-[13px] font-tight truncate">{name ?? '—'}</span>
+      <span className="text-[13px] font-tight font-bold truncate">{name ?? '—'}</span>
     </span>
   );
 

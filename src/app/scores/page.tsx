@@ -5,7 +5,7 @@
 
 import { FeedPage } from '@/components/feed-page';
 import { getCurrentGames } from '@/lib/ufa/client';
-import { gameUiState } from '@/lib/ufa/format';
+import { sortForFeed } from '@/lib/ufa/format';
 import { getToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
 import { type UsauTournamentPage } from '@/lib/usau/data';
@@ -120,36 +120,4 @@ async function loadUsauPage(
     return recentUsauTournamentPageCached(usauLevel, usauFlights, season, result.pageCount - 1);
   }
   return result;
-}
-
-/**
- * Sort order:
- *   1. Live games — earliest start first (active now → kick-off-soon).
- *   2. Upcoming games — earliest start first (next up at top).
- *   3. Final games — most recent first (today's results above last night's).
- *
- * Falls back to gameID alphabetical when a startTimestamp is missing on either
- * side so the order is still stable.
- */
-function sortForFeed(games: UfaGame[]): UfaGame[] {
-  const rank = (g: UfaGame): number => {
-    const s = gameUiState(g);
-    if (s.isLive) return 0;
-    if (s.isUpcoming) return 1;
-    return 2;
-  };
-  const ts = (g: UfaGame): number =>
-    g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0;
-
-  return [...games].sort((a, b) => {
-    const ra = rank(a);
-    const rb = rank(b);
-    if (ra !== rb) return ra - rb;
-    const ta = ts(a);
-    const tb = ts(b);
-    if (ta && tb && ta !== tb) {
-      return ra === 2 ? tb - ta : ta - tb;
-    }
-    return a.gameID.localeCompare(b.gameID);
-  });
 }

@@ -19,7 +19,7 @@
 // no team records or final placements, so ranking is final_placement → win% →
 // point diff.
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useViewParam } from '@/lib/use-view-param';
 import Link from 'next/link';
 import type { EufDivision, EufGameCard, EufStandingRow } from '@/lib/euf/data';
@@ -327,7 +327,7 @@ function DivisionContent({
       )}
 
       {/* ── Pools ─────────────────────────────────────────────────────────── */}
-      {active === 'pools' && <RoundSections rounds={poolRounds} />}
+      {active === 'pools' && <EufPoolPlay rounds={poolRounds} />}
 
       {/* ── Crossovers ────────────────────────────────────────────────────── */}
       {active === 'crossovers' && (
@@ -366,6 +366,164 @@ function groupRounds(games: EufGameCard[]): Array<[string, EufGameCard[]]> {
     const sb = STAGE_ORDER[b[1][0]?.stage ?? 'other'] ?? 9;
     return sa !== sb ? sa - sb : a[0].localeCompare(b[0]);
   });
+}
+
+// ── Pool play (USAU-style cards) ─────────────────────────────────────────────
+//
+// Mirrors USAU's Pools tab (Hunter, 2026-08-20): one card per pool — team list
+// ranked by in-pool record, with that pool's games in a collapsed "Games"
+// footer inside the card. Teams derive from the games (Ultiorganizer has no
+// team→pool table); record/diff count this pool's scored games only.
+
+interface EufPoolTeam {
+  id: string | null;
+  name: string;
+  division: EufDivision;
+  country: string | null;
+  wins: number;
+  losses: number;
+  diff: number;
+}
+
+function buildEufPoolTeams(games: EufGameCard[]): EufPoolTeam[] {
+  const byName = new Map<string, EufPoolTeam>();
+  const side = (id: string | null, name: string, country: string | null, division: EufDivision) => {
+    let t = byName.get(name);
+    if (!t) {
+      t = { id, name, division, country, wins: 0, losses: 0, diff: 0 };
+      byName.set(name, t);
+    }
+    if (t.id == null && id != null) t.id = id;
+    return t;
+  };
+  for (const g of games) {
+    const home = side(g.homeTeamId, g.homeName, g.homeCountry, g.division);
+    const away = side(g.awayTeamId, g.awayName, g.awayCountry, g.division);
+    if (g.homeScore == null || g.awayScore == null) continue;
+    home.diff += g.homeScore - g.awayScore;
+    away.diff += g.awayScore - g.homeScore;
+    if (g.homeScore > g.awayScore) {
+      home.wins += 1;
+      away.losses += 1;
+    } else if (g.awayScore > g.homeScore) {
+      away.wins += 1;
+      home.losses += 1;
+    }
+  }
+  return [...byName.values()].sort(
+    (a, b) =>
+      b.wins - a.wins || a.losses - b.losses || b.diff - a.diff || a.name.localeCompare(b.name),
+  );
+}
+
+function EufPoolPlay({ rounds }: { rounds: Array<[string, EufGameCard[]]> }) {
+  if (rounds.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-6">
+      {rounds.map(([pool, list]) => (
+        <EufPoolCard key={pool} label={pool} games={list} />
+      ))}
+    </div>
+  );
+}
+
+function EufPoolCard({ label, games }: { label: string; games: EufGameCard[] }) {
+  const teams = useMemo(() => buildEufPoolTeams(games), [games]);
+  const sorted = useMemo(
+    () => games.slice().sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')),
+    [games],
+  );
+  const [gamesOpen, setGamesOpen] = useState(false);
+  const panelId = `pool-games-${label.replace(/\s+/g, '-').toLowerCase()}`;
+
+  return (
+    <div className="bg-surface rounded-card shadow-card overflow-hidden">
+      <div className="px-4 py-3">
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
+          {label}
+        </span>
+      </div>
+      <ul className="list-none p-0 m-0">
+        {teams.map((t) => {
+          const inner = (
+            <>
+              <EufFlag countryName={t.country} size={14} />
+              <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink font-tight truncate">
+                {t.name}
+              </span>
+              <span className="tabular text-[11px] font-bold text-muted font-tight flex-shrink-0">
+                {t.wins}–{t.losses}
+              </span>
+            </>
+          );
+          const rowClass =
+            'flex items-center gap-3 px-4 py-2.5 no-underline transition-colors duration-150';
+          return (
+            <li key={t.name} className="border-t border-hairline">
+              {t.id ? (
+                <Link
+                  href={`/euf/clubs/${encodeURIComponent(t.name)}?div=${encodeURIComponent(t.division)}`}
+                  className={`${rowClass} hover:bg-ink/[0.03]`}
+                >
+                  {inner}
+                </Link>
+              ) : (
+                <span className={rowClass}>{inner}</span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {sorted.length > 0 && (
+        <div className="border-t border-hairline">
+          <button
+            type="button"
+            aria-expanded={gamesOpen}
+            aria-controls={panelId}
+            onClick={() => setGamesOpen((o) => !o)}
+            className={[
+              'w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left cursor-pointer',
+              'hover:bg-ink/[0.03] transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+            ].join(' ')}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <PoolGamesChevron open={gamesOpen} />
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
+                Games
+              </span>
+            </span>
+            <span className="tabular text-[10px] font-bold text-faint font-tight">
+              {sorted.length}
+            </span>
+          </button>
+          {gamesOpen && (
+            <ul id={panelId} className="list-none m-0 flex flex-col gap-2 px-3 pt-0 pb-3">
+              {sorted.map((g) => (
+                <GameRow key={g.id} game={g} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PoolGamesChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      className={['shrink-0 text-faint transition-transform duration-150', open ? 'rotate-90' : ''].join(' ')}
+    >
+      <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 /** A round heading + its games, each round split into day groups so a two-day
@@ -588,7 +746,7 @@ function TeamLine({
   const inner = (
     <>
       <EufFlag countryName={country} size={13} />
-      <span className={['truncate', won ? 'text-ink font-semibold' : 'text-muted'].join(' ')}>
+      <span className={['truncate font-bold', won ? 'text-ink' : 'text-muted'].join(' ')}>
         {name}
       </span>
     </>

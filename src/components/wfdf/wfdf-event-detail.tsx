@@ -7,7 +7,7 @@
 // shows: final standings (from wfdf_teams) + the division's games grouped into
 // pool play and bracket. Team names link to /wfdf/teams/[id].
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useViewParam } from '@/lib/use-view-param';
@@ -507,88 +507,14 @@ function PoolPlaySection({
           </h2>
 
           <div className="mt-4 flex flex-col gap-6">
-            {pools.map((pool) => {
-              const pTeams = poolTeams.get(pool) ?? [];
-              const pGames = gamesByPool.get(pool) ?? [];
-              return (
-                <div key={pool}>
-                  <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-                    <div className="flex items-center justify-between px-4 py-2.5">
-                      <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
-                        {poolDisplayLabel(pool)}
-                      </span>
-                      <span className="text-[10px] tabular text-faint font-tight">
-                        {pTeams.length} teams
-                      </span>
-                    </div>
-                    <ul>
-                      {pTeams.map((t, i) => (
-                        <li key={t.id}>
-                          <Link
-                            href={`/wfdf/teams/${t.id}`}
-                            className={[
-                              'flex items-center gap-2.5 px-4 py-2.5 no-underline',
-                              'transition-colors duration-150 hover:bg-surface-hi',
-                              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-                              i > 0 ? 'border-t border-hairline' : '',
-                            ].join(' ')}
-                          >
-                            <span className="w-5 text-right text-[11px] font-bold tabular text-faint font-tight">
-                              {t.seed ?? '–'}
-                            </span>
-                            <WfdfFlag flagFile={t.flagFile} countryCode={t.countryCode} size={16} />
-                            <span className="flex-1 min-w-0 font-tight text-[14px] font-semibold text-ink truncate">
-                              {t.name}
-                            </span>
-                            {/* In-pool record only — event-wide t.wins/t.losses
-                                include bracket games (those live on Standings). */}
-                            <span className="text-[11px] tabular text-faint font-tight">
-                              {t.poolWins}–{t.poolLosses}
-                            </span>
-                          </Link>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {pGames.length > 0 && (
-                    <details className="group mt-1.5">
-                      <summary
-                        className={[
-                          'flex items-center gap-2 cursor-pointer list-none [&::-webkit-details-marker]:hidden',
-                          'px-4 py-2 rounded-full',
-                          'text-[10px] font-bold tracking-[0.16em] uppercase text-muted font-tight',
-                          'hover:text-ink transition-colors duration-150',
-                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                        ].join(' ')}
-                      >
-                        <svg
-                          className="w-2.5 h-2.5 flex-shrink-0 transition-transform duration-150 group-open:rotate-90"
-                          viewBox="0 0 10 10"
-                          fill="none"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M3.5 2L6.5 5L3.5 8"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
-                        Games
-                        <span className="text-faint tabular">{pGames.length}</span>
-                      </summary>
-                      <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
-                        {pGames.map((g) => (
-                          <GameRow key={g.id} game={g} />
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </div>
-              );
-            })}
+            {pools.map((pool) => (
+              <WfdfPoolCard
+                key={pool}
+                label={poolDisplayLabel(pool)}
+                teams={poolTeams.get(pool) ?? []}
+                games={gamesByPool.get(pool) ?? []}
+              />
+            ))}
           </div>
         </section>
       )}
@@ -597,6 +523,109 @@ function PoolPlaySection({
         <GameSection heading="Other Games" games={otherGames} groupByPool />
       )}
     </>
+  );
+}
+
+// One pool's card: standings-style team list with that pool's games in a
+// collapsed footer INSIDE the card — same look/behavior as USAU's PoolCard
+// (Hunter, 2026-08-20; replaced the old detached <details> pill below the card).
+function WfdfPoolCard({
+  label,
+  teams,
+  games,
+}: {
+  label: string;
+  teams: WfdfPoolTeam[];
+  games: WfdfEvent['games'];
+}) {
+  const [gamesOpen, setGamesOpen] = useState(false);
+  const panelId = `pool-games-${label.replace(/\s+/g, '-').toLowerCase()}`;
+
+  return (
+    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2.5">
+        <span className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
+          {label}
+        </span>
+        <span className="text-[10px] tabular text-faint font-tight">{teams.length} teams</span>
+      </div>
+      <ul>
+        {teams.map((t, i) => (
+          <li key={t.id}>
+            <Link
+              href={`/wfdf/teams/${t.id}`}
+              className={[
+                'flex items-center gap-2.5 px-4 py-2.5 no-underline',
+                'transition-colors duration-150 hover:bg-surface-hi',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+                i > 0 ? 'border-t border-hairline' : '',
+              ].join(' ')}
+            >
+              <span className="w-5 text-right text-[11px] font-bold tabular text-faint font-tight">
+                {t.seed ?? '–'}
+              </span>
+              <WfdfFlag flagFile={t.flagFile} countryCode={t.countryCode} size={16} />
+              <span className="flex-1 min-w-0 font-tight text-[14px] font-semibold text-ink truncate">
+                {t.name}
+              </span>
+              {/* In-pool record only — event-wide t.wins/t.losses include
+                  bracket games (those live on Standings). */}
+              <span className="text-[11px] tabular text-faint font-tight">
+                {t.poolWins}–{t.poolLosses}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+
+      {games.length > 0 && (
+        <div className="border-t border-hairline">
+          <button
+            type="button"
+            aria-expanded={gamesOpen}
+            aria-controls={panelId}
+            onClick={() => setGamesOpen((o) => !o)}
+            className={[
+              'w-full flex items-center justify-between gap-3 px-4 py-2.5 text-left cursor-pointer',
+              'hover:bg-ink/[0.03] transition-colors duration-150',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset',
+            ].join(' ')}
+          >
+            <span className="flex items-center gap-2 min-w-0">
+              <PoolGamesChevron open={gamesOpen} />
+              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
+                Games
+              </span>
+            </span>
+            <span className="tabular text-[10px] font-bold text-faint font-tight">
+              {games.length}
+            </span>
+          </button>
+          {gamesOpen && (
+            <div id={panelId} className="flex flex-col gap-2 px-3 pb-3">
+              {games.map((g) => (
+                <GameRow key={g.id} game={g} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PoolGamesChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      className={['shrink-0 text-faint transition-transform duration-150', open ? 'rotate-90' : ''].join(' ')}
+    >
+      <path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -734,8 +763,8 @@ function TeamLine({
       <WfdfFlag flagFile={null} countryCode={country} size={14} />
       <span
         className={[
-          'font-tight text-[13px] truncate',
-          done ? (won ? 'font-bold text-ink' : 'text-muted') : 'text-ink',
+          'font-tight text-[13px] font-bold truncate',
+          done ? (won ? 'text-ink' : 'text-muted') : 'text-ink',
         ].join(' ')}
       >
         {name ?? 'TBD'}

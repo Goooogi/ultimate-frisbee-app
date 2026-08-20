@@ -5,10 +5,11 @@
 // The league switcher lives in the AppShell's top bar and is now controlled
 // from here so changing leagues swaps the content (UFA games ↔ USAU events).
 
-import { Suspense, useCallback } from 'react';
+import { Suspense, useCallback, useMemo } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { gameUiState } from '@/lib/ufa/format';
+import { gameUiState, sortForFeed } from '@/lib/ufa/format';
+import { useLiveGames } from '@/lib/use-live-games';
 import type { UfaGame } from '@/lib/ufa/types';
 import type { Today } from '@/lib/today';
 import { GameCard } from '@/components/game-card';
@@ -42,12 +43,16 @@ export function FeedPage(props: FeedPageProps) {
   );
 }
 
-function FeedPageInner({ games, today, usauPage, usauLevel }: FeedPageProps) {
+function FeedPageInner({ games: initialGames, today, usauPage, usauLevel }: FeedPageProps) {
   // League state lives in ?league= — see lib/use-league.ts. We don't pass
   // a topNavSlot so AppShell's default renders: pill tabs on desktop, a
   // dropdown on mobile. Both write to the same useLeague() state via the
   // URL so changing it anywhere updates this component on next render.
   const [league] = useLeague();
+  // Live score polling — UFA only (the one league with in-play data). Re-sort
+  // after each poll so a game flipping Upcoming→Live→Final moves sections.
+  const polled = useLiveGames(initialGames, 'games?current=true', league === 'ufa');
+  const games = useMemo(() => sortForFeed(polled), [polled]);
   const counts = gameCounts(games);
 
   return (

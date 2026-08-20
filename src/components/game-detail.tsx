@@ -1,7 +1,9 @@
 'use client';
 
 import Link from 'next/link';
+import { useMemo } from 'react';
 import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
+import { useLiveGames } from '@/lib/use-live-games';
 import { gameUiState, formatStartCompact, livePhaseLabel } from '@/lib/ufa/format';
 import type {
   UfaGame,
@@ -71,7 +73,13 @@ export function GameDetail({ game, today, enrichment }: GameDetailProps) {
  * dramatic split with stencil + tinted gradient on both themes — colors come
  * from CSS variables so it reads correctly in light and dark.
  */
-function DetailBody({ game, today, enrichment }: { game: UfaGame; today: Today; enrichment?: GameEnrichment }) {
+function DetailBody({ game: initialGame, today, enrichment }: { game: UfaGame; today: Today; enrichment?: GameEnrichment }) {
+  // Live score/status polling — makes the "Auto-refreshing · 30s" footer label
+  // below actually true. Enrichment (leaders, boxscore) stays render-time.
+  const initial = useMemo(() => [initialGame], [initialGame]);
+  const game =
+    useLiveGames(initial, `games?gameID=${encodeURIComponent(initialGame.gameID)}`)[0] ??
+    initialGame;
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const state = gameUiState(game);
