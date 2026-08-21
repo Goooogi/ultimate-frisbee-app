@@ -35,9 +35,20 @@ if (typeof window !== 'undefined') {
   });
 }
 
-/** Previous in-app route (pathname+search), or null right after a reload. */
-export function previousUrl(): string | null {
-  return prev;
+/** Previous in-app page (pathname+search), or null right after a reload.
+ *
+ *  Callers pass their own pathname for two reasons:
+ *  - Freshness: the tracker updates one effect pass AFTER a new page renders,
+ *    so at mount the freshest previous page is still in `curr` — reading bare
+ *    `prev` there returns the page before last.
+ *  - Same-path noise: ?div=/?tab= filter switches are router.replace calls on
+ *    the SAME page; without skipping same-path entries they'd masquerade as a
+ *    back target after a re-render. */
+export function previousUrl(currentPath: string): string | null {
+  for (const c of [curr, prev]) {
+    if (c != null && c.split('?')[0] !== currentPath) return c;
+  }
+  return null;
 }
 
 /** Mounted once in the root layout (under Suspense — reads search params). */

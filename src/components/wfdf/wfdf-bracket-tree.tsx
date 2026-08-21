@@ -190,17 +190,15 @@ function BracketSection({ bracket }: { bracket: Bracket }) {
 
   return (
     <section aria-label={bracket.title}>
+      {/* NOTE: the gold/silver/bronze medal tags that sat right of this title
+          are removed for now (Hunter, 2026-08-21): `medals` derives from the
+          EVENT-WIDE team list's finalStanding, so another division's medalist
+          leaked in ("Bronze Fury" on the Mixed bracket — Fury is a women's
+          team). Re-add only once the rail filters teams to this division. */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
           {bracket.title}
         </h3>
-        {bracket.medals && (
-          <div className="flex items-center gap-3 flex-wrap">
-            {bracket.medals.gold && <MedalTag place="gold" name={bracket.medals.gold} />}
-            {bracket.medals.silver && <MedalTag place="silver" name={bracket.medals.silver} />}
-            {bracket.medals.bronze && <MedalTag place="bronze" name={bracket.medals.bronze} />}
-          </div>
-        )}
       </div>
 
       {/* Horizontal tree at EVERY width — scroll right for later rounds, the
@@ -403,21 +401,6 @@ function TeamLine({
         {done ? score : '–'}
       </span>
     </div>
-  );
-}
-
-function MedalTag({ place, name }: { place: 'gold' | 'silver' | 'bronze'; name: string }) {
-  const color =
-    place === 'gold' ? 'text-[#d4af37]' : place === 'silver' ? 'text-[#9ca3af]' : 'text-[#c07a3e]';
-  const label = place === 'gold' ? 'Gold' : place === 'silver' ? 'Silver' : 'Bronze';
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-tight">
-      <span className={color} aria-hidden="true">
-        ●
-      </span>
-      <span className="text-[9px] font-bold tracking-[0.14em] uppercase text-faint">{label}</span>
-      <span className="font-semibold text-ink truncate max-w-[140px]">{name}</span>
-    </span>
   );
 }
 

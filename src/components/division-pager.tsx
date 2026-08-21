@@ -384,11 +384,11 @@ export function DivisionPager<V extends string>({
     const only = activeValue ?? divisions[0]?.value;
     if (only == null) return null;
     // Single division: no segmented control, but the leading view tabs still
-    // belong on the page.
+    // belong on the page. Same frozen-header treatment as the paged branch.
     if (tabRowLeading == null) return <>{renderRef.current(only)}</>;
     return (
-      <div className="flex flex-col gap-2.5">
-        <div className="pt-2 pb-2 lg:pt-0">{tabRowLeading}</div>
+      <div className="flex flex-col">
+        <div className="sticky top-0 z-30 bg-bg pt-2 pb-4 lg:pt-0">{tabRowLeading}</div>
         {renderRef.current(only)}
       </div>
     );
@@ -453,14 +453,20 @@ export function DivisionPager<V extends string>({
   );
 
   return (
-    <div className="flex flex-col gap-2.5">
+    // The view-tab + division-control header is FROZEN: sticky against the
+    // scroll pane so the reader always sees where they are and can switch
+    // section/division from anywhere down the page (Hunter, 2026-08-21).
+    // Solid bg-bg so content slides under it cleanly; the old parent gap-2.5
+    // moved into the header's own padding — a transparent gap strip below the
+    // stuck header would show cards scrolling through it.
+    <div className="flex flex-col">
       {tabRowLeading != null ? (
-        <div className="flex flex-col gap-3.5 pt-2 pb-2 lg:flex-row lg:items-center lg:justify-between lg:gap-3 lg:pt-0">
+        <div className="sticky top-0 z-30 bg-bg flex flex-col gap-3.5 pt-2 pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-3 lg:pt-0">
           <div className="shrink-0">{tabRowLeading}</div>
           {segmentScroller}
         </div>
       ) : (
-        segmentScroller
+        <div className="sticky top-0 z-30 bg-bg pb-2.5">{segmentScroller}</div>
       )}
 
       {/* Edge-bleed the TOUCH surface, not the layout: PageShell's px-5 gutter
