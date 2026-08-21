@@ -32,7 +32,7 @@ import {
   classifyStructRound,
   type StructuralRail,
 } from '@/lib/wfdf/bracket-structure';
-import { BracketConnectors } from '@/components/bracket-connectors';
+import { BracketScroller } from '@/components/bracket-scroller';
 import { WfdfFlag } from './wfdf-flag';
 
 type Game = WfdfEventDetail['games'][number];
@@ -100,13 +100,17 @@ interface Bracket {
   /** Human title, e.g. "Championship Bracket", "9th–16th Place". */
   title: string;
   columns: RoundColumn[];
+  /** Sibling placement finals (3rd Place, 11th Place, …) — decided alongside
+   *  the rail's own final but rendered in a small section BELOW the tree:
+   *  stacked into the Final column they crowded the card above and clipped
+   *  their placement tags (Hunter, 2026-08-20). */
+  extras: BracketGame[];
   /** Final placement rail (rank → team), sorted ascending by rank. */
   rail: { rank: number; teamName: string; countryCode: string | null; flagFile: string | null }[];
   /** Gold/silver/bronze (only set on the championship bracket). */
   medals: { gold: string | null; silver: string | null; bronze: string | null } | null;
 }
 
-const ROW_PITCH_PX = 104;
 /** Height of the placement tag rendered above a card (text + mb-1). */
 const PLACE_TAG_H_PX = 16;
 
@@ -150,6 +154,7 @@ export function wfdfBracketCoveredIds(
     for (const col of b.columns) {
       for (const g of col.games) ids.add(g.id);
     }
+    for (const g of b.extras) ids.add(g.id);
   }
   return ids;
 }
@@ -172,9 +177,16 @@ export function WfdfBracketTree({ divisionName, games, teams }: Props) {
 }
 
 function BracketSection({ bracket }: { bracket: Bracket }) {
-  const positions = useMemo(() => assignPositions(bracket.columns), [bracket.columns]);
-  const rendered = bracket.columns.filter((c) => c.games.length > 0);
-  if (rendered.length === 0) return null;
+  // assignPositions establishes the vertical order (side effect on the column
+  // arrays), so the scroller columns derive in the same memo, after it.
+  const { positions, cols } = useMemo(() => {
+    const positions = assignPositions(bracket.columns);
+    const cols = bracket.columns
+      .filter((c) => c.games.length > 0)
+      .map((c) => ({ key: c.label, label: c.label, games: c.games }));
+    return { positions, cols };
+  }, [bracket.columns]);
+  if (cols.length === 0) return null;
 
   return (
     <section aria-label={bracket.title}>
@@ -192,58 +204,34 @@ function BracketSection({ bracket }: { bracket: Bracket }) {
       </div>
 
       {/* Horizontal tree at EVERY width — scroll right for later rounds, the
-          same way the USAU bracket reads (Hunter, 2026-08-18; replaces the
-          old stacked-rounds mobile variant, whose latest-first list read as
-          "the Final has two games"). */}
-      <div className="overflow-x-auto pb-2">
-        <DesktopBracket columns={rendered} positions={positions} />
-      </div>
-    </section>
-  );
-}
+          same way the USAU bracket reads (Hunter, 2026-08-18). The scroller
+          collapses passed rounds ESPN-style as the user swipes (Hunter,
+          2026-08-20). Cards carrying a placement tag lift by its height so
+          the card body stays aligned with the connector elbows. */}
+      <BracketScroller
+        columns={cols}
+        positions={positions}
+        cardLift={(g) => (g.finalLabel ? PLACE_TAG_H_PX : 0)}
+        renderCard={(g) => <MatchCard game={g} />}
+      />
 
-function DesktopBracket({
-  columns,
-  positions,
-}: {
-  columns: RoundColumn[];
-  positions: Map<string, number>;
-}) {
-  const baseCount = Math.max(...columns.map((c) => c.games.length), 2);
-  const totalHeight = baseCount * ROW_PITCH_PX + 32;
-
-  return (
-    <div
-      className="grid gap-x-6 relative flex-shrink-0"
-      style={{
-        gridTemplateColumns: `repeat(${columns.length}, 180px)`,
-        height: `${totalHeight}px`,
-      }}
-    >
-      <BracketConnectors columns={columns} positions={positions} />
-      {columns.map((col) => (
-        <div key={col.label} className="relative h-full">
-          <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
-            {col.label}
+      {/* Sibling placement finals (3rd Place, 11th Place, …) — same cards,
+          own small grid so their tags never crowd the tree's final. */}
+      {bracket.extras.length > 0 && (
+        <div className="mt-5">
+          <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3">
+            Placement games
           </div>
-          {col.games.map((g) => {
-            const top = positions.get(g.id) ?? 0;
-            return (
-              // The placement tag renders ABOVE the card, so cards that carry
-              // one start higher — offset by the tag's height to keep the card
-              // body aligned with the connector elbows.
-              <div
-                key={g.id}
-                className="absolute left-0 right-0"
-                style={{ top: `${top + 32 - (g.finalLabel ? PLACE_TAG_H_PX : 0)}px` }}
-              >
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-x-6 gap-y-4">
+            {bracket.extras.map((g) => (
+              <div key={g.id}>
                 <MatchCard game={g} />
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
-      ))}
-    </div>
+      )}
+    </section>
   );
 }
 
@@ -608,6 +596,9 @@ function railToBracket(rail: StructuralRail, teamById: Map<string, Team>): Brack
       return bg;
     }),
   );
+  // The rail's final column is [primary final, …sibling placement finals]
+  // (bracket-structure contract) — siblings render below the tree, not in it.
+  const extras = gameCols.length > 0 ? gameCols[gameCols.length - 1].splice(1) : [];
   const relLabels = relativeRoundLabels(gameCols.length);
   const columns: RoundColumn[] = gameCols.map((gs, i) => ({
     level: (i === gameCols.length - 1 ? LEVEL_FINAL : LEVEL_BASE) as RoundLevel,
@@ -646,7 +637,7 @@ function railToBracket(rail: StructuralRail, teamById: Map<string, Team>): Brack
     title = `${ordinal(rail.minRank)}–${ordinal(rail.maxRank)} Place`;
   }
 
-  return { id: `${rail.group}-${rail.minRank}`, title, columns, rail: railRows, medals };
+  return { id: `${rail.group}-${rail.minRank}`, title, columns, extras, rail: railRows, medals };
 }
 
 function winnerOf(g: BracketGame): string | null {
@@ -706,6 +697,21 @@ function assembleBracket(
     if (r > 1 && r < 9000) topFinal.finalLabel = `${ordinal(r)} Place`;
   }
 
+  // Sibling placement finals (bronze, 5/6, …) render below the tree. These
+  // were previously collected into the bracket but never given a column, so
+  // legacy events silently dropped them.
+  const extras = [...(byLevel.get(LEVEL_FINAL) ?? [])]
+    .filter((g) => g.id !== topFinal.id)
+    .sort(
+      (a, b) =>
+        Math.min(standingOf(a.homeId), standingOf(a.awayId)) -
+        Math.min(standingOf(b.homeId), standingOf(b.awayId)),
+    );
+  for (const e of extras) {
+    const r = Math.min(standingOf(e.homeId), standingOf(e.awayId));
+    if (r > 1 && r < 9000) e.finalLabel = `${ordinal(r)} Place`;
+  }
+
   // Relative labels: last col = Final, filling backward SF/QF/Round 1.
   const relLabels = relativeRoundLabels(orderedGameCols.length);
   const columns: RoundColumn[] = orderedGameCols.map((gs, i) => ({
@@ -746,7 +752,7 @@ function assembleBracket(
     title = groupTitle(group);
   }
 
-  return { id: `${group}-${minRank}`, title, columns, rail, medals };
+  return { id: `${group}-${minRank}`, title, columns, extras, rail, medals };
 }
 
 // Round labels for a bracket with `n` columns, ending in Final. e.g. n=4 →

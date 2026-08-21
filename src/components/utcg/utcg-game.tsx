@@ -624,9 +624,10 @@ export function UtcgGame({ snapshot }: UtcgGameProps) {
         />
       )}
 
-      {/* Phase content. No bottom bar anymore → no bottom-bar clearance needed. */}
+      {/* Phase content. The GLOBAL flat bottom bar (58px, root layout) covers
+          this pane on <lg, so the pane clears it; desktop has no bar. */}
       <div className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-10 py-4 sm:py-6 pb-[calc(env(safe-area-inset-bottom)+80px)] lg:pb-8">
           {tab === 'play' && (
             <>
               {/* First-time onboarding — a new user owns no cards yet, so they

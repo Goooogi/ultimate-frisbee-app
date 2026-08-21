@@ -228,22 +228,29 @@ function StickyName({ name }: { name: string }) {
   }, []);
 
   return (
+    // ZERO-HEIGHT sticky wrapper — the bar must never take layout space. The
+    // old max-height 0→44px animation grew the page under the reader's thumb:
+    // expanding pushed the sentinel back into view, which collapsed the bar,
+    // which pulled the sentinel out again — an oscillating half-faded bar
+    // whenever you rested just past the name (Hunter, 2026-08-20). The bar now
+    // overlays via a 0-height sticky anchor and animates transform/opacity
+    // only, so toggling can't move the sentinel.
     <div
       ref={barRef}
       aria-hidden={titleVisible}
-      className={[
-        // Mobile-only — desktop has vertical room to spare. top-0 because the
-        // sticky offset resolves against the scroll pane, whose top edge is
-        // already below the AppRail.
-        'sticky top-0 z-40 overflow-hidden lg:hidden',
-        'bg-bg/95 backdrop-blur shadow-soft',
-        'transition-[max-height,opacity] duration-150',
-        titleVisible ? 'max-h-0 opacity-0' : 'max-h-11 opacity-100',
-      ].join(' ')}
+      className="sticky top-0 z-40 h-0 lg:hidden"
     >
-      <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
-        {name}
-      </span>
+      <div
+        className={[
+          'bg-bg/95 backdrop-blur shadow-soft',
+          'transition-[transform,opacity] duration-150',
+          titleVisible ? '-translate-y-full opacity-0 pointer-events-none' : 'translate-y-0 opacity-100',
+        ].join(' ')}
+      >
+        <span className="block px-5 py-2.5 font-tight text-[15px] font-bold tracking-[-0.01em] text-ink truncate">
+          {name}
+        </span>
+      </div>
     </div>
   );
 }

@@ -560,7 +560,9 @@ function PlayMatchFooter({
   ctaLabel?: string;
 }) {
   return (
-    <div className="fixed inset-x-4 sm:inset-x-6 bottom-[calc(env(safe-area-inset-bottom)+96px)] z-30 max-w-5xl mx-auto flex justify-center">
+    // Floats just above the 58px flat bottom bar (96px cleared the retired
+    // floating pill and left it hovering mid-screen).
+    <div className="fixed inset-x-4 sm:inset-x-6 bottom-[calc(env(safe-area-inset-bottom)+70px)] z-30 max-w-5xl mx-auto flex justify-center">
       <button
         type="button"
         onClick={onPlayMatch}

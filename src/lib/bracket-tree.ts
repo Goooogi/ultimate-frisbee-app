@@ -158,6 +158,53 @@ export function assignPositions<T extends BracketNode>(
   return positions;
 }
 
+/**
+ * Per-round collapsed layouts for the scroll-collapsing bracket (see
+ * components/bracket-scroller.tsx). Layout k is the bracket as it should read
+ * when column k sits at the viewport's LEFT edge: columns 0..k stack compactly
+ * at the row pitch (their tree spread has scrolled away, so the gaps between
+ * their games go too), columns k+1.. sit at the midpoints of their feeders as
+ * usual. Layout 0 is exactly `base` (assignPositions' output — its first
+ * column is already compact).
+ *
+ * Call AFTER assignPositions on the same column arrays: this reuses the
+ * vertical order it established (no re-sorting here, so cards never swap
+ * places between layouts — the de-overlap pass alone keeps a column
+ * monotonic).
+ */
+export function collapsedLayouts<T extends BracketNode>(
+  columns: BracketColumn<T>[],
+  base: Map<string, number>,
+): Map<string, number>[] {
+  const layouts: Map<string, number>[] = [base];
+  for (let k = 1; k < columns.length; k++) {
+    const m = new Map<string, number>();
+    for (let j = 0; j <= k; j++) {
+      columns[j].games.forEach((g, i) => m.set(g.id, i * ROW_PITCH_PX));
+    }
+    for (let j = k + 1; j < columns.length; j++) {
+      const prev = columns[j - 1].games;
+      columns[j].games.forEach((g, idx) => {
+        const sources = sourcesFor(g, prev);
+        if (sources.length === 0) {
+          m.set(g.id, idx * ROW_PITCH_PX);
+        } else {
+          const tops = sources.map((s) => m.get(s.id) ?? 0);
+          m.set(g.id, tops.reduce((a, b) => a + b, 0) / tops.length);
+        }
+      });
+      const games = columns[j].games;
+      for (let i = 1; i < games.length; i++) {
+        const prevTop = m.get(games[i - 1].id) ?? 0;
+        const cur = m.get(games[i].id) ?? 0;
+        if (cur < prevTop + ROW_PITCH_PX) m.set(games[i].id, prevTop + ROW_PITCH_PX);
+      }
+    }
+    layouts.push(m);
+  }
+  return layouts;
+}
+
 /** Pixel height a bracket needs, so the absolute-positioned column has a box. */
 export function bracketHeight<T extends BracketNode>(
   columns: BracketColumn<T>[],

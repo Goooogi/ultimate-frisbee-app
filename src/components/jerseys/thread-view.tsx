@@ -133,7 +133,9 @@ export function ThreadView({
           </span>
         </div>
       ) : (
-      <div className="flex items-end gap-2 sticky bottom-[calc(env(safe-area-inset-bottom)+88px)] sm:static bg-bg pt-2">
+      // Clears the 58px flat bottom bar plus a small gap (was 88px for the old
+      // floating pill bar, which left the composer hovering mid-air).
+      <div className="flex items-end gap-2 sticky bottom-[calc(env(safe-area-inset-bottom)+66px)] sm:static bg-bg pt-2">
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}

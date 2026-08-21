@@ -21,9 +21,8 @@ import {
   bracketBucket,
   type BracketBucket,
   assignPositions as sharedAssignPositions,
-  ROW_PITCH_PX,
 } from '@/lib/bracket-tree';
-import { BracketConnectors } from '@/components/bracket-connectors';
+import { BracketScroller } from '@/components/bracket-scroller';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { formatGameTime } from '@/lib/usau/venue-tz';
@@ -191,10 +190,23 @@ function BracketTreeGroup({
   venueState: string | null;
 }) {
   // ── Split into round columns, complete the bracket, assign positions ───
-  const columns = useMemo(() => completeBracket(buildColumns(games)), [games]);
-  const positions = useMemo(() => assignPositions(columns), [columns]);
+  // assignPositions establishes the vertical slot order (side effect), so the
+  // scroller's node columns derive in the same memo, after it. Each node keeps
+  // its slot so renderCard can hand MatchCard the real thing.
+  const { nodeColumns, positions } = useMemo(() => {
+    const columns = completeBracket(buildColumns(games));
+    const positions = assignPositions(columns);
+    const nodeColumns = columns
+      .filter((c) => c.slots.length > 0)
+      .map((c) => ({
+        key: c.key,
+        label: c.label,
+        games: c.slots.map((s) => ({ ...slotNode(s), slot: s })),
+      }));
+    return { nodeColumns, positions };
+  }, [games]);
 
-  if (columns.every((c) => c.slots.length === 0)) {
+  if (nodeColumns.length === 0) {
     return null;
   }
 
@@ -209,78 +221,13 @@ function BracketTreeGroup({
       {/* Horizontal tree at EVERY width — scroll right for later rounds, same
           as the WFDF bracket and the native app (Hunter, 2026-08-20; replaces
           the old stacked-rounds mobile variant, whose latest-first list read
-          as "the Final has two games"). */}
-      <div className="overflow-x-auto pb-2">
-        <DesktopBracket columns={columns} positions={positions} venueState={venueState} />
-      </div>
-    </div>
-  );
-}
-
-// ── Desktop bracket layout ────────────────────────────────────────────────
-
-function DesktopBracket({
-  columns,
-  positions,
-  venueState,
-}: {
-  columns: SlotColumn[];
-  positions: Map<string, number>;
-  venueState: string | null;
-}) {
-  // Determine total height needed: the tallest column sets the pitch count
-  // (small regionals brackets are just 2 semis + a final — don't reserve
-  // four rows of blank space for those). 32 covers the round-label row.
-  const baseCount = Math.max(0, ...columns.map((c) => c.slots.length));
-  // A de-overlap pass can push a later-round card below the base-column count
-  // (two collided semis get spread to 156/260 while the QF column ends at 312),
-  // so also honor the lowest positioned card + one card-height so nothing clips.
-  // Height = whichever is taller: the base column's rows, or the lowest card a
-  // de-overlap pass pushed down (two collided semis get spread to 156/260 while
-  // the QF column ends at 312), plus breathing room.
-  //
-  // NOTE: no minimum-2-rows floor. Placement brackets are often a SINGLE game
-  // (a lone 3rd-place final), and forcing two rows left a full empty row of
-  // dead space under every one of them once side brackets started rendering.
-  const maxTop = Math.max(0, ...Array.from(positions.values()));
-  const totalHeight = Math.max(baseCount * ROW_PITCH_PX, maxTop + ROW_PITCH_PX) + 32;
-
-  // Column count drives grid template.
-  const renderedColumns = columns.filter((c) => c.slots.length > 0);
-
-  return (
-    <div
-      // Fixed 180px columns (WFDF-tree parity) so the tree pans horizontally
-      // on a phone instead of forcing a 920px canvas onto minmax stretch.
-      className="grid gap-x-6 relative flex-shrink-0"
-      style={{
-        gridTemplateColumns: `repeat(${renderedColumns.length}, 180px)`,
-        height: `${totalHeight}px`,
-      }}
-    >
-      <BracketConnectors
-        columns={renderedColumns.map((c) => ({ games: c.slots.map(slotNode) }))}
+          as "the Final has two games"). The scroller collapses passed rounds
+          ESPN-style as the user swipes. */}
+      <BracketScroller
+        columns={nodeColumns}
         positions={positions}
+        renderCard={(g) => <MatchCard slot={g.slot} venueState={venueState} />}
       />
-      {renderedColumns.map((col) => (
-        <div key={col.key} className="relative h-full">
-          <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
-            {col.label}
-          </div>
-          {col.slots.map((s) => {
-            const top = positions.get(s.id) ?? 0;
-            return (
-              <div
-                key={s.id}
-                className="absolute left-0 right-0"
-                style={{ top: `${top + 32}px` }}
-              >
-                <MatchCard slot={s} venueState={venueState} />
-              </div>
-            );
-          })}
-        </div>
-      ))}
     </div>
   );
 }

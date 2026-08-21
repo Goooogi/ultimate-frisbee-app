@@ -1,8 +1,9 @@
 'use client';
 
-// SiteFooter — home page only.
-// Identity left (logo + version), attribution right (Developed by Altius).
-// Theme-aware: logo swaps light/dark via useTheme(); tokens swap via CSS vars.
+// SiteFooter — flat "blended" footer matching the mobile app's SiteFooter
+// (Hunter, 2026-08-20 — replaces the dark rounded card slab, which read heavy
+// on mobile). Sits on the page background, separated by a hairline rule; all
+// text uses palette tokens so it flips with the theme.
 
 import Link from 'next/link';
 import { DiscFlight } from '@/components/logo-strike';
@@ -40,83 +41,42 @@ function ExternalArrow() {
 
 export function SiteFooter() {
   return (
-    <footer className="px-5 lg:px-12 pb-10 lg:pb-12 pt-2">
-      <div className="bg-ink text-bg rounded-card-xl px-6 py-7 lg:px-10 lg:py-9">
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
-          {/* LEFT — wordmark + tagline. This card's background is ALWAYS
-              ink-colored regardless of theme (dark in field, light cream in
-              broadcast — see the shadow-guide note on the intentional
-              inversion), so the wordmark text uses `text-bg` directly rather
-              than LogoStrikeInline (which hardcodes `text-ink`, correct only
-              when its surrounding surface follows the page theme). */}
-          <div className="flex flex-col gap-1.5">
-            <div className="inline-flex items-center gap-2 font-display" style={{ lineHeight: 1 }}>
-              <span
-                className="font-semibold italic uppercase text-bg/70"
-                style={{ fontSize: 12 * 0.85, letterSpacing: '0.2em', transform: 'translateY(-1px)' }}
-              >
-                The
-              </span>
-              <span
-                className="font-bold italic uppercase text-bg"
-                style={{ fontSize: 28 * 0.85, letterSpacing: '-0.005em' }}
-              >
-                Layout
-              </span>
-              {/* Disc uses a fixed warm coral rather than the theme accent —
-                  the theme's lime accent fails contrast against broadcast's
-                  inverted (light cream) footer card. text-bg/40 ring keeps
-                  the inner rings visible against either card polarity. */}
-              <DiscFlight size={24 * 0.85} color="#FF3D00" ring="rgb(var(--bg) / 0.4)" tilt={-12} />
-            </div>
-            <span className="text-[12px] text-bg/60 font-tight">
-              Every league, one place.
+    <footer className="px-5 lg:px-12 pt-7 pb-10 lg:pb-12 mt-8 border-t border-hairline">
+      <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+        {/* LEFT — wordmark + tagline. */}
+        <div className="flex flex-col gap-1.5">
+          <div className="inline-flex items-center gap-2 font-display" style={{ lineHeight: 1 }}>
+            <span
+              className="font-semibold italic uppercase text-muted"
+              style={{ fontSize: 12 * 0.85, letterSpacing: '0.2em', transform: 'translateY(-1px)' }}
+            >
+              The
             </span>
+            <span
+              className="font-bold italic uppercase text-ink"
+              style={{ fontSize: 28 * 0.85, letterSpacing: '-0.005em' }}
+            >
+              Layout
+            </span>
+            {/* Disc keeps the fixed warm coral brand accent in both themes;
+                the ink-based ring reads on either page background. */}
+            <DiscFlight size={24 * 0.85} color="#FF3D00" ring="rgb(var(--ink) / 0.25)" tilt={-12} />
           </div>
-
-          {/* RIGHT — quick links + social */}
-          <div className="flex items-center gap-5 self-start sm:self-auto">
-            <nav aria-label="Footer" className="flex items-center gap-4">
-              {FOOTER_LINKS.map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  className={[
-                    'text-[12px] font-bold tracking-[0.1em] uppercase font-tight text-bg/60 no-underline',
-                    'motion-safe:transition-colors motion-safe:duration-150 hover:text-bg',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-                  ].join(' ')}
-                >
-                  {l.label}
-                </Link>
-              ))}
-            </nav>
-            <span className="w-px h-4 bg-bg/15" aria-hidden="true" />
-            {/* Instagram, deep-linking into the native app on mobile. */}
-            <InstagramLink />
-          </div>
+          <span className="text-[12px] text-muted font-tight">
+            Every league, one place.
+          </span>
         </div>
 
-        {/* BOTTOM — copyright + version + legal links. Leaves a clean slot to
-            restore the "Developed by Altius" attribution (below) later. */}
-        <div className="mt-7 pt-5 border-t border-bg/10 flex items-center justify-between gap-4">
-          <span className="text-[10px] font-bold tracking-[0.16em] text-bg/45 uppercase font-tight">
-            © 2026 The Layout · v0.1
-          </span>
-
-          {/* Legal */}
-          <nav aria-label="Legal" className="flex items-center gap-4">
-            {[
-              { label: 'Terms', href: '/terms' },
-              { label: 'Privacy', href: '/privacy' },
-              { label: 'Support', href: '/support' },
-            ].map((l) => (
+        {/* RIGHT — quick links + social */}
+        <div className="flex items-center gap-5 self-start sm:self-auto">
+          <nav aria-label="Footer" className="flex items-center gap-4">
+            {FOOTER_LINKS.map((l) => (
               <Link
                 key={l.href}
                 href={l.href}
                 className={[
-                  'text-[10px] font-bold tracking-[0.16em] uppercase font-tight text-bg/45 no-underline',
-                  'motion-safe:transition-colors motion-safe:duration-150 hover:text-bg',
+                  'text-[12px] font-bold tracking-[0.1em] uppercase font-tight text-muted no-underline',
+                  'motion-safe:transition-colors motion-safe:duration-150 hover:text-ink',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
                 ].join(' ')}
               >
@@ -124,26 +84,58 @@ export function SiteFooter() {
               </Link>
             ))}
           </nav>
-
-          {/* Attribution. Hidden for now (per Hunter); restore this block to show
-              "Developed by Altius" again in the future. */}
-          {/* <a
-            href="https://altiusapps.com"
-            target="_blank"
-            rel="noopener noreferrer"
-            className={[
-              'group text-[12px] text-bg/60 font-tight',
-              'motion-safe:transition-colors motion-safe:duration-150 hover:text-bg',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-            ].join(' ')}
-          >
-            Developed by{' '}
-            <span className="text-bg font-bold group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150">
-              Altius
-            </span>
-            <ExternalArrow />
-          </a> */}
+          <span className="w-px h-4 bg-hairline" aria-hidden="true" />
+          {/* Instagram, deep-linking into the native app on mobile. */}
+          <InstagramLink />
         </div>
+      </div>
+
+      {/* BOTTOM — copyright + version + legal links. Leaves a clean slot to
+          restore the "Developed by Altius" attribution (below) later. */}
+      <div className="mt-7 pt-5 border-t border-hairline flex items-center justify-between gap-4">
+        <span className="text-[10px] font-bold tracking-[0.16em] text-faint uppercase font-tight">
+          © 2026 The Layout · v0.1
+        </span>
+
+        {/* Legal */}
+        <nav aria-label="Legal" className="flex items-center gap-4">
+          {[
+            { label: 'Terms', href: '/terms' },
+            { label: 'Privacy', href: '/privacy' },
+            { label: 'Support', href: '/support' },
+          ].map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              className={[
+                'text-[10px] font-bold tracking-[0.16em] uppercase font-tight text-faint no-underline',
+                'motion-safe:transition-colors motion-safe:duration-150 hover:text-ink',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
+              ].join(' ')}
+            >
+              {l.label}
+            </Link>
+          ))}
+        </nav>
+
+        {/* Attribution. Hidden for now (per Hunter); restore this block to show
+            "Developed by Altius" again in the future. */}
+        {/* <a
+          href="https://altiusapps.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          className={[
+            'group text-[12px] text-muted font-tight',
+            'motion-safe:transition-colors motion-safe:duration-150 hover:text-ink',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
+          ].join(' ')}
+        >
+          Developed by{' '}
+          <span className="text-ink font-bold group-hover:text-accent motion-safe:transition-colors motion-safe:duration-150">
+            Altius
+          </span>
+          <ExternalArrow />
+        </a> */}
       </div>
     </footer>
   );

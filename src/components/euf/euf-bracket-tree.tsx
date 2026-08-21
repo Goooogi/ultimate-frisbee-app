@@ -24,11 +24,10 @@ import {
   bracketBucket,
   ordinal as sharedOrdinal,
   assignPositions as sharedAssignPositions,
-  ROW_PITCH_PX,
   type BracketColumn,
 } from '@/lib/bracket-tree';
 import { eufGameDate, eufGameTime } from '@/lib/euf/format-date';
-import { BracketConnectors } from '@/components/bracket-connectors';
+import { BracketScroller } from '@/components/bracket-scroller';
 import { EufFlag } from './euf-flag';
 
 /** Height of the placement tag rendered above a card (text + mb-1). */
@@ -285,11 +284,29 @@ function TreeSection({
   tree: SubTree;
   placesOf: (g: EufGameCard) => [number, number] | null;
 }) {
-  const { columns } = tree;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const positions = useMemo(() => assignPositions(columns), [columns]);
+  // Horizontal tree at EVERY width via the shared scroll-collapsing scroller
+  // (Hunter, 2026-08-20 — WFDF/USAU parity; replaces the desktop-only tree +
+  // stacked-rounds mobile variant, and matches the mobile app, whose shared
+  // renderer collapses EUF too). assignPositions establishes the vertical
+  // order (side effect), so the scroller columns derive in the same memo.
+  const { nodeColumns, positions } = useMemo(() => {
+    const positions = assignPositions(tree.columns);
+    const nodeColumns = tree.columns
+      .filter((c) => c.games.length > 0)
+      .map((c) => ({
+        key: c.key,
+        label: c.label,
+        games: c.games.map((g) => ({
+          ...gameNode(g),
+          game: g,
+          places: c.key === 'final' ? placesOf(g) : null,
+        })),
+      }));
+    return { nodeColumns, positions };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tree.columns]);
 
-  if (columns.every((c) => c.games.length === 0)) return null;
+  if (nodeColumns.length === 0) return null;
 
   return (
     <div>
@@ -297,95 +314,14 @@ function TreeSection({
         {tree.label}
       </h3>
 
-      {/* Mobile: vertical stack by round, latest round FIRST (placement finals
-          lead, same rationale as the USAU tree — the result you care about
-          leads on a phone). */}
-      <div className="lg:hidden flex flex-col gap-5">
-        {[...columns].reverse().map(
-          (col) =>
-            col.games.length > 0 && (
-              <div key={col.key}>
-                <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-                  {col.label}
-                </div>
-                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {col.games.map((g) => (
-                    <MatchCard
-                      key={g.id}
-                      game={g}
-                      places={col.key === 'final' ? placesOf(g) : null}
-                      compact
-                    />
-                  ))}
-                </ul>
-              </div>
-            ),
-        )}
-      </div>
-
-      {/* Desktop: horizontal columns with absolute-positioned cards */}
-      <div className="hidden lg:block overflow-x-auto pb-2">
-        <DesktopBracket columns={columns} positions={positions} placesOf={placesOf} />
-      </div>
-    </div>
-  );
-}
-
-// ── Desktop bracket layout ────────────────────────────────────────────────
-
-function DesktopBracket({
-  columns,
-  positions,
-  placesOf,
-}: {
-  columns: RoundColumn[];
-  positions: Map<string, number>;
-  placesOf: (g: EufGameCard) => [number, number] | null;
-}) {
-  const baseCount = Math.max(0, ...columns.map((c) => c.games.length));
-  const maxTop = Math.max(0, ...Array.from(positions.values()));
-  const totalHeight = Math.max(baseCount * ROW_PITCH_PX, maxTop + ROW_PITCH_PX) + 32;
-
-  const renderedColumns = columns.filter((c) => c.games.length > 0);
-
-  return (
-    <div
-      // Fixed 180px columns (USAU/WFDF-tree parity) — the connector overlay
-      // computes elbow x-positions from the fixed column width, and the tree
-      // pans horizontally instead of stretching on minmax.
-      className="grid gap-x-6 relative flex-shrink-0"
-      style={{
-        gridTemplateColumns: `repeat(${renderedColumns.length}, 180px)`,
-        height: `${totalHeight}px`,
-      }}
-    >
-      <BracketConnectors
-        columns={renderedColumns.map((c) => ({ games: c.games.map(gameNode) }))}
+      {/* Placement-tagged cards lift by the tag's height so the card body
+          stays aligned with the connector elbows. */}
+      <BracketScroller
+        columns={nodeColumns}
         positions={positions}
+        cardLift={(g) => (g.places ? PLACE_TAG_H_PX : 0)}
+        renderCard={(g) => <MatchCard game={g.game} places={g.places} compact />}
       />
-      {renderedColumns.map((col) => (
-        <div key={col.key} className="relative h-full">
-          <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-3 text-center h-[20px]">
-            {col.label}
-          </div>
-          {col.games.map((g) => {
-            const top = positions.get(g.id) ?? 0;
-            const places = col.key === 'final' ? placesOf(g) : null;
-            return (
-              // The placement tag renders ABOVE the card, so tagged cards start
-              // higher — offset by the tag's height to keep the card body
-              // aligned with the connector elbows.
-              <div
-                key={g.id}
-                className="absolute left-0 right-0"
-                style={{ top: `${top + 32 - (places ? PLACE_TAG_H_PX : 0)}px` }}
-              >
-                <MatchCard game={g} places={places} />
-              </div>
-            );
-          })}
-        </div>
-      ))}
     </div>
   );
 }
