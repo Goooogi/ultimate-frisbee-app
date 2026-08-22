@@ -55,6 +55,7 @@ import {
 } from '@/lib/usau/data';
 import { flightForName } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
+import { venueTimeZone } from '@/lib/usau/venue-tz';
 
 /** The 5 official USAU rank-sets (OfficialRankDivision isn't exported from
  *  usau/data — mirror the literal here). */
@@ -269,16 +270,34 @@ export interface ForYouFeed {
 
 const MS_DAY = 86_400_000;
 
-/** Short "Sat 3:00 PM" / "Final" / "Live" label from a date + status. */
-function whenLabel(date: Date | null, status: 'upcoming' | 'live' | 'final'): string {
+/** Short "Sat 3:00 PM" / "Final" / "Live" label from a date + status.
+ *
+ *  `timeZone` MUST be passed for any league whose kickoff is a real UTC instant
+ *  (USAU stores venue-local converted to UTC). Without it, toLocaleString uses
+ *  the RUNTIME's zone — and this runs in a Server Component on Vercel, where
+ *  that is UTC. A 14:50Z game in Indianapolis then rendered as "2:50 PM"
+ *  instead of 10:50 AM, and the viewer's own device zone never entered into it
+ *  because the HTML arrives pre-formatted (Hunter, 2026-08-22). */
+function whenLabel(
+  date: Date | null,
+  status: 'upcoming' | 'live' | 'final',
+  timeZone?: string,
+): string {
   if (status === 'live') return 'Live';
   if (status === 'final') return 'Final';
   if (!date) return 'TBD';
-  return date.toLocaleString('en-US', {
+  const full = date.toLocaleString('en-US', {
     weekday: 'short',
     hour: 'numeric',
     minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
   });
+  // Rows ingested without a time-of-day sit at midnight; show just the weekday
+  // rather than a fake "12:00 AM" (same rule as formatGameTime in venue-tz).
+  if (full.endsWith('12:00 AM')) {
+    return date.toLocaleString('en-US', { weekday: 'short', ...(timeZone ? { timeZone } : {}) });
+  }
+  return full;
 }
 
 /**
@@ -827,6 +846,17 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
   const out: FeedGame[] = [];
   for (const ev of events) {
     if (!ev) continue;
+    // Game times are true UTC instants; render them in the VENUE's wall clock,
+    // not the server's (see whenLabel). Null state → undefined → UTC, which
+    // renders the stored clock unshifted, same fallback as formatGameTime.
+    const tz = venueTimeZone(ev.state) ?? undefined;
+    // Logos need the team's gender division, which lives on the event's team
+    // list rather than the game row — index it once per event.
+    const divisionByTeamName = new Map<string, string | null>();
+    for (const t of ev.teams) divisionByTeamName.set(t.teamName.toLowerCase(), t.genderDivision);
+    const logoFor = (name: string | null) =>
+      name ? usauTeamLogo(name, divisionByTeamName.get(name.toLowerCase()) ?? null, ev.competitionLevel) : null;
+
     for (const g of ev.games) {
       const aLc = g.teamAName?.toLowerCase() ?? '';
       const bLc = g.teamBName?.toLowerCase() ?? '';
@@ -843,9 +873,9 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
         id: `usau-${g.id}`,
         league: 'usau',
         status: 'upcoming',
-        away: { name: g.teamAName, teamId: g.teamAId ?? '', score: null, logoUrl: null },
-        home: { name: g.teamBName, teamId: g.teamBId ?? '', score: null, logoUrl: null },
-        when: whenLabel(date, 'upcoming'),
+        away: { name: g.teamAName, teamId: g.teamAId ?? '', score: null, logoUrl: logoFor(g.teamAName) },
+        home: { name: g.teamBName, teamId: g.teamBId ?? '', score: null, logoUrl: logoFor(g.teamBName) },
+        when: whenLabel(date, 'upcoming', tz),
         favoriteTeamName: team.name,
         sortTs: ts,
         isPreview: false,
