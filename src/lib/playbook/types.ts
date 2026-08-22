@@ -93,7 +93,31 @@ export interface Play {
   /** Optional YouTube or Vimeo reference video URL (stored as the raw watch
    *  URL, rendered via parseEmbed). Null when no video is attached. */
   videoUrl?: string | null;
+  /** Situational tags for filtering (o-line, endzone, zone-offense, …).
+   *  Always an array — untagged plays carry `[]`, never null. */
+  tags: string[];
 }
 
 export const PLAYER_COUNT = 7;
 export const DEFAULT_STEP_MS = 700;
+
+/**
+ * The situational tag vocabulary, grouped for the picker. Closed set by
+ * design: free-text tags fragment instantly ("endzone" vs "end zone" vs "EZ")
+ * and make filtering useless. The DB stores plain text, so widening this list
+ * needs no migration — but narrowing it would orphan existing tags.
+ */
+export const PLAY_TAG_GROUPS: Array<{ label: string; tags: string[] }> = [
+  { label: 'Unit', tags: ['o-line', 'd-line'] },
+  { label: 'Situation', tags: ['endzone', 'goal-line', 'after-timeout', 'stopped-disc', 'pull-play', 'last-point'] },
+  { label: 'Structure', tags: ['vertical', 'horizontal', 'side-stack', 'zone-offense', 'zone-defense', 'man-defense'] },
+];
+
+/** Flat list of every valid tag, for validation + filter chips. */
+export const PLAY_TAGS: string[] = PLAY_TAG_GROUPS.flatMap((g) => g.tags);
+
+/** Human label for a tag slug ('after-timeout' → 'After timeout'). */
+export function tagLabel(tag: string): string {
+  const spaced = tag.replace(/-/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}

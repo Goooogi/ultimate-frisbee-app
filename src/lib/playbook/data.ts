@@ -17,6 +17,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { parseEmbed } from '@/lib/player-content/embed';
 import type { Json } from '@/lib/supabase/database.types';
+import { PLAYER_COUNT } from './types';
 import type {
   DiscPos,
   Drawing,
@@ -359,6 +360,428 @@ async function waitForSession(
   }
 }
 
+// ─── roster ────────────────────────────────────────────────────────────────
+
+/** Position tendency on the roster. Broader than the editor's `Role` (which is
+ *  strictly handler/cutter per chip) — a roster player can be a hybrid. */
+export type RosterPosition = 'handler' | 'cutter' | 'hybrid';
+
+export interface RosterPlayer {
+  id: string;
+  teamID: string;
+  name: string;
+  /** Jersey number. Text, not int — '00' and '0' are both real numbers. */
+  number: string | null;
+  position: RosterPosition;
+  /** Set when this athlete also has an app login on the team. */
+  userID: string | null;
+  active: boolean;
+  note: string | null;
+  sortOrder: number;
+}
+
+interface RosterRow {
+  id: string;
+  team_id: string;
+  name: string;
+  number: string | null;
+  position: string;
+  user_id: string | null;
+  active: boolean;
+  note: string | null;
+  sort_order: number;
+}
+
+const ROSTER_COLS = 'id, team_id, name, number, position, user_id, active, note, sort_order';
+
+function rosterRowToPlayer(row: RosterRow): RosterPlayer {
+  return {
+    id: row.id,
+    teamID: row.team_id,
+    name: row.name,
+    number: row.number,
+    position: row.position as RosterPosition,
+    userID: row.user_id,
+    active: row.active,
+    note: row.note,
+    sortOrder: row.sort_order,
+  };
+}
+
+/** Every athlete on a team, active and benched. RLS gates this to members. */
+export async function listRoster(teamID: string): Promise<RosterPlayer[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('pb_roster_players')
+    .select(ROSTER_COLS)
+    .eq('team_id', teamID)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rosterRowToPlayer(r as RosterRow));
+}
+
+export async function addRosterPlayer(input: {
+  teamID: string;
+  name: string;
+  number?: string | null;
+  position?: RosterPosition;
+  note?: string | null;
+}): Promise<RosterPlayer> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  // New players land at the end of the list. One extra read, but the roster is
+  // small and it keeps sort_order dense without a sequence.
+  const { data: last } = await supabase
+    .from('pb_roster_players')
+    .select('sort_order')
+    .eq('team_id', input.teamID)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const number = input.number?.trim() || null;
+  const note = input.note?.trim() || null;
+
+  const { data, error } = await supabase
+    .from('pb_roster_players')
+    .insert({
+      team_id: input.teamID,
+      name: input.name.trim(),
+      number,
+      position: input.position ?? 'hybrid',
+      note,
+      sort_order: ((last?.sort_order as number | undefined) ?? -1) + 1,
+      created_by: user.id,
+    })
+    .select(ROSTER_COLS)
+    .single();
+  if (error) throw error;
+  return rosterRowToPlayer(data as RosterRow);
+}
+
+export async function updateRosterPlayer(
+  playerID: string,
+  patch: Partial<Pick<RosterPlayer, 'name' | 'number' | 'position' | 'active' | 'note'>>,
+): Promise<RosterPlayer> {
+  const supabase = createClient();
+  const row: {
+    name?: string;
+    number?: string | null;
+    position?: RosterPosition;
+    active?: boolean;
+    note?: string | null;
+  } = {};
+  if (patch.name !== undefined) row.name = patch.name.trim();
+  if (patch.number !== undefined) row.number = patch.number?.trim() || null;
+  if (patch.position !== undefined) row.position = patch.position;
+  if (patch.active !== undefined) row.active = patch.active;
+  if (patch.note !== undefined) row.note = patch.note?.trim() || null;
+
+  const { data, error } = await supabase
+    .from('pb_roster_players')
+    .update(row)
+    .eq('id', playerID)
+    .select(ROSTER_COLS)
+    .single();
+  if (error) throw error;
+  return rosterRowToPlayer(data as RosterRow);
+}
+
+export async function deleteRosterPlayer(playerID: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('pb_roster_players').delete().eq('id', playerID);
+  if (error) throw error;
+}
+
+/** Persist a reordered roster. Callers pass the full ordered id list; we write
+ *  each row's new index. Small N, so a per-row update is fine. */
+export async function reorderRoster(teamID: string, orderedIDs: string[]): Promise<void> {
+  const supabase = createClient();
+  for (let i = 0; i < orderedIDs.length; i++) {
+    const { error } = await supabase
+      .from('pb_roster_players')
+      .update({ sort_order: i })
+      .eq('id', orderedIDs[i])
+      .eq('team_id', teamID);
+    if (error) throw error;
+  }
+}
+
+// ─── lines ─────────────────────────────────────────────────────────────────
+
+export type LineKind = 'offense' | 'defense' | 'special' | 'other';
+
+export interface Line {
+  id: string;
+  teamID: string;
+  name: string;
+  kind: LineKind;
+  note: string | null;
+  sortOrder: number;
+  /** Roster player ids, in line order. Deliberately ids, not full players —
+   *  the caller already has the roster and joins locally. */
+  playerIDs: string[];
+}
+
+const LINE_COLS = 'id, team_id, name, kind, note, sort_order';
+
+/** Every line on a team, each with its ordered player ids. Two reads (lines,
+ *  then memberships) rather than an embed, so the ordering of both levels is
+ *  explicit. */
+export async function listLines(teamID: string): Promise<Line[]> {
+  const supabase = createClient();
+  const { data: lineRows, error } = await supabase
+    .from('pb_lines')
+    .select(LINE_COLS)
+    .eq('team_id', teamID)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  const lines = lineRows ?? [];
+  if (lines.length === 0) return [];
+
+  const { data: memberRows, error: memberErr } = await supabase
+    .from('pb_line_players')
+    .select('line_id, player_id, sort_order')
+    .in(
+      'line_id',
+      lines.map((l) => l.id),
+    )
+    .order('sort_order', { ascending: true });
+  if (memberErr) throw memberErr;
+
+  const byLine = new Map<string, string[]>();
+  for (const m of memberRows ?? []) {
+    const list = byLine.get(m.line_id) ?? [];
+    list.push(m.player_id);
+    byLine.set(m.line_id, list);
+  }
+
+  return lines.map((l) => ({
+    id: l.id,
+    teamID: l.team_id,
+    name: l.name,
+    kind: l.kind as LineKind,
+    note: l.note,
+    sortOrder: l.sort_order,
+    playerIDs: byLine.get(l.id) ?? [],
+  }));
+}
+
+export async function createLine(input: {
+  teamID: string;
+  name: string;
+  kind?: LineKind;
+}): Promise<Line> {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const { data: last } = await supabase
+    .from('pb_lines')
+    .select('sort_order')
+    .eq('team_id', input.teamID)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  const { data, error } = await supabase
+    .from('pb_lines')
+    .insert({
+      team_id: input.teamID,
+      name: input.name.trim(),
+      kind: input.kind ?? 'other',
+      sort_order: ((last?.sort_order as number | undefined) ?? -1) + 1,
+      created_by: user.id,
+    })
+    .select(LINE_COLS)
+    .single();
+  if (error) throw error;
+
+  return {
+    id: data.id,
+    teamID: data.team_id,
+    name: data.name,
+    kind: data.kind as LineKind,
+    note: data.note,
+    sortOrder: data.sort_order,
+    playerIDs: [],
+  };
+}
+
+export async function updateLine(
+  lineID: string,
+  patch: { name?: string; kind?: LineKind; note?: string | null },
+): Promise<void> {
+  const supabase = createClient();
+  const row: { name?: string; kind?: LineKind; note?: string | null } = {};
+  if (patch.name !== undefined) row.name = patch.name.trim();
+  if (patch.kind !== undefined) row.kind = patch.kind;
+  if (patch.note !== undefined) row.note = patch.note?.trim() || null;
+
+  const { error } = await supabase.from('pb_lines').update(row).eq('id', lineID);
+  if (error) throw error;
+}
+
+export async function deleteLine(lineID: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('pb_lines').delete().eq('id', lineID);
+  if (error) throw error;
+}
+
+/**
+ * Replace a line's membership with `playerIDs`, in order. Delete-then-insert:
+ * the set is small and a diff would need the previous state, which the caller
+ * doesn't reliably hold after optimistic edits.
+ */
+export async function setLinePlayers(lineID: string, playerIDs: string[]): Promise<void> {
+  const supabase = createClient();
+  const { error: delErr } = await supabase
+    .from('pb_line_players')
+    .delete()
+    .eq('line_id', lineID);
+  if (delErr) throw delErr;
+
+  if (playerIDs.length === 0) return;
+
+  const { error } = await supabase.from('pb_line_players').insert(
+    playerIDs.map((playerID, i) => ({
+      line_id: lineID,
+      player_id: playerID,
+      sort_order: i,
+    })),
+  );
+  if (error) throw error;
+}
+
+// ─── per-play personnel ────────────────────────────────────────────────────
+
+/** slot (0..6) → roster player id. Sparse: unassigned chips are simply absent. */
+export type Personnel = Record<number, string>;
+
+export async function getPlayPersonnel(playID: string): Promise<Personnel> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('pb_play_personnel')
+    .select('slot, player_id')
+    .eq('play_id', playID);
+  if (error) throw error;
+
+  const out: Personnel = {};
+  for (const row of data ?? []) out[row.slot] = row.player_id;
+  return out;
+}
+
+/** Load personnel for several plays at once, keyed by play id — one read for
+ *  the whole list rather than N. */
+export async function getPersonnelForPlays(
+  playIDs: string[],
+): Promise<Record<string, Personnel>> {
+  if (playIDs.length === 0) return {};
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('pb_play_personnel')
+    .select('play_id, slot, player_id')
+    .in('play_id', playIDs);
+  if (error) throw error;
+
+  const out: Record<string, Personnel> = {};
+  for (const row of data ?? []) {
+    (out[row.play_id] ??= {})[row.slot] = row.player_id;
+  }
+  return out;
+}
+
+/** Assign one chip slot, or clear it when playerID is null. */
+export async function setPlaySlot(
+  playID: string,
+  slot: number,
+  playerID: string | null,
+): Promise<void> {
+  const supabase = createClient();
+
+  if (playerID === null) {
+    const { error } = await supabase
+      .from('pb_play_personnel')
+      .delete()
+      .eq('play_id', playID)
+      .eq('slot', slot);
+    if (error) throw error;
+    return;
+  }
+
+  // An athlete can only hold one chip per play (enforced by a unique index),
+  // so clear any slot they already occupy before claiming this one — otherwise
+  // reassigning a player from slot 2 to slot 5 would violate the constraint.
+  const { error: clearErr } = await supabase
+    .from('pb_play_personnel')
+    .delete()
+    .eq('play_id', playID)
+    .eq('player_id', playerID);
+  if (clearErr) throw clearErr;
+
+  const { error } = await supabase
+    .from('pb_play_personnel')
+    .upsert({ play_id: playID, slot, player_id: playerID }, { onConflict: 'play_id,slot' });
+  if (error) throw error;
+}
+
+/** Drop every assignment on a play (the "clear personnel" action). */
+export async function clearPlayPersonnel(playID: string): Promise<void> {
+  const supabase = createClient();
+  const { error } = await supabase.from('pb_play_personnel').delete().eq('play_id', playID);
+  if (error) throw error;
+}
+
+/**
+ * Fill chips 0..6 from a line, in line order. Players past the 7th are ignored
+ * — lines may hold 8-9 for subbing, but a play only has seven chips.
+ */
+export async function applyLineToPlay(playID: string, playerIDs: string[]): Promise<Personnel> {
+  const supabase = createClient();
+  const { error: delErr } = await supabase
+    .from('pb_play_personnel')
+    .delete()
+    .eq('play_id', playID);
+  if (delErr) throw delErr;
+
+  const assigned = playerIDs.slice(0, PLAYER_COUNT);
+  if (assigned.length === 0) return {};
+
+  const { error } = await supabase.from('pb_play_personnel').insert(
+    assigned.map((playerID, slot) => ({ play_id: playID, slot, player_id: playerID })),
+  );
+  if (error) throw error;
+
+  const out: Personnel = {};
+  assigned.forEach((playerID, slot) => {
+    out[slot] = playerID;
+  });
+  return out;
+}
+
+// ─── play tags ─────────────────────────────────────────────────────────────
+
+export async function setPlayTags(playID: string, tags: string[]): Promise<void> {
+  const supabase = createClient();
+  // Normalize before the write so the DB's uniqueness CHECK sees the same
+  // shape the UI does (trimmed, lowercased, de-duped, capped).
+  const clean = Array.from(
+    new Set(tags.map((t) => t.trim().toLowerCase()).filter((t) => t !== '' && t.length <= 40)),
+  ).slice(0, 12);
+
+  const { error } = await supabase.from('pb_plays').update({ tags: clean }).eq('id', playID);
+  if (error) throw error;
+}
+
 // ─── plays ─────────────────────────────────────────────────────────────────
 
 /**
@@ -380,7 +803,7 @@ export async function listPlays(
     .from('pb_plays')
     .select(
       `
-      id, name, formation, field_type, video_url, owner_id, team_id, created_at, updated_at,
+      id, name, formation, field_type, video_url, tags, owner_id, team_id, created_at, updated_at,
       pb_play_steps (
         id, position, duration_ms, note, payload
       )
@@ -444,7 +867,7 @@ export async function createPlay(input: {
   const { data: play, error } = await supabase
     .from('pb_plays')
     .insert(insertRow)
-    .select('id, name, formation, field_type, video_url, owner_id, team_id, created_at, updated_at')
+    .select('id, name, formation, field_type, video_url, tags, owner_id, team_id, created_at, updated_at')
     .single();
   if (error) throw error;
 
@@ -508,7 +931,7 @@ export async function copyPlay(
     .from('pb_plays')
     .select(
       `
-      name, formation, field_type, video_url,
+      name, formation, field_type, video_url, tags,
       pb_play_steps ( position, duration_ms, note, payload )
     `,
     )
@@ -527,10 +950,13 @@ export async function copyPlay(
     formation: src.formation,
     field_type: src.field_type,
     video_url: src.video_url ?? null,
+    // Tags travel with the copy; personnel deliberately does NOT — the target
+    // scope has a different roster (or none, if personal).
+    tags: src.tags ?? [],
     created_by: user.id,
   };
   const returnCols =
-    'id, name, formation, field_type, video_url, owner_id, team_id, created_at, updated_at';
+    'id, name, formation, field_type, video_url, tags, owner_id, team_id, created_at, updated_at';
 
   const { data: play, error: playErr } =
     target.scope === 'personal'
@@ -665,6 +1091,7 @@ interface PlayRow {
   formation: string;
   field_type: string;
   video_url?: string | null;
+  tags?: string[] | null;
   owner_id: string | null;
   team_id: string | null;
   created_at: string;
@@ -692,6 +1119,7 @@ function playRowToPlay(row: PlayRow): Play {
     formation: row.formation as FormationID,
     fieldType: row.field_type as FieldType,
     videoUrl: row.video_url ?? null,
+    tags: row.tags ?? [],
     steps,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),

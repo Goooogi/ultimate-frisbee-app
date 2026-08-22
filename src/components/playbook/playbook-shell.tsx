@@ -48,6 +48,7 @@ interface PlaybookShellProps {
 
 const NAV: Array<{ label: string; href: string; match: string; tag?: 'beta' | 'soon' }> = [
   { label: 'Plays', href: '/playbook', match: '/playbook' },
+  { label: 'Team', href: '/playbook/roster', match: '/playbook/roster' },
   { label: 'Film', href: '/playbook/film', match: '/playbook/film', tag: 'soon' },
 ];
 

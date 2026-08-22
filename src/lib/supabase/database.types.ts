@@ -1564,6 +1564,83 @@ export type Database = {
           },
         ]
       }
+      pb_line_players: {
+        Row: {
+          line_id: string
+          player_id: string
+          sort_order: number
+        }
+        Insert: {
+          line_id: string
+          player_id: string
+          sort_order?: number
+        }
+        Update: {
+          line_id?: string
+          player_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pb_line_players_line_id_fkey"
+            columns: ["line_id"]
+            isOneToOne: false
+            referencedRelation: "pb_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pb_line_players_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "pb_roster_players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pb_lines: {
+        Row: {
+          created_at: string
+          created_by: string
+          id: string
+          kind: string
+          name: string
+          note: string | null
+          sort_order: number
+          team_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          kind?: string
+          name: string
+          note?: string | null
+          sort_order?: number
+          team_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          id?: string
+          kind?: string
+          name?: string
+          note?: string | null
+          sort_order?: number
+          team_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pb_lines_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "pb_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pb_plays: {
         Row: {
           created_at: string
@@ -1573,6 +1650,7 @@ export type Database = {
           id: string
           name: string
           owner_id: string | null
+          tags: string[]
           team_id: string | null
           updated_at: string
           video_url: string | null
@@ -1585,6 +1663,7 @@ export type Database = {
           id?: string
           name: string
           owner_id?: string | null
+          tags?: string[]
           team_id?: string | null
           updated_at?: string
           video_url?: string | null
@@ -1597,6 +1676,7 @@ export type Database = {
           id?: string
           name?: string
           owner_id?: string | null
+          tags?: string[]
           team_id?: string | null
           updated_at?: string
           video_url?: string | null
@@ -1646,6 +1726,92 @@ export type Database = {
           },
           {
             foreignKeyName: "plays_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "pb_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pb_play_personnel: {
+        Row: {
+          play_id: string
+          player_id: string
+          slot: number
+        }
+        Insert: {
+          play_id: string
+          player_id: string
+          slot: number
+        }
+        Update: {
+          play_id?: string
+          player_id?: string
+          slot?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pb_play_personnel_play_id_fkey"
+            columns: ["play_id"]
+            isOneToOne: false
+            referencedRelation: "pb_plays"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pb_play_personnel_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "pb_roster_players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pb_roster_players: {
+        Row: {
+          active: boolean
+          created_at: string
+          created_by: string
+          id: string
+          name: string
+          note: string | null
+          number: string | null
+          position: string
+          sort_order: number
+          team_id: string
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          active?: boolean
+          created_at?: string
+          created_by?: string
+          id?: string
+          name: string
+          note?: string | null
+          number?: string | null
+          position?: string
+          sort_order?: number
+          team_id: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          active?: boolean
+          created_at?: string
+          created_by?: string
+          id?: string
+          name?: string
+          note?: string | null
+          number?: string | null
+          position?: string
+          sort_order?: number
+          team_id?: string
+          updated_at?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pb_roster_players_team_id_fkey"
             columns: ["team_id"]
             isOneToOne: false
             referencedRelation: "pb_teams"

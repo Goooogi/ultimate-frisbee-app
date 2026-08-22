@@ -41,15 +41,23 @@ import {
   copyPlay as apiCopyPlay,
   createPlay as apiCreatePlay,
   deletePlay as apiDeletePlay,
+  getPersonnelForPlays,
   listMyTeams,
   listPlays,
+  listRoster,
   renamePlay as apiRenamePlay,
   replaceSteps,
+  setPlayTags,
   setPlayVideo,
   touchPlay,
+  type Personnel,
+  type RosterPlayer,
   type Team,
 } from '@/lib/playbook/data';
+import { labelStep } from '@/lib/playbook/personnel';
 import { PlayVideoPanel } from './play-video-panel';
+import { PersonnelPanel } from './personnel-panel';
+import { PlayTagBar, PlayTagFilter } from './play-tag-bar';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { formatSupabaseError } from '@/lib/supabase/errors';
 import type {
@@ -90,6 +98,15 @@ export function PlaybookApp() {
   // Teams (the user's memberships).
   const [teams, setTeams] = useState<Team[]>([]);
   const [scope, setScope] = useState<Scope>({ kind: 'personal' });
+
+  // Personnel (slot → roster player) per play, plus the roster to resolve
+  // those ids against. Both are team-scope only — a personal play has no
+  // roster, so these stay empty there.
+  const [personnelByPlay, setPersonnelByPlay] = useState<Record<string, Personnel>>({});
+  const [roster, setRoster] = useState<RosterPlayer[]>([]);
+
+  // Situational tag filter for the play list. Empty = show everything.
+  const [tagFilter, setTagFilter] = useState<string[]>([]);
 
   // Save state — surfaces "saving…" / "saved just now" / "save failed".
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -150,6 +167,11 @@ export function PlaybookApp() {
     setCurrentStepIndex(0);
     setSelectedPlayerKey(null);
     setIsPlaying(false);
+    // Personnel/roster/tag-filter are all scope-specific — clear them so a
+    // stale team's names can never label the next scope's chips.
+    setPersonnelByPlay({});
+    setRoster([]);
+    setTagFilter([]);
 
     async function load() {
       try {
@@ -160,6 +182,19 @@ export function PlaybookApp() {
         if (cancelled) return;
         setPlays(list);
         setCurrentID(list[0]?.id);
+
+        // Personnel only exists for team plays. One read for the whole list
+        // rather than per-play, so opening a play is instant.
+        if (scope.kind === 'team') {
+          const teamID = scope.teamID;
+          const [r, pers] = await Promise.all([
+            listRoster(teamID),
+            getPersonnelForPlays(list.map((p) => p.id)),
+          ]);
+          if (cancelled) return;
+          setRoster(r);
+          setPersonnelByPlay(pers);
+        }
       } catch (err) {
         if (cancelled) return;
         setLastError(formatSupabaseError(err, 'Load plays'));
@@ -182,6 +217,40 @@ export function PlaybookApp() {
   const prevStep =
     currentPlay && currentStepIndex > 0 ? currentPlay.steps[currentStepIndex - 1] : undefined;
   const canPlay = (currentPlay?.steps.length ?? 0) > 1;
+
+  const rosterByID = useMemo(() => new Map(roster.map((p) => [p.id, p])), [roster]);
+  const currentPersonnel = useMemo(
+    () => (currentID ? (personnelByPlay[currentID] ?? {}) : {}),
+    [personnelByPlay, currentID],
+  );
+
+  // Chip labels are derived, never stored: the step handed to <Field> gets
+  // `label` overlaid from personnel. labelStep returns the step untouched when
+  // there's no personnel, so unassigned plays keep referential equality.
+  const labeledStep = useMemo(
+    () => (currentStep ? labelStep(currentStep, currentPersonnel, rosterByID) : undefined),
+    [currentStep, currentPersonnel, rosterByID],
+  );
+  const labeledPrevStep = useMemo(
+    () => (prevStep ? labelStep(prevStep, currentPersonnel, rosterByID) : undefined),
+    [prevStep, currentPersonnel, rosterByID],
+  );
+
+  // Tag filter for the play list. A play matches when it carries EVERY
+  // selected tag (AND, not OR) — narrowing is the useful direction when
+  // you're hunting for "the endzone play we run after a timeout".
+  const visiblePlays = useMemo(() => {
+    if (tagFilter.length === 0) return plays;
+    return plays.filter((p) => tagFilter.every((t) => p.tags.includes(t)));
+  }, [plays, tagFilter]);
+
+  // Every tag actually in use in this scope, so the filter bar only offers
+  // tags that would return something.
+  const tagsInUse = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of plays) for (const t of p.tags) set.add(t);
+    return set;
+  }, [plays]);
 
   // ── debounced persistence ────────────────────────────────────────────────
   // Whenever the in-memory plays change, schedule a flush. We only flush
@@ -543,6 +612,37 @@ export function PlaybookApp() {
     [currentID],
   );
 
+  // ── personnel + tags ─────────────────────────────────────────────────────
+  // Personnel writes go straight to the DB from PersonnelPanel (they're single
+  // discrete assignments, not continuous drags), so this only mirrors the
+  // result into local state for chip labelling.
+  const handlePersonnelChange = useCallback(
+    (next: Personnel) => {
+      if (!currentID) return;
+      setPersonnelByPlay((prev) => ({ ...prev, [currentID]: next }));
+    },
+    [currentID],
+  );
+
+  // Tags are written immediately rather than through the step debounce — the
+  // debounce flushes name + steps only, and a tag edit is a discrete act.
+  const handleTagsChange = useCallback(
+    async (next: string[]) => {
+      if (!currentID) return;
+      const playID = currentID;
+      const previous = plays.find((p) => p.id === playID)?.tags ?? [];
+      setPlays((all) => all.map((p) => (p.id === playID ? { ...p, tags: next } : p)));
+      try {
+        await setPlayTags(playID, next);
+      } catch (err) {
+        setLastError(formatSupabaseError(err, 'Save tags'));
+        console.error('[playbook-app] setPlayTags failed', err);
+        setPlays((all) => all.map((p) => (p.id === playID ? { ...p, tags: previous } : p)));
+      }
+    },
+    [currentID, plays],
+  );
+
   // PlaybookShell still takes a flat team list + currentTeamID; we
   // translate Scope -> currentTeamID at the boundary.
   const currentTeamID = scope.kind === 'team' ? scope.teamID : undefined;
@@ -606,15 +706,24 @@ export function PlaybookApp() {
   );
 
   const sidebarList = (
-    <SidebarPlayList
-      plays={plays}
-      currentID={currentID}
-      onSelect={handleSelectPlay}
-      onCreate={handleOpenCreateDialog}
-      onDelete={requestDeletePlay}
-      copyTargets={copyTargetsForCurrentScope}
-      onCopy={handleCopyPlay}
-    />
+    <div className="flex flex-col gap-2">
+      <PlayTagFilter
+        tagsInUse={tagsInUse}
+        selected={tagFilter}
+        onChange={setTagFilter}
+        matchCount={visiblePlays.length}
+        totalCount={plays.length}
+      />
+      <SidebarPlayList
+        plays={visiblePlays}
+        currentID={currentID}
+        onSelect={handleSelectPlay}
+        onCreate={handleOpenCreateDialog}
+        onDelete={requestDeletePlay}
+        copyTargets={copyTargetsForCurrentScope}
+        onCopy={handleCopyPlay}
+      />
+    </div>
   );
 
   // ── render ───────────────────────────────────────────────────────────────
@@ -757,6 +866,8 @@ export function PlaybookApp() {
         />
       </div>
 
+      <PlayTagBar tags={currentPlay.tags} canEdit={canEdit} onChange={handleTagsChange} />
+
       <div className="flex flex-col bg-bg border border-hairline rounded-sm overflow-hidden">
         <div className="relative bg-surface px-2 py-2 lg:py-2">
           <div className="flex justify-end pr-2 pb-1 lg:pb-1.5">
@@ -785,8 +896,8 @@ export function PlaybookApp() {
                 style={{ aspectRatio: fieldAspect }}
               >
                 <Field
-                  step={currentStep}
-                  prevStep={prevStep}
+                  step={labeledStep ?? currentStep}
+                  prevStep={labeledPrevStep ?? prevStep}
                   fieldType={fieldType}
                   selectedKey={selectedPlayerKey}
                   onSelect={setSelectedPlayerKey}
@@ -836,6 +947,17 @@ export function PlaybookApp() {
         />
       </div>
 
+      {/* Personnel is team-only — a personal play has no roster to draw from. */}
+      {scope.kind === 'team' && (
+        <PersonnelPanel
+          playID={currentPlay.id}
+          teamID={scope.teamID}
+          canEdit={canEdit}
+          personnel={currentPersonnel}
+          onPersonnelChange={handlePersonnelChange}
+        />
+      )}
+
       <PlayVideoPanel
         playID={currentPlay.id}
         videoUrl={currentPlay.videoUrl}
@@ -852,7 +974,7 @@ export function PlaybookApp() {
       currentTeamID={currentTeamID}
       onSwitchTeam={handleShellSwitchTeam}
       playsNavExtras={sidebarList}
-      plays={plays}
+      plays={visiblePlays}
       currentPlayID={currentID}
       onSelectPlay={handleSelectPlay}
       onCreatePlay={handleOpenCreateDialog}

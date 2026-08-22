@@ -44,6 +44,7 @@ Key notes by area:
 | Mobile parity | `Mobile/Mobile Web Alignment.md` |
 | UTCG card game | `Features/UTCG Card Game.md` |
 | Fantasy | `Features/Fantasy Feature.md` · 12-0 → `Features/12-0 Mini Game.md` |
+| Playbook backlog (availability, practice plans) | `Features/Playbook Enhancement TODO.md` |
 | Styling | `Features/V2 Redesign — Editorial Calm.md` + `docs/redesign-v2-style-guide.md` |
 | Why is this built this way? (May–Jun 2026) | `Archive/Project Changelog 2026-05 to 2026-06.md` |
 

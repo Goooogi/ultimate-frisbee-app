@@ -22,7 +22,7 @@
 // The server renders the plain scrollLeft-0 tree, so first paint and no-JS
 // match today's layout exactly.
 
-import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ROW_PITCH_PX,
   collapsedLayouts,
@@ -61,9 +61,43 @@ export function BracketScroller<T extends BracketNode>({
   cardLift?: (game: T) => number;
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const cardEls = useRef(new Map<string, HTMLDivElement>());
   const pathEls = useRef(new Map<string, SVGPathElement>());
+  const applyRef = useRef<(() => void) | null>(null);
   const [colW, setColW] = useState(DESKTOP_COL_W);
+
+  // Ref callbacks MUST be stable. An inline arrow is a new function every
+  // render, so React detaches (calls with null) and re-attaches every card and
+  // path on ANY parent re-render — which emptied these maps mid-gesture and
+  // left cards frozen at stale transforms until the next scroll event. That
+  // was the "shake". Keyed factories are created once and cached.
+  const cardRefCbs = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
+  const pathRefCbs = useRef(new Map<string, (el: SVGPathElement | null) => void>());
+
+  const cardRef = useCallback((id: string) => {
+    let cb = cardRefCbs.current.get(id);
+    if (!cb) {
+      cb = (el: HTMLDivElement | null) => {
+        if (el) cardEls.current.set(id, el);
+        else cardEls.current.delete(id);
+      };
+      cardRefCbs.current.set(id, cb);
+    }
+    return cb;
+  }, []);
+
+  const pathRef = useCallback((key: string) => {
+    let cb = pathRefCbs.current.get(key);
+    if (!cb) {
+      cb = (el: SVGPathElement | null) => {
+        if (el) pathEls.current.set(key, el);
+        else pathEls.current.delete(key);
+      };
+      pathRefCbs.current.set(key, cb);
+    }
+    return cb;
+  }, []);
 
   const layouts = useMemo(() => collapsedLayouts(columns, positions), [columns, positions]);
 
@@ -112,20 +146,34 @@ export function BracketScroller<T extends BracketNode>({
     return () => ro.disconnect();
   }, []);
 
+  // Everything `apply` reads lives in a ref, so the scroll listener is
+  // installed ONCE and never torn down mid-gesture. Re-subscribing on every
+  // layouts/heights/pairs identity change (they're useMemo'd on `columns`,
+  // which callers rebuild whenever `games` changes identity) was ripping the
+  // listener out from under an in-flight fling.
+  const stateRef = useRef({ columns, positions, layouts, heights, pairs, colW });
+  stateRef.current = { columns, positions, layouts, heights, pairs, colW };
+
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
-    if (!scroller || columns.length === 0) return;
-    const stride = colW + COL_GAP;
-    const last = columns.length - 1;
     let raf = 0;
 
     const apply = () => {
       raf = 0;
-      const f = Math.min(Math.max(scroller.scrollLeft / stride, 0), last);
+      const el0 = scrollerRef.current;
+      const content = contentRef.current;
+      if (!el0 || !content) return;
+      const { columns, positions, layouts, heights, pairs, colW } = stateRef.current;
+      if (columns.length === 0) return;
+
+      const stride = colW + COL_GAP;
+      const last = columns.length - 1;
+      const f = Math.min(Math.max(el0.scrollLeft / stride, 0), last);
       const k = Math.min(Math.floor(f), Math.max(last - 1, 0));
       const t = last === 0 ? 0 : f - k;
       const from = layouts[k];
       const to = layouts[Math.min(k + 1, last)];
+      if (!from || !to) return;
       const posOf = (id: string) => {
         const a = from.get(id) ?? positions.get(id) ?? 0;
         const b = to.get(id) ?? a;
@@ -136,12 +184,21 @@ export function BracketScroller<T extends BracketNode>({
       // early), so the exiting round's lower cards only clip once the round
       // is nearly off-screen, and an entering round is revealed before it
       // slides in.
+      //
+      // This is written to the CONTENT wrapper, never to the scroll container.
+      // Resizing a `snap-mandatory` scroller from inside its own scroll handler
+      // makes the browser re-run snap selection against the new geometry, which
+      // is what flung the bracket to a different round mid-swipe.
       const hFrom = heights[k];
       const hTo = heights[Math.min(k + 1, last)];
       const ht = hTo < hFrom ? t * t : 1 - (1 - t) * (1 - t);
-      scroller.style.height = `${hFrom + (hTo - hFrom) * ht + BOTTOM_PAD}px`;
+      content.style.height = `${hFrom + (hTo - hFrom) * ht}px`;
 
       for (const [id, el] of cardEls.current) {
+        // `top` is (position + LABEL_H - lift) and the target is
+        // (posOf + LABEL_H - lift), so the lift cancels and the delta is just
+        // the layout movement. Cards absent from `positions` (shouldn't happen,
+        // but a stale ref would) fall back to 0 rather than flinging to the top.
         el.style.transform = `translateY(${posOf(id) - (positions.get(id) ?? 0)}px)`;
       }
 
@@ -155,27 +212,55 @@ export function BracketScroller<T extends BracketNode>({
       }
     };
 
+    applyRef.current = apply;
+
     const onScroll = () => {
       if (!raf) raf = requestAnimationFrame(apply);
     };
     apply();
-    scroller.addEventListener('scroll', onScroll, { passive: true });
+    scroller?.addEventListener('scroll', onScroll, { passive: true });
     return () => {
-      scroller.removeEventListener('scroll', onScroll);
+      scroller?.removeEventListener('scroll', onScroll);
       if (raf) cancelAnimationFrame(raf);
     };
+    // Mount-only: `apply` reads live values through stateRef.
+  }, []);
+
+  // Re-run the imperative pass after any render that could change geometry,
+  // WITHOUT re-subscribing the scroll listener. Prune first: a game that left
+  // the bracket would otherwise keep a detached node in cardEls forever, and
+  // the rAF pass would go on writing transforms to it.
+  useLayoutEffect(() => {
+    const live = new Set<string>();
+    for (const col of columns) for (const g of col.games) live.add(g.id);
+    for (const id of cardEls.current.keys()) if (!live.has(id)) cardEls.current.delete(id);
+    for (const id of cardRefCbs.current.keys()) if (!live.has(id)) cardRefCbs.current.delete(id);
+
+    const liveKeys = new Set(pairs.map((p) => `${p.childId}|${p.srcId}`));
+    for (const k of pathEls.current.keys()) if (!liveKeys.has(k)) pathEls.current.delete(k);
+    for (const k of pathRefCbs.current.keys()) if (!liveKeys.has(k)) pathRefCbs.current.delete(k);
+
+    applyRef.current?.();
   }, [colW, columns, layouts, heights, pairs, positions]);
 
   return (
     <div
       ref={scrollerRef}
       className="overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory lg:snap-none"
+      // Sized to the FIRST layout and left alone from here on. The per-frame
+      // collapse resizes the inner content instead; a scroll container that
+      // changes height while snapping re-evaluates its snap target and can
+      // jump the user to a different round mid-swipe.
       style={{ height: `${(heights[0] ?? ROW_PITCH_PX + LABEL_H) + BOTTOM_PAD}px` }}
     >
       <div
+        ref={contentRef}
         // Explicit width: a block-level grid sizes to its container and lets
         // the tracks overflow, which left the inset-0 connector SVG spanning
         // only the first viewport — later rounds' elbows clipped away.
+        //
+        // The collapse animates THIS element's height, not the scroller's:
+        // resizing the snap container itself re-triggers snap selection.
         className="grid gap-x-6 relative"
         style={{
           gridTemplateColumns: `repeat(${columns.length}, ${colW}px)`,
@@ -197,10 +282,7 @@ export function BracketScroller<T extends BracketNode>({
             return (
               <path
                 key={key}
-                ref={(el) => {
-                  if (el) pathEls.current.set(key, el);
-                  else pathEls.current.delete(key);
-                }}
+                ref={pathRef(key)}
                 d={`M ${x1} ${y1} H ${x1 + COL_GAP / 2} V ${y2} H ${p.col * (colW + COL_GAP)}`}
                 fill="none"
                 stroke="currentColor"
@@ -217,10 +299,7 @@ export function BracketScroller<T extends BracketNode>({
             {col.games.map((g) => (
               <div
                 key={g.id}
-                ref={(el) => {
-                  if (el) cardEls.current.set(g.id, el);
-                  else cardEls.current.delete(g.id);
-                }}
+                ref={cardRef(g.id)}
                 className="absolute left-0 right-0"
                 style={{
                   top: `${(positions.get(g.id) ?? 0) + LABEL_H - (cardLift?.(g) ?? 0)}px`,

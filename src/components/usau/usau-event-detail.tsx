@@ -184,11 +184,53 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
       set.add(fieldCluster(g.location));
       divisionFields.set(g.bracketName, set);
     }
+    // SCHEDULE-BLOCK FALLBACK (Hunter, 2026-08-22 — ESC showed no Bracket tab).
+    // The field-cluster rule needs a SEEDED game in the same bracket_name group,
+    // but a pre-tournament bracket has none: at Elite-Select Challenge all 72
+    // bracket rows are placeholder-only, pools sit under bracket_name "Pool A–D"
+    // while brackets are "Championship"/"Ninth Place Bracket", and most bracket
+    // rows have NO location. divisionFields came out empty, every bracket row was
+    // dropped, and hasBracket went false — hiding the tab the placeholders exist
+    // to fill. Fields can't rescue it: ESC divisions SHARE clusters (11/13/15/24/26).
+    //
+    // USAU numbers a combined event's schedule in one contiguous block per
+    // division, each division's bracket ids running on from its own pool ids
+    // (ESC: Women 413987-414034, Mixed 414035-414091, Men 414092+). So a
+    // team-less row goes to the division whose seeded games have the nearest id
+    // at or below it; late-added tail rows fall to the last block, which is right.
+    const idFloor = (pred: (g: Game) => boolean): number | null => {
+      let floor: number | null = null;
+      for (const g of event.games) {
+        if (g.usauGameOrder == null || !pred(g)) continue;
+        if (floor == null || g.usauGameOrder < floor) floor = g.usauGameOrder;
+      }
+      return floor;
+    };
+    const myFloor = idFloor(inDivision);
+    const otherFloors = new Set<number>();
+    for (const d of new Set(event.teams.map((t) => t.genderDivision))) {
+      if (!d || d === division) continue;
+      const ids = new Set(
+        event.teams.filter((t) => t.genderDivision === d).map((t) => t.teamId),
+      );
+      const f = idFloor(
+        (g) => (g.teamAId != null && ids.has(g.teamAId)) || (g.teamBId != null && ids.has(g.teamBId)),
+      );
+      if (f != null) otherFloors.add(f);
+    }
+    const nextFloor =
+      myFloor == null
+        ? null
+        : Math.min(...[...otherFloors].filter((f) => f > myFloor), Number.POSITIVE_INFINITY);
+
     games = event.games.filter((g) => {
       if (inDivision(g)) return true;
       if (g.teamAId != null || g.teamBId != null) return false;
-      if (!g.bracketName || !g.location) return false;
-      return divisionFields.get(g.bracketName)?.has(fieldCluster(g.location)) ?? false;
+      if (g.bracketName && g.location) {
+        if (divisionFields.get(g.bracketName)?.has(fieldCluster(g.location))) return true;
+      }
+      if (myFloor == null || g.usauGameOrder == null) return false;
+      return g.usauGameOrder >= myFloor && g.usauGameOrder < (nextFloor ?? Infinity);
     });
     teams = filteredTeams;
   }
