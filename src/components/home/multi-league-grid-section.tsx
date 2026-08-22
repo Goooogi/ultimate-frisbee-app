@@ -341,12 +341,20 @@ export function UsauMajorGrid({
   fill?: boolean;
 }) {
   if (majors.length === 0) return null;
-  // Events with no champions yet ("Results pending") sink to the bottom so the
-  // completed tournaments lead. Array.sort is stable, so within each group the
-  // upstream date ordering (most recent first) is preserved.
-  const ordered = [...majors].sort(
-    (a, b) => Number(a.champions.length === 0) - Number(b.champions.length === 0),
-  );
+  // On the HOME page, events with no champions yet ("Results pending") sink to
+  // the bottom so finished tournaments lead — a home teaser wants results, not
+  // empty cards. Array.sort is stable, so date order holds within each group.
+  //
+  // On the SCORES feed (`fill`) that sinking is wrong: it buried a tournament
+  // being played RIGHT NOW under last weekend's finished ones, which is exactly
+  // when its scores matter most (Hunter, 2026-08-22 — the Elite Select
+  // Challenge sat below Aug 15–16 events all weekend). There the upstream
+  // date-then-flight order stands as-is.
+  const ordered = fill
+    ? majors
+    : [...majors].sort(
+        (a, b) => Number(a.champions.length === 0) - Number(b.champions.length === 0),
+      );
 
   if (fill) {
     // One column on mobile, two on desktop; each card fills its column (no

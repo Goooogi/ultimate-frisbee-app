@@ -12,6 +12,7 @@ import { Suspense } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
+import { SourceLink } from '@/components/source-link';
 import { getEvent, type UsauEventSummary } from '@/lib/usau/data';
 import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
@@ -70,6 +71,18 @@ export default async function UsauEventPage({ params }: Props) {
       title={event.name}
       eyebrow={`USAU${eyebrowParts ? ` · ${eyebrowParts}` : ''}`}
       subtitle={subtitle ?? undefined}
+      // Source link sits beside the title in the header's controls slot, same
+      // as the WFDF event page — a quiet accent link, not a pill on its own row
+      // (Hunter, 2026-08-22).
+      controls={
+        event.url ? (
+          <SourceLink
+            href={event.url}
+            label="USAU site"
+            ariaLabel={`View ${event.name} on USA Ultimate`}
+          />
+        ) : undefined
+      }
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'The Games', href: gamesHref },

@@ -527,18 +527,18 @@ function EventTabsView(props: {
 
   return (
     <>
-      {/* Row 1 — "View on USAU" link (left) + Level select (right). One
-          compact header row on mobile. Level only renders when the event
-          fielded 2+ (combined masters championships; writes the URL param
-          read via useLevel() above). The Division switcher moved below the
-          view tabs as centered pills (DivisionPager), mirroring the mobile
-          app's layout. */}
-      {(event.url || event.venue || availableLevels.length > 1) && (
+      {/* Row 1 — venue (left) + Level select (right). One compact header row
+          on mobile. Level only renders when the event fielded 2+ (combined
+          masters championships; writes the URL param read via useLevel()
+          above). The Division switcher moved below the view tabs as centered
+          pills (DivisionPager), mirroring the mobile app's layout.
+          The source link left this row for the page header's controls slot
+          (Hunter, 2026-08-22) — see the SourceLink in the route file. */}
+      {(event.venue || availableLevels.length > 1) && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-          {event.url || event.venue ? (
+          {event.venue ? (
             <div className="flex flex-wrap items-center gap-2">
-              {event.url && <UsauExternalLink url={event.url} name={event.name} />}
-              {event.venue && <EventVenue venue={event.venue} />}
+              <EventVenue venue={event.venue} />
             </div>
           ) : (
             <span />
@@ -868,29 +868,7 @@ function PlacementTree({
   );
 }
 
-/** External link back to the canonical USAU event page. Lives here (not in
- *  the page header) so it can share a row with the Level/Division selects. */
-function UsauExternalLink({ url, name }: { url: string; name: string }) {
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      aria-label={`View ${name} on USA Ultimate`}
-      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-ink hover:bg-ink/10 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent no-underline"
-    >
-      View on USAU
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M3 1.5h5.5V7" />
-        <path d="M8.5 1.5L3.5 6.5" />
-        <path d="M7 8.5H1.5V3" />
-      </svg>
-    </a>
-  );
-}
-
-/** Venue name, derived from the field names on the event's games. Shares the
- *  metadata row with "View on USAU" — same pill shape, but non-interactive
+/** Venue name, derived from the field names on the event's games. Non-interactive
  *  (it's a fact, not a link). Only renders when we resolved a venue; roughly
  *  half of events record only a bare field number, and the header subtitle
  *  already carries the city/state. */

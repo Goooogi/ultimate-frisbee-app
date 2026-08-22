@@ -3225,6 +3225,7 @@ export type Database = {
           created_at: string
           end_date: string | null
           event_type: Database["public"]["Enums"]["usau_event_type"]
+          flight_rank: number | null
           id: string
           is_sanctioned: boolean
           last_scraped_at: string | null

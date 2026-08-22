@@ -2199,7 +2199,14 @@ export async function recentUsauTournamentPage(
     if (season != null) q = q.eq('season', season);
     return q
       .order('end_date', { ascending: false, nullsFirst: false })
-      // Secondary key so the server-side order is TOTAL. Without it Postgres may
+      // Flight breaks the date tie. A busy August weekend ends eight club
+      // tournaments on the same day; ordering those by `id` alone meant the top
+      // card was chosen by a random UUID, so a 42-game local invite outranked
+      // the Elite Select Challenge (Hunter, 2026-08-22). flight_rank ASCENDS
+      // with prestige (0 = Triple Crown … 9 = unclassified), and is a generated
+      // column mirroring flightForName — see the 20260822120000 migration.
+      .order('flight_rank', { ascending: true })
+      // Final key so the server-side order is TOTAL. Without it Postgres may
       // return same-end_date rows in a different order per request, which would
       // let a card appear on two pages or on none.
       .order('id', { ascending: true })
