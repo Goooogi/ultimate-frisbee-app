@@ -17,6 +17,7 @@ import { flightForName, FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 import { isUnhealthyError } from '@/lib/supabase/health';
+import { usauToday } from '@/lib/today';
 
 type DB = SupabaseClient<Database>;
 
@@ -743,7 +744,7 @@ export async function getCurrentEvent(opts?: {
 }): Promise<{ slug: string; hasGames: boolean } | null> {
   const db = await supabase();
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
+  const today = usauToday(now);
   // The weekend rule only looks one weekend back or forward, so a tight window
   // is all we need — and it keeps the per-event count + division queries below
   // well clear of PostgREST's 1000-row response cap (a ±180d window spans 450+
@@ -1087,7 +1088,7 @@ export async function getNextUpcomingEvent(opts?: {
   competitionLevel?: CompetitionLevel;
 }): Promise<{ slug: string; hasGames: boolean } | null> {
   const db = await supabase();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = usauToday();
   // Look ~120d ahead: far enough to always find the next flagship weekend even
   // in a sparse stretch, tight enough to stay clear of the 1000-row cap.
   const windowForward = new Date(Date.now() + 120 * 86400_000)
@@ -1220,7 +1221,7 @@ export interface UpcomingUsauEvent {
  */
 export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEvent[]> {
   const db = await supabase();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = usauToday();
   const windowForward = new Date(Date.now() + 120 * 86400_000).toISOString().slice(0, 10);
 
   const { data: rows } = await db
@@ -1783,7 +1784,7 @@ export interface UsauMajorWithChampions {
  */
 export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
-  const today = new Date().toISOString().slice(0, 10);
+  const today = usauToday();
 
   // 1. Pull the most-recent completed CLUB events. Scan wide (300 ≈ a bit over
   // a full season of the club calendar): flight-named majors are a small
@@ -2163,7 +2164,9 @@ export async function recentUsauTournamentPage(
   page = 0,
 ): Promise<UsauTournamentPage> {
   const db = await supabase();
-  const today = now.toISOString().slice(0, 10);
+  // Eastern, not UTC: toISOString() rolls over at 8pm ET, which surfaced the
+  // NEXT day's tournaments under Scores the evening before they started.
+  const today = usauToday(now);
 
   const hasFlightFilter = flights.length > 0;
   const flightSet = hasFlightFilter ? new Set(flights) : null;
@@ -2639,8 +2642,10 @@ export interface UsauPlayerListRow {
   latestTeamId: string | null;
   /** Most recent season we've seen them rostered. */
   latestSeason: number | null;
-  /** Number of distinct (team, season) stints — used as an "activity"
-   *  proxy until we have real cross-event stats. */
+  /** Distinct (team, season) stints, summed across every player_id sharing
+   *  this display name — an "activity" proxy until we have real cross-event
+   *  stats. Counts DISTINCT team-seasons, not roster rows: usau_rosters is
+   *  per-event, so a team playing 5 events would otherwise read as 5 stints. */
   appearances: number;
   /** Years this player won the Club Nationals championship. Empty if none. */
   championYears: number[];
@@ -3441,6 +3446,9 @@ export interface UsauEventSummary {
   endDate: string | null;
   city: string | null;
   state: string | null;
+  /** Venue name derived from game field names. Null on ~48% of events (games
+   *  that store only a bare "Field 3"); the UI renders nothing in that case. */
+  venue: string | null;
   competitionLevel: string;
   /** Canonical USAU event page URL, for the "View on USAU" link. */
   url: string | null;
@@ -3547,7 +3555,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const slugPattern = slug.replace(/[%_\\]/g, (c) => `\\${c}`);
   const { data: event, error } = await db
     .from('usau_events')
-    .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level, url')
+    .select('id, usau_slug, name, season, start_date, end_date, city, state, venue, competition_level, url')
     .ilike('usau_slug', slugPattern)
     .maybeSingle();
   if (error) throw error;
@@ -3620,6 +3628,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
     endDate: event.end_date,
     city: event.city,
     state: event.state,
+    venue: event.venue ?? null,
     competitionLevel: event.competition_level,
     url: event.url ?? null,
     flight: flightForName(event.name),

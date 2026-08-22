@@ -22,7 +22,7 @@ import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { useViewParam } from '@/lib/use-view-param';
 import { USAU_LEVELS } from '@/lib/league';
-import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix } from './usau-bracket-tree';
+import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder } from './usau-bracket-tree';
 import { formatGameTime } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager } from '@/components/division-pager';
@@ -412,21 +412,28 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   }
 
   // ── View tabs (#6): Pools / Bracket ──────────────────────────────────────
+  // The Bracket tab shows as soon as USAU publishes the bracket SHAPE — before
+  // any team is seeded into it. USAU's own page draws the full structure with
+  // "P1 of Pool A" / "W of Quarterfinals G1" placeholders pre-tournament, and
+  // the tree already renders those (completeBracket). Gating on a real team id
+  // hid the whole tab until Sunday (Hunter, 2026-08-21). Whether a team has
+  // actually landed in the bracket now only decides the DEFAULT landing tab:
+  // pools while play is still there, bracket once it matters.
   const bracketHasTeams = games.some(
     (g) =>
       (isChampionshipBracket(g) || isPlacementName(g.bracketName) || isCrossoverBracket(g.bracketName)) &&
       (g.teamAId != null || g.teamBId != null),
   );
   const hasBracket =
-    (games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0) &&
-    bracketHasTeams;
+    games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
   const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0;
   const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
     { key: 'pools',      label: 'Pools',      show: hasPools },
     { key: 'bracket',    label: 'Bracket',    show: hasBracket },
   ];
   const visibleTabs = TABS.filter((t) => t.show);
-  const defaultTab: ViewTab = hasBracket ? 'bracket' : (visibleTabs[0]?.key ?? 'pools');
+  const defaultTab: ViewTab =
+    hasBracket && (bracketHasTeams || !hasPools) ? 'bracket' : (visibleTabs[0]?.key ?? 'pools');
 
   return {
     teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
@@ -484,9 +491,16 @@ function EventTabsView(props: {
           read via useLevel() above). The Division switcher moved below the
           view tabs as centered pills (DivisionPager), mirroring the mobile
           app's layout. */}
-      {(event.url || availableLevels.length > 1) && (
+      {(event.url || event.venue || availableLevels.length > 1) && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-          {event.url ? <UsauExternalLink url={event.url} name={event.name} /> : <span />}
+          {event.url || event.venue ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {event.url && <UsauExternalLink url={event.url} name={event.name} />}
+              {event.venue && <EventVenue venue={event.venue} />}
+            </div>
+          ) : (
+            <span />
+          )}
           {availableLevels.length > 1 && (
             <div className="flex items-center gap-3">
               <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
@@ -830,6 +844,23 @@ function UsauExternalLink({ url, name }: { url: string; name: string }) {
         <path d="M7 8.5H1.5V3" />
       </svg>
     </a>
+  );
+}
+
+/** Venue name, derived from the field names on the event's games. Shares the
+ *  metadata row with "View on USAU" — same pill shape, but non-interactive
+ *  (it's a fact, not a link). Only renders when we resolved a venue; roughly
+ *  half of events record only a bare field number, and the header subtitle
+ *  already carries the city/state. */
+function EventVenue({ venue }: { venue: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-muted">
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M5 9s3-2.9 3-5.1A3 3 0 0 0 2 3.9C2 6.1 5 9 5 9Z" />
+        <circle cx="5" cy="3.9" r="1.05" />
+      </svg>
+      {venue}
+    </span>
   );
 }
 
@@ -1225,8 +1256,12 @@ function GameRow({
         )}
         <span className={statusClass}>{statusLabel}</span>
       </div>
+      {/* Unseeded sides show USAU's own placeholder ("P1 Pool A", "W of
+          Quarters G1") — same vocabulary as the bracket tree's cards — so a
+          pre-tournament flat list reads as the bracket logic, not a wall of
+          dashes. */}
       <TeamLine
-        name={game.teamAName}
+        name={game.teamAName ?? shortPlaceholder(game.teamAPlaceholder)}
         seed={game.seedA}
         teamId={game.teamAId}
         score={hasScore ? game.scoreA : null}
@@ -1234,7 +1269,7 @@ function GameRow({
         lost={bWon}
       />
       <TeamLine
-        name={game.teamBName}
+        name={game.teamBName ?? shortPlaceholder(game.teamBPlaceholder)}
         seed={game.seedB}
         teamId={game.teamBId}
         score={hasScore ? game.scoreB : null}

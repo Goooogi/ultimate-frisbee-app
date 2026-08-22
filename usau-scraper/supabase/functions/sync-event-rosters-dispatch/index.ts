@@ -174,12 +174,19 @@ async function dispatchEvent(
     return { slug, season, teamsToScrape: 0, deferred: 0, dispatched: 0, failedToDispatch: 0 };
   }
 
-  // Idempotent: skip teams that already have a roster this season.
+  // Idempotent: skip teams that already have a roster FOR THIS EVENT.
+  //
+  // Must be event-scoped, not season-scoped. usau_rosters is per-event now, so
+  // "has any roster this season" would skip a team at every OTHER event it
+  // attends the moment one event was scraped — permanently starving the rest.
+  // Legacy rows (event_id null) don't count as done for the same reason: they
+  // predate per-event tracking and can't tell us which event they came from.
   if (!includeResolved) {
     const { data: haveRoster } = await db
       .from('usau_rosters')
       .select('team_id')
       .eq('season', season)
+      .eq('event_id', eventId)
       .in('team_id', teamIds);
     const done = new Set((haveRoster ?? []).map((r) => r.team_id as string));
     teamIds = teamIds.filter((id) => !done.has(id));

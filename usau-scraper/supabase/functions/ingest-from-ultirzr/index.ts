@@ -727,6 +727,11 @@ async function ingestEvent(
     if (error) throw new Error(`upsert game ${gm.EventGameId}: ${stringifyErr(error)}`);
     stats.games++;
   }
+
+  // Derive the event's venue from the FieldName values we just wrote (majority
+  // vote, trailing field designator stripped). Write-path only — the read path
+  // serves the stored usau_events.venue column.
+  await db.rpc('usau_derive_event_venue', { target_event_id: eventUuid });
 }
 
 interface TeamSeenInfo {

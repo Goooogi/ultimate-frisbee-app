@@ -3070,6 +3070,7 @@ export type Database = {
           template_key: string | null
           updated_at: string
           url: string | null
+          venue: string | null
           usau_event_id: number | null
           usau_slug: string
         }
@@ -3090,6 +3091,7 @@ export type Database = {
           template_key?: string | null
           updated_at?: string
           url?: string | null
+          venue?: string | null
           usau_event_id?: number | null
           usau_slug: string
         }
@@ -3110,6 +3112,7 @@ export type Database = {
           template_key?: string | null
           updated_at?: string
           url?: string | null
+          venue?: string | null
           usau_event_id?: number | null
           usau_slug?: string
         }
@@ -3355,18 +3358,21 @@ export type Database = {
       }
       usau_rosters: {
         Row: {
+          event_id: string | null
           jersey_number: string | null
           player_id: string
           season: number
           team_id: string
         }
         Insert: {
+          event_id?: string | null
           jersey_number?: string | null
           player_id: string
           season: number
           team_id: string
         }
         Update: {
+          event_id?: string | null
           jersey_number?: string | null
           player_id?: string
           season?: number

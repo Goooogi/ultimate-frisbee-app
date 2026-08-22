@@ -770,7 +770,7 @@ function wOf(prevKey: string, n: number): string {
  *  ("L of Ninth Place Semifinals G2" → "L of Ninth Place Semis G2"). Used when
  *  structural feeder linkage can't derive a label itself — most usefully the
  *  pool-fed opening round, which has no feeder games at all. */
-function shortPlaceholder(raw: string | null | undefined): string | null {
+export function shortPlaceholder(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const pool = raw.match(/^P(\d+) of .*?(Pool\s+\S+)$/i);
   if (pool) return `P${pool[1]} ${pool[2]}`;

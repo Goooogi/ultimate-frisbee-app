@@ -6,7 +6,7 @@
 import { FeedPage } from '@/components/feed-page';
 import { getCurrentGames } from '@/lib/ufa/client';
 import { sortForFeed } from '@/lib/ufa/format';
-import { getToday } from '@/lib/today';
+import { getToday, usauToday } from '@/lib/today';
 import type { UfaGame } from '@/lib/ufa/types';
 import { type UsauTournamentPage } from '@/lib/usau/data';
 import { recentUsauTournamentPageCached, listUsauSeasonsCached } from '@/lib/cached-readers';
@@ -115,9 +115,12 @@ async function loadUsauPage(
     }
   }
   const requested = Math.max(1, parseInt(searchParams.page ?? '1', 10) || 1) - 1;
-  const result = await recentUsauTournamentPageCached(usauLevel, usauFlights, season, requested);
+  // Eastern-date cutoff, passed explicitly so it's part of the cache key —
+  // otherwise the "recent" window freezes at whenever the entry was built.
+  const today = usauToday();
+  const result = await recentUsauTournamentPageCached(today, usauLevel, usauFlights, season, requested);
   if (requested > 0 && requested >= result.pageCount) {
-    return recentUsauTournamentPageCached(usauLevel, usauFlights, season, result.pageCount - 1);
+    return recentUsauTournamentPageCached(today, usauLevel, usauFlights, season, result.pageCount - 1);
   }
   return result;
 }

@@ -1180,6 +1180,10 @@ async function run(body: RequestBody) {
     totalGames += perDivision[div].games;
   }
 
+  // Derive the event's venue from the field names we just wrote. Write-path
+  // only — the read path serves the stored column.
+  await db.rpc('usau_derive_event_venue', { target_event_id: eventUUID });
+
   // Mark the event as freshly scraped.
   await db
     .from('usau_events')

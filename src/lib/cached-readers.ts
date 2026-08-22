@@ -38,19 +38,30 @@ import {
 // DB read per window.
 const REVALIDATE_SECONDS = 300;
 
-// Wrapped as a closure so the reader's `now: Date` default stays out of
-// the cache key (a Date wouldn't serialize into one cleanly). Callers never
-// pass `now`, so this preserves behavior exactly. competitionLevel, flights,
-// season and page ARE serialized cache-key args, so each combination memoizes
-// independently. `flights` must be passed in canonical order (see
-// parseFlightsParam) so the same selection always yields the same cache key.
+// `today` (yyyy-mm-dd, US Eastern — see usauToday) is an EXPLICIT cache-key arg
+// rather than a `new Date()` default evaluated inside the cached body. It gates
+// which events count as "recent" (start_date <= today), so leaving it out of the
+// key froze the cutoff at whenever the entry was first computed and let the NEXT
+// weekend's tournaments show up a day early. competitionLevel, flights, season
+// and page are likewise serialized, so each combination memoizes independently.
+// `flights` must be passed in canonical order (see parseFlightsParam) so the same
+// selection always yields the same cache key.
 export const recentUsauTournamentPageCached = unstable_cache(
   (
+    today: string,
     competitionLevel: CompetitionLevel = 'CLUB',
     flights: Flight[] = [],
     season: number | null = null,
     page = 0,
-  ) => _recentUsauTournamentPage(undefined, undefined, competitionLevel, flights, season, page),
+  ) =>
+    _recentUsauTournamentPage(
+      new Date(`${today}T12:00:00Z`),
+      undefined,
+      competitionLevel,
+      flights,
+      season,
+      page,
+    ),
   ['usau-recent-tournament-page'],
   { revalidate: REVALIDATE_SECONDS },
 );

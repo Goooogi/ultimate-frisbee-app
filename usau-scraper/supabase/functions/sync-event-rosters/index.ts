@@ -14,6 +14,17 @@
 // pages, just display names. We use (team_id, lower(name)) as the natural
 // key — meaning "Nick Tolfa on Revolver" and "Nick Tolfa on PoNY" are two
 // separate rows. That's accurate to what the source actually publishes.
+//
+// Rosters are PER EVENT. USAU publishes a different roster for each event a
+// team attends (Chain Lightning 2026: 19 at Pro-Elite Challenge East, 20 at
+// Elite Select Challenge, 12 in common), so usau_rosters rows carry event_id
+// and are keyed (team_id, season, event_id, player_id). Before that key
+// existed, the second event scraped silently overwrote the first.
+//
+// If an event's URL ids haven't been resolved yet this function resolves them
+// on demand (invoking resolve-event-team-urls for that slug) rather than
+// failing — that stage used to be a separate manual prerequisite and silently
+// left 11% of 2026 participations unscrapeable.
 
 import { fetchHtml } from '../_shared/http.ts';
 import { parseHtml, teamUrlByEventTeamId } from '../_shared/parse.ts';
@@ -175,14 +186,18 @@ async function syncTeam(
       playerByName.set(lowerName, playerUUID);
     }
 
+    // event_id is part of the key: USAU rosters are PER EVENT, and without it
+    // the second event scraped for a team-season overwrote the first (PEC East
+    // lost Selfridge/Poe to the ESC scrape). See the 20260821140000 migration.
     const { error: rosterErr } = await db.from('usau_rosters').upsert(
       {
         team_id: teamUUID,
         season,
+        event_id: eventID,
         player_id: playerUUID,
         jersey_number: p.jersey,
       },
-      { onConflict: 'team_id,season,player_id', ignoreDuplicates: false },
+      { onConflict: 'team_id,season,event_id,player_id', ignoreDuplicates: false },
     );
     if (rosterErr) throw new Error(`usau_rosters upsert: ${stringifyErr(rosterErr)}`);
 
@@ -244,20 +259,52 @@ async function run(body: RequestBody) {
 
   // Use usau_event_team_url_id (the base64 per-event id used by USAU team
   // page URLs), not the persistent usau_event_team_id (which is the
-  // numeric team id since the ultirzr ingest). Skip rows where the URL id
-  // hasn't been resolved yet — those need resolve-event-team-urls first.
-  let ptQuery = db
-    .from('usau_event_teams')
-    .select('team_id, usau_event_team_url_id, usau_teams(name)')
-    .eq('event_id', event.id)
-    .not('usau_event_team_url_id', 'is', null);
-  if (onlyTeamId) ptQuery = ptQuery.eq('team_id', onlyTeamId);
-  const { data: participations, error: ptErr } = await ptQuery;
-  if (ptErr) throw new Error(`load event_teams: ${stringifyErr(ptErr)}`);
-  if (!participations || participations.length === 0) {
+  // numeric team id since the ultirzr ingest).
+  const loadParticipations = async () => {
+    let q = db
+      .from('usau_event_teams')
+      .select('team_id, usau_event_team_url_id, usau_teams(name)')
+      .eq('event_id', event.id)
+      .not('usau_event_team_url_id', 'is', null);
+    if (onlyTeamId) q = q.eq('team_id', onlyTeamId);
+    const { data, error } = await q;
+    if (error) throw new Error(`load event_teams: ${stringifyErr(error)}`);
+    return data ?? [];
+  };
+
+  let participations = await loadParticipations();
+
+  // Self-heal instead of erroring out. The URL token is scraped from the same
+  // schedule page this pipeline already walks, but it used to live in a
+  // separate stage (resolve-event-team-urls) that had to be run FIRST and by
+  // hand — 11% of 2026 participations were left unresolved, so their rosters
+  // were never fetchable and the miss was silent. Resolve on demand, then retry.
+  let resolved = 0;
+  if (participations.length === 0) {
+    const { data: pending } = await db
+      .from('usau_event_teams')
+      .select('team_id')
+      .eq('event_id', event.id)
+      .is('usau_event_team_url_id', null);
+    if ((pending ?? []).length > 0) {
+      console.log(
+        `[sync-event-rosters] '${slug}': ${pending!.length} unresolved url ids — resolving now`,
+      );
+      const { error: invokeErr } = await db.functions.invoke('resolve-event-team-urls', {
+        body: { slug, limit: 1 },
+      });
+      if (invokeErr) {
+        throw new Error(`resolve-event-team-urls('${slug}'): ${stringifyErr(invokeErr)}`);
+      }
+      participations = await loadParticipations();
+      resolved = participations.length;
+    }
+  }
+
+  if (participations.length === 0) {
     throw new Error(
       `no participations with usau_event_team_url_id for '${slug}' — ` +
-        `run resolve-event-team-urls first`,
+        `resolve-event-team-urls found no schedule page to resolve them from`,
     );
   }
 
@@ -286,6 +333,8 @@ async function run(body: RequestBody) {
       slug,
       teams: results.length,
       players: totalRoster,
+      /** Non-zero when this run had to resolve URL ids before it could scrape. */
+      resolvedUrlIds: resolved,
       stats: { goals: totalGoals, assists: totalAssists },
       perTeam: results,
     },
