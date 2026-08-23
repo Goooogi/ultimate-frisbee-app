@@ -46,6 +46,40 @@ export function venueTimeZone(state: string | null | undefined): string | null {
   return STATE_TO_TZ[state.trim().toUpperCase()] ?? null;
 }
 
+/** "Sat 8/22" — the date portion only, in the venue's wall clock. For the
+ *  desktop pool schedule table, which splits date and time into columns the
+ *  way USAU's own event page does. */
+export function formatGameDate(
+  iso: string | null | undefined,
+  state: string | null | undefined,
+): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const timeZone = venueTimeZone(state) ?? 'UTC';
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+    timeZone,
+  });
+}
+
+/** "9:45 AM" — the time portion only, in the venue's wall clock. Returns ''
+ *  for rows stored at midnight (ingested without a time of day), so the table
+ *  shows a dash rather than a fake "12:00 AM" — same rule as formatGameTime. */
+export function formatGameClock(
+  iso: string | null | undefined,
+  state: string | null | undefined,
+): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const timeZone = venueTimeZone(state) ?? 'UTC';
+  const t = d.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', timeZone });
+  return t === '12:00 AM' ? '' : t;
+}
+
 /** "Sun 9:45 AM" — a game's scheduled time as the venue's wall clock.
  *  Rows ingested without a time-of-day are stored at venue midnight (or
  *  UTC midnight when the venue zone was unknown); those render as just the

@@ -23,7 +23,7 @@ import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { useViewParam } from '@/lib/use-view-param';
 import { USAU_LEVELS } from '@/lib/league';
 import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder } from './usau-bracket-tree';
-import { formatGameTime } from '@/lib/usau/venue-tz';
+import { formatGameTime, formatGameDate, formatGameClock } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager } from '@/components/division-pager';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
@@ -699,6 +699,25 @@ function DivisionContent({
               ))}
             </div>
           )}
+
+          {/* Desktop: full per-pool schedule tables beneath the standings row,
+              matching USAU's own event page (Hunter, 2026-08-22). The cards
+              above hide their "Games" disclosure at lg+ so the schedule lives
+              in exactly one place; below lg the disclosure carries it, because
+              a 7-column table doesn't fit a phone. */}
+          {pools.length > 0 && poolGames.size > 0 && (
+            <div className="hidden lg:flex flex-col gap-4">
+              {pools.map((pool) => (
+                <PoolScheduleTable
+                  key={pool.name}
+                  poolName={bracketLabel(pool.name)}
+                  games={poolGames.get(pool.name) ?? []}
+                  venueState={event.state}
+                />
+              ))}
+            </div>
+          )}
+
           {pools.length > 0 && poolGames.size === 0 && <PoolGamesEmpty slug={event.slug} />}
 
           {/* Matchup rounds — pool-less Saturday phases ("Sat Round 1/2/3"),
@@ -1053,10 +1072,55 @@ function PoolCard({
   games: Game[];
   venueState?: string | null;
 }) {
-  // Rank by pool record when we have any completed games — tied records break
-  // on point diff (Hunter, 2026-08-18); the incoming team order is by seed,
-  // which stays as the final tiebreak within equal records.
+  // Rank by pool record when we have any completed games — the incoming team
+  // order is by seed, which stays as the final tiebreak within equal records.
   const anyRecords = pool.teams.some((t) => t.teamId && records.has(t.teamId));
+
+  // USAU breaks a tied record on point differential in the games AMONG THE
+  // TIED TEAMS ONLY — not overall pool diff. Sorting on overall diff let a team
+  // win a pool on a blowout against the bottom seed instead of on who beat whom
+  // (ESC 2026 Women's Pool A: a genuine 3-way tie at 2-1 put Flipside on top
+  //  purely for its 15-5 over last-place Siege, when Pop had beaten Flipside
+  //  head to head — Hunter/mobile session, 2026-08-22).
+  //
+  // Computed per tie GROUP: a mini-diff is meaningless outside a team's own
+  // group, and grouping keeps this inert when nothing is tied. Overall diff
+  // stays as the NEXT tiebreak, which is what separates two teams that are
+  // still level after their head-to-head (Flipside -1 vs Parcha -1 → +9 vs +4).
+  const miniDiff = useMemo(() => {
+    const out = new Map<string, number>();
+    if (!anyRecords) return out;
+
+    const byRecord = new Map<string, string[]>();
+    for (const t of pool.teams) {
+      if (!t.teamId) continue;
+      const r = records.get(t.teamId);
+      if (!r) continue;
+      const k = `${r.wins}-${r.losses}`;
+      const list = byRecord.get(k);
+      if (list) list.push(t.teamId);
+      else byRecord.set(k, [t.teamId]);
+    }
+
+    for (const ids of byRecord.values()) {
+      if (ids.length < 2) continue; // not a tie — leave every member at 0
+      const tied = new Set(ids);
+      for (const id of ids) out.set(id, 0);
+      for (const g of games) {
+        // Same guards the records pass uses: decided games only, no live
+        // in-progress scores, no ties.
+        if (g.status !== 'final') continue;
+        if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) continue;
+        if (!g.teamAId || !g.teamBId) continue;
+        if (!tied.has(g.teamAId) || !tied.has(g.teamBId)) continue;
+        const m = g.scoreA - g.scoreB;
+        out.set(g.teamAId, (out.get(g.teamAId) ?? 0) + m);
+        out.set(g.teamBId, (out.get(g.teamBId) ?? 0) - m);
+      }
+    }
+    return out;
+  }, [anyRecords, pool.teams, records, games]);
+
   const ranked = anyRecords
     ? pool.teams
         .slice()
@@ -1065,6 +1129,9 @@ function PoolCard({
           const rb = (b.teamId && records.get(b.teamId)) || { wins: 0, losses: 0, diff: 0 };
           if (rb.wins !== ra.wins) return rb.wins - ra.wins;
           if (ra.losses !== rb.losses) return ra.losses - rb.losses;
+          const ma = a.teamId ? (miniDiff.get(a.teamId) ?? 0) : 0;
+          const mb = b.teamId ? (miniDiff.get(b.teamId) ?? 0) : 0;
+          if (mb !== ma) return mb - ma;
           if (rb.diff !== ra.diff) return rb.diff - ra.diff;
           return (a.seed ?? 99) - (b.seed ?? 99);
         })
@@ -1110,8 +1177,11 @@ function PoolCard({
         })}
       </ul>
 
+      {/* Hidden at lg+: the desktop layout renders full per-pool schedule
+          tables below the standings row instead (PoolScheduleTable), so the
+          games would otherwise appear twice. */}
       {games.length > 0 && (
-        <div className="border-t border-hairline">
+        <div className="border-t border-hairline lg:hidden">
           <button
             type="button"
             aria-expanded={gamesOpen}
@@ -1217,6 +1287,124 @@ function BracketBlock({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * "Pool A Schedule & Scores" — the full per-pool game table USAU's own event
+ * page renders beneath the standings row (Hunter, 2026-08-22). DESKTOP ONLY:
+ * on lg+ the standings cards drop their collapsed "Games" disclosure and these
+ * tables carry the schedule instead, so a coach can read a whole pool's slate
+ * without opening four accordions. Mobile keeps the merged-card behavior —
+ * a 7-column table does not fit a phone.
+ */
+function PoolScheduleTable({
+  poolName,
+  games,
+  venueState,
+}: {
+  poolName: string;
+  games: Game[];
+  venueState?: string | null;
+}) {
+  if (games.length === 0) return null;
+
+  return (
+    <section className="bg-surface rounded-card shadow-card overflow-hidden">
+      <div className="px-4 py-3 border-b border-hairline">
+        <h3 className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">
+          {poolName} Schedule &amp; Scores
+        </h3>
+      </div>
+      {/* Wide content scrolls inside its own container rather than pushing the
+          page sideways. */}
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse text-[13px] font-tight">
+          <thead>
+            <tr className="text-left">
+              {['Date', 'Time', 'Field', 'Team 1', 'Team 2', 'Score', 'Status'].map((h) => (
+                <th
+                  key={h}
+                  scope="col"
+                  className="px-4 py-2 text-[10px] font-bold tracking-[0.14em] uppercase text-muted font-tight whitespace-nowrap bg-ink/[0.02]"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {games.map((g) => {
+              const status = g.status.toLowerCase();
+              const isCancelled = status === 'cancelled';
+              const hasScore = g.scoreA != null && g.scoreB != null;
+              const isFinal = hasScore || status === 'final';
+              const aWon = hasScore && isFinal && (g.scoreA ?? 0) > (g.scoreB ?? 0);
+              const bWon = hasScore && isFinal && (g.scoreB ?? 0) > (g.scoreA ?? 0);
+              // Date and time are split into their own columns here (the card
+              // view folds them into one status strip), both in the VENUE's
+              // wall clock — see formatGameTime.
+              const dateLabel = formatGameDate(g.scheduledAt, venueState ?? null);
+              const timeLabel = formatGameClock(g.scheduledAt, venueState ?? null);
+              const field = g.location?.trim() || '—';
+
+              return (
+                <tr key={g.id} className="border-t border-hairline hover:bg-ink/[0.03] transition-colors">
+                  <td className="px-4 py-2.5 text-muted whitespace-nowrap tabular">{dateLabel || '—'}</td>
+                  <td className="px-4 py-2.5 text-muted whitespace-nowrap tabular">{timeLabel || '—'}</td>
+                  <td className="px-4 py-2.5 text-muted whitespace-nowrap tabular">{field}</td>
+                  <td className="px-4 py-2.5">
+                    <TeamCell name={g.teamAName} teamId={g.teamAId} won={aWon} />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <TeamCell name={g.teamBName} teamId={g.teamBId} won={bWon} />
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap tabular font-bold">
+                    {hasScore ? (
+                      <span className="text-ink">
+                        <span className={aWon ? '' : 'text-muted'}>{g.scoreA}</span>
+                        <span className="text-faint"> – </span>
+                        <span className={bWon ? '' : 'text-muted'}>{g.scoreB}</span>
+                      </span>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap text-[11px] font-bold tracking-[0.12em] uppercase">
+                    <span className={isCancelled ? 'text-live' : isFinal ? 'text-faint' : 'text-muted'}>
+                      {isCancelled ? 'Cancelled' : isFinal ? 'Final' : 'Scheduled'}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+/** One team cell in the schedule table — links out when we resolved an id. */
+function TeamCell({
+  name,
+  teamId,
+  won,
+}: {
+  name: string | null;
+  teamId: string | null;
+  won: boolean;
+}) {
+  const label = name ?? 'TBD';
+  const cls = ['truncate', won ? 'font-bold text-ink' : 'font-medium text-muted'].join(' ');
+  if (!teamId || !name) return <span className={cls}>{label}</span>;
+  return (
+    <Link
+      href={`/usau/teams/${teamId}`}
+      className={`${cls} no-underline hover:text-accent transition-colors`}
+    >
+      {label}
+    </Link>
   );
 }
 
