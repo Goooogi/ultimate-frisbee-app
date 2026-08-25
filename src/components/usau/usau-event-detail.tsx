@@ -312,12 +312,43 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     if (!byBracket.has(k)) byBracket.set(k, []);
     byBracket.get(k)!.push(g);
   }
+  // A group whose name canonicalPlacement can't rank ("Third", first scraped
+  // as USAU's generic tab text, landed in the order-999 bucket and rendered
+  // BELOW 15th place at the 2026 Elite Select Challenge) still has structure:
+  // its teams fell out of the championship somewhere, and that round names the
+  // places it decides — semi losers play for 3rd, QF losers for 5th–8th,
+  // prequarter losers for 9th+. Derive the order from the participants' exit
+  // (+0.5 so a recognized bracket with the same start place sorts first).
+  const champLossRound = new Map<string, string>();
+  for (const g of games) {
+    if (!isChampionshipBracket(g)) continue;
+    if (g.round === 'final') continue; // final's loser is 2nd — no placement game
+    if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) continue;
+    const loser = g.scoreA > g.scoreB ? g.teamBId : g.teamAId;
+    if (loser) champLossRound.set(loser, g.round);
+  }
+  const EXIT_START: Record<string, number> = { semi: 3, quarter: 5, prequarter: 9 };
+  const derivedPlacementOrder = (gs: Game[]): number => {
+    let best = Number.POSITIVE_INFINITY;
+    for (const g of gs) {
+      for (const id of [g.teamAId, g.teamBId]) {
+        if (!id) continue;
+        const start = EXIT_START[champLossRound.get(id) ?? ''];
+        if (start != null && start < best) best = start;
+      }
+    }
+    return Number.isFinite(best) ? best + 0.5 : 999;
+  };
+  const placementOrder = (name: string, gs: Game[]): number => {
+    const o = bracketOrder(name);
+    return o === 999 ? derivedPlacementOrder(gs) : o;
+  };
   const placementBrackets = Array.from(byBracket.entries())
     .map(([name, gs]) => ({
       name,
       games: gs.slice().sort((a, b) => roundOrder(a.round) - roundOrder(b.round)),
     }))
-    .sort((a, b) => bracketOrder(a.name) - bracketOrder(b.name));
+    .sort((a, b) => placementOrder(a.name, a.games) - placementOrder(b.name, b.games));
 
   // ── Matchup rounds ("Sat Round 1/2/3") — pool-less Saturday phases. ─────
   const roundGroupsMap = new Map<string, Game[]>();

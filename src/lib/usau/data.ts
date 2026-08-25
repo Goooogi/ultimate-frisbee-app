@@ -1342,17 +1342,23 @@ export async function findUsauPlayerByName(name: string): Promise<string | null>
   const candidates = (matches ?? []).filter((m) => namesMatch(name, m.display_name));
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0].id;
-  // Multiple candidate IDs — pick the one with the most rosters (most active).
+  // Multiple candidate IDs — pick the one with the most DISTINCT (team, season)
+  // stints, matching the RPC's ordering (20260821170000): with per-event roster
+  // rows, a raw row count scores one player-season once per event the team
+  // attended, over-ranking players whose teams travelled more. event_id is
+  // deliberately NOT part of the key — ~255k legacy rows carry it NULL, so
+  // keying on it would drop real history (mobile parity).
   const ids = candidates.map((c) => c.id);
   const { data: rosters } = await db
     .from('usau_rosters')
-    .select('player_id')
+    .select('player_id, team_id, season')
     .in('player_id', ids);
-  const counts = new Map<string, number>();
+  const stints = new Map<string, Set<string>>();
   for (const r of rosters ?? []) {
-    counts.set(r.player_id, (counts.get(r.player_id) ?? 0) + 1);
+    if (!stints.has(r.player_id)) stints.set(r.player_id, new Set());
+    stints.get(r.player_id)!.add(`${r.team_id}|${r.season}`);
   }
-  return ids.sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0))[0];
+  return ids.sort((a, b) => (stints.get(b)?.size ?? 0) - (stints.get(a)?.size ?? 0))[0];
 }
 
 /**
@@ -2978,7 +2984,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
   // division) champion since 3 divisions share the same Nationals event.
   const { data: candidateRosters } = await db
     .from('usau_rosters')
-    .select('player_id, team_id, season, jersey_number, usau_teams(name, gender_division, competition_level)')
+    .select('player_id, team_id, season, event_id, jersey_number, usau_teams(name, gender_division, competition_level)')
     .in('player_id', candidateIds);
 
   // For the identity conflict rule we need to know which candidate TEAMS played
@@ -3114,6 +3120,36 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     participationRows = (data ?? []) as unknown as ParticipationRow[];
   }
 
+  // Per-EVENT roster gate (mirror of the _build_player_profile prosrc patch,
+  // 20260824100000): event-keyed usau_rosters rows say who was actually
+  // rostered AT an event. Where coverage exists for a (team, event), the
+  // stint shows the event only if this cluster is on that event's roster —
+  // a guest stint (Nethercutt: Lotus at the 2021 Pro-Elite Challenge only)
+  // must not inherit the team's whole season. Uncovered events keep the
+  // whole-season projection. Paged: coverage rows span every player on the
+  // team, and a Nationals team-event alone exceeds the 1000-row cap.
+  const eventRosterCoverage = new Set<string>();
+  if (teamIds.length > 0) {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page } = await db
+        .from('usau_rosters')
+        .select('team_id, event_id')
+        .in('team_id', teamIds)
+        .not('event_id', 'is', null)
+        .range(from, from + PAGE - 1);
+      for (const row of page ?? []) {
+        eventRosterCoverage.add(`${row.team_id}|${row.event_id}`);
+      }
+      if ((page ?? []).length < PAGE) break;
+    }
+  }
+  const clusterEventRoster = new Set<string>();
+  for (const r of clusterRosters) {
+    const eid = (r as { event_id?: string | null }).event_id;
+    if (eid) clusterEventRoster.add(`${r.team_id}|${eid}`);
+  }
+
   // Build maps for the join.
   const eventsByTeamId = new Map<string, ParticipationRow[]>();
   for (const row of participationRows) {
@@ -3182,6 +3218,8 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
       const ev = (p as { usau_events: { usau_slug: string; name: string; season: number; start_date: string | null } | null }).usau_events;
       if (!ev || ev.season !== stint.season) continue;
       if (seenEvents.has(p.event_id)) continue;
+      const covKey = `${p.team_id}|${p.event_id}`;
+      if (eventRosterCoverage.has(covKey) && !clusterEventRoster.has(covKey)) continue;
       seenEvents.add(p.event_id);
       const stats = statsByEvent.get(p.event_id);
       events.push({

@@ -65,8 +65,8 @@ interface RoundColumn {
 function slotNode(s: Slot) {
   return {
     id: s.id,
-    homeId: s.game?.teamAId ?? null,
-    awayId: s.game?.teamBId ?? null,
+    homeId: s.game?.teamAId ?? s.aResolved?.teamId ?? null,
+    awayId: s.game?.teamBId ?? s.bResolved?.teamId ?? null,
     sourceIds: s.sourceIds,
   };
 }
@@ -255,10 +255,10 @@ function MatchCard({
           <StatusPill tone="upcoming" label="" tag={tag} />
         </div>
         <TeamLine
-          teamId={null}
-          name={null}
+          teamId={slot.aResolved?.teamId ?? null}
+          name={slot.aResolved?.name ?? null}
           fallback={slot.aFallback}
-          seed={null}
+          seed={slot.aResolved?.seed ?? null}
           score={null}
           won={false}
           lost={false}
@@ -266,10 +266,10 @@ function MatchCard({
         />
         <div className="h-px bg-hairline" />
         <TeamLine
-          teamId={null}
-          name={null}
+          teamId={slot.bResolved?.teamId ?? null}
+          name={slot.bResolved?.name ?? null}
           fallback={slot.bFallback}
-          seed={null}
+          seed={slot.bResolved?.seed ?? null}
           score={null}
           won={false}
           lost={false}
@@ -288,7 +288,11 @@ function MatchCard({
   // A slot that names its origin isn't a bare "TBD" card anymore — it's a
   // scheduled game whose participants are pending, so it reads as upcoming
   // (cancelled keeps its own treatment via matchTone/statusLabel).
-  if ((slot.aFallback || slot.bFallback) && tone === 'tbd' && game.status !== 'cancelled') {
+  if (
+    (slot.aFallback || slot.bFallback || slot.aResolved || slot.bResolved) &&
+    tone === 'tbd' &&
+    game.status !== 'cancelled'
+  ) {
     tone = 'upcoming';
   }
   // Cancelled games carry 0–0 in the DB; showing "0 0" under a Cancelled pill
@@ -323,10 +327,10 @@ function MatchCard({
         </span>
       </div>
       <TeamLine
-        teamId={game.teamAId}
-        name={game.teamAName}
+        teamId={game.teamAId ?? slot.aResolved?.teamId ?? null}
+        name={game.teamAName ?? slot.aResolved?.name ?? null}
         fallback={slot.aFallback}
-        seed={game.seedA}
+        seed={game.seedA ?? slot.aResolved?.seed ?? null}
         score={scoreA}
         won={aWon}
         lost={bWon}
@@ -334,10 +338,10 @@ function MatchCard({
       />
       <div className="h-px bg-hairline" />
       <TeamLine
-        teamId={game.teamBId}
-        name={game.teamBName}
+        teamId={game.teamBId ?? slot.bResolved?.teamId ?? null}
+        name={game.teamBName ?? slot.bResolved?.name ?? null}
         fallback={slot.bFallback}
-        seed={game.seedB}
+        seed={game.seedB ?? slot.bResolved?.seed ?? null}
         score={scoreB}
         won={bWon}
         lost={aWon}
@@ -621,29 +625,14 @@ function buildColumns(games: Game[]): RoundColumn[] {
   let finals = games.filter((g) => g.round === 'final');
   const quarters = games.filter((g) => g.round === 'quarter');
 
-  // Round-of-16 recovery. The usau_game_round enum tops out at 'prequarter', so
-  // a bracket that opens with a round of 16 is stored as round='other' and was
-  // dropped entirely — isBracketGame() rejects 'other' by default, so a whole
-  // played round vanished from the tree while its winners appeared in the QFs.
-  //
-  // Identify it structurally rather than by name: an 'other' game in this
-  // bracket whose winner plays in the round that opens the tree. That keeps a
-  // genuinely unclassifiable game out while recovering a real feeder round.
-  const openers = prequarters.length > 0 ? prequarters : quarters;
-  const recovered = recoverFeederRound(games, openers);
-  // Type the recovered round by SIZE: more games than the openers is a round
-  // of 16; equal-or-fewer is a play-in/prequarter round feeding the openers
-  // (Ski Town Mixed stores its play-ins as round='other', bracket
-  // "Pre-Quarters"). Only claims the prequarter column when none is explicitly
-  // tagged.
-  const recoveredAsPrequarters =
-    prequarters.length === 0 && recovered.length > 0 && recovered.length <= openers.length;
-  const r16 = recoveredAsPrequarters ? [] : recovered;
-
-  // USAU routinely mislabels a bracket's FINAL as round='other': a placement
-  // bracket's semis store round='semi' but the deciding game stores 'other',
-  // so the tree draws semis with no final. Recover it the same way — a game
-  // outside the tree rounds whose two teams are both semi WINNERS is the final.
+  // USAU routinely mislabels a bracket's FINAL as an out-of-tree round: a
+  // placement bracket's semis store round='semi' but the deciding game stores
+  // 'other' or 'placement', so the tree draws semis with no final. Recover it —
+  // a game outside the tree rounds whose two teams are both semi WINNERS is the
+  // final. This MUST run before feeder recovery below: the recovered final's
+  // winner also appears in the bracket's own quarters (they advanced through
+  // them), so feeder recovery would otherwise claim the SAME game as a
+  // phantom "Pre-Quarters" column and render it twice (ESC 2026 9th place).
   if (finals.length === 0 && semis.length > 0) {
     const semiWinners = new Set(
       semis
@@ -662,6 +651,28 @@ function buildColumns(games: Game[]): RoundColumn[] {
         semiWinners.has(g.teamBId),
     );
   }
+  const claimedFinalIds = new Set(finals.map((g) => g.id));
+
+  // Round-of-16 recovery. The usau_game_round enum tops out at 'prequarter', so
+  // a bracket that opens with a round of 16 is stored as round='other' and was
+  // dropped entirely — isBracketGame() rejects 'other' by default, so a whole
+  // played round vanished from the tree while its winners appeared in the QFs.
+  //
+  // Identify it structurally rather than by name: an 'other' game in this
+  // bracket whose winner plays in the round that opens the tree. That keeps a
+  // genuinely unclassifiable game out while recovering a real feeder round.
+  const openers = prequarters.length > 0 ? prequarters : quarters;
+  const recovered = recoverFeederRound(games, openers).filter(
+    (g) => !claimedFinalIds.has(g.id),
+  );
+  // Type the recovered round by SIZE: more games than the openers is a round
+  // of 16; equal-or-fewer is a play-in/prequarter round feeding the openers
+  // (Ski Town Mixed stores its play-ins as round='other', bracket
+  // "Pre-Quarters"). Only claims the prequarter column when none is explicitly
+  // tagged.
+  const recoveredAsPrequarters =
+    prequarters.length === 0 && recovered.length > 0 && recovered.length <= openers.length;
+  const r16 = recoveredAsPrequarters ? [] : recovered;
 
   let r1: Game[];
   let qf: Game[];
@@ -745,6 +756,17 @@ interface Slot {
   /** Side labels used when the team is unknown ("W of Quarters G1"). */
   aFallback: string | null;
   bFallback: string | null;
+  /** Winner of a DECIDED feeder game, shown in place of the "W of …" label
+   *  while the row itself still stores TBD — the team advances on screen the
+   *  moment its game goes final, not whenever the next scrape lands. */
+  aResolved: ResolvedSide | null;
+  bResolved: ResolvedSide | null;
+}
+
+interface ResolvedSide {
+  teamId: string | null;
+  name: string;
+  seed: number | null;
 }
 
 export interface SlotColumn {
@@ -790,8 +812,154 @@ function treeWinnerId(g: Game): string | null {
   return g.scoreA > g.scoreB ? g.teamAId : g.teamBId;
 }
 
-/** Slot for a real row: attach feeders, derive side labels for unknown sides. */
-function makeRealSlot(g: Game, idx: number, feeders: Slot[], prevKey: string): Slot {
+/** The winner of a feeder slot's game, when decided — id/name/seed for the
+ *  downstream card to render in place of its "W of …" label. */
+function resolvedWinner(f: Slot): ResolvedSide | null {
+  const g = f.game;
+  if (!g) return null;
+  const wid = treeWinnerId(g);
+  if (!wid) return null;
+  const won = wid === g.teamAId;
+  const name = won ? g.teamAName : g.teamBName;
+  const seed = won ? g.seedA : g.seedB;
+  return name ? { teamId: wid, name, seed } : null;
+}
+
+// ── Duplicate-row collapse (dual-pipeline safety) ───────────────────────────
+// Mid-tournament, the HTML scrape and the ultirzr ingest can BOTH hold rows
+// for the same structural game (different ids, one pair stale) — the 2026
+// Elite Select semis rendered as FOUR cards: the fresh pair plus a stale
+// TBD-vs-TBD pair carrying the quarters' old times. Two rows are the same
+// game when they resolve to the same feeder pair, name the same scraped
+// origins, or hold the same two teams; and a column never gets more cards
+// than its feeders can supply (4 QFs → 2 semis → 1 final).
+
+function statusRank(g: Game): number {
+  const s = g.status.toLowerCase();
+  if (s === 'final' || s === 'forfeit') return 3;
+  if (s === 'in_progress') return 2;
+  return 1;
+}
+
+/** >0 when `a` is the better duplicate to keep: more resolved teams, a
+ *  further-along status, then the later scheduled time (the stale row carries
+ *  the superseded slot's earlier time). */
+function rowScore(a: Game, b: Game): number {
+  const resolved = (g: Game) => (g.teamAId ? 1 : 0) + (g.teamBId ? 1 : 0);
+  return (
+    resolved(a) - resolved(b) ||
+    statusRank(a) - statusRank(b) ||
+    (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')
+  );
+}
+
+/** Feeder game number a scraped placeholder points at ("W of Quarterfinals
+ *  G3" → 3) — only when the round it names IS the previous column, so a
+ *  label reaching further back can't forge a false link. */
+function placeholderFeederNumber(
+  raw: string | null | undefined,
+  prevKey: string,
+): number | null {
+  if (!raw) return null;
+  const m = raw.match(/^W(?:inner)?\s+of\b(.*)\bG\s*(\d+)\s*$/i);
+  if (!m) return null;
+  const round = m[1].toLowerCase();
+  const matches =
+    prevKey === 'qf'
+      ? /quarter/.test(round) && !/pre/.test(round)
+      : prevKey === 'sf'
+        ? /semi/.test(round)
+        : prevKey === 'r16'
+          ? /16/.test(round)
+          : prevKey === 'r1'
+            ? /pre.?quarter|round\s*1/.test(round)
+            : false;
+  return matches ? Number(m[2]) : null;
+}
+
+/** Which previous-round game number feeds this side: a resolved team links to
+ *  the feeder it WON; an open side links through its scraped placeholder. */
+function feederRef(
+  teamId: string | null,
+  placeholder: string | null | undefined,
+  prev: Slot[] | null,
+  prevKey: string,
+): number | null {
+  if (!prev) return null;
+  if (teamId) {
+    const f = prev.find((s) => s.game && treeWinnerId(s.game) === teamId);
+    return f ? f.number : null;
+  }
+  return placeholderFeederNumber(placeholder, prevKey);
+}
+
+function dupSignature(g: Game, prev: Slot[] | null, prevKey: string): string | null {
+  if (g.teamAId && g.teamBId) {
+    return `t:${[g.teamAId, g.teamBId].sort().join('|')}`;
+  }
+  if (!g.teamAId && !g.teamBId && g.teamAPlaceholder && g.teamBPlaceholder) {
+    return `p:${[g.teamAPlaceholder, g.teamBPlaceholder].sort().join('|')}`;
+  }
+  const ra = feederRef(g.teamAId, g.teamAPlaceholder, prev, prevKey);
+  const rb = feederRef(g.teamBId, g.teamBPlaceholder, prev, prevKey);
+  if (ra != null && rb != null && ra !== rb) {
+    return `f:${Math.min(ra, rb)},${Math.max(ra, rb)}`;
+  }
+  return null;
+}
+
+/** Collapse duplicate rows within one round, keeping the most informative of
+ *  each pair, then enforce `cap` (structural max for halving rounds) by
+ *  dropping the least informative extras. Unrecognizable rows (no signature)
+ *  are never merged — only capped. */
+function dedupeRound(
+  games: Game[],
+  prev: Slot[] | null,
+  prevKey: string,
+  cap: number | null,
+): Game[] {
+  const bySig = new Map<string, number>();
+  const kept: Game[] = [];
+  for (const g of games) {
+    const sig = dupSignature(g, prev, prevKey);
+    if (!sig) {
+      kept.push(g);
+      continue;
+    }
+    const at = bySig.get(sig);
+    if (at == null) {
+      bySig.set(sig, kept.length);
+      kept.push(g);
+    } else if (rowScore(g, kept[at]) > 0) {
+      kept[at] = g;
+    }
+  }
+  if (cap != null && kept.length > cap) {
+    const keep = new Set(
+      kept
+        .slice()
+        .sort((a, b) => rowScore(b, a))
+        .slice(0, cap),
+    );
+    return kept.filter((g) => keep.has(g));
+  }
+  return kept;
+}
+
+/** Rounds whose game count is structurally half the named previous round —
+ *  the transitions dedupeRound may cap. r1 (prequarters) → qf is deliberately
+ *  absent: play-in rounds don't halve. */
+const HALVES_FROM: Record<string, string> = { qf: 'r16', sf: 'qf', final: 'sf' };
+
+/** Slot for a real row: attach feeders, derive side labels for unknown sides,
+ *  and resolve a decided feeder's winner into the open side. */
+function makeRealSlot(
+  g: Game,
+  idx: number,
+  feeders: Slot[],
+  prevKey: string,
+  prevAll: Slot[],
+): Slot {
   const known = [g.teamAId, g.teamBId].filter((id): id is string => !!id);
 
   // The structural pairing (slot k ← feeders 2k-1/2k) is an assumption about
@@ -811,6 +979,8 @@ function makeRealSlot(g: Game, idx: number, feeders: Slot[], prevKey: string): S
 
   let aFallback: string | null = null;
   let bFallback: string | null = null;
+  let aFeeder: Slot | null = null;
+  let bFeeder: Slot | null = null;
   if (fs.length === 2) {
     // Which feeder feeds which side: when a side's team already appears in a
     // feeder's row, that feeder is its source; otherwise positional (top
@@ -821,19 +991,41 @@ function makeRealSlot(g: Game, idx: number, feeders: Slot[], prevKey: string): S
       (f.game.teamAId === teamId || f.game.teamBId === teamId);
     let [fa, fb] = fs;
     if (inFeeder(g.teamAId, fb) || inFeeder(g.teamBId, fa)) [fa, fb] = [fb, fa];
+    aFeeder = fa;
+    bFeeder = fb;
     if (g.teamAId == null) aFallback = wOf(prevKey, fa.number);
     if (g.teamBId == null) bFallback = wOf(prevKey, fb.number);
   } else if (fs.length === 1) {
     // Play-in feeder (prequarter → quarter): only the open side gets a label.
-    if (g.teamAId == null) aFallback = wOf(prevKey, fs[0].number);
-    else if (g.teamBId == null) bFallback = wOf(prevKey, fs[0].number);
+    if (g.teamAId == null) {
+      aFeeder = fs[0];
+      aFallback = wOf(prevKey, fs[0].number);
+    } else if (g.teamBId == null) {
+      bFeeder = fs[0];
+      bFallback = wOf(prevKey, fs[0].number);
+    }
+  } else {
+    // No structural linkage — USAU's scraped "W of <round> G<n>" text still
+    // names the feeder, so an open side can resolve its winner through it.
+    const byNumber = (n: number | null) =>
+      n == null ? null : (prevAll.find((s) => s.number === n) ?? null);
+    if (g.teamAId == null) {
+      aFeeder = byNumber(placeholderFeederNumber(g.teamAPlaceholder, prevKey));
+    }
+    if (g.teamBId == null) {
+      bFeeder = byNumber(placeholderFeederNumber(g.teamBPlaceholder, prevKey));
+    }
   }
 
   return {
     id: g.id,
     game: g,
     number: idx + 1,
-    sourceIds: fs.map((f) => f.id),
+    sourceIds: (fs.length > 0 ? fs : [aFeeder, bFeeder].filter((f): f is Slot => !!f)).map(
+      (f) => f.id,
+    ),
+    aResolved: g.teamAId == null && aFeeder ? resolvedWinner(aFeeder) : null,
+    bResolved: g.teamBId == null && bFeeder ? resolvedWinner(bFeeder) : null,
     // Structure-derived labels win (consistent wording with synthesized
     // slots); USAU's scraped text fills slots the linkage couldn't label —
     // unlinked play-in rounds, non-halving columns, pool-fed sides.
@@ -875,11 +1067,15 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
     {
       key: present[0].key,
       label: present[0].label,
-      slots: present[0].games.map((g, i) => ({
+      // Opening round has no feeder column, but dual-pipeline duplicates still
+      // collapse via team-pair / scraped-origin signatures.
+      slots: dedupeRound(present[0].games, null, '', null).map((g, i) => ({
         id: g.id,
         game: g,
         number: i + 1,
         sourceIds: [],
+        aResolved: null,
+        bResolved: null,
         // The opening round has no feeder games to derive labels from, but
         // USAU's own scraped text covers it ("P1 Pool A" pool-fed slots).
         aFallback: g.teamAId ? null : shortPlaceholder(g.teamAPlaceholder),
@@ -891,18 +1087,24 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
   for (let i = 1; i < present.length; i++) {
     const col = present[i];
     const prev = out[out.length - 1];
-    const half = col.games.length * 2 === prev.slots.length;
+    // A round can't hold more games than its feeders supply — cap halving
+    // steps so duplicate rows can never widen a column past the bracket's
+    // real shape (4 QFs → 2 semis → 1 final).
+    const cap =
+      HALVES_FROM[col.key] === prev.key ? Math.max(1, Math.ceil(prev.slots.length / 2)) : null;
+    const games = dedupeRound(col.games, prev.slots, prev.key, cap);
+    const half = games.length * 2 === prev.slots.length;
     // Positional linkage is only trusted for the halving case and 1↔1 chains.
     // Same-sized rounds (4 play-ins → 4 QFs) looked positional but real data
     // disproved it — Ski Town Mixed slots play-in G4's winner into QF G1, so an
     // equal-count guess renders wrong "W of …" labels on unplayed rounds.
     // (Played feeders get rescued by the winner-contradiction check either
     // way; unplayed ones have nothing to contradict.)
-    const chain = col.games.length === 1 && prev.slots.length === 1;
+    const chain = games.length === 1 && prev.slots.length === 1;
     out.push({
       key: col.key,
       label: col.label,
-      slots: col.games.map((g, j) =>
+      slots: games.map((g, j) =>
         makeRealSlot(
           g,
           j,
@@ -912,6 +1114,7 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
               ? [prev.slots[0]]
               : [],
           prev.key,
+          prev.slots,
         ),
       ),
     });
@@ -934,6 +1137,10 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
         game: null,
         number: j + 1,
         sourceIds: [fa.id, fb.id],
+        // A decided feeder slots its winner straight into the synthesized
+        // card ("W of Quarters G3" becomes the team the moment G3 is final).
+        aResolved: resolvedWinner(fa),
+        bResolved: resolvedWinner(fb),
         aFallback: wOf(last.key, fa.number),
         bFallback: wOf(last.key, fb.number),
       });
