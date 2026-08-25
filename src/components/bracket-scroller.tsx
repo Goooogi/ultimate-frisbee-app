@@ -15,6 +15,21 @@
 // the focused round too, so a 32-team bracket stops holding 1,600px of page
 // while the user is looking at the semis.
 //
+// PAGE height follows the collapse as well (Hunter, 2026-08-25): the sections
+// below a bracket (3rd-place game, placement brackets) slide up in lockstep
+// as it collapses, instead of sitting under the expanded tree's reserved
+// space. Two mechanisms, chosen by breakpoint, because a `snap-mandatory`
+// scroller must NEVER be resized mid-gesture (the browser re-runs snap
+// selection against the new geometry and flings the user to another round):
+//   - phone/tablet (snap on): the scroller keeps its fixed height inside a
+//     wrapper whose height is animated per-frame with overflow-y clip — the
+//     page sees the wrapper, the snap geometry never changes.
+//   - desktop ≥980px (snap off via lg:snap-none): the scroller itself is
+//     resized, which keeps the classic horizontal scrollbar visible where a
+//     wrapper clip would swallow it.
+// Each BracketScroller instance owns its refs and scroll position, so
+// collapsing one bracket never moves its neighbors.
+//
 // Columns are sized so exactly 2 rounds fit under a 620px container (3 up to
 // 980px), with per-round scroll snap; desktop keeps the fixed 180px columns
 // and free panning. All per-frame work is imperative DOM writes — card
@@ -60,12 +75,18 @@ export function BracketScroller<T extends BracketNode>({
    *  connectors keep aiming at the layout position, same as before. */
   cardLift?: (game: T) => number;
 }) {
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const cardEls = useRef(new Map<string, HTMLDivElement>());
   const pathEls = useRef(new Map<string, SVGPathElement>());
   const applyRef = useRef<(() => void) | null>(null);
   const [colW, setColW] = useState(DESKTOP_COL_W);
+  // colW alone can't identify desktop (a 384px phone's 2-up column is also
+  // 180px), so the breakpoint is tracked explicitly. It selects the
+  // page-height mechanism: resize the scroller (desktop, snap off) vs animate
+  // the clip wrapper (mobile, snap on) — see the header comment.
+  const [isDesktop, setIsDesktop] = useState(false);
 
   // Ref callbacks MUST be stable. An inline arrow is a new function every
   // render, so React detaches (calls with null) and re-attaches every card and
@@ -136,6 +157,7 @@ export function BracketScroller<T extends BracketNode>({
     if (!el) return;
     const measure = () => {
       const w = el.clientWidth;
+      setIsDesktop(w >= 980);
       if (w >= 980) setColW(DESKTOP_COL_W);
       else if (w >= 620) setColW((w - 2 * COL_GAP) / 3);
       else setColW((w - COL_GAP) / 2);
@@ -151,8 +173,8 @@ export function BracketScroller<T extends BracketNode>({
   // layouts/heights/pairs identity change (they're useMemo'd on `columns`,
   // which callers rebuild whenever `games` changes identity) was ripping the
   // listener out from under an in-flight fling.
-  const stateRef = useRef({ columns, positions, layouts, heights, pairs, colW });
-  stateRef.current = { columns, positions, layouts, heights, pairs, colW };
+  const stateRef = useRef({ columns, positions, layouts, heights, pairs, colW, isDesktop });
+  stateRef.current = { columns, positions, layouts, heights, pairs, colW, isDesktop };
 
   useLayoutEffect(() => {
     const scroller = scrollerRef.current;
@@ -163,7 +185,7 @@ export function BracketScroller<T extends BracketNode>({
       const el0 = scrollerRef.current;
       const content = contentRef.current;
       if (!el0 || !content) return;
-      const { columns, positions, layouts, heights, pairs, colW } = stateRef.current;
+      const { columns, positions, layouts, heights, pairs, colW, isDesktop } = stateRef.current;
       if (columns.length === 0) return;
 
       const stride = colW + COL_GAP;
@@ -192,7 +214,21 @@ export function BracketScroller<T extends BracketNode>({
       const hFrom = heights[k];
       const hTo = heights[Math.min(k + 1, last)];
       const ht = hTo < hFrom ? t * t : 1 - (1 - t) * (1 - t);
-      content.style.height = `${hFrom + (hTo - hFrom) * ht}px`;
+      const h = hFrom + (hTo - hFrom) * ht;
+      content.style.height = `${h}px`;
+
+      // Page-height collapse (see header). Desktop resizes the scroller
+      // directly — snapping is off there, so the fling hazard doesn't exist
+      // and the horizontal scrollbar stays visible. Mobile keeps the snap
+      // container's geometry frozen and animates the clip wrapper instead.
+      const wrap = wrapperRef.current;
+      if (isDesktop) {
+        el0.style.height = `${h + BOTTOM_PAD}px`;
+        if (wrap) wrap.style.height = '';
+      } else {
+        el0.style.height = `${(heights[0] ?? 0) + BOTTOM_PAD}px`;
+        if (wrap) wrap.style.height = `${h + BOTTOM_PAD}px`;
+      }
 
       for (const [id, el] of cardEls.current) {
         // `top` is (position + LABEL_H - lift) and the target is
@@ -244,13 +280,26 @@ export function BracketScroller<T extends BracketNode>({
   }, [colW, columns, layouts, heights, pairs, positions]);
 
   return (
+    // The element the PAGE sizes against. Its height is animated per-frame in
+    // apply() (mobile: this is the collapse the sections below follow; the
+    // overflow-y clip hides the fixed-height snap scroller sticking out past
+    // it). On desktop apply() clears the wrapper height (auto) and resizes the
+    // scroller itself. Initial height matches the scroller's expanded height,
+    // so SSR / no-JS first paint is identical to the pre-wrapper layout.
+    <div
+      ref={wrapperRef}
+      className="overflow-y-clip"
+      style={{ height: `${(heights[0] ?? ROW_PITCH_PX + LABEL_H) + BOTTOM_PAD}px` }}
+    >
     <div
       ref={scrollerRef}
       className="overflow-x-auto overflow-y-hidden overscroll-x-contain snap-x snap-mandatory lg:snap-none"
-      // Sized to the FIRST layout and left alone from here on. The per-frame
-      // collapse resizes the inner content instead; a scroll container that
-      // changes height while snapping re-evaluates its snap target and can
-      // jump the user to a different round mid-swipe.
+      // Sized to the FIRST layout; on MOBILE apply() keeps writing this same
+      // fixed value every frame — a scroll container that changes height while
+      // snapping re-evaluates its snap target and can jump the user to a
+      // different round mid-swipe, so the per-frame collapse animates the
+      // inner content and the wrapper above instead. Desktop (no snapping)
+      // is the exception: apply() resizes this element directly.
       style={{ height: `${(heights[0] ?? ROW_PITCH_PX + LABEL_H) + BOTTOM_PAD}px` }}
     >
       <div
@@ -311,6 +360,7 @@ export function BracketScroller<T extends BracketNode>({
           </div>
         ))}
       </div>
+    </div>
     </div>
   );
 }
