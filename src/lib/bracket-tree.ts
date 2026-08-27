@@ -136,7 +136,10 @@ export function assignPositions<T extends BracketNode>(
       if (sources.length === 0) {
         const idx = col.games.indexOf(g);
         const step = (totalSlots * ROW_PITCH_PX) / Math.max(col.games.length, 1);
-        positions.set(g.id, idx * step + step / 2 - ROW_PITCH_PX / 2);
+        // Clamped at 0 (mobile parity, 2026-08-26): a column with MORE games
+        // than the base column gets step < pitch, and its first rows resolved
+        // to negative tops — cards painted over the round label.
+        positions.set(g.id, Math.max(0, idx * step + step / 2 - ROW_PITCH_PX / 2));
       } else {
         const tops = sources.map((s) => positions.get(s.id) ?? 0);
         positions.set(g.id, tops.reduce((a, b) => a + b, 0) / tops.length);

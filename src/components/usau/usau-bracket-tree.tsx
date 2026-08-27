@@ -884,24 +884,42 @@ function feederRef(
   placeholder: string | null | undefined,
   prev: Slot[] | null,
   prevKey: string,
+  trustPlaceholders: boolean,
 ): number | null {
   if (!prev) return null;
   if (teamId) {
     const f = prev.find((s) => s.game && treeWinnerId(s.game) === teamId);
     return f ? f.number : null;
   }
-  return placeholderFeederNumber(placeholder, prevKey);
+  return trustPlaceholders ? placeholderFeederNumber(placeholder, prevKey) : null;
 }
 
-function dupSignature(g: Game, prev: Slot[] | null, prevKey: string): string | null {
+/** A scraped placeholder distinguishes games only when it says something —
+ *  a literal "TBD" is the same text on every unseeded slot, so treating a
+ *  TBD|TBD pair as a duplicate signature collapsed whole pre-tournament
+ *  rounds to one card (mobile parity, 2026-08-26). */
+function isInformativePlaceholder(raw: string | null | undefined): boolean {
+  return !!raw && raw.trim().toLowerCase() !== 'tbd';
+}
+
+function dupSignature(
+  g: Game,
+  prev: Slot[] | null,
+  prevKey: string,
+  trustPlaceholders: boolean,
+): string | null {
   if (g.teamAId && g.teamBId) {
     return `t:${[g.teamAId, g.teamBId].sort().join('|')}`;
   }
-  if (!g.teamAId && !g.teamBId && g.teamAPlaceholder && g.teamBPlaceholder) {
+  if (
+    !g.teamAId && !g.teamBId &&
+    g.teamAPlaceholder && g.teamBPlaceholder &&
+    (isInformativePlaceholder(g.teamAPlaceholder) || isInformativePlaceholder(g.teamBPlaceholder))
+  ) {
     return `p:${[g.teamAPlaceholder, g.teamBPlaceholder].sort().join('|')}`;
   }
-  const ra = feederRef(g.teamAId, g.teamAPlaceholder, prev, prevKey);
-  const rb = feederRef(g.teamBId, g.teamBPlaceholder, prev, prevKey);
+  const ra = feederRef(g.teamAId, g.teamAPlaceholder, prev, prevKey, trustPlaceholders);
+  const rb = feederRef(g.teamBId, g.teamBPlaceholder, prev, prevKey, trustPlaceholders);
   if (ra != null && rb != null && ra !== rb) {
     return `f:${Math.min(ra, rb)},${Math.max(ra, rb)}`;
   }
@@ -917,11 +935,12 @@ function dedupeRound(
   prev: Slot[] | null,
   prevKey: string,
   cap: number | null,
+  trustPlaceholders: boolean,
 ): Game[] {
   const bySig = new Map<string, number>();
   const kept: Game[] = [];
   for (const g of games) {
-    const sig = dupSignature(g, prev, prevKey);
+    const sig = dupSignature(g, prev, prevKey, trustPlaceholders);
     if (!sig) {
       kept.push(g);
       continue;
@@ -959,6 +978,7 @@ function makeRealSlot(
   feeders: Slot[],
   prevKey: string,
   prevAll: Slot[],
+  trustPlaceholders: boolean,
 ): Slot {
   const known = [g.teamAId, g.teamBId].filter((id): id is string => !!id);
 
@@ -1004,9 +1024,11 @@ function makeRealSlot(
       bFeeder = fs[0];
       bFallback = wOf(prevKey, fs[0].number);
     }
-  } else {
+  } else if (trustPlaceholders) {
     // No structural linkage — USAU's scraped "W of <round> G<n>" text still
     // names the feeder, so an open side can resolve its winner through it.
+    // Skipped entirely when the column's sheet numbering disagrees with our
+    // stored slots (see completeBracket's trust check).
     const byNumber = (n: number | null) =>
       n == null ? null : (prevAll.find((s) => s.number === n) ?? null);
     if (g.teamAId == null) {
@@ -1069,7 +1091,7 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
       label: present[0].label,
       // Opening round has no feeder column, but dual-pipeline duplicates still
       // collapse via team-pair / scraped-origin signatures.
-      slots: dedupeRound(present[0].games, null, '', null).map((g, i) => ({
+      slots: dedupeRound(present[0].games, null, '', null, true).map((g, i) => ({
         id: g.id,
         game: g,
         number: i + 1,
@@ -1092,7 +1114,20 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
     // real shape (4 QFs → 2 semis → 1 final).
     const cap =
       HALVES_FROM[col.key] === prev.key ? Math.max(1, Math.ceil(prev.slots.length / 2)) : null;
-    const games = dedupeRound(col.games, prev.slots, prev.key, cap);
+    // Sheet-numbering trust (mobile parity, 2026-08-26): scraped "W of
+    // <round> G<n>" labels use USAU's SHEET numbering, which can count bye
+    // slots we don't store (Fruit Bowl QFs cite Pre-Quarters G2/G4/G6/G8
+    // against our 4 stored games G1–G4). If any cited number exceeds the
+    // previous column's slot count, the numbering schemes disagree — drop
+    // placeholder-derived linkage for the WHOLE column rather than mislink.
+    const trustPlaceholders = col.games.every((g) => {
+      for (const raw of [g.teamAPlaceholder, g.teamBPlaceholder]) {
+        const n = placeholderFeederNumber(raw, prev.key);
+        if (n != null && n > prev.slots.length) return false;
+      }
+      return true;
+    });
+    const games = dedupeRound(col.games, prev.slots, prev.key, cap, trustPlaceholders);
     const half = games.length * 2 === prev.slots.length;
     // Positional linkage is only trusted for the halving case and 1↔1 chains.
     // Same-sized rounds (4 play-ins → 4 QFs) looked positional but real data
@@ -1115,6 +1150,7 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
               : [],
           prev.key,
           prev.slots,
+          trustPlaceholders,
         ),
       ),
     });

@@ -1112,6 +1112,40 @@ async function persistSchedulePage(
     }
   }
 
+  // ── Prune abandoned schedule generations (2026-08-26, NW Fruit Bowl) ──
+  // USAU can auto-publish a full round-robin, then the TD replaces it with
+  // the real schedule under NEW EventGameIds. The upsert path above keys on
+  // usau_event_game_id and never removed rows whose id vanished from the
+  // page, so the abandoned 55-game generation lived on beside the real 18
+  // (2x+ pool games, teams double-booked at 3 AM; ~18 events in 2026 share
+  // the signature). Delete only rows that are provably that stale class:
+  //   - this event + THIS page (source_url is the division scope —
+  //     usau_games has no gender column),
+  //   - carrying an event-game id the page no longer shows,
+  //   - never touched by a result (scheduled, 0-0) — played/final rows are
+  //     kept, protecting the "USAU hides pool tables once brackets start"
+  //     case, where vanishing from the page is normal.
+  // The teams.length===0 early-return above means a page that parsed nothing
+  // never reaches this, so selector drift can't mass-delete.
+  const seenEventGameIds = games
+    .map((g) => g.usau_event_game_id)
+    .filter((id): id is string => !!id);
+  if (seenEventGameIds.length > 0) {
+    const inList = `(${seenEventGameIds.map((id) => `"${id.replace(/"/g, '')}"`).join(',')})`;
+    const { error: pruneErr, count: pruned } = await db
+      .from('usau_games')
+      .delete({ count: 'exact' })
+      .eq('event_id', eventUUID)
+      .eq('source_url', url)
+      .eq('status', 'scheduled')
+      .eq('score_a', 0)
+      .eq('score_b', 0)
+      .not('usau_event_game_id', 'is', null)
+      .not('usau_event_game_id', 'in', inList);
+    if (pruneErr) throw new Error(`usau_games stale-generation prune: ${stringifyErr(pruneErr)}`);
+    if (pruned) console.log(`pruned ${pruned} stale-generation games for ${url}`);
+  }
+
   return { teams: teams.length, games: games.length, skipped: false };
 }
 

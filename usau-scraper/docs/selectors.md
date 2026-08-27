@@ -348,3 +348,14 @@ typically don't. Treat the values as nullable.
   from a residential IP works (verified 2026-05-19). Edge Function
   reachability still needs to be confirmed by deploying
   `diagnose-reachability`.
+
+## Stale-generation prune (sync-event-details, 2026-08-26)
+
+After persistSchedulePage upserts a page's games, it DELETEs rows that are
+provably from an abandoned schedule generation (NW Fruit Bowl class: USAU
+auto-publishes a round-robin, TD replaces it under new EventGameIds):
+same event + same source_url (division scope), usau_event_game_id NOT among
+the ids just seen on the page, status='scheduled' AND 0-0. Played/final rows
+are never deleted (pool tables vanish from the page once brackets start —
+that's normal, not staleness). The parse-zero early return means selector
+drift can never reach the prune.
