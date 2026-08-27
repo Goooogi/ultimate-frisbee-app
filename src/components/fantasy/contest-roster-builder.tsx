@@ -230,7 +230,11 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
           Create a team on the contest page before building a roster.
         </p>
         <Link
-          href={`/fantasy/contests/${contest.id}`}
+          href={
+            contest.competition === 'ufa'
+              ? `/fantasy/ufa/l/${contest.id}`
+              : `/fantasy/contests/${contest.id}`
+          }
           className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
         >
           Back to contest

@@ -166,17 +166,25 @@ export function TeamRoster() {
       }}
       pageTitle="Team"
     >
-      <div className="px-4 pt-4 pb-12 lg:px-8 lg:pt-6 lg:pb-12">
+      {/* Bottom padding clears the fixed mobile tab bar + home-indicator safe
+          area (same recipe as the home page) — pb-12 alone left the last row
+          pinned under the bar with no scroll room (Hunter, 2026-08-27). */}
+      <div className="px-4 pt-4 pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)] lg:px-8 lg:pt-6 lg:pb-12">
         <div className="max-w-[860px] mx-auto">
-          <div className="mb-6 lg:mb-8">
-            <h1 className="m-0 font-display italic text-[28px] lg:text-[36px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
-              {currentTeam?.name ?? 'Team'}
-            </h1>
-            <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[14px]">
-              Your roster of athletes. Players here don&rsquo;t need an account —
-              add everyone now, link logins later.
-            </p>
-          </div>
+          {/* Header is roster-only (Hunter, 2026-08-27): the copy describes the
+              roster, and on Lines the team name is already in the scope
+              switcher — the block just pushed the lines below the fold. */}
+          {tab !== 'lines' && (
+            <div className="mb-6 lg:mb-8">
+              <h1 className="m-0 font-display italic text-[28px] lg:text-[36px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
+                {currentTeam?.name ?? 'Team'}
+              </h1>
+              <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[14px]">
+                Your roster of athletes. Players here don&rsquo;t need an account —
+                add everyone now, link logins later.
+              </p>
+            </div>
+          )}
 
           {error && (
             <div
@@ -509,7 +517,9 @@ function AddPlayerForm({
         setName('');
         setNumber('');
       }}
-      className="p-4 bg-surface flex items-center gap-2 flex-wrap rounded-card shadow-card"
+      // One line at every width (Hunter, 2026-08-27): no flex-wrap — the name
+      // input yields (min-w-0) instead of pushing Add onto its own row.
+      className="p-4 bg-surface flex items-center gap-2 rounded-card shadow-card"
     >
       <label className="sr-only" htmlFor="add-roster-number">
         Jersey number
@@ -535,7 +545,7 @@ function AddPlayerForm({
         required
         placeholder="Add a player…"
         maxLength={80}
-        className="flex-1 min-w-[160px] bg-bg border border-border px-3 py-2 text-[13px] text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink"
+        className="flex-1 min-w-0 bg-bg border border-border px-3 py-2 text-[13px] text-ink font-tight rounded focus-visible:outline-none focus-visible:border-ink"
       />
       <label className="sr-only" htmlFor="add-roster-position">
         Position

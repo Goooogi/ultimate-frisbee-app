@@ -51,10 +51,14 @@ const NAV_ITEMS: NavItem[] = [
 
 // Fantasy is its own sub-app: it gets a Fantasy-specific secondary nav instead
 // of the league (Scores/Schedule/Teams/Players) tabs, and no league switcher.
+// "Hub" only lights up on the exact game-hub landing (/fantasy) — everything
+// under /fantasy/ufa/* (the only live game in P0) gets its own tabs so a user
+// inside the UFA game isn't shown a dead "Hub" highlight.
 const FANTASY_NAV_ITEMS: NavItem[] = [
-  { label: 'Leaderboard', href: '/fantasy',         match: '/fantasy' },
-  { label: 'My Team',     href: '/fantasy/team',    match: '/fantasy/team' },
-  { label: 'My Leagues',  href: '/fantasy/leagues', match: '/fantasy/leagues' },
+  { label: 'Hub',          href: '/fantasy',           match: '/fantasy' },
+  { label: 'Leaderboard',  href: '/fantasy/ufa',       match: '/fantasy/ufa' },
+  { label: 'My Team',      href: '/fantasy/ufa/team',  match: '/fantasy/ufa/team' },
+  { label: 'My Leagues',   href: '/fantasy/leagues',   match: '/fantasy/leagues' },
 ];
 
 // WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
@@ -85,24 +89,32 @@ const EUF_NAV_ITEMS: NavItem[] = [
   { label: 'Players',  href: '/euf/players',  match: '/euf/players', aliases: ['/euf/players'] },
 ];
 
-// The landing (/fantasy) IS the leaderboard, and /fantasy/team is nested under
-// it — so plain prefix matching would light up BOTH tabs on /fantasy/team.
-// Use exact/segment-aware matching for the fantasy tabs.
+// The hub (/fantasy) is a distinct landing from the UFA game home
+// (/fantasy/ufa), and /fantasy/ufa/team is nested under the game — so plain
+// prefix matching would light up multiple tabs at once. Use exact/segment-
+// aware matching for the fantasy tabs.
 function isFantasyActive(pathname: string, item: NavItem): boolean {
   if (item.match === '/fantasy') {
-    // Leaderboard active only on the exact landing, not the nested team pages.
+    // Hub active only on the exact landing, not any nested game/league page.
     return pathname === '/fantasy';
   }
-  if (item.match === '/fantasy/team') {
-    return pathname === '/fantasy/team' || pathname.startsWith('/fantasy/team/');
+  if (item.match === '/fantasy/ufa') {
+    // Leaderboard (game home) active only on the exact game-home page, not
+    // the nested team pages.
+    return pathname === '/fantasy/ufa';
+  }
+  if (item.match === '/fantasy/ufa/team') {
+    return pathname === '/fantasy/ufa/team' || pathname.startsWith('/fantasy/ufa/team/');
   }
   if (item.match === '/fantasy/leagues') {
-    // The whole leagues layer: the list, a league home, its contests, and the
-    // invite/join flows all live under "My Leagues".
+    // The whole leagues layer: the list, a league home, its contests
+    // (legacy + game-scoped), and the invite/join flows all live under
+    // "My Leagues".
     return (
       pathname === '/fantasy/leagues' ||
       pathname.startsWith('/fantasy/leagues/') ||
       pathname.startsWith('/fantasy/contests/') ||
+      pathname.startsWith('/fantasy/ufa/l/') ||
       pathname.startsWith('/fantasy/invite/') ||
       pathname.startsWith('/fantasy/join/')
     );

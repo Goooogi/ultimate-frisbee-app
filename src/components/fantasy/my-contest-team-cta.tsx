@@ -55,7 +55,11 @@ export function MyContestTeamCta({ contest }: { contest: ContestView }) {
           <div className="font-tight text-[16px] font-bold text-ink truncate">{myTeam.teamName}</div>
         </div>
         <Link
-          href={`/fantasy/contests/${contest.id}/team`}
+          href={
+            contest.competition === 'ufa'
+              ? `/fantasy/ufa/l/${contest.id}/team`
+              : `/fantasy/contests/${contest.id}/team`
+          }
           className={[
             'flex-shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full min-h-[44px]',
             'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase',
@@ -83,7 +87,11 @@ export function MyContestTeamCta({ contest }: { contest: ContestView }) {
       const teamId = await createContestTeam(contest.id, trimmed, contest.seasonYear);
       await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
       setMyTeam({ id: teamId, teamName: trimmed });
-      router.push(`/fantasy/contests/${contest.id}/team`);
+      router.push(
+        contest.competition === 'ufa'
+          ? `/fantasy/ufa/l/${contest.id}/team`
+          : `/fantasy/contests/${contest.id}/team`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create your team.');
     } finally {

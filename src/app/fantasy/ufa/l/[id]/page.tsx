@@ -1,65 +1,81 @@
-// /fantasy/contests/[id] — legacy contest page. UFA contests now live at the
-// canonical /fantasy/ufa/l/[id] (2026-08-27 game-hub IA inversion) — redirect
-// there. Other competitions have no game-scoped route yet (P1+), so they
-// keep rendering here.
+// /fantasy/ufa/l/[id] — LEAGUE-IN-GAME (canonical UFA contest page). Server
+// shell: contest header, standings (public), period schedule strip, members +
+// commissioner tools. Client islands: my-team CTA, members panel. Moved from
+// /fantasy/contests/[id] for UFA contests (2026-08-27 game-hub IA inversion)
+// — the old route now redirects here for competition==='ufa'; other
+// competitions still render at the old path until they get their own
+// game-scoped route (P1+).
+//
+// Commissioner tools (invite/regenerate/remove/leave) are surfaced here via
+// the SAME LeagueMembersPanel the league umbrella uses (P1, 2026-08-27) — a
+// commissioner never has to leave the game context to manage the league.
+// Only rendered when the contest belongs to a private league (public/global
+// contests have no members to manage).
 
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
+import { notFound } from 'next/navigation';
 import { PageShell } from '@/components/page-shell';
 import {
   getContest,
   getLeague,
+  getLeagueMembers,
   getContestStandings,
   getContestPeriods,
   periodsToWeeks,
 } from '@/lib/fantasy/leagues';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import { MyContestTeamCta } from '@/components/fantasy/my-contest-team-cta';
+import { LeagueMembersPanel } from '@/components/fantasy/league-members-panel';
+import { DraftScheduleCard } from '@/components/fantasy/draft-schedule-card';
 import type { Crumb } from '@/components/breadcrumbs';
 
 export const revalidate = 60;
 
-export default async function ContestPage({ params }: { params: { id: string } }) {
+export default async function UfaLeagueInGamePage({ params }: { params: { id: string } }) {
   const contest = await getContest(params.id).catch(() => null);
-
-  if (contest?.competition === 'ufa') redirect(`/fantasy/ufa/l/${contest.id}`);
 
   if (!contest) {
     return (
       <PageShell
-        title="Contest"
-        eyebrow="Fantasy Contest"
-        breadcrumbs={[{ label: 'Fantasy', href: '/fantasy' }, { label: 'Contest' }]}
+        title="League"
+        eyebrow="UFA Fantasy"
+        breadcrumbs={[{ label: 'UFA Fantasy', href: '/fantasy/ufa' }, { label: 'League' }]}
         hideFooterMobile
       >
         <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
           <p className="text-muted font-tight text-[14px]">
-            This contest doesn&apos;t exist, or you don&apos;t have access to it.
+            This league doesn&apos;t exist, or you don&apos;t have access to it.
           </p>
         </div>
       </PageShell>
     );
   }
 
-  const [league, standings, periods] = await Promise.all([
+  // This route is UFA-canonical; a non-UFA contest id landing here (stale
+  // link, manual URL) has no game-scoped home yet — its real page is the
+  // legacy /fantasy/contests/[id] route (P1+ will add the rest).
+  if (contest.competition !== 'ufa') notFound();
+
+  const [league, standings, periods, members] = await Promise.all([
     contest.leagueId ? getLeague(contest.leagueId).catch(() => null) : Promise.resolve(null),
     getContestStandings(contest.id).catch(() => []),
     getContestPeriods(contest.id).catch(() => []),
+    contest.leagueId ? getLeagueMembers(contest.leagueId).catch(() => []) : Promise.resolve([]),
   ]);
   const weeks = periodsToWeeks(periods);
 
   const breadcrumbs: Crumb[] = league
     ? [
-        { label: 'Fantasy', href: '/fantasy' },
+        { label: 'UFA Fantasy', href: '/fantasy/ufa' },
         { label: league.name, href: `/fantasy/leagues/${league.id}` },
         { label: contest.name },
       ]
-    : [{ label: 'Fantasy', href: '/fantasy' }, { label: contest.name }];
+    : [{ label: 'UFA Fantasy', href: '/fantasy/ufa' }, { label: contest.name }];
 
   return (
     <PageShell
       title={contest.name}
-      eyebrow="Fantasy Contest"
+      eyebrow="UFA Fantasy"
       breadcrumbs={breadcrumbs}
       hideFooterMobile
       controls={<CompetitionChip label={contest.competitionDef.shortLabel} season={contest.seasonYear} />}
@@ -67,6 +83,16 @@ export default async function ContestPage({ params }: { params: { id: string } }
       <div className="space-y-8">
         {/* ── My team CTA (client island) ──────────────────────────────── */}
         <MyContestTeamCta contest={contest} />
+
+        {/* ── Draft (private leagues only — the Public League stays
+            pick-anyone and never drafts, per Hunter's 2026-08-27 decision) ── */}
+        {league && (
+          <DraftScheduleCard
+            contestId={contest.id}
+            leagueId={league.id}
+            draftPath={`/fantasy/ufa/l/${contest.id}/draft`}
+          />
+        )}
 
         {/* ── Period schedule strip ────────────────────────────────────── */}
         {weeks.length > 0 && (
@@ -115,14 +141,14 @@ export default async function ContestPage({ params }: { params: { id: string } }
                 <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">Team</span>
                 <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight text-right">Pts</span>
               </div>
-              <ol aria-label="Contest standings">
+              <ol aria-label="League standings">
                 {standings.map((row, idx) => {
                   const rank = idx + 1;
                   const isTop3 = rank <= 3;
                   return (
                     <li key={row.teamId}>
                       <Link
-                        href={`/fantasy/contests/${contest.id}/t/${row.teamId}`}
+                        href={`/fantasy/ufa/l/${contest.id}/t/${row.teamId}`}
                         className={[
                           'grid grid-cols-[2.5rem_1fr_auto] items-center px-5 py-3.5',
                           'no-underline transition-colors duration-150',
@@ -162,6 +188,24 @@ export default async function ContestPage({ params }: { params: { id: string } }
             </div>
           )}
         </section>
+
+        {/* ── Members + commissioner tools ─────────────────────────────────
+            Private leagues only — public/global contests have no members. */}
+        {league && (
+          <section aria-labelledby="members-heading">
+            <h2
+              id="members-heading"
+              className="font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-4"
+            >
+              League
+            </h2>
+            <LeagueMembersPanel
+              leagueId={league.id}
+              members={members}
+              onLeaveRedirect="/fantasy/ufa"
+            />
+          </section>
+        )}
       </div>
     </PageShell>
   );

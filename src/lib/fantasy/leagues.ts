@@ -238,6 +238,51 @@ export async function getContestStandings(contestId: string): Promise<Leaderboar
     .sort((a, b) => b.totalPoints - a.totalPoints);
 }
 
+// ─── Contest team (public, competition-agnostic) ─────────────────────────────
+
+export interface ContestTeamView {
+  id: string;
+  contestId: string;
+  teamName: string;
+  ownerDisplayName: string | null;
+  ownerUsername: string | null;
+  totalPoints: number;
+  weeklyPoints: { week: string; points: number }[];
+}
+
+/** A team's header + per-period totals, scoped to its contest — the
+ *  competition-agnostic counterpart to data.ts' getFantasyTeam (which is
+ *  UFA-only via fantasy_roster_slots' ufa_players join). Used by the public
+ *  contest-scoped team view (any competition). */
+export async function getContestTeam(teamId: string): Promise<ContestTeamView | null> {
+  const { data: team, error } = await anon()
+    .from('fantasy_teams')
+    .select('id, contest_id, team_name, owner_display_name, owner_username')
+    .eq('id', teamId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!team) return null;
+
+  const { data: scores } = await anon()
+    .from('fantasy_scores')
+    .select('week, points')
+    .eq('team_id', teamId);
+
+  const weekly = (scores ?? [])
+    .map((s: Record<string, unknown>) => ({ week: s.week as string, points: Number(s.points) }))
+    .sort((a, b) => a.week.localeCompare(b.week, undefined, { numeric: true }));
+
+  return {
+    id: team.id as string,
+    contestId: team.contest_id as string,
+    teamName: team.team_name as string,
+    ownerDisplayName: (team.owner_display_name as string) ?? null,
+    ownerUsername: (team.owner_username as string) ?? null,
+    totalPoints: roundPoints(weekly.reduce((acc, w) => acc + w.points, 0)),
+    weeklyPoints: weekly,
+  };
+}
+
 // ─── My leagues (session) ────────────────────────────────────────────────────
 
 export interface MyLeagueRow {

@@ -1,6 +1,8 @@
-// /fantasy/team/[id] — Public team view. Server Component.
-// Fully accessible logged-out. Shows team name, owner handle, cumulative
-// points, weekly breakdown, and the current week's roster.
+// /fantasy/ufa/team/[id] — Public team view. Server Component.
+// Moved from /fantasy/team/[id] (2026-08-27 game-hub IA inversion); the old
+// path redirects here via next.config. Fully accessible logged-out. Shows
+// team name, owner handle, cumulative points, weekly breakdown, and the
+// current week's roster.
 
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
@@ -21,7 +23,7 @@ interface Props {
 
 export const revalidate = 60;
 
-export default async function FantasyTeamPage({ params }: Props) {
+export default async function UfaTeamDetailPage({ params }: Props) {
   const { id } = params;
 
   const [team, weekInfo] = await Promise.all([
@@ -55,18 +57,15 @@ export default async function FantasyTeamPage({ params }: Props) {
   const offenders = roster.filter((s) => s.role === 'offender');
   const defenders = roster.filter((s) => s.role === 'defender');
 
-  // Top nav — the /fantasy page IS the leaderboard, so label it plainly.
-  // (This is the page's only back-nav; the old redundant bottom "Leaderboard"
-  // link was removed.)
   const BREADCRUMBS: Crumb[] = [
-    { label: 'Leaderboard', href: '/fantasy' },
+    { label: 'UFA Fantasy', href: '/fantasy/ufa' },
     { label: team.teamName },
   ];
 
   return (
     <PageShell
       title={team.teamName}
-      eyebrow="Fantasy · Beta"
+      eyebrow="UFA Fantasy · Beta"
       hideFooterMobile
       subtitle={
         team.ownerDisplayName || team.ownerUsername

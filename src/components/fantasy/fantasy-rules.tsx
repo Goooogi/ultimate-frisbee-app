@@ -121,7 +121,7 @@ export function FantasyRules({ showCta = false }: FantasyRulesProps) {
         {showCta && (
           <div className="mt-6 pt-5 border-t border-hairline flex flex-col sm:flex-row sm:items-center gap-3">
             <Link
-              href="/fantasy/team"
+              href="/fantasy/ufa/team"
               className={[
                 'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full',
                 'bg-accent text-accent-ink',

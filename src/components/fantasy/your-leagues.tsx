@@ -160,7 +160,7 @@ export function YourLeagues({ globalPool = null, standalone = false }: YourLeagu
               Links straight into the roster builder ("jump into it"). */}
           {globalPool && (
             <Link
-              href="/fantasy/team"
+              href="/fantasy/ufa/team"
               className={[
                 'flex items-center gap-3 px-5 py-3.5',
                 'no-underline transition-colors duration-150',

@@ -1,7 +1,8 @@
-// /fantasy/team — Roster builder page shell. Server Component.
-// The page itself is public (no auth gate). Auth is demanded ONLY when the
-// user attempts a write action (create team / save roster) inside the
-// client RosterBuilder component.
+// /fantasy/ufa/team — Roster builder page shell. Server Component.
+// Moved from /fantasy/team (2026-08-27 game-hub IA inversion); the old path
+// redirects here via next.config. The page itself is public (no auth gate).
+// Auth is demanded ONLY when the user attempts a write action (create team /
+// save roster) inside the client RosterBuilder component.
 
 import { PageShell } from '@/components/page-shell';
 import { currentFantasyWeek } from '@/lib/fantasy/data';
@@ -20,11 +21,11 @@ export const revalidate = 0; // builder needs fresh week/team state
 export const dynamic = 'force-dynamic';
 
 const BREADCRUMBS: Crumb[] = [
-  { label: 'Fantasy', href: '/fantasy' },
+  { label: 'UFA Fantasy', href: '/fantasy/ufa' },
   { label: 'My Team' },
 ];
 
-export default async function FantasyTeamPage() {
+export default async function UfaTeamPage() {
   // Resolve everything server-side with the cookie-aware server client so the
   // signed-in user's team name, roster, and profile are baked into the initial
   // HTML — no post-hydration empty→filled flash. All three return null/[] when
@@ -45,7 +46,7 @@ export default async function FantasyTeamPage() {
   return (
     <PageShell
       title="My Team"
-      eyebrow="Fantasy · Beta"
+      eyebrow="UFA Fantasy · Beta"
       hideFooterMobile
       subtitle={
         weekInfo

@@ -580,7 +580,7 @@ export function RosterBuilder({
       await revalidateFantasy(teamId).catch(() => null);
 
       // 5. Redirect to public team view.
-      router.push(`/fantasy/team/${teamId}`);
+      router.push(`/fantasy/ufa/team/${teamId}`);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
@@ -870,7 +870,7 @@ export function RosterBuilder({
               </svg>
             </button>
             <Link
-              href={`/fantasy/team/${existingTeam.id}`}
+              href={`/fantasy/ufa/team/${existingTeam.id}`}
               className="flex-shrink-0 text-[11px] font-bold text-accent font-tight hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-full"
             >
               View team
