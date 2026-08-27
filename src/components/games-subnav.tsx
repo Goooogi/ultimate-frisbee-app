@@ -54,11 +54,15 @@ const NAV_ITEMS: NavItem[] = [
 // "Hub" only lights up on the exact game-hub landing (/fantasy) — everything
 // under /fantasy/ufa/* (the only live game in P0) gets its own tabs so a user
 // inside the UFA game isn't shown a dead "Hub" highlight.
+//
+// No "Leaderboard" tab (removed 2026-08-27): standings are a property of a
+// league, never a top-level destination — ESPN/Yahoo/Sleeper all scope them
+// inside the league. The UFA Public League's standings live at its own
+// league page like every private league's.
 const FANTASY_NAV_ITEMS: NavItem[] = [
   { label: 'Hub',          href: '/fantasy',           match: '/fantasy' },
-  { label: 'Leaderboard',  href: '/fantasy/ufa',       match: '/fantasy/ufa' },
-  { label: 'My Team',      href: '/fantasy/ufa/team',  match: '/fantasy/ufa/team' },
   { label: 'My Leagues',   href: '/fantasy/leagues',   match: '/fantasy/leagues' },
+  { label: 'My Team',      href: '/fantasy/ufa/team',  match: '/fantasy/ufa/team' },
 ];
 
 // WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
@@ -95,13 +99,9 @@ const EUF_NAV_ITEMS: NavItem[] = [
 // aware matching for the fantasy tabs.
 function isFantasyActive(pathname: string, item: NavItem): boolean {
   if (item.match === '/fantasy') {
-    // Hub active only on the exact landing, not any nested game/league page.
-    return pathname === '/fantasy';
-  }
-  if (item.match === '/fantasy/ufa') {
-    // Leaderboard (game home) active only on the exact game-home page, not
-    // the nested team pages.
-    return pathname === '/fantasy/ufa';
+    // Hub covers the game-picker landing AND a game home (/fantasy/ufa) —
+    // both are "browsing the games" rather than a league or team surface.
+    return pathname === '/fantasy' || pathname === '/fantasy/ufa';
   }
   if (item.match === '/fantasy/ufa/team') {
     return pathname === '/fantasy/ufa/team' || pathname.startsWith('/fantasy/ufa/team/');

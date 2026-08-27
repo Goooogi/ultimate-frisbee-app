@@ -93,7 +93,7 @@ export const ALL_STAR_TEAM_META: Record<string, TeamMeta> = {
 };
 
 export function teamMeta(id: string): TeamMeta {
-  const known = TEAM_META[id];
+  const known = TEAM_META[id] ?? ALL_STAR_TEAM_META[id];
   if (known) return known;
   return {
     id,

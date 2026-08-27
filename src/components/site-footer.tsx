@@ -11,7 +11,7 @@ import { DiscFlight } from '@/components/logo-strike';
 // Top-level destinations surfaced in the footer brand bar. Kept short and
 // scannable (per the slim brand-bar direction) — the full nav lives in the rail.
 const FOOTER_LINKS: { label: string; href: string }[] = [
-  { label: 'Scores', href: '/scores' },
+  { label: 'League', href: '/leagues' },
   { label: 'Playbook', href: '/playbook' },
   { label: 'Fantasy', href: '/fantasy' },
 ];

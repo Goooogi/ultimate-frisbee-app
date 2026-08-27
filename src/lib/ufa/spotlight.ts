@@ -14,6 +14,7 @@ import {
 } from '@/lib/ufa/client';
 import type { UfaGame, UfaPlayerStat } from '@/lib/ufa/types';
 import { gameUiState } from '@/lib/ufa/format';
+import { ALL_STAR_TEAM_META } from '@/lib/ufa/teams';
 import {
   pickPlayerOfGame,
   pickPlayerToWatch,
@@ -54,6 +55,7 @@ function toSeasonInput(p: UfaPlayerStat, headshotUrl: string | null): SeasonInpu
 
 /** Pick the watch player for one team, then resolve that player's headshot. */
 async function watchForTeam(teamID: string, year: number): Promise<SpotlightPlayer | null> {
+  if (teamID in ALL_STAR_TEAM_META) return null;
   const rows = await getAllPlayerStats(
     { year, teamID, per: 'total', sort: 'scores', dir: 'desc' },
     { maxPages: 2 },

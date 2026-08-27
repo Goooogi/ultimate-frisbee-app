@@ -26,7 +26,9 @@ export default async function MyLeaguesPage() {
       <YourLeagues
         standalone
         globalPool={
-          globalContest ? { name: `UFA ${globalContest.seasonYear} · Public League` } : null
+          globalContest
+            ? { name: `UFA ${globalContest.seasonYear} · Public League`, contestId: globalContest.id }
+            : null
         }
       />
     </PageShell>

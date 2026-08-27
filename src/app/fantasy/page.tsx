@@ -23,7 +23,7 @@ export default function FantasyHubPage() {
     >
       <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" aria-label="Fantasy games">
         {games.map((game) => (
-          <li key={game.id}>
+          <li key={game.id} className="h-full">
             <GameCard
               href={game.status === 'live' ? `/fantasy/${gameSlug(game.id)}` : undefined}
               name={game.name}
@@ -110,7 +110,7 @@ function GameCard({
 
   if (!href) {
     return (
-      <div aria-disabled="true" className="block cursor-not-allowed">
+      <div aria-disabled="true" className="block h-full cursor-not-allowed">
         {content}
       </div>
     );
@@ -119,7 +119,7 @@ function GameCard({
   return (
     <Link
       href={href}
-      className="block no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-card-lg"
+      className="block h-full no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-card-lg"
     >
       {content}
     </Link>

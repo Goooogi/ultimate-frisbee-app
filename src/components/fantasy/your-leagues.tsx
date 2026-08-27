@@ -1,12 +1,14 @@
 'use client';
 
-// "Your Leagues" — client island on the Fantasy landing page.
+// "Your Leagues" — client island on the Fantasy leagues page.
 //
 // Signed out: compact CTA card explaining leagues, sign-in via AuthModal.
-// Signed in: the user's leagues (getMyLeagues) + create/join affordances.
+// Signed in: three equal sibling cards — Your Leagues / Join a League /
+// Create a League — the ESPN+Yahoo front-door pattern (their signup pages are
+// three parallel actions, not a list with a form bolted to the side).
 //
-// This never touches the global UFA leaderboard below it — that stays a
-// Server Component in page.tsx exactly as it was.
+// Standings are NOT here and never were: they belong to a league, so they
+// render on the league page you click into (2026-08-27 IA rework).
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -16,9 +18,10 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import { getMyLeagues, joinLeagueByCode, type MyLeagueRow } from '@/lib/fantasy/leagues';
 
 interface YourLeaguesProps {
-  /** The open-to-everyone pool (the original UFA beta), pinned above private
-   *  leagues so it stays one tap away. Null when no global contest exists. */
-  globalPool?: { name: string } | null;
+  /** The open-to-everyone Public League (the original UFA beta), pinned above
+   *  private leagues so it stays one tap away. Carries its contest id so the
+   *  row can link to the shared league page. Null when none exists. */
+  globalPool?: { name: string; contestId: string } | null;
   /** True when this is the whole page (/fantasy/leagues): the PageShell owns
    *  the title, so the section header is skipped and the New-league action
    *  renders in its own row. False (default) on the /fantasy hub, where the
@@ -129,38 +132,24 @@ export function YourLeagues({ globalPool = null, standalone = false }: YourLeagu
   }
 
   // ── Signed in ────────────────────────────────────────────────────────────
-  const newLeagueAction = (
-    <Link
-      href="/fantasy/leagues/new"
-      className={[
-        'inline-flex items-center gap-1.5',
-        'px-4 py-2 rounded-full min-h-[36px]',
-        'bg-accent text-accent-ink font-tight text-[11px] font-bold tracking-[0.1em] uppercase',
-        'hover:opacity-90 transition-opacity duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-      ].join(' ')}
-    >
-      <PlusGlyph />
-      New league
-    </Link>
-  );
-
   return (
     <section aria-labelledby="your-leagues-heading" className="mb-8 lg:mb-10">
-      {standalone ? (
-        <div className="flex justify-end mb-4">{newLeagueAction}</div>
-      ) : (
-        <SectionHeader action={newLeagueAction} />
-      )}
+      {!standalone && <SectionHeader />}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-        {/* League list */}
-        <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-          {/* Pinned global pool — the original UFA beta, open to everyone.
-              Links straight into the roster builder ("jump into it"). */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+        {/* ── Card 1: Your Leagues ──────────────────────────────────────── */}
+        <div className="h-full bg-surface rounded-card-lg shadow-card overflow-hidden flex flex-col">
+          <CardHeading
+            title="Your Leagues"
+            blurb="The leagues you're in. Tap one for standings, members and teams."
+          />
+          {/* Pinned Public League — the original UFA beta, open to everyone.
+              Routes to its LEAGUE PAGE like every private league (option A,
+              2026-08-27), not straight into the roster builder: standings and
+              members belong on the league page, one code path for both kinds. */}
           {globalPool && (
             <Link
-              href="/fantasy/ufa/team"
+              href={`/fantasy/ufa/l/${globalPool.contestId}`}
               className={[
                 'flex items-center gap-3 px-5 py-3.5',
                 'no-underline transition-colors duration-150',
@@ -173,7 +162,7 @@ export function YourLeagues({ globalPool = null, standalone = false }: YourLeagu
                   {globalPool.name}
                 </span>
                 <span className="font-tight text-[11px] text-muted">
-                  Open to everyone — build your team
+                  Open to everyone — standings &amp; teams
                 </span>
               </span>
               <span className="flex-shrink-0 text-[9.5px] font-bold tracking-[0.1em] uppercase px-2 py-[3px] rounded-full bg-accent text-accent-ink">
@@ -241,12 +230,14 @@ export function YourLeagues({ globalPool = null, standalone = false }: YourLeagu
           )}
         </div>
 
-        {/* Join with a code */}
-        <div className="bg-surface rounded-card-lg shadow-soft p-5">
-          <div className="text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight mb-3">
-            Join with a code
-          </div>
-          <form onSubmit={handleJoin} className="flex flex-col gap-2.5">
+        {/* ── Card 2: Join a League ─────────────────────────────────────── */}
+        <div className="h-full bg-surface rounded-card-lg shadow-card p-5 lg:p-6 flex flex-col">
+          <CardHeading
+            title="Join a League"
+            blurb="Got an invite code from a friend? Enter it here to join their league."
+            bare
+          />
+          <form onSubmit={handleJoin} className="flex flex-col gap-2.5 mt-auto">
             <input
               type="text"
               value={joinCode}
@@ -292,6 +283,28 @@ export function YourLeagues({ globalPool = null, standalone = false }: YourLeagu
             )}
           </form>
         </div>
+
+        {/* ── Card 3: Create a League ───────────────────────────────────── */}
+        <div className="h-full bg-surface rounded-card-lg shadow-card p-5 lg:p-6 flex flex-col">
+          <CardHeading
+            title="Create a League"
+            blurb="You're the commissioner here. Set it up, pick your games, and invite your friends."
+            bare
+          />
+          <Link
+            href="/fantasy/leagues/new"
+            className={[
+              'mt-auto inline-flex items-center justify-center gap-2',
+              'px-4 py-2.5 rounded-full min-h-[44px]',
+              'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase',
+              'no-underline hover:opacity-90 transition-opacity duration-150 cursor-pointer',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
+            ].join(' ')}
+          >
+            <PlusGlyph />
+            Create a league
+          </Link>
+        </div>
       </div>
 
       <AuthModal
@@ -305,21 +318,32 @@ export function YourLeagues({ globalPool = null, standalone = false }: YourLeagu
   );
 }
 
-function SectionHeader({ action }: { action?: React.ReactNode }) {
+function SectionHeader() {
   return (
-    <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
-      <div>
-        <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
-          Leagues
-        </div>
-        <h2
-          id="your-leagues-heading"
-          className="font-display italic text-[26px] lg:text-[34px] font-bold tracking-[-0.02em] leading-[0.95] text-ink"
-        >
-          Your Leagues
-        </h2>
+    <div className="mb-4 lg:mb-5">
+      <div className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
+        Leagues
       </div>
-      {action}
+      <h2
+        id="your-leagues-heading"
+        className="font-display italic text-[26px] lg:text-[34px] font-bold tracking-[-0.02em] leading-[0.95] text-ink"
+      >
+        Your Leagues
+      </h2>
+    </div>
+  );
+}
+
+/** Each of the three cards leads with the same title+blurb block (the ESPN
+ *  signup pattern). `bare` cards own their padding; the league-list card is
+ *  edge-to-edge below the heading so its rows can span the full width. */
+function CardHeading({ title, blurb, bare = false }: { title: string; blurb: string; bare?: boolean }) {
+  return (
+    <div className={bare ? 'mb-4' : 'px-5 pt-5 pb-4'}>
+      <h3 className="font-display italic text-[19px] font-bold tracking-[-0.02em] leading-[1.05] text-ink mb-1.5">
+        {title}
+      </h3>
+      <p className="text-muted font-tight text-[12.5px] leading-snug">{blurb}</p>
     </div>
   );
 }

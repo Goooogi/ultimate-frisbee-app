@@ -81,6 +81,33 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
       controls={<CompetitionChip label={contest.competitionDef.shortLabel} season={contest.seasonYear} />}
     >
       <div className="space-y-8">
+        {/* ── Section jump-nav ─────────────────────────────────────────────
+            ESPN-style in-league navigation. Anchor links rather than stateful
+            tabs so the page stays a Server Component (App Health rule: no
+            client JS for what a hash can do) and every section stays
+            deep-linkable. Standings first — it's the default view on ESPN,
+            Yahoo and Sleeper alike. */}
+        <nav aria-label="League sections" className="flex items-center gap-5 border-b border-hairline">
+          {[
+            ...(weeks.length > 0 ? [{ href: '#schedule-heading', label: 'Schedule' }] : []),
+            { href: '#standings-heading', label: 'Standings' },
+            ...(league ? [{ href: '#members-heading', label: 'Members' }] : []),
+          ].map((s) => (
+            <a
+              key={s.href}
+              href={s.href}
+              className={[
+                'whitespace-nowrap no-underline pb-2 border-b-2 border-transparent',
+                'text-[12px] font-bold tracking-[0.1em] uppercase font-tight',
+                'text-muted hover:text-ink hover:border-accent transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              ].join(' ')}
+            >
+              {s.label}
+            </a>
+          ))}
+        </nav>
+
         {/* ── My team CTA (client island) ──────────────────────────────── */}
         <MyContestTeamCta contest={contest} />
 
@@ -96,7 +123,7 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
 
         {/* ── Period schedule strip ────────────────────────────────────── */}
         {weeks.length > 0 && (
-          <section aria-labelledby="schedule-heading">
+          <section aria-labelledby="schedule-heading" className="scroll-mt-24">
             <h2
               id="schedule-heading"
               className="text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight mb-3"
@@ -122,7 +149,7 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
         )}
 
         {/* ── Standings ─────────────────────────────────────────────────── */}
-        <section aria-labelledby="standings-heading">
+        <section aria-labelledby="standings-heading" className="scroll-mt-24">
           <h2
             id="standings-heading"
             className="font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-4"
@@ -192,12 +219,12 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
         {/* ── Members + commissioner tools ─────────────────────────────────
             Private leagues only — public/global contests have no members. */}
         {league && (
-          <section aria-labelledby="members-heading">
+          <section aria-labelledby="members-heading" className="scroll-mt-24">
             <h2
               id="members-heading"
               className="font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-4"
             >
-              League
+              Members
             </h2>
             <LeagueMembersPanel
               leagueId={league.id}
