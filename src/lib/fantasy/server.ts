@@ -37,8 +37,11 @@ function serverDb() {
   return { supabase, db: supabase as unknown as AnyQuery };
 }
 
-/** The signed-in user's beta team (league_id NULL, current season), fetched
- *  with server-side auth. null when signed out or no team yet. */
+/** The signed-in user's Public League team for the current season, fetched
+ *  with server-side auth. null when signed out or no team yet.
+ *
+ *  Keyed on the global contest's id — see getMyTeam() in data.ts for why
+ *  `league_id is null` is not a valid discriminator (every team row has it). */
 export async function getMyTeamServer(
   year = fantasySeasonYear(),
 ): Promise<FantasyTeamView | null> {
@@ -48,12 +51,20 @@ export async function getMyTeamServer(
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  const { data: contest } = await db
+    .from('fantasy_contests')
+    .select('id')
+    .is('league_id', null)
+    .eq('competition', 'ufa')
+    .eq('season_year', year)
+    .maybeSingle();
+  if (!contest) return null;
+
   const { data, error } = await db
     .from('fantasy_teams')
     .select('id')
     .eq('owner_id', user.id)
-    .is('league_id', null)
-    .eq('season_year', year)
+    .eq('contest_id', contest.id as string)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;

@@ -319,10 +319,18 @@ export async function saveContestRoster(
   if (unique.size !== slots.length) throw new Error('A player can only be rostered once.');
 
   // Lock check against the period table (the DB trigger is the backstop).
+  //
+  // Checks lockAt directly, NOT `locked`: `locked` is true only inside
+  // [lockAt, unlockAt), so a finished week reads unlocked again once its
+  // unlock passes. Since the write below is DELETE-then-INSERT, a stale pass
+  // here would wipe a scored roster before the trigger rejected the insert.
+  // A week whose lock has passed is over — unlockAt opens the NEXT week.
   const weeks = periodsToWeeks(await getContestPeriods(contest.id));
   const target = weeks.find((w) => w.week === period);
   if (!target) throw new Error('This period is not open for rosters yet.');
-  if (target.locked) throw new Error('This roster is locked — play has started.');
+  if (target.lockAt && new Date(target.lockAt).getTime() <= Date.now()) {
+    throw new Error('This roster is locked — play has started.');
+  }
 
   const del = await supabase
     .from('fantasy_roster_slots')

@@ -1,6 +1,6 @@
 // /fantasy/ufa/l/[id] — LEAGUE-IN-GAME (canonical UFA contest page). Server
-// shell: contest header, standings (public), period schedule strip, members +
-// commissioner tools. Client islands: my-team CTA, members panel. Moved from
+// shell: contest header, standings (public), members + commissioner tools.
+// Client islands: my-team CTA, members panel. Moved from
 // /fantasy/contests/[id] for UFA contests (2026-08-27 game-hub IA inversion)
 // — the old route now redirects here for competition==='ufa'; other
 // competitions still render at the old path until they get their own
@@ -20,10 +20,7 @@ import {
   getLeague,
   getLeagueMembers,
   getContestStandings,
-  getContestPeriods,
-  periodsToWeeks,
 } from '@/lib/fantasy/leagues';
-import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import { MyContestTeamCta } from '@/components/fantasy/my-contest-team-cta';
 import { LeagueMembersPanel } from '@/components/fantasy/league-members-panel';
 import { DraftScheduleCard } from '@/components/fantasy/draft-schedule-card';
@@ -56,13 +53,11 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
   // legacy /fantasy/contests/[id] route (P1+ will add the rest).
   if (contest.competition !== 'ufa') notFound();
 
-  const [league, standings, periods, members] = await Promise.all([
+  const [league, standings, members] = await Promise.all([
     contest.leagueId ? getLeague(contest.leagueId).catch(() => null) : Promise.resolve(null),
     getContestStandings(contest.id).catch(() => []),
-    getContestPeriods(contest.id).catch(() => []),
     contest.leagueId ? getLeagueMembers(contest.leagueId).catch(() => []) : Promise.resolve([]),
   ]);
-  const weeks = periodsToWeeks(periods);
 
   const breadcrumbs: Crumb[] = league
     ? [
@@ -89,7 +84,6 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
             Yahoo and Sleeper alike. */}
         <nav aria-label="League sections" className="flex items-center gap-5 border-b border-hairline">
           {[
-            ...(weeks.length > 0 ? [{ href: '#schedule-heading', label: 'Schedule' }] : []),
             { href: '#standings-heading', label: 'Standings' },
             ...(league ? [{ href: '#members-heading', label: 'Members' }] : []),
           ].map((s) => (
@@ -119,33 +113,6 @@ export default async function UfaLeagueInGamePage({ params }: { params: { id: st
             leagueId={league.id}
             draftPath={`/fantasy/ufa/l/${contest.id}/draft`}
           />
-        )}
-
-        {/* ── Period schedule strip ────────────────────────────────────── */}
-        {weeks.length > 0 && (
-          <section aria-labelledby="schedule-heading" className="scroll-mt-24">
-            <h2
-              id="schedule-heading"
-              className="text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight mb-3"
-            >
-              Schedule
-            </h2>
-            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-              {weeks.map((w) => (
-                <div
-                  key={w.week}
-                  className="flex-shrink-0 bg-surface rounded-card-sm shadow-soft px-4 py-2.5 min-w-[130px]"
-                >
-                  <div className="font-tight text-[12px] font-bold text-ink">
-                    {formatWeekLabel(w.week)}
-                  </div>
-                  <div className="font-tight text-[10.5px] text-faint mt-0.5">
-                    {periodLockLabel(w)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
         )}
 
         {/* ── Standings ─────────────────────────────────────────────────── */}
@@ -244,19 +211,4 @@ function CompetitionChip({ label, season }: { label: string; season: number }) {
       {label} · {season}
     </span>
   );
-}
-
-function periodLockLabel(w: { locked: boolean; complete: boolean; lockAt: string | null }): string {
-  if (w.complete) return 'Final';
-  if (w.locked) return 'Locked';
-  if (!w.lockAt) return 'Open';
-  const d = new Date(w.lockAt);
-  if (Number.isNaN(d.getTime())) return 'Open';
-  const s = d.toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'America/New_York',
-  });
-  return `Locks ${s}`;
 }

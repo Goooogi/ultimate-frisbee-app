@@ -33,7 +33,6 @@ import {
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import type { FantasyWeek } from '@/lib/fantasy/weeks';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
-import { PillSelect } from '@/components/pill-select';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -246,21 +245,18 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
   return (
     <>
       <div className="space-y-8">
-        {/* Period selector — weekly-stats mode only */}
-        {!isEventMode && weeks.length > 0 && selectedPeriod && (
+        {/* Current period — NOT selectable. You edit the week that's open now,
+            the one pickActivePeriod resolved; past weeks are locked and future
+            ones aren't editable yet, so a dropdown only ever offered dead ends
+            (Hunter, 2026-08-27). Read-only label. */}
+        {!isEventMode && selectedPeriod && (
           <div className="flex items-center gap-3">
             <span className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
               Period
             </span>
-            <PillSelect
-              value={selectedPeriod}
-              onChange={setSelectedPeriod}
-              ariaLabel="Select a period"
-              options={weeks.map((w) => ({
-                value: w.week,
-                label: `${formatWeekLabel(w.week)}${w.locked ? ' (Locked)' : w.complete ? ' (Final)' : ''}`,
-              }))}
-            />
+            <span className="font-tight text-[13px] font-bold tracking-[0.04em] uppercase text-ink">
+              {formatWeekLabel(selectedPeriod)}
+            </span>
           </div>
         )}
 
@@ -342,9 +338,17 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
+/** The week the user is actually editing: the first whose lock hasn't arrived.
+ *
+ *  NOT `find(w => !w.locked)`. `locked` is true only INSIDE [lockAt, unlockAt),
+ *  so once a week's unlock passes it reads unlocked again — and that predicate
+ *  returned WEEK 1 for the whole season outside game windows. A week whose lock
+ *  has passed is over; unlockAt opens the NEXT week, it never reopens that one.
+ *  Falls back to the last week (which renders as locked) when the season's done. */
 function pickActivePeriod(weeks: FantasyWeek[], isEventMode: boolean): string | null {
   if (weeks.length === 0) return isEventMode ? 'event' : null;
-  const editable = weeks.find((w) => !w.locked);
+  const now = Date.now();
+  const editable = weeks.find((w) => !w.lockAt || new Date(w.lockAt).getTime() > now);
   return (editable ?? weeks[weeks.length - 1]).week;
 }
 

@@ -308,7 +308,14 @@ export async function getLeaderboard(
 
 // ─── Writes (client-side; owner derived from session) ────────────────────────
 
-/** The signed-in user's beta team for this season, if any. */
+/** The signed-in user's Public League team for this season, if any.
+ *
+ *  Keyed on the global contest's id, NOT `league_id is null`: every team row
+ *  carries league_id=null (createContestTeam sets it unconditionally), so that
+ *  filter stopped discriminating once private contests existed and this
+ *  maybeSingle() would see multiple rows — one user owning both a Public
+ *  League team and a private-contest team in the same season broke their own
+ *  My Team tab. contest_id is the real discriminator. */
 export async function getMyTeam(year = fantasySeasonYear()): Promise<FantasyTeamView | null> {
   const supabase = sessionClient();
   const {
@@ -316,12 +323,20 @@ export async function getMyTeam(year = fantasySeasonYear()): Promise<FantasyTeam
   } = await supabase.auth.getUser();
   if (!user) return null;
 
+  const { data: contest } = await supabase
+    .from('fantasy_contests')
+    .select('id')
+    .is('league_id', null)
+    .eq('competition', 'ufa')
+    .eq('season_year', year)
+    .maybeSingle();
+  if (!contest) return null;
+
   const { data, error } = await supabase
     .from('fantasy_teams')
     .select('id')
     .eq('owner_id', user.id)
-    .is('league_id', null)
-    .eq('season_year', year)
+    .eq('contest_id', contest.id as string)
     .maybeSingle();
   if (error) throw error;
   if (!data) return null;
@@ -571,8 +586,9 @@ export async function createMyTeam(
   if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
 
   // Attach the team to the global UFA contest (the beta pool became a real
-  // contest row). Falls back to a contest-less legacy insert if the row is
-  // somehow missing so the beta path can't hard-break.
+  // contest row). This is REQUIRED, not best-effort: getMyTeam() resolves the
+  // user's Public League team by contest_id, so a contest_id-null insert would
+  // create a team its owner can never see again. Fail loud instead.
   const { data: contest } = await supabase
     .from('fantasy_contests')
     .select('id')
@@ -580,6 +596,7 @@ export async function createMyTeam(
     .eq('competition', 'ufa')
     .eq('season_year', year)
     .maybeSingle();
+  if (!contest) throw new Error('The public league for this season is not open yet.');
 
   const { data, error } = await supabase
     .from('fantasy_teams')
@@ -588,7 +605,7 @@ export async function createMyTeam(
       team_name: name,
       season_year: year,
       league_id: null,
-      contest_id: (contest?.id as string | undefined) ?? null,
+      contest_id: contest.id as string,
     })
     .select('id')
     .single();
@@ -664,9 +681,14 @@ export async function saveRoster(
   }
 
   // Lock guard: don't allow editing a week that has already started.
+  // Tests lockAt, not `locked` — `locked` is only true inside
+  // [lockAt, unlockAt), so a finished week reads unlocked once its unlock
+  // passes, and the delete-then-insert below would wipe a scored roster.
   const weeks = buildWeeks(await seasonWeekGames(year, supabase), new Date());
   const target = weeks.find((w) => w.week === week);
-  if (target?.locked) throw new Error(`${week} is locked — its games have started.`);
+  if (target?.lockAt && new Date(target.lockAt).getTime() <= Date.now()) {
+    throw new Error(`${week} is locked — its games have started.`);
+  }
 
   // Ownership is enforced by RLS; we still fail fast client-side.
   // delete-then-insert this (team, week).
