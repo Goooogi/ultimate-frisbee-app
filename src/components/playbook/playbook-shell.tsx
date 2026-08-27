@@ -89,7 +89,7 @@ export function PlaybookShell({
               <summary
                 aria-label={`Current scope: ${currentTeam?.name ?? 'Personal'}`}
                 className={[
-                  'list-none cursor-pointer inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-full bg-ink/5',
+                  'list-none cursor-pointer inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-lg bg-ink/5',
                   'h-10 max-w-[46vw] hover:bg-ink/10 transition-colors',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                 ].join(' ')}
@@ -316,7 +316,7 @@ function PlaysDropdown({
       <summary
         aria-label="Switch play"
         className={[
-          'list-none cursor-pointer inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full bg-ink/5',
+          'list-none cursor-pointer inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-lg bg-ink/5',
           'h-10 max-w-[38vw] hover:bg-ink/10 transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         ].join(' ')}

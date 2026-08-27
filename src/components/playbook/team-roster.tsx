@@ -18,13 +18,13 @@ import {
   deleteRosterPlayer,
   listMyTeams,
   listRoster,
-  reorderRoster,
   updateRosterPlayer,
   type RosterPlayer,
   type RosterPosition,
   type Team,
 } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
+import { loadScopePref, saveScopePref } from '@/lib/playbook/scope-pref';
 
 const POSITIONS: Array<{ value: RosterPosition; label: string }> = [
   { value: 'handler', label: 'Handler' },
@@ -54,10 +54,14 @@ export function TeamRoster() {
     let cancelled = false;
     (async () => {
       try {
-        const t = await listMyTeams();
+        const [t, pref] = await Promise.all([listMyTeams(), loadScopePref()]);
         if (cancelled) return;
         setTeams(t);
-        if (t.length > 0) setScopeID(t[0].id);
+        // Prefer the account's persisted scope when it's one of these teams
+        // ('personal' means nothing on a roster page); else the first team.
+        const preferred =
+          pref && pref !== 'personal' && t.some((tm) => tm.id === pref) ? pref : t[0]?.id;
+        if (preferred) setScopeID(preferred);
       } catch (err) {
         if (!cancelled) setError(formatSupabaseError(err, 'Load teams'));
       } finally {
@@ -142,32 +146,6 @@ export function TeamRoster() {
     }
   }, [removing]);
 
-  // Move a player one slot up/down. Optimistic — the list reorders immediately,
-  // then the new order is persisted.
-  const handleMove = useCallback(
-    async (id: string, direction: -1 | 1) => {
-      if (!scopeID) return;
-      const idx = roster.findIndex((p) => p.id === id);
-      const target = idx + direction;
-      if (idx < 0 || target < 0 || target >= roster.length) return;
-
-      const next = [...roster];
-      [next[idx], next[target]] = [next[target], next[idx]];
-      setRoster(next);
-      try {
-        await reorderRoster(
-          scopeID,
-          next.map((p) => p.id),
-        );
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Reorder roster'));
-        console.error('[team-roster] reorderRoster failed', err);
-        refreshRoster(scopeID);
-      }
-    },
-    [roster, scopeID, refreshRoster],
-  );
-
   const active = useMemo(() => roster.filter((p) => p.active), [roster]);
   const benched = useMemo(() => roster.filter((p) => !p.active), [roster]);
   const counts = useMemo(() => {
@@ -180,7 +158,12 @@ export function TeamRoster() {
     <PlaybookShell
       teams={teams}
       currentTeamID={scopeID}
-      onSwitchTeam={(id) => setScopeID(id)}
+      onSwitchTeam={(id) => {
+        setScopeID(id);
+        // Keep the app-wide playbook scope in sync — switching teams here
+        // should be remembered on the Plays surface too.
+        saveScopePref(id);
+      }}
       pageTitle="Team"
     >
       <div className="px-4 pt-4 pb-12 lg:px-8 lg:pt-6 lg:pb-12">
@@ -276,27 +259,23 @@ export function TeamRoster() {
                   <RosterSection
                     heading={`Active · ${active.length}`}
                     players={active}
-                    roster={roster}
                     canEdit={canEdit}
                     editingID={editingID}
                     onEdit={setEditingID}
                     onCancelEdit={() => setEditingID(null)}
                     onSave={handleUpdate}
                     onRemove={setRemoving}
-                    onMove={handleMove}
                   />
                   {benched.length > 0 && (
                     <RosterSection
                       heading={`Benched · ${benched.length}`}
                       players={benched}
-                      roster={roster}
                       canEdit={canEdit}
                       editingID={editingID}
                       onEdit={setEditingID}
                       onCancelEdit={() => setEditingID(null)}
                       onSave={handleUpdate}
                       onRemove={setRemoving}
-                      onMove={handleMove}
                     />
                   )}
                 </div>
@@ -327,25 +306,21 @@ export function TeamRoster() {
 function RosterSection({
   heading,
   players,
-  roster,
   canEdit,
   editingID,
   onEdit,
   onCancelEdit,
   onSave,
   onRemove,
-  onMove,
 }: {
   heading: string;
   players: RosterPlayer[];
-  roster: RosterPlayer[];
   canEdit: boolean;
   editingID: string | null;
   onEdit: (id: string) => void;
   onCancelEdit: () => void;
   onSave: (id: string, patch: Partial<RosterPlayer>) => void;
   onRemove: (player: RosterPlayer) => void;
-  onMove: (id: string, direction: -1 | 1) => void;
 }) {
   return (
     <section>
@@ -353,56 +328,43 @@ function RosterSection({
         {heading}
       </h2>
       <ul className="flex flex-col gap-2">
-        {players.map((p) => {
-          // Move bounds are relative to the WHOLE roster, not the section —
-          // sort_order is one list, split visually by active/benched.
-          const idx = roster.findIndex((r) => r.id === p.id);
-          return (
-            <li key={p.id}>
-              {editingID === p.id ? (
-                <EditPlayerRow
-                  player={p}
-                  onSave={(patch) => onSave(p.id, patch)}
-                  onCancel={onCancelEdit}
-                />
-              ) : (
-                <PlayerRow
-                  player={p}
-                  canEdit={canEdit}
-                  canMoveUp={idx > 0}
-                  canMoveDown={idx < roster.length - 1}
-                  onEdit={() => onEdit(p.id)}
-                  onToggleActive={() => onSave(p.id, { active: !p.active })}
-                  onRemove={() => onRemove(p)}
-                  onMove={(dir) => onMove(p.id, dir)}
-                />
-              )}
-            </li>
-          );
-        })}
+        {players.map((p) => (
+          <li key={p.id}>
+            {editingID === p.id ? (
+              <EditPlayerRow
+                player={p}
+                onSave={(patch) => onSave(p.id, patch)}
+                onCancel={onCancelEdit}
+              />
+            ) : (
+              <PlayerRow
+                player={p}
+                canEdit={canEdit}
+                onEdit={() => onEdit(p.id)}
+                onRemove={() => onRemove(p)}
+              />
+            )}
+          </li>
+        ))}
       </ul>
     </section>
   );
 }
 
+// Slimmed 2026-08-27 (Hunter): the row is read-mostly — reorder arrows and the
+// Bench toggle moved out (benching now lives in the Edit form's Active
+// checkbox), and Remove is a trash icon. Two actions keep the row calm on a
+// phone-width card.
 function PlayerRow({
   player,
   canEdit,
-  canMoveUp,
-  canMoveDown,
   onEdit,
-  onToggleActive,
   onRemove,
-  onMove,
 }: {
   player: RosterPlayer;
   canEdit: boolean;
-  canMoveUp: boolean;
-  canMoveDown: boolean;
   onEdit: () => void;
-  onToggleActive: () => void;
   onRemove: () => void;
-  onMove: (direction: -1 | 1) => void;
 }) {
   return (
     <div
@@ -427,28 +389,13 @@ function PlayerRow({
         </div>
       </div>
       {canEdit && (
-        <div className="flex items-center gap-1.5 flex-wrap justify-end">
-          <div className="flex items-center gap-0.5">
-            <IconButton label={`Move ${player.name} up`} disabled={!canMoveUp} onClick={() => onMove(-1)}>
-              <ArrowGlyph direction="up" />
-            </IconButton>
-            <IconButton
-              label={`Move ${player.name} down`}
-              disabled={!canMoveDown}
-              onClick={() => onMove(1)}
-            >
-              <ArrowGlyph direction="down" />
-            </IconButton>
-          </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
           <SmallButton onClick={onEdit} variant="ghost">
             Edit
           </SmallButton>
-          <SmallButton onClick={onToggleActive} variant="ghost">
-            {player.active ? 'Bench' : 'Activate'}
-          </SmallButton>
-          <SmallButton onClick={onRemove} variant="danger">
-            Remove
-          </SmallButton>
+          <IconButton label={`Remove ${player.name}`} onClick={onRemove} danger>
+            <TrashGlyph />
+          </IconButton>
         </div>
       )}
     </div>
@@ -467,6 +414,10 @@ function EditPlayerRow({
   const [name, setName] = useState(player.name);
   const [number, setNumber] = useState(player.number ?? '');
   const [position, setPosition] = useState<RosterPosition>(player.position);
+  // Benching lives here now — the row's Bench/Activate button was removed
+  // (Hunter, 2026-08-27), and the removal dialog still points coaches at
+  // benching, so the Edit form is where a player's availability is set.
+  const [active, setActive] = useState(player.active);
 
   return (
     <form
@@ -474,7 +425,7 @@ function EditPlayerRow({
         e.preventDefault();
         const trimmed = name.trim();
         if (!trimmed) return;
-        onSave({ name: trimmed, number: number.trim() || null, position });
+        onSave({ name: trimmed, number: number.trim() || null, position, active });
       }}
       className="p-3 rounded-card bg-surface shadow-card flex items-center gap-2 flex-wrap"
     >
@@ -519,6 +470,15 @@ function EditPlayerRow({
           </option>
         ))}
       </select>
+      <label className="inline-flex items-center gap-1.5 px-2 py-2 text-[11px] font-bold tracking-[0.14em] uppercase text-muted font-tight cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={active}
+          onChange={(e) => setActive(e.target.checked)}
+          className="cursor-pointer accent-current"
+        />
+        Active
+      </label>
       <SmallButton onClick={() => {}} variant="primary" type="submit">
         Save
       </SmallButton>
@@ -652,11 +612,14 @@ function IconButton({
   label,
   onClick,
   disabled = false,
+  danger = false,
 }: {
   children: React.ReactNode;
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Destructive action — hover turns the live/danger red instead of ink. */
+  danger?: boolean;
 }) {
   return (
     <button
@@ -667,7 +630,11 @@ function IconButton({
       className={[
         'inline-flex items-center justify-center w-7 h-7 rounded-full text-muted transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-        disabled ? 'opacity-30 pointer-events-none' : 'cursor-pointer hover:text-ink hover:bg-ink/5',
+        disabled
+          ? 'opacity-30 pointer-events-none'
+          : danger
+            ? 'cursor-pointer hover:text-live hover:bg-live/10'
+            : 'cursor-pointer hover:text-ink hover:bg-ink/5',
       ].join(' ')}
     >
       {children}
@@ -675,21 +642,20 @@ function IconButton({
   );
 }
 
-function ArrowGlyph({ direction }: { direction: 'up' | 'down' }) {
+function TrashGlyph() {
   return (
     <svg
-      width="10"
-      height="10"
-      viewBox="0 0 10 10"
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.8"
+      strokeWidth="1.4"
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
-      className={direction === 'up' ? 'rotate-180' : ''}
     >
-      <path d="M2 4l3 3 3-3" />
+      <path d="M1.5 3h9M4.5 3V1.75h3V3M2.5 3l.5 7.25h6L9.5 3M4.9 5v3.5M7.1 5v3.5" />
     </svg>
   );
 }

@@ -178,9 +178,17 @@ export function TeamLines({
                 : 'No lines have been set up for this team yet.'}
             </p>
           ) : (
-            <ul className="flex flex-col gap-2">
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 items-start">
+              {/* Vertical columns (Hunter, 2026-08-27): each line reads as a
+                  depth-chart column — players stacked under the line's name —
+                  instead of one full-width row per line with names flowing
+                  horizontally. Single column on phones; the member picker
+                  takes the full row since it's a two-panel editor. */}
               {lines.map((line) => (
-                <li key={line.id}>
+                <li
+                  key={line.id}
+                  className={editingID === line.id ? 'sm:col-span-2 lg:col-span-3' : undefined}
+                >
                   {editingID === line.id ? (
                     <LinePicker
                       line={line}
@@ -246,7 +254,7 @@ function LineCard({
 
   return (
     <div className="px-3 py-3 rounded-card bg-surface shadow-card transition-shadow hover:shadow-lift">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-0">
           {renaming ? (
             <RenameLineForm
@@ -290,22 +298,27 @@ function LineCard({
       </div>
 
       {players.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5 mt-3">
-          {players.map((p) => (
+        <ul className="flex flex-col gap-1 mt-3">
+          {players.map((p, i) => (
             <li
               key={p.id}
               className={[
-                'inline-flex items-baseline gap-1.5 px-2.5 py-1 rounded-full bg-ink/5',
+                'flex items-baseline gap-2 px-2 py-1 rounded-card-sm bg-ink/5',
                 // A benched player stays visible but is clearly not available.
                 p.active ? 'text-ink' : 'text-faint line-through',
               ].join(' ')}
             >
+              {/* Slot order — the order chips 0..6 fill when the line is
+                  applied to a play, same numbering the picker shows. */}
+              <span className="text-[10px] font-bold font-tight tabular text-faint w-4 flex-shrink-0">
+                {i + 1}
+              </span>
               {p.number && (
                 <span className="text-[10px] font-bold font-tight tabular text-muted">
-                  {p.number}
+                  #{p.number}
                 </span>
               )}
-              <span className="text-[12px] font-medium font-tight">{p.name}</span>
+              <span className="text-[12px] font-medium font-tight truncate">{p.name}</span>
             </li>
           ))}
         </ul>

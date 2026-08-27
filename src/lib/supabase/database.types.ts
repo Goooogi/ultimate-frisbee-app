@@ -2226,6 +2226,7 @@ export type Database = {
       profiles: {
         Row: {
           avatar_icon: string | null
+          playbook_scope: string | null
           avatar_url: string | null
           created_at: string
           display_name: string | null
@@ -2238,6 +2239,7 @@ export type Database = {
         }
         Insert: {
           avatar_icon?: string | null
+          playbook_scope?: string | null
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
@@ -2250,6 +2252,7 @@ export type Database = {
         }
         Update: {
           avatar_icon?: string | null
+          playbook_scope?: string | null
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null

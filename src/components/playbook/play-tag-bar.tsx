@@ -73,7 +73,9 @@ export function PlayTagBar({
                 onClick={() => setPicking(false)}
                 className="fixed inset-0 z-20 cursor-default"
               />
-              <div className="absolute left-0 top-full mt-1 z-30 w-[260px] bg-surface rounded-card shadow-lift p-3 max-h-[60vh] overflow-y-auto">
+              {/* right-0: the bar now sits at the screen's right edge on the
+                  title row, so the panel must open leftward or it clips. */}
+              <div className="absolute right-0 top-full mt-1 z-30 w-[260px] bg-surface rounded-card shadow-lift p-3 max-h-[60vh] overflow-y-auto">
                 {PLAY_TAG_GROUPS.map((group) => (
                   <div key={group.label} className="mb-3 last:mb-0">
                     <h4 className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1.5">

@@ -40,17 +40,13 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="text-[9px] font-bold tracking-[0.18em] uppercase text-faint font-tight px-1">
-        Scope
-      </div>
-
       <details ref={detailsRef} className="relative group">
         <summary
           aria-label={
             current ? `Current team: ${current.name}. Click to switch.` : 'Personal scope. Click to switch.'
           }
           className={[
-            'list-none cursor-pointer flex items-center gap-2 px-2 py-2 rounded-full',
+            'list-none cursor-pointer flex items-center gap-2 px-2 py-2 rounded-lg',
             'bg-ink/5 hover:bg-ink/10 transition-colors',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           ].join(' ')}
@@ -106,7 +102,7 @@ export function TeamSwitcher({ teams, currentID, onSwitch }: TeamSwitcherProps) 
 
           <Link
             href="/playbook/teams"
-            className="flex items-center justify-between gap-2 px-2 py-2 rounded-full hover:bg-ink/5 transition-colors text-[11px] font-bold tracking-[0.14em] uppercase text-ink font-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="flex items-center justify-between gap-2 px-2 py-2 rounded-lg hover:bg-ink/5 transition-colors text-[11px] font-bold tracking-[0.14em] uppercase text-ink font-tight focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           >
             Manage teams
             <ArrowIcon />
@@ -128,7 +124,7 @@ function PersonalRow({ active, onSelect }: { active: boolean; onSelect: () => vo
         if (det) det.open = false;
       }}
       className={[
-        'flex items-center gap-2 px-2 py-1.5 rounded-full text-left cursor-pointer transition-colors',
+        'flex items-center gap-2 px-2 py-1.5 rounded-lg text-left cursor-pointer transition-colors',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
         active ? 'bg-ink/5' : 'hover:bg-ink/5',
       ].join(' ')}
@@ -180,7 +176,7 @@ function TeamGroup({
               if (det) det.open = false;
             }}
             className={[
-              'flex items-center gap-2 px-2 py-1.5 rounded-full text-left cursor-pointer transition-colors',
+              'flex items-center gap-2 px-2 py-1.5 rounded-lg text-left cursor-pointer transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
               active ? 'bg-ink/5' : 'hover:bg-ink/5',
             ].join(' ')}

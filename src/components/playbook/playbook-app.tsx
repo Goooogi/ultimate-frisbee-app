@@ -60,6 +60,7 @@ import { PersonnelPanel } from './personnel-panel';
 import { PlayTagBar, PlayTagFilter } from './play-tag-bar';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { formatSupabaseError } from '@/lib/supabase/errors';
+import { loadScopePref, saveScopePref } from '@/lib/playbook/scope-pref';
 import type {
   DiscPos,
   Drawing,
@@ -133,15 +134,19 @@ export function PlaybookApp() {
 
     async function hydrate() {
       try {
-        const [t, p] = await Promise.all([
-          listMyTeams(),
-          listPlays({ scope: 'personal' }),
-        ]);
+        // Teams + the persisted scope preference load together; the play list
+        // itself is fetched by the scope effect below once `hydrated` flips,
+        // so the FIRST fetch already targets the remembered scope instead of
+        // loading personal and flashing over to the team (Hunter, 2026-08-27).
+        const [t, pref] = await Promise.all([listMyTeams(), loadScopePref()]);
         if (cancelled) return;
         setTeams(t);
-        setPlays(p);
-        setCurrentID(p[0]?.id);
-        setCurrentStepIndex(0);
+        // Apply only when the value still means something: 'personal' is the
+        // default anyway, and a team id must be one of the user's CURRENT
+        // memberships (left team / stale id → quiet fallback).
+        if (pref && pref !== 'personal' && t.some((tm) => tm.id === pref)) {
+          setScope({ kind: 'team', teamID: pref });
+        }
       } catch (err) {
         if (cancelled) return;
         setLastError(formatSupabaseError(err, 'Load playbook'));
@@ -205,8 +210,10 @@ export function PlaybookApp() {
     return () => {
       cancelled = true;
     };
+    // `hydrated` is a dep so this fires once hydration decides the initial
+    // scope — hydrate() no longer fetches any play list itself.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope.kind, scope.kind === 'team' ? scope.teamID : null]);
+  }, [hydrated, scope.kind, scope.kind === 'team' ? scope.teamID : null]);
 
   // ── derived ──────────────────────────────────────────────────────────────
   const currentPlay = useMemo(
@@ -597,6 +604,8 @@ export function PlaybookApp() {
   // sidebar TeamSwitcher and the new "scope" pill chip.
   const handleSwitchScope = useCallback((next: Scope) => {
     setScope(next);
+    // Persist per profile — the choice survives sessions and devices.
+    saveScopePref(next.kind === 'personal' ? 'personal' : next.teamID);
   }, []);
 
   // ── video helpers ────────────────────────────────────────────────────────
@@ -843,7 +852,11 @@ export function PlaybookApp() {
         </div>
       </header>
 
-      <div className="px-1">
+      {/* Title + tags share one line (Hunter, 2026-08-27): tags right-aligned
+          beside the title instead of a row beneath it. The tag cluster wraps
+          within its own box and is capped so a long tag list can't squeeze
+          the title input into nothing. */}
+      <div className="px-1 flex items-center gap-3">
         <input
           type="text"
           value={currentPlay.name}
@@ -858,15 +871,16 @@ export function PlaybookApp() {
           // clearly after the last letter. leading-tight also gives the line
           // box enough vertical room that the caret aligns to the baseline.
           className={[
-            'block w-full bg-transparent border-0 outline-none',
+            'block flex-1 min-w-0 bg-transparent border-0 outline-none',
             'font-display italic font-bold text-[24px] md:text-[32px] lg:text-[56px] leading-tight tracking-[-0.04em] text-ink',
             'placeholder-faint focus:placeholder-transparent',
             'py-0.5 pr-3 transition-colors',
           ].join(' ')}
         />
+        <div className="ml-auto flex-shrink-0 max-w-[55%]">
+          <PlayTagBar tags={currentPlay.tags} canEdit={canEdit} onChange={handleTagsChange} />
+        </div>
       </div>
-
-      <PlayTagBar tags={currentPlay.tags} canEdit={canEdit} onChange={handleTagsChange} />
 
       <div className="flex flex-col bg-bg border border-hairline rounded-sm overflow-hidden">
         <div className="relative bg-surface px-2 py-2 lg:py-2">
