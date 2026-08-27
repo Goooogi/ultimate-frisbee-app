@@ -24,6 +24,12 @@ interface HeroGameCardProps {
    *  of both showing the same state-derived text. When omitted, the label is
    *  derived from the game's live/upcoming/final state as before. */
   eyebrow?: string;
+  /** Replace the teamMeta-derived identity for a side. Built for the champ-
+   *  weekend WUL/PUL All-Star exhibition, whose API team ids ('allstars1'/
+   *  'allstars2') carry no franchise: the card then renders the LEAGUE's mark
+   *  and colors instead of the fallback abbr block. */
+  awayMeta?: TeamMeta;
+  homeMeta?: TeamMeta;
 }
 
 const BASE = '#0E1622';
@@ -66,11 +72,11 @@ function glowColor(team: TeamMeta): string {
   return luminance(a) > luminance(p) ? team.accent : team.primary;
 }
 
-export function HeroGameCard({ game, awayRecord, homeRecord, eyebrow }: HeroGameCardProps) {
+export function HeroGameCard({ game, awayRecord, homeRecord, eyebrow, awayMeta, homeMeta }: HeroGameCardProps) {
   if (!game) return <EmptyHero />;
 
-  const away = teamMeta(game.awayTeamID);
-  const home = teamMeta(game.homeTeamID);
+  const away = awayMeta ?? teamMeta(game.awayTeamID);
+  const home = homeMeta ?? teamMeta(game.homeTeamID);
   const state = gameUiState(game);
   const awayGlow = glowColor(away);
   const homeGlow = glowColor(home);
@@ -136,7 +142,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord, eyebrow }: HeroGame
             under the carousel's side-centered 42px arrow buttons. */}
         <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-5 px-0 sm:px-8 lg:px-12">
           <GameTeam
-            slug={away.id}
+            meta={away}
             abbr={away.abbr}
             name={away.name ?? game.awayTeamName}
             rec={awayRecord ?? '—'}
@@ -156,7 +162,7 @@ export function HeroGameCard({ game, awayRecord, homeRecord, eyebrow }: HeroGame
             </span>
           </div>
           <GameTeam
-            slug={home.id}
+            meta={home}
             abbr={home.abbr}
             name={home.name ?? game.homeTeamName}
             rec={homeRecord ?? '—'}
@@ -208,19 +214,21 @@ function EmptyHero() {
 }
 
 function GameTeam({
-  slug,
+  meta,
   abbr,
   name,
   rec,
   align = 'left',
 }: {
-  slug: string;
+  /** Full identity for the side — the caller resolves it (teamMeta or an
+   *  override like the All-Star card's league marks), so this component
+   *  never re-derives from a slug. */
+  meta: TeamMeta;
   abbr: string;
   name: string;
   rec: string;
   align?: 'left' | 'right';
 }) {
-  const meta = teamMeta(slug);
   const right = align === 'right';
   return (
     <div

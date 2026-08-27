@@ -80,6 +80,18 @@ const FALLBACK: Omit<TeamMeta, 'id' | 'abbr' | 'internalID'> = {
  * Always returns a TeamMeta — generates a neutral fallback for unknown teamIDs
  * so the UI never crashes on a roster change we haven't mapped yet.
  */
+// Champ-weekend WUL/PUL All-Star exhibition — the UFA API schedules it with
+// synthetic team ids that carry no franchise, so the hero renders these
+// LEAGUE marks instead (logos already shipped in /public; colors sampled from
+// them: PUL navy/cyan, WUL teal).
+// ⚠️ SIDE MAPPING IS ASSUMED (allstars1/away = PUL, allstars2/home = WUL) —
+// neither the API ("All-Stars" vs "All-Stars") nor watchufa names the league
+// per side. If the broadcast shows it flipped, swap the two entries here.
+export const ALL_STAR_TEAM_META: Record<string, TeamMeta> = {
+  allstars1: { id: 'allstars1', internalID: 0, abbr: 'PUL', primary: '#0F1D41', accent: '#68D0EC', name: 'All-Stars', logo: '/PUL.webp' },
+  allstars2: { id: 'allstars2', internalID: 0, abbr: 'WUL', primary: '#286E82', accent: '#B1C9CF', name: 'All-Stars', logo: '/WUL-logo.jpeg' },
+};
+
 export function teamMeta(id: string): TeamMeta {
   const known = TEAM_META[id];
   if (known) return known;

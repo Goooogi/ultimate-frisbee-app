@@ -118,6 +118,102 @@ export function pickUpcomingGameOfWeek(
   return upcoming[0];
 }
 
+// ── playoffs + all-star (champ weekend) ────────────────────────────────
+
+/** The champ-weekend all-star exhibition (WUL vs PUL all-stars). The UFA API
+ *  schedules it with synthetic team ids ('allstars1'/'allstars2') and a
+ *  gameID like '2026-08-28-allstar-game'. It must never count as a playoff
+ *  game (it's an exhibition) and gets its own hero slide instead. */
+export function isAllStarGame(g: UfaGame): boolean {
+  const s = `${g.gameID ?? ''} ${g.awayTeamID ?? ''} ${g.homeTeamID ?? ''}`.toLowerCase();
+  return s.includes('allstar') || s.includes('all-star');
+}
+
+export interface PlayoffSlateGame {
+  game: UfaGame;
+  /** Round label for the slide's eyebrow ("Semifinal" / "Championship" /
+   *  "Playoffs"). */
+  label: string;
+}
+
+/**
+ * When the soonest week holding upcoming/live games is a PLAYOFF round,
+ * return ALL of that round's games — the hero then shows one slide per game
+ * ("Semifinal 1/2") instead of the single win%-scored Game of the week, which
+ * is playoff-blind: at 2026 championship weekend it picked Sol–Wind Chill
+ * over Empire–Spiders on one game of record difference (Hunter, 2026-08-26).
+ *
+ * Detection is structural because the modern UFA API labels playoff weeks
+ * numerically ('week-16', not 'semifinals'): a week is a playoff week when it
+ * comes AFTER the last "bulk" week (≥6 scheduled games — regular-season UFA
+ * weeks run 7-15 games, playoff rounds 2-4) and itself holds ≤4 real games.
+ * The all-star exhibition is excluded from both the counts and the slate.
+ *
+ * Round naming by slate shape: 1 game → Championship; 2 → both Semifinal;
+ * 3 → two Semifinals + Championship (the champ-weekend shape once the final
+ * is scheduled); 4 → generic "Playoffs" (an earlier full round).
+ */
+export function pickPlayoffSlate(games: UfaGame[]): PlayoffSlateGame[] {
+  const real = games.filter((g) => !isAllStarGame(g));
+
+  const counts = new Map<number, number>();
+  for (const g of real) {
+    const n = weekNum(g.week ?? '');
+    if (n === Number.MAX_SAFE_INTEGER) continue;
+    counts.set(n, (counts.get(n) ?? 0) + 1);
+  }
+  let lastBulkWeek = -Infinity;
+  for (const [n, c] of counts) {
+    if (c >= 6 && n > lastBulkWeek) lastBulkWeek = n;
+  }
+  if (!Number.isFinite(lastBulkWeek)) return [];
+
+  const active = real.filter((g) => {
+    const s = gameUiState(g);
+    return s.isUpcoming || s.isLive;
+  });
+  if (active.length === 0) return [];
+
+  const soonestWeek = Math.min(...active.map((g) => weekNum(g.week ?? '')));
+  if (soonestWeek === Number.MAX_SAFE_INTEGER || soonestWeek <= lastBulkWeek) return [];
+
+  const slate = active
+    .filter((g) => weekNum(g.week ?? '') === soonestWeek)
+    .sort((a, b) => startTs(a) - startTs(b));
+  if (slate.length === 0 || slate.length > 4) return [];
+
+  const labelFor = (i: number): string => {
+    if (slate.length === 1) return 'Championship';
+    if (slate.length === 2) return 'Semifinal';
+    if (slate.length === 3) return i < 2 ? 'Semifinal' : 'Championship';
+    return 'Playoffs';
+  };
+  return slate.map((game, i) => ({ game, label: labelFor(i) }));
+}
+
+/** The champ-weekend all-star game's hero window: while it's upcoming/live,
+ *  plus 3 days after it goes final so the result lingers through the weekend.
+ *  Returns undefined outside that window (the slide drops — it's a
+ *  once-a-year card). */
+export function pickAllStarGame(games: UfaGame[]): UfaGame | undefined {
+  const candidates = games.filter(isAllStarGame);
+  for (const g of candidates) {
+    const s = gameUiState(g);
+    if (s.isUpcoming || s.isLive) return g;
+  }
+  const RECENT_MS = 3 * 86400_000;
+  return candidates.find((g) => {
+    const s = gameUiState(g);
+    if (!s.isFinal) return false;
+    const ts = startTs(g);
+    return ts > 0 && Date.now() - ts < RECENT_MS;
+  });
+}
+
+function startTs(g: UfaGame): number {
+  return g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0;
+}
+
 // ── scoring ────────────────────────────────────────────────────────────
 
 function scoreGame(game: UfaGame, standings: UfaStanding[]): ScoredGame {

@@ -27,7 +27,12 @@ import {
   currentSeasonYear,
 } from '@/lib/ufa/client';
 import { gameUiState } from '@/lib/ufa/format';
-import { pickTopGame, pickUpcomingGameOfWeek } from '@/lib/ufa/game-of-the-week';
+import {
+  pickTopGame,
+  pickUpcomingGameOfWeek,
+  pickPlayoffSlate,
+  pickAllStarGame,
+} from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { getCurrentEvent, listNextUpcomingEvents, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
 import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
@@ -40,7 +45,7 @@ import { HeroPulSlide } from '@/components/home/hero-pul-slide';
 import { HeroWulSlide } from '@/components/home/hero-wul-slide';
 import { HeroWfdfSlide } from '@/components/home/hero-wfdf-slide';
 import { getCurrentWfdfEvent } from '@/lib/wfdf/data';
-import { teamMeta } from '@/lib/ufa/teams';
+import { teamMeta, ALL_STAR_TEAM_META } from '@/lib/ufa/teams';
 import { LeaguesStrip } from '@/components/home/leagues-strip';
 import { StandingsStrip } from '@/components/home/standings-strip';
 import { RankingsCard } from '@/components/home/rankings-card';
@@ -165,6 +170,15 @@ export default async function HomePage() {
   const firstShowableGame = games.find((g) => !gameUiState(g).isCancelled) ?? games[0];
   const gotwGame = pickUpcomingGameOfWeek(games, standings) ?? firstShowableGame;
 
+  // Playoff mode: when the soonest active week is a playoff round, EVERY game
+  // in it gets its own labeled slide ("Semifinal"/"Championship") — the
+  // win%-scored GOTW is playoff-blind and benched Empire–Spiders on one game
+  // of record difference (Hunter, 2026-08-26). Empty outside the playoffs.
+  const playoffSlate = pickPlayoffSlate(games);
+  // Champ-weekend WUL/PUL All-Star exhibition — once-a-year slide; undefined
+  // outside its window (upcoming/live + 3 days after the final).
+  const allStarGame = pickAllStarGame(games);
+
   // Records for a game's two teams (from current standings).
   const recordOf = (slug?: string): string | undefined => {
     if (!slug) return undefined;
@@ -215,8 +229,10 @@ export default async function HomePage() {
   const slides = [
     // UFA "Top game" slide — LIVE game only. Rendered ONLY while a UFA game is
     // in progress; dropped otherwise (no past/future fallback, so it can't show
-    // a different game than the Game-of-the-week highlight).
-    topGame ? (
+    // a different game than the Game-of-the-week highlight). Suppressed while
+    // the playoff slate is active: the live playoff game already has its own
+    // labeled slide there, and two cards for one game reads as a bug.
+    topGame && playoffSlate.length === 0 ? (
       <HeroGameCard
         key="ufa-top"
         game={topGame}
@@ -225,15 +241,41 @@ export default async function HomePage() {
         eyebrow="Top game"
       />
     ) : null,
-    // UFA "Game of the week" slide — best UPCOMING marquee matchup. Always the
-    // primary UFA slide (EmptyHero renders in a truly empty off-season).
-    <HeroGameCard
-      key="ufa-gotw"
-      game={gotwGame}
-      awayRecord={recordOf(gotwGame?.awayTeamID)}
-      homeRecord={recordOf(gotwGame?.homeTeamID)}
-      eyebrow="Game of the week"
-    />,
+    // UFA headline slide(s). During a playoff round: one slide PER game in the
+    // round, labeled by round — with two semifinals there is no "the" game of
+    // the week, so both show. Otherwise the single win%-picked Game of the
+    // week as before (EmptyHero renders in a truly empty off-season).
+    ...(playoffSlate.length > 0
+      ? playoffSlate.map(({ game: pg, label }) => (
+          <HeroGameCard
+            key={`ufa-playoff-${pg.gameID}`}
+            game={pg}
+            awayRecord={recordOf(pg.awayTeamID)}
+            homeRecord={recordOf(pg.homeTeamID)}
+            eyebrow={label}
+          />
+        ))
+      : [
+          <HeroGameCard
+            key="ufa-gotw"
+            game={gotwGame}
+            awayRecord={recordOf(gotwGame?.awayTeamID)}
+            homeRecord={recordOf(gotwGame?.homeTeamID)}
+            eyebrow="Game of the week"
+          />,
+        ]),
+    // Champ-weekend WUL/PUL All-Star exhibition — its own once-a-year slide,
+    // rendered with LEAGUE marks (the API's allstars1/2 ids carry no
+    // franchise; see ALL_STAR_TEAM_META for the side-mapping caveat).
+    allStarGame ? (
+      <HeroGameCard
+        key="ufa-allstar"
+        game={allStarGame}
+        eyebrow="All-Star Game"
+        awayMeta={ALL_STAR_TEAM_META[allStarGame.awayTeamID]}
+        homeMeta={ALL_STAR_TEAM_META[allStarGame.homeTeamID]}
+      />
+    ) : null,
     // USAU — tournament card, null when no current event.
     usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.
