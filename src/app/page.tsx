@@ -32,6 +32,7 @@ import {
   pickUpcomingGameOfWeek,
   pickPlayoffSlate,
   pickAllStarGame,
+  isAllStarGame,
 } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
 import { getCurrentEvent, listNextUpcomingEvents, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
@@ -165,9 +166,10 @@ export default async function HomePage() {
   const topGame = pickTopGame(games, standings);
   // Fallback keeps the UFA slide non-empty mid-season, but must NEVER be a
   // cancelled/postponed game (those aren't upcoming/live/final, so the pickers
-  // already skip them — the raw games[0] fallback would leak one). Prefer the
-  // first non-cancelled game.
-  const firstShowableGame = games.find((g) => !gameUiState(g).isCancelled) ?? games[0];
+  // already skip them — the raw games[0] fallback would leak one) NOR the
+  // all-star exhibition (it has its own slide — no game appears on two cards).
+  const firstShowableGame =
+    games.find((g) => !isAllStarGame(g) && !gameUiState(g).isCancelled) ?? games[0];
   const gotwGame = pickUpcomingGameOfWeek(games, standings) ?? firstShowableGame;
 
   // Playoff mode: when the soonest active week is a playoff round, EVERY game

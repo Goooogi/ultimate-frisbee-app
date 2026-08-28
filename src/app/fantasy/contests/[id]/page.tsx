@@ -1,7 +1,9 @@
-// /fantasy/contests/[id] — legacy contest page. UFA contests now live at the
-// canonical /fantasy/ufa/l/[id] (2026-08-27 game-hub IA inversion) — redirect
-// there. Other competitions have no game-scoped route yet (P1+), so they
-// keep rendering here.
+// /fantasy/contests/[id] — canonical contest page for non-UFA games (Club
+// Nationals first). UFA contests live at /fantasy/ufa/l/[id] (2026-08-27
+// game-hub IA inversion) — redirect there. Carries the same league surfaces
+// as the UFA page (draft card, members + commissioner tools) so a non-UFA
+// league is fully manageable from its game context (2026-08-27 Club Nats
+// activation).
 
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
@@ -9,12 +11,16 @@ import { PageShell } from '@/components/page-shell';
 import {
   getContest,
   getLeague,
+  getLeagueMembers,
   getContestStandings,
   getContestPeriods,
   periodsToWeeks,
 } from '@/lib/fantasy/leagues';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
+import { getGame, draftOpensDate } from '@/lib/fantasy/games';
 import { MyContestTeamCta } from '@/components/fantasy/my-contest-team-cta';
+import { LeagueMembersPanel } from '@/components/fantasy/league-members-panel';
+import { DraftScheduleCard } from '@/components/fantasy/draft-schedule-card';
 import type { Crumb } from '@/components/breadcrumbs';
 
 export const revalidate = 60;
@@ -41,20 +47,32 @@ export default async function ContestPage({ params }: { params: { id: string } }
     );
   }
 
-  const [league, standings, periods] = await Promise.all([
+  const [league, standings, periods, members] = await Promise.all([
     contest.leagueId ? getLeague(contest.leagueId).catch(() => null) : Promise.resolve(null),
     getContestStandings(contest.id).catch(() => []),
     getContestPeriods(contest.id).catch(() => []),
+    contest.leagueId ? getLeagueMembers(contest.leagueId).catch(() => []) : Promise.resolve([]),
   ]);
   const weeks = periodsToWeeks(periods);
 
-  const breadcrumbs: Crumb[] = league
-    ? [
-        { label: 'Fantasy', href: '/fantasy' },
-        { label: league.name, href: `/fantasy/leagues/${league.id}` },
-        { label: contest.name },
-      ]
-    : [{ label: 'Fantasy', href: '/fantasy' }, { label: contest.name }];
+  // Event contests: drafts open the Saturday before the event (mirrors the DB
+  // draft window). The 'event' period's lock_at IS the event start (midnight
+  // ET), so derive the calendar date from it in ET.
+  const eventLockAt = weeks.find((w) => w.week === 'event')?.lockAt ?? null;
+  const eventDateEt = eventLockAt
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date(eventLockAt))
+    : null;
+  const draftOpens = eventDateEt ? draftOpensDate(eventDateEt) : null;
+
+  const game = getGame(contest.competition);
+  const gameHome = game?.status === 'live' ? `/fantasy/${contest.competition}` : '/fantasy';
+
+  const breadcrumbs: Crumb[] = [
+    { label: 'Fantasy', href: '/fantasy' },
+    ...(game?.status === 'live' ? [{ label: game.name, href: gameHome }] : []),
+    ...(league ? [{ label: league.name, href: `/fantasy/leagues/${league.id}` }] : []),
+    { label: contest.name },
+  ];
 
   return (
     <PageShell
@@ -65,12 +83,45 @@ export default async function ContestPage({ params }: { params: { id: string } }
       controls={<CompetitionChip label={contest.competitionDef.shortLabel} season={contest.seasonYear} />}
     >
       <div className="space-y-8">
+        {/* ── Section jump-nav (anchor links, same pattern as the UFA
+            league page — Server Component, deep-linkable) ──────────────── */}
+        <nav aria-label="League sections" className="flex items-center gap-5 border-b border-hairline">
+          {[
+            ...(weeks.length > 0 ? [{ href: '#schedule-heading', label: 'Schedule' }] : []),
+            { href: '#standings-heading', label: 'Standings' },
+            ...(league ? [{ href: '#members-heading', label: 'Members' }] : []),
+          ].map((s) => (
+            <a
+              key={s.href}
+              href={s.href}
+              className={[
+                'whitespace-nowrap no-underline pb-2 border-b-2 border-transparent',
+                'text-[12px] font-bold tracking-[0.1em] uppercase font-tight',
+                'text-muted hover:text-ink hover:border-accent transition-colors duration-150',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+              ].join(' ')}
+            >
+              {s.label}
+            </a>
+          ))}
+        </nav>
+
         {/* ── My team CTA (client island) ──────────────────────────────── */}
         <MyContestTeamCta contest={contest} />
 
+        {/* ── Draft (private leagues only — public contests never draft) ── */}
+        {league && (
+          <DraftScheduleCard
+            contestId={contest.id}
+            leagueId={league.id}
+            draftPath={`/fantasy/contests/${contest.id}/draft`}
+            draftOpens={draftOpens}
+          />
+        )}
+
         {/* ── Period schedule strip ────────────────────────────────────── */}
         {weeks.length > 0 && (
-          <section aria-labelledby="schedule-heading">
+          <section aria-labelledby="schedule-heading" className="scroll-mt-24">
             <h2
               id="schedule-heading"
               className="text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight mb-3"
@@ -96,7 +147,7 @@ export default async function ContestPage({ params }: { params: { id: string } }
         )}
 
         {/* ── Standings ─────────────────────────────────────────────────── */}
-        <section aria-labelledby="standings-heading">
+        <section aria-labelledby="standings-heading" className="scroll-mt-24">
           <h2
             id="standings-heading"
             className="font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-4"
@@ -162,6 +213,20 @@ export default async function ContestPage({ params }: { params: { id: string } }
             </div>
           )}
         </section>
+
+        {/* ── Members + commissioner tools ─────────────────────────────────
+            Private leagues only — public/global contests have no members. */}
+        {league && (
+          <section aria-labelledby="members-heading" className="scroll-mt-24">
+            <h2
+              id="members-heading"
+              className="font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-4"
+            >
+              Members
+            </h2>
+            <LeagueMembersPanel leagueId={league.id} members={members} onLeaveRedirect={gameHome} />
+          </section>
+        )}
       </div>
     </PageShell>
   );

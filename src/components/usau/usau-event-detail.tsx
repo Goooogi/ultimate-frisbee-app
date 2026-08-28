@@ -22,7 +22,7 @@ import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { useViewParam } from '@/lib/use-view-param';
 import { USAU_LEVELS } from '@/lib/league';
-import { UsauBracketTree, UsauPlacementBracketTree, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder } from './usau-bracket-tree';
+import { UsauBracketTree, UsauPlacementBracketTree, UsauFlatBracketCards, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder } from './usau-bracket-tree';
 import { formatGameTime, formatGameDate, formatGameClock } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager } from '@/components/division-pager';
@@ -864,6 +864,7 @@ function BracketView({
                 key={bracket.name}
                 bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
                 venueState={venueState}
+                treeSized
               />
             ),
           )}
@@ -1265,9 +1266,14 @@ function PoolGamesChevron({ open }: { open: boolean }) {
 function BracketBlock({
   bracket,
   venueState,
+  treeSized = false,
 }: {
   bracket: { name: string; games: Game[] };
   venueState?: string | null;
+  /** Render the games as tree-sized MatchCards (BracketScroller columns)
+   *  instead of full-width GameRows — used when the group sits alongside
+   *  bracket trees so every card on the tab is the same size. */
+  treeSized?: boolean;
 }) {
   // The ingest classifier tags a placement bracket's DECIDING game round='other'
   // (its classifyRound has no placement-final case), so it renders as "OTHER"
@@ -1303,20 +1309,27 @@ function BracketBlock({
       <h3 className="font-display italic font-bold text-[22px] leading-tight tracking-[-0.02em] text-ink mb-3">
         {bracket.name}
       </h3>
-      <div className="flex flex-col gap-4">
-        {rounds.map(([round, games]) => (
-          <div key={round}>
-            <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-              {prettyRound(round)}
+      {treeSized ? (
+        <UsauFlatBracketCards
+          rounds={rounds.map(([round, games]) => ({ label: prettyRound(round), games }))}
+          venueState={venueState}
+        />
+      ) : (
+        <div className="flex flex-col gap-4">
+          {rounds.map(([round, games]) => (
+            <div key={round}>
+              <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
+                {prettyRound(round)}
+              </div>
+              <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {games.map((g) => (
+                  <GameRow key={g.id} game={g} venueState={venueState} />
+                ))}
+              </ul>
             </div>
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
-              {games.map((g) => (
-                <GameRow key={g.id} game={g} venueState={venueState} />
-              ))}
-            </ul>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

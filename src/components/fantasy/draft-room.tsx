@@ -37,6 +37,7 @@ import {
   resolveDraftClock,
   saveDraftQueue,
   subscribeDraft,
+  unsubscribeDraft,
   teamOnClock,
   roundOf,
   type Draft,
@@ -159,7 +160,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     const onFocus = () => refetch();
     window.addEventListener('focus', onFocus);
     return () => {
-      channel.unsubscribe();
+      unsubscribeDraft(channel);
       window.removeEventListener('focus', onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

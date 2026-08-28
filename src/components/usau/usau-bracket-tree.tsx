@@ -116,6 +116,58 @@ export function UsauPlacementBracketTree({
   return <BracketTreeGroup games={games} label={null} venueState={venueState ?? null} />;
 }
 
+/**
+ * Flat placement groups ("Third", "Eleventh Place") rendered with the SAME
+ * MatchCard + scroller column sizing as the trees around them — a full-width
+ * one-off card sandwiched between trees read as a different component
+ * (Hunter, 2026-08-27). The caller pre-groups games into labeled round
+ * columns (it owns the round-remap rules); this only lays them out. Synthetic
+ * slots carry no feeders, so no connector lines draw.
+ */
+export function UsauFlatBracketCards({
+  rounds,
+  venueState,
+}: {
+  rounds: Array<{ label: string; games: Game[] }>;
+  venueState?: string | null;
+}) {
+  const { nodeColumns, positions } = useMemo(() => {
+    const columns: SlotColumn[] = rounds.map((r, ci) => ({
+      key: `flat-${ci}`,
+      label: r.label,
+      slots: r.games.map((g, i) => ({
+        id: g.id,
+        game: g,
+        number: i + 1,
+        sourceIds: [],
+        aFallback: null,
+        bFallback: null,
+        aResolved: null,
+        bResolved: null,
+      })),
+    }));
+    const positions = assignPositions(columns);
+    const nodeColumns = columns
+      .filter((c) => c.slots.length > 0)
+      .map((c) => ({
+        key: c.key,
+        label: c.label,
+        games: c.slots.map((s) => ({ ...slotNode(s), slot: s })),
+      }));
+    return { nodeColumns, positions };
+  }, [rounds]);
+
+  if (nodeColumns.length === 0) return null;
+
+  return (
+    <BracketScroller
+      columns={nodeColumns}
+      positions={positions}
+      renderCard={(g) => <MatchCard slot={g.slot} venueState={venueState ?? null} />}
+    />
+  );
+}
+
 export function UsauBracketTree({ games, venueState, includePlacement = false }: Props) {
   // ── Which brackets this tree renders ──────────────────────────────────
   // Tournaments run parallel placement brackets (5th, 9th, 13th …) that decide

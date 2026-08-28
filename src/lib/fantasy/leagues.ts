@@ -417,6 +417,35 @@ export async function acceptLeagueInvite(token: string): Promise<string> {
   return data as string;
 }
 
+/** Rename a league (commissioner-only; RPC enforces). */
+export async function renameLeague(leagueId: string, name: string): Promise<string> {
+  const n = name.trim();
+  if (n.length < 1 || n.length > 60) throw new Error('League name must be 1–60 characters.');
+  const bad = moderateName(n, 'League name');
+  if (bad) throw new Error(bad);
+  const { error } = await sessionClient().rpc('fantasy_rename_league', {
+    p_league: leagueId,
+    p_name: n,
+  });
+  if (error) throw error;
+  return n;
+}
+
+/** Roster composition for one contest (commissioner-only; RPC enforces).
+ *  weekly-stats games pass offenders+defenders, event games pass flex. */
+export async function updateContestRoster(
+  contestId: string,
+  input: { offenders?: number; defenders?: number; flex?: number },
+): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_update_contest_roster', {
+    p_contest: contestId,
+    p_offenders: input.offenders ?? null,
+    p_defenders: input.defenders ?? null,
+    p_flex: input.flex ?? null,
+  });
+  if (error) throw error;
+}
+
 /** Remove a member (commissioner-only; owner can't be removed). */
 export async function removeLeagueMember(leagueId: string, userId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_remove_league_member', {
@@ -442,7 +471,7 @@ export async function leaveLeague(leagueId: string): Promise<void> {
 export async function resolveEventForCompetition(
   competition: CompetitionId,
   seasonYear: number,
-): Promise<{ eventId: string; name: string; startDate: string | null } | null> {
+): Promise<{ eventId: string; name: string; startDate: string | null; endDate: string | null } | null> {
   if (competition === 'usau-club-nationals' || competition === 'usau-college-nationals') {
     const level = competition === 'usau-club-nationals' ? 'CLUB' : 'COLLEGE_D1';
     // Name patterns vary by year ("USA Ultimate Club Nationals" vs "National
@@ -450,7 +479,7 @@ export async function resolveEventForCompetition(
     // level + season, then prefer the latest-starting (Nationals ends a season).
     const { data, error } = await anon()
       .from('usau_events')
-      .select('id, name, start_date')
+      .select('id, name, start_date, end_date')
       .eq('season', seasonYear)
       .eq('competition_level', level)
       .or('name.ilike.%nationals%,name.ilike.%national championships%,name.ilike.%college championships%')
@@ -467,12 +496,13 @@ export async function resolveEventForCompetition(
       eventId: hit.id as string,
       name: hit.name as string,
       startDate: (hit.start_date as string) ?? null,
+      endDate: (hit.end_date as string) ?? null,
     };
   }
   if (competition === 'wfdf-wucc') {
     const { data, error } = await anon()
       .from('wfdf_events')
-      .select('id, name, start_date')
+      .select('id, name, start_date, end_date')
       .eq('year', seasonYear)
       .ilike('season_id', 'wucc%')
       .maybeSingle();
@@ -482,6 +512,7 @@ export async function resolveEventForCompetition(
       eventId: data.id as string,
       name: data.name as string,
       startDate: (data.start_date as string) ?? null,
+      endDate: (data.end_date as string) ?? null,
     };
   }
   return null; // season competitions don't bind to a single event

@@ -89,7 +89,9 @@ export function pickTopGame(
   games: UfaGame[],
   standings: UfaStanding[],
 ): UfaGame | undefined {
-  const live = games.filter((g) => gameUiState(g).isLive);
+  // All-star exhibition excluded: it has its own dedicated hero slide, and a
+  // game must never appear on two carousel cards (Hunter, 2026-08-27).
+  const live = games.filter((g) => !isAllStarGame(g) && gameUiState(g).isLive);
   if (live.length === 0) return undefined;
   return pickBest(live.map((g) => scoreGame(g, standings))).game;
 }
@@ -105,7 +107,11 @@ export function pickUpcomingGameOfWeek(
   games: UfaGame[],
   standings: UfaStanding[],
 ): UfaGame | undefined {
-  const upcoming = games.filter((g) => gameUiState(g).isUpcoming);
+  // All-star exhibition excluded — same one-card rule as pickTopGame. At 2026
+  // champ weekend the all-star game was the only "upcoming" row between the
+  // semis and the final, so it headlined as Game of the week AND its own
+  // All-Star slide — the same game on two carousel cards.
+  const upcoming = games.filter((g) => !isAllStarGame(g) && gameUiState(g).isUpcoming);
   if (upcoming.length === 0) return undefined;
 
   const byWeek = groupByWeek(upcoming);

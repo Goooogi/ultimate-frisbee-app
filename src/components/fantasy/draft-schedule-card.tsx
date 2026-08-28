@@ -21,6 +21,7 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { getDraft, scheduleDraft, startDraft, type Draft } from '@/lib/fantasy/draft-room';
 import { getMyLeagueRole } from '@/lib/fantasy/leagues';
+import { formatDateOnly } from '@/lib/fantasy/games';
 
 const CLOCK_OPTIONS = [30, 60, 90, 120] as const;
 
@@ -29,9 +30,18 @@ interface Props {
   leagueId: string | null;
   /** Where the room lives for this contest (UFA canonical vs generic path). */
   draftPath: string;
+  /** Event contests: 'YYYY-MM-DD' the draft window opens (the Saturday before
+   *  the event — rosters are in by then). The DB RPCs enforce it; this only
+   *  surfaces the date and pre-validates the form. Omit for weekly games. */
+  draftOpens?: string | null;
 }
 
-export function DraftScheduleCard({ contestId, leagueId, draftPath }: Props) {
+/** Today as 'YYYY-MM-DD' in ET (the draft window's timezone). */
+function todayEt(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+}
+
+export function DraftScheduleCard({ contestId, leagueId, draftPath, draftOpens = null }: Props) {
   const { user } = useAuth();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,7 +84,7 @@ export function DraftScheduleCard({ contestId, leagueId, draftPath }: Props) {
 
   if (!draft) {
     if (!isCommissioner) return null;
-    return <ScheduleForm contestId={contestId} onScheduled={setDraft} />;
+    return <ScheduleForm contestId={contestId} draftOpens={draftOpens} onScheduled={setDraft} />;
   }
 
   if (draft.status === 'scheduled') {
@@ -206,9 +216,11 @@ function ScheduledAt({ iso }: { iso: string }) {
 
 function ScheduleForm({
   contestId,
+  draftOpens,
   onScheduled,
 }: {
   contestId: string;
+  draftOpens: string | null;
   onScheduled: (d: Draft) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -218,12 +230,19 @@ function ScheduleForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const windowNotOpen = draftOpens !== null && todayEt() < draftOpens;
+
   if (!open) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6 flex items-center justify-between gap-4 flex-wrap">
         <div>
           <div className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1">Draft</div>
-          <p className="font-tight text-[13px] text-muted">No draft scheduled yet.</p>
+          <p className="font-tight text-[13px] text-muted">
+            No draft scheduled yet.
+            {windowNotOpen && draftOpens && (
+              <> Drafts open {formatDateOnly(draftOpens)} — once teams and rosters are in.</>
+            )}
+          </p>
         </div>
         <button
           type="button"
@@ -243,6 +262,11 @@ function ScheduleForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Friendly pre-check only — fantasy_schedule_draft enforces the window.
+    if (draftOpens && at && at.slice(0, 10) < draftOpens) {
+      setError(`Drafts open ${formatDateOnly(draftOpens)} — pick a later time.`);
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -270,6 +294,7 @@ function ScheduleForm({
           id="draft-at"
           type="datetime-local"
           value={at}
+          min={draftOpens ? `${draftOpens}T00:00` : undefined}
           onChange={(e) => setAt(e.target.value)}
           className={[
             'w-full sm:w-auto px-3.5 py-2.5 rounded-card-sm bg-ink/5',
@@ -278,6 +303,12 @@ function ScheduleForm({
             'min-h-[44px]',
           ].join(' ')}
         />
+        {draftOpens && windowNotOpen && (
+          <p className="mt-1.5 text-[11px] text-faint font-tight">
+            Drafts open {formatDateOnly(draftOpens)}, the Saturday before the tournament — schedule
+            for then or later.
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap gap-6">

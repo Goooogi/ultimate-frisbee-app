@@ -1,27 +1,48 @@
 'use client';
 
-// Create-league form — auth-gated. name → createLeague → revalidate → redirect.
+// Create-league form — auth-gated. name + game → createLeague + createContest
+// → revalidate → redirect into the league.
+//
+// The game is chosen HERE (2026-08-27, Hunter): a league is created FOR a game.
+// It used to be a bare name, with a separate "enter this league into another
+// game" panel on the league page afterwards — which exposed the internal
+// "contest" concept the IA plan says should stay hidden, and left every new
+// league in an empty, unusable state until the commissioner found that panel.
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
-import { createLeague } from '@/lib/fantasy/leagues';
+import { PillSelect, type PillSelectOption } from '@/components/pill-select';
+import { createLeague, createContest } from '@/lib/fantasy/leagues';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
+import type { CompetitionId } from '@/lib/fantasy/competitions';
+import { GAMES } from '@/lib/fantasy/games';
 
 export function CreateLeagueForm() {
   return (
     <AuthGate
       headline="Sign in to create a league."
-      subhead="Leagues are free — invite your friends and pick your competitions once you're in."
+      subhead="Leagues are free — pick your game, then invite your friends."
     >
       <Form />
     </AuthGate>
   );
 }
 
+// Only live games can be created against; coming-soon ones render disabled so
+// the roadmap is visible without allowing a create that has nowhere to go.
+const GAME_OPTIONS: PillSelectOption<CompetitionId>[] = GAMES.filter((g) => g.status !== 'hidden').map(
+  (g) => ({
+    value: g.id,
+    label: g.status === 'live' ? g.name : `${g.name} — soon`,
+    disabled: g.status !== 'live',
+  }),
+);
+
 function Form() {
   const router = useRouter();
   const [name, setName] = useState('');
+  const [gameId, setGameId] = useState<CompetitionId>('ufa');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,8 +56,19 @@ function Form() {
     setError(null);
     try {
       const leagueId = await createLeague(trimmed);
-      await revalidateFantasyLeague(leagueId).catch(() => null);
-      router.push(`/fantasy/leagues/${leagueId}`);
+      // The league exists either way; a contest failure must not strand the
+      // user, so land them in the league and surface the problem there.
+      const contestId = await createContest(leagueId, gameId, new Date().getFullYear()).catch(
+        () => null,
+      );
+      await revalidateFantasyLeague(leagueId, contestId ?? undefined).catch(() => null);
+      router.push(
+        contestId
+          ? gameId === 'ufa'
+            ? `/fantasy/ufa/l/${contestId}`
+            : `/fantasy/contests/${contestId}`
+          : `/fantasy/leagues/${leagueId}`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create your league. Please try again.');
       setSaving(false);
@@ -68,6 +100,21 @@ function Form() {
           ].join(' ')}
         />
         <p className="mt-1 text-[11px] text-faint font-tight">{trimmed.length}/60 characters</p>
+
+        <div className="mt-5">
+          <div className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
+            Game
+          </div>
+          <PillSelect
+            value={gameId}
+            onChange={setGameId}
+            ariaLabel="Which game is this league for"
+            options={GAME_OPTIONS}
+          />
+          <p className="mt-1.5 text-[11px] text-faint font-tight">
+            Everyone in this league drafts and scores in this game.
+          </p>
+        </div>
 
         {error && (
           <div className="mt-4 px-4 py-3 rounded-card-sm bg-live/[0.08]">

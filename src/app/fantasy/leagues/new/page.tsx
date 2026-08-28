@@ -14,7 +14,7 @@ export default function NewLeaguePage() {
     <PageShell
       title="New League"
       eyebrow="Fantasy · Leagues"
-      subtitle="Name your league — you can invite friends and add competitions next."
+      subtitle="Name your league and pick your game — invite your friends next."
       breadcrumbs={BREADCRUMBS}
       hideFooterMobile
     >

@@ -206,12 +206,18 @@ export async function getMyDraftQueue(draftId: string): Promise<DraftRef[]> {
 /** Subscribe a draft room: fires on every new pick and on draft-row updates
  *  (status/clock advance). Caller refetches via getDraft/getDraftPicks on
  *  events (payloads are notifications, not the source of truth). Returns the
- *  channel; caller must unsubscribe on unmount. */
+ *  channel; caller must clean up with unsubscribeDraft() on unmount. */
 export function subscribeDraft(
   draftId: string,
   onChange: () => void,
 ): RealtimeChannel {
   const supabase = client();
+  // The browser client is a singleton and caches channels by topic. A prior
+  // mount's channel (unsubscribed or not) is returned as-is by channel(), and
+  // adding .on() to a once-subscribed channel throws — remove any stale
+  // instance first so re-entering the room (or a dev double-mount) works.
+  const stale = supabase.getChannels().find((c) => c.topic === `realtime:draft:${draftId}`);
+  if (stale) supabase.removeChannel(stale);
   return supabase
     .channel(`draft:${draftId}`)
     .on(
@@ -225,4 +231,11 @@ export function subscribeDraft(
       onChange,
     )
     .subscribe();
+}
+
+/** Tear down a room subscription — removeChannel (not bare unsubscribe) so
+ *  the singleton client drops its cached instance and the next mount can
+ *  subscribe cleanly. */
+export function unsubscribeDraft(channel: RealtimeChannel): void {
+  client().removeChannel(channel);
 }
