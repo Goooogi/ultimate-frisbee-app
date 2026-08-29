@@ -16,8 +16,18 @@ import { SourceLink } from '@/components/source-link';
 import { getEvent, type UsauEventSummary } from '@/lib/usau/data';
 import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
+import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { USAU_LEVELS, buildLeagueQs, type UsauLevel } from '@/lib/league';
+
+// Stars only render for events that haven't fully wrapped — a star on a past
+// event can never produce a notification (Push Notifications.md plan rule).
+function isUpcomingOrLive(event: UsauEventSummary): boolean {
+  const cutoff = event.endDate ?? event.startDate;
+  if (!cutoff) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return cutoff >= today;
+}
 
 export const revalidate = 60;
 
@@ -75,12 +85,27 @@ export default async function UsauEventPage({ params }: Props) {
       // as the WFDF event page — a quiet accent link, not a pill on its own row
       // (Hunter, 2026-08-22).
       controls={
-        event.url ? (
-          <SourceLink
-            href={event.url}
-            label="USAU site"
-            ariaLabel={`View ${event.name} on USA Ultimate`}
-          />
+        event.url || isUpcomingOrLive(event) ? (
+          <div className="flex items-center gap-2">
+            {event.url && (
+              <SourceLink
+                href={event.url}
+                label="USAU site"
+                ariaLabel={`View ${event.name} on USA Ultimate`}
+              />
+            )}
+            {isUpcomingOrLive(event) && (
+              <EventFavoriteStar
+                event={{
+                  league: 'usau',
+                  eventId: event.id,
+                  name: event.name,
+                  startDate: event.startDate,
+                  endDate: event.endDate,
+                }}
+              />
+            )}
+          </div>
         ) : undefined
       }
       breadcrumbs={[

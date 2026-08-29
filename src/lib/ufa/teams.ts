@@ -112,6 +112,7 @@ const NAME_HISTORY: Record<string, ReadonlyArray<{ through: number; name: string
   legion: [{ through: 2021, name: 'Roughnecks' }], // rebranded to Legion for 2022
   union: [{ through: 2019, name: 'Wildfire' }], // rebranded to Union for 2021 (2020 cancelled)
   cascades: [{ through: 2014, name: 'Raptors' }], // one season as Seattle Raptors
+  apex: [{ through: 2025, name: 'Summit' }], // 'Summit' ceded to NWSL's Denver Summit FC; first season as Apex is 2026
 };
 
 // Relocations under one slug — the API's per-game city field is HISTORICAL

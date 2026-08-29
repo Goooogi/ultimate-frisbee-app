@@ -30,6 +30,7 @@ import type {
 } from './types';
 import { teamInternalID } from './teams';
 import { isFinalStatus } from './format';
+import { getStatsPagesRoster } from './stats-pages';
 
 export const UFA_BASE = 'https://www.backend.ufastats.com/web-v1';
 const UA = 'Mozilla/5.0 (the-layout)';
@@ -316,6 +317,25 @@ export async function getGameBoxscore(gameID: string): Promise<UfaGameBoxscore> 
   const year = yearFromGameID(gameID);
   const roster = await getGameRoster(gameID);
 
+  let rosterAway = roster.away ?? [];
+  let rosterHome = roster.home ?? [];
+
+  // roster-reports has no roster for championship-weekend and all-star games
+  // (2/144 in 2026, including the title game). Only the ROSTER is missing for
+  // those — per-player stats still resolve normally — so swap in the
+  // stats-pages roster and run the same fan-out below.
+  //
+  // The all-star game stays empty by design: its rosters are WUL/PUL players
+  // who have no rows in UFA's player index, so nothing resolves for them and
+  // the UI falls through to its existing empty state.
+  if (rosterAway.length === 0 && rosterHome.length === 0) {
+    const fallback = await getStatsPagesRoster(gameID, year);
+    if (fallback) {
+      rosterAway = fallback.away;
+      rosterHome = fallback.home;
+    }
+  }
+
   const resolve = async (players: UfaRosterPlayer[]): Promise<UfaBoxscorePlayerRow[]> => {
     const rows = await Promise.all(
       players.map(async (p): Promise<UfaBoxscorePlayerRow> => {
@@ -339,11 +359,15 @@ export async function getGameBoxscore(gameID: string): Promise<UfaGameBoxscore> 
     return rows;
   };
 
-  const [away, home] = await Promise.all([resolve(roster.away), resolve(roster.home)]);
+  const [away, home] = await Promise.all([resolve(rosterAway), resolve(rosterHome)]);
   return { gameID, year, away, home };
 }
 
 // ── Champions ────────────────────────────────────────────────────────────────
+
+/** First UFA (then AUDL) season. 2020 was cancelled — the API returns no games
+ *  for it, which the `games.length === 0` guard already handles. */
+export const UFA_FIRST_SEASON = 2012;
 
 // Game start time as a sortable number; missing timestamps sort last.
 function gameTs(g: UfaGame): number {
@@ -476,13 +500,14 @@ export interface TeamPodium {
  * semifinal marker (2024+ playoff games are all `week-N`), so we can't identify
  * the losing semifinalists without guessing. Gold + silver only, newest first.
  *
- * Scans the modern UFA window (2021→current), where `findChampionshipGame`'s
- * label handling is validated. Only completed seasons yield a result.
+ * Scans every UFA season (2012→current) — `findChampionshipGame`'s label
+ * handling is validated across all of them. Only completed seasons yield a
+ * result; 2020 (cancelled) returns no games and is skipped.
  */
 export async function getUfaTeamPodiums(teamSlug: string): Promise<TeamPodium[]> {
   const current = currentSeasonYear();
   const years: number[] = [];
-  for (let y = current; y >= 2021; y--) years.push(y);
+  for (let y = current; y >= UFA_FIRST_SEASON; y--) years.push(y);
   const slug = teamSlug.toLowerCase();
   const out: TeamPodium[] = [];
 

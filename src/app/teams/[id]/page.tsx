@@ -178,10 +178,14 @@ export default async function TeamPage({ params, searchParams }: Props) {
         { label: `${displayCity} ${displayName}` },
       ]}
       controls={<YearSelector currentYear={year} years={seasons} />}
+      compactHeaderMobile
     >
-      {/* Hero band with team color — floats on shadow, softened corners */}
+      {/* Hero band with team color — floats on shadow, softened corners.
+          Mobile: shorter (no md: step-up), tighter gaps, smaller type —
+          the compact page header above already carries the team name at
+          full size, so this band's job on a phone is logo + record only. */}
       <div
-        className="relative overflow-hidden mb-6 px-6 py-8 md:px-8 md:py-10 rounded-card-xl shadow-hero"
+        className="relative overflow-hidden mb-4 lg:mb-6 px-5 py-5 md:px-8 md:py-10 rounded-card-xl shadow-hero"
         style={{ background: meta.primary }}
         aria-hidden="false"
       >
@@ -192,11 +196,11 @@ export default async function TeamPage({ params, searchParams }: Props) {
           aria-hidden="true"
         />
 
-        <div className="relative z-10 flex flex-wrap items-end justify-between gap-6">
-          <div className="flex items-center gap-5">
+        <div className="relative z-10 flex flex-wrap items-end justify-between gap-4 lg:gap-6">
+          <div className="flex items-center gap-4 lg:gap-5">
             {/* Logo (or abbr fallback) — circular white disc per v2 chip treatment */}
             <div
-              className="flex items-center justify-center w-[72px] h-[72px] md:w-[96px] md:h-[96px] relative overflow-hidden flex-shrink-0 rounded-full bg-white"
+              className="flex items-center justify-center w-[56px] h-[56px] md:w-[96px] md:h-[96px] relative overflow-hidden flex-shrink-0 rounded-full bg-white"
             >
               {displayLogo ? (
                 <img
@@ -206,7 +210,7 @@ export default async function TeamPage({ params, searchParams }: Props) {
                 />
               ) : (
                 <span
-                  className="font-display italic text-[28px] md:text-[36px] font-bold tracking-[0.02em] uppercase"
+                  className="font-display italic text-[22px] md:text-[36px] font-bold tracking-[0.02em] uppercase"
                   style={{ color: meta.primary }}
                 >
                   {meta.abbr}
@@ -215,13 +219,13 @@ export default async function TeamPage({ params, searchParams }: Props) {
             </div>
 
             <div>
-              <div className="text-[11px] font-bold tracking-[0.2em] uppercase font-sans mb-1" style={{ color: 'rgba(255,255,255,0.6)' }}>
+              <div className="text-[9.5px] md:text-[11px] font-bold tracking-[0.2em] uppercase font-sans mb-1" style={{ color: 'rgba(255,255,255,0.6)' }}>
                 {meta.division ? `${meta.division} Division` : 'UFA'}
               </div>
-              <div className="font-display italic text-[32px] md:text-[42px] font-bold uppercase leading-[0.95] tracking-[-0.01em]" style={{ color: '#fff' }}>
+              <div className="font-display italic text-[24px] md:text-[42px] font-bold uppercase leading-[0.95] tracking-[-0.01em]" style={{ color: '#fff' }}>
                 {displayName}
               </div>
-              <div className="text-[13px] font-medium font-sans mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
+              <div className="text-[12px] md:text-[13px] font-medium font-sans mt-1" style={{ color: 'rgba(255,255,255,0.7)' }}>
                 {locationLine(displayCity, ufaTeamState(meta.id))}
               </div>
             </div>
@@ -232,11 +236,11 @@ export default async function TeamPage({ params, searchParams }: Props) {
               the W-L only. */}
           {recordStr && (
             <div className="flex flex-col items-end gap-1">
-              <div className="tabular font-display italic text-[36px] md:text-[44px] font-bold leading-[0.95]" style={{ color: '#fff' }}>
+              <div className="tabular font-display italic text-[28px] md:text-[44px] font-bold leading-[0.95]" style={{ color: '#fff' }}>
                 {recordStr}
               </div>
               {standing && standing.pointDiff !== 0 && (
-                <div className="text-[11px] font-bold tracking-[0.1em] uppercase font-sans" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                <div className="text-[9.5px] md:text-[11px] font-bold tracking-[0.1em] uppercase font-sans" style={{ color: 'rgba(255,255,255,0.55)' }}>
                   {standing.pointDiff > 0 ? `+${standing.pointDiff}` : standing.pointDiff} point diff
                 </div>
               )}
@@ -252,36 +256,42 @@ export default async function TeamPage({ params, searchParams }: Props) {
         </div>
       )}
 
-      {/* Team stats strip */}
+      {/* Team stats strip — mobile shows 6 tiles in one row with hairline
+          dividers (PF/PA/CMP/TO/BLK/GP, matching the native app); "Holds"
+          only reappears at lg+ where there's room for all 7. Desktop keeps
+          its original grid-cols-4/8 wrap behavior untouched. */}
       {teamStatRow && (
-        <div className="grid grid-cols-4 md:grid-cols-8 bg-surface rounded-card-lg shadow-card mb-8 overflow-hidden">
+        <div className="flex lg:grid lg:grid-cols-4 xl:grid-cols-8 bg-surface rounded-card-lg shadow-card mb-6 lg:mb-8 overflow-hidden divide-x divide-hairline lg:divide-x-0">
           {[
-            { label: 'PF', value: teamStatRow.scoresFor },
-            { label: 'PA', value: teamStatRow.scoresAgainst },
-            { label: 'Cmp', value: teamStatRow.completions },
-            { label: 'TO', value: teamStatRow.turnovers },
-            { label: 'Blk', value: teamStatRow.blocks },
-            { label: 'Holds', value: teamStatRow.holds },
-            { label: 'GP', value: teamStatRow.gamesPlayed },
+            { label: 'PF', value: teamStatRow.scoresFor, mobile: true },
+            { label: 'PA', value: teamStatRow.scoresAgainst, mobile: true },
+            { label: 'Cmp', value: teamStatRow.completions, mobile: true },
+            { label: 'TO', value: teamStatRow.turnovers, mobile: true },
+            { label: 'Blk', value: teamStatRow.blocks, mobile: true },
+            { label: 'Holds', value: teamStatRow.holds, mobile: false },
+            { label: 'GP', value: teamStatRow.gamesPlayed, mobile: true },
           ]
             .filter(({ value }) => value != null)
-            .map(({ label, value }) => (
+            .map(({ label, value, mobile }) => (
               <div
                 key={label}
-                className="flex flex-col items-center justify-center px-2 py-4 gap-0.5"
+                className={[
+                  'flex-1 flex flex-col items-center justify-center px-1.5 py-3 lg:px-2 lg:py-4 gap-0.5 min-w-0',
+                  mobile ? '' : 'hidden lg:flex',
+                ].join(' ')}
               >
-                <div className="tabular font-display italic text-[22px] font-bold leading-none text-ink">{value}</div>
-                <div className="text-[9px] font-bold tracking-[0.16em] uppercase text-muted font-tight">{label}</div>
+                <div className="tabular font-display italic text-[16px] lg:text-[22px] font-bold leading-none text-ink">{value}</div>
+                <div className="text-[7.5px] lg:text-[9px] font-bold tracking-[0.1em] lg:tracking-[0.16em] uppercase text-muted font-tight mt-0.5">{label}</div>
               </div>
             ))}
         </div>
       )}
 
-      <div className="flex flex-col gap-10">
+      <div className="flex flex-col gap-8 lg:gap-10">
         {/* Roster */}
         {players.length > 0 && (
           <section aria-labelledby="roster-heading">
-            <div className="flex items-end justify-between gap-4 mb-4">
+            <div className="flex items-end justify-between gap-4 mb-3 lg:mb-4">
               <h2
                 id="roster-heading"
                 className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans m-0"

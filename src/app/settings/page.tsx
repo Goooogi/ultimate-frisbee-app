@@ -3,6 +3,7 @@ import { AuthGate } from '@/components/auth/auth-gate';
 import { AppShell } from '@/components/page-shell';
 import { ProfileSettings } from '@/components/settings/profile-settings';
 import { FavoritesSettings } from '@/components/settings/favorites-settings';
+import { NotificationsSettings } from '@/components/settings/notifications-settings';
 import { DeleteAccountSettings } from '@/components/settings/delete-account-settings';
 import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
 
@@ -40,6 +41,7 @@ export default function SettingsPage() {
                 Hidden while For You is unfinished (backlog #14); re-appears
                 automatically when the flag flips to true. */}
             {FOR_YOU_ENABLED && <FavoritesSettings />}
+            <NotificationsSettings />
             <DeleteAccountSettings />
           </div>
         </div>

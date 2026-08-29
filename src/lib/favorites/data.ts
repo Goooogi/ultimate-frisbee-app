@@ -53,6 +53,17 @@ export interface FavoritePlayer {
   headshotUrl: string | null;
 }
 
+/** A starred tournament — the (league, eventId) pair, with the event's own
+ *  fields denormalized (mirrors FavoriteTeam) so the feed/star can render
+ *  without a join. USAU/WFDF only per the plan (Push Notifications.md). */
+export interface FavoriteEvent {
+  league: 'usau' | 'wfdf';
+  eventId: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+}
+
 export interface MyFavorites {
   leagues: FavoriteLeague[];
   teams: FavoriteTeam[];
@@ -296,4 +307,70 @@ export async function setFavoriteLeagues(leagues: FavoriteLeague[]): Promise<voi
       .in('league', toRemove);
     if (error) throw error;
   }
+}
+
+// ─── Event (starred tournament) writes ───────────────────────────────────────
+
+/** Whether the signed-in user has starred this event. False when signed out. */
+export async function isEventFavorited(
+  league: FavoriteEvent['league'],
+  eventId: string,
+): Promise<boolean> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data, error } = await supabase
+    .from('user_favorite_events')
+    .select('event_id')
+    .eq('user_id', user.id)
+    .eq('league', league)
+    .eq('event_id', eventId)
+    .maybeSingle();
+  if (error) throw error;
+  return data != null;
+}
+
+/** Star a tournament. Idempotent (upsert on the (user, league, event) PK).
+ *  owner id comes from the session. No cap — a user stars far fewer events
+ *  than teams/players in practice. */
+export async function addFavoriteEvent(event: FavoriteEvent): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const { error } = await supabase.from('user_favorite_events').upsert(
+    {
+      user_id: user.id,
+      league: event.league,
+      event_id: event.eventId,
+      name: event.name,
+      start_date: event.startDate,
+      end_date: event.endDate,
+    },
+    { onConflict: 'user_id,league,event_id' },
+  );
+  if (error) throw error;
+}
+
+/** Unstar a tournament by its (league, eventId). No-op if not favorited. */
+export async function removeFavoriteEvent(
+  league: FavoriteEvent['league'],
+  eventId: string,
+): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  const { error } = await supabase
+    .from('user_favorite_events')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('league', league)
+    .eq('event_id', eventId);
+  if (error) throw error;
 }

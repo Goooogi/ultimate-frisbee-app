@@ -11,7 +11,9 @@
 //   The league pill lives IN the AppRail on mobile — no separate below-rail strip.
 
 import { Suspense, useEffect, useRef, useState } from 'react';
-import { usePaneScrollRestoration } from '@/lib/nav-history';
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { usePaneScrollRestoration, previousUrl } from '@/lib/nav-history';
 import { AppRail } from '@/components/app-rail';
 import { SectionNavForRoute } from '@/components/games-subnav';
 import { Breadcrumbs, type Crumb } from '@/components/breadcrumbs';
@@ -150,6 +152,11 @@ interface PageShellProps {
   /** Wider content cap for dashboard/bento layouts (e.g. For You) that need more
    *  horizontal room than the default reading width. */
   wide?: boolean;
+  /** Mobile-only: collapse the breadcrumb + big italic <h1> block into a single
+   *  compact row (back chevron + title + `controls` inline, e.g. a year pill).
+   *  Desktop is unaffected — it keeps the standard breadcrumb/title stack.
+   *  Needs `breadcrumbs` (for the back target) to render the chevron. */
+  compactHeaderMobile?: boolean;
   children: React.ReactNode;
 }
 
@@ -165,6 +172,7 @@ export function PageShell({
   stickyName,
   hideFooterMobile,
   wide,
+  compactHeaderMobile,
   children,
 }: PageShellProps) {
   return (
@@ -174,15 +182,27 @@ export function PageShell({
         wide ? 'lg:px-10 xl:px-8 lg:max-w-[1320px]' : 'lg:px-14 lg:max-w-[1080px]',
       ].join(' ')}>
         {stickyName && <StickyName name={stickyName} />}
-        {breadcrumbsSlot ??
-          (breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />)}
-        <PageHeader
-          title={title}
-          subtitle={subtitle}
-          eyebrow={eyebrow}
-          titleLeft={titleLeft}
-          controls={controls}
-        />
+
+        {/* Compact mobile header — back chevron + title + controls in one row.
+            Desktop keeps the standard breadcrumb/eyebrow/h1 stack unchanged. */}
+        {compactHeaderMobile && (
+          <div className="lg:hidden">
+            <CompactHeader title={title} breadcrumbs={breadcrumbs} controls={controls} />
+          </div>
+        )}
+
+        <div className={compactHeaderMobile ? 'hidden lg:block' : undefined}>
+          {breadcrumbsSlot ??
+            (breadcrumbs && breadcrumbs.length > 0 && <Breadcrumbs crumbs={breadcrumbs} />)}
+          <PageHeader
+            title={title}
+            subtitle={subtitle}
+            eyebrow={eyebrow}
+            titleLeft={titleLeft}
+            controls={controls}
+          />
+        </div>
+
         {stickyName && <StickySentinel />}
         {children}
       </div>
@@ -296,6 +316,55 @@ function PageHeader({
         )}
       </div>
       {controls && <div className="flex items-center gap-3 flex-wrap">{controls}</div>}
+    </div>
+  );
+}
+
+// ── Compact mobile header (opt-in via PageShell `compactHeaderMobile`) ──────
+//
+// Collapses the breadcrumb + big italic <h1> stack into one row: back
+// chevron, page title (truncates), and `controls` (e.g. a year pill)
+// right-aligned. Reuses Breadcrumbs' smart-back logic (pop real history when
+// it leads back to the same parent; otherwise a plain link) so behavior
+// matches the desktop breadcrumb exactly — only the presentation differs.
+function CompactHeader({
+  title,
+  breadcrumbs,
+  controls,
+}: {
+  title: string;
+  breadcrumbs?: Crumb[];
+  controls?: React.ReactNode;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const parent = breadcrumbs && breadcrumbs.length >= 2 ? breadcrumbs[breadcrumbs.length - 2] : null;
+  const href = parent?.href;
+
+  return (
+    <div className="flex items-center gap-2 mb-4 min-w-0">
+      {href && (
+        <Link
+          href={href}
+          onClick={(e) => {
+            if (previousUrl(pathname) != null) {
+              e.preventDefault();
+              router.back();
+            }
+          }}
+          aria-label={`Back to ${parent.label}`}
+          className="flex-shrink-0 -ml-1.5 p-1.5 text-ink hover:text-accent transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+        >
+          <svg width="18" height="18" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9 2L4 7l5 5" />
+          </svg>
+        </Link>
+      )}
+      <h1 className="min-w-0 flex-1 truncate m-0 font-display italic text-[19px] font-bold tracking-[-0.01em] text-ink">
+        {title}
+      </h1>
+      {controls && <div className="flex-shrink-0 flex items-center gap-2">{controls}</div>}
     </div>
   );
 }
