@@ -25,6 +25,13 @@
 // upstream player id is SKIPPED (never aborts the run — that exact crash is why
 // the manual script silently stopped landing stats).
 //
+// The one DESTRUCTIVE step is the orphan prune (step 1b): season rows whose
+// gameID vanished upstream are deleted, but ONLY when we're certain we fetched
+// the complete season (short terminal page AND count == the feed's `total`).
+// ufa_game_player_stats cascades off ufa_games, so an ungated prune on a partial
+// fetch would wipe real stats — see the comment at the prune for why the gate
+// matters more than the prune does.
+//
 // Request body (all optional):
 //   { "year": 2026, "windowDays": 14, "maxGames": 12, "retryDays": 5,
 //     "maxPlayerFetches": 120 }   (larger for manual repair runs; wall-clock caps ~400)
@@ -115,6 +122,69 @@ async function fetchHeadshotUrl(supabase: SupabaseClient, playerID: string): Pro
   return supabase.storage.from(HEADSHOT_BUCKET).getPublicUrl(objectPath).data.publicUrl;
 }
 
+// ── roster-reports fallback for championship-weekend / all-star games ───────
+// roster-reports returns {home:[],away:[]} for those games (confirmed live),
+// which silently left the title game's stat rows out of every hourly sync —
+// same gap the app's own boxscore/jersey-number fallbacks work around via
+// stats-pages/game/{gameID}. Ported here so the cron doesn't permanently skip
+// a championship weekend every season.
+
+/** Collapse a name to comparable letters — case, accents, punctuation and
+ *  spacing all drift between the two feeds. */
+function normalizeName(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z]/g, '');
+}
+
+/** name → playerID for one season, from player-stats?year=Y. Colliding names
+ *  map to null so they're skipped rather than resolved to the wrong player. */
+async function buildPlayerNameIndex(year: number): Promise<Map<string, string | null>> {
+  const byName = new Map<string, string | null>();
+  for (let page = 1; page <= 30; page++) {
+    const data = await ufaGet<{ stats?: ApiPlayerStat[] }>(
+      `player-stats?year=${year}&limit=30&page=${page}`,
+    );
+    const rows = data.stats ?? [];
+    for (const p of rows) {
+      const key = normalizeName(p.name ?? '');
+      if (!key) continue;
+      byName.set(key, byName.has(key) ? null : p.playerID);
+    }
+    if (rows.length < 30) break;
+    await sleep(FETCH_GAP_MS);
+  }
+  return byName;
+}
+
+/** Roster for one game via stats-pages, with playerIDs resolved by name
+ *  against the season's player index. Returns null when stats-pages has no
+ *  roster for the game either. */
+async function fetchRosterViaStatsPages(
+  gameID: string,
+  nameIndex: Map<string, string | null>,
+): Promise<ApiRosterReports | null> {
+  const data = await ufaStatsPagesGet<ApiStatsPagesGame>(gameID);
+  if (!data) return null;
+  const convert = (rows: StatsPagesRosterEntry[]): ApiRosterPlayer[] => {
+    const out: ApiRosterPlayer[] = [];
+    for (const e of rows) {
+      const first = e.player?.first_name ?? '';
+      const last = e.player?.last_name ?? '';
+      const playerID = nameIndex.get(normalizeName(`${first}${last}`));
+      if (!playerID) continue;
+      out.push({ playerID, firstName: first, lastName: last });
+    }
+    return out;
+  };
+  const home = convert(data.rostersHome ?? []);
+  const away = convert(data.rostersAway ?? []);
+  if (home.length === 0 && away.length === 0) return null;
+  return { home, away };
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function db(): SupabaseClient {
@@ -140,6 +210,23 @@ async function ufaGet<T>(path: string, attempt = 1): Promise<T> {
       return ufaGet<T>(path, attempt + 1);
     }
     throw new Error(`UFA ${path} failed after ${attempt} tries: ${(err as Error).message}`);
+  }
+}
+
+const STATS_PAGES_BASE = 'https://www.backend.ufastats.com/stats-pages';
+
+/** Best-effort — same endpoint watchufa's own game center uses. Returns null
+ *  on any failure rather than retrying; the caller already has a game to
+ *  process either way (roster-reports may just be genuinely empty). */
+async function ufaStatsPagesGet<T>(gameID: string): Promise<T | null> {
+  try {
+    const res = await fetch(`${STATS_PAGES_BASE}/game/${encodeURIComponent(gameID)}`, {
+      headers: { 'User-Agent': UA, Accept: 'application/json' },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
   }
 }
 
@@ -176,6 +263,15 @@ interface ApiGame {
 }
 interface ApiRosterPlayer { playerID: string; firstName?: string; lastName?: string; status?: string }
 interface ApiRosterReports { home?: ApiRosterPlayer[]; away?: ApiRosterPlayer[] }
+interface ApiPlayerStat { playerID: string; name?: string }
+interface StatsPagesRosterEntry {
+  jersey_number?: string | number | null;
+  player: { first_name?: string; last_name?: string } | null;
+}
+interface ApiStatsPagesGame {
+  rostersHome?: StatsPagesRosterEntry[] | null;
+  rostersAway?: StatsPagesRosterEntry[] | null;
+}
 interface ApiPlayerGameRow {
   gameID: string; isHome: boolean;
   goals: number; assists: number; hockeyAssists: number; blocks: number; callahans: number;
@@ -185,18 +281,30 @@ interface ApiPlayerGameRow {
   secondsPlayed: number; pulls: number; hucksCompleted: number; hucksAttempted: number;
 }
 
-async function fetchGames(year: number): Promise<ApiGame[]> {
+/**
+ * Walk the season's games pages.
+ *
+ * `complete` reports whether we are certain we saw the WHOLE season: the walk
+ * ended on a short page (upstream's terminal signal) AND the row count matches
+ * the `total` the feed reports alongside every page. Anything else — a page cap
+ * hit, a mid-walk shortfall — leaves it false. Only the orphan prune reads this;
+ * the upsert path is safe either way (it only ever writes what it saw).
+ */
+async function fetchGames(year: number): Promise<{ games: ApiGame[]; complete: boolean }> {
   const out: ApiGame[] = [];
+  let total: number | null = null;
+  let sawShortPage = false;
   for (let page = 1; page <= 30; page++) {
-    const data = await ufaGet<{ games?: ApiGame[] }>(
+    const data = await ufaGet<{ games?: ApiGame[]; total?: number }>(
       `games?years=${year}&limit=${MAX_GAMES_LIMIT}&page=${page}`,
     );
+    if (typeof data.total === 'number') total = data.total;
     const rows = data.games ?? [];
     out.push(...rows);
-    if (rows.length < MAX_GAMES_LIMIT) break;
+    if (rows.length < MAX_GAMES_LIMIT) { sawShortPage = true; break; }
     await sleep(FETCH_GAP_MS);
   }
-  return out;
+  return { games: out, complete: sawShortPage && total !== null && out.length === total };
 }
 
 async function upsert(supabase: SupabaseClient, table: string, rows: Record<string, unknown>[], onConflict: string) {
@@ -238,7 +346,7 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
 
   // 1. Season games. Upsert ALL of them (cheap) so schedule/scores/status stay
   //    fresh even for games we don't fan-out stats for this run.
-  const games = await fetchGames(year);
+  const { games, complete: seasonFetchComplete } = await fetchGames(year);
   const gameRows = games.filter((g) => isSafeId(g.gameID)).map((g) => gameRowOf(g, year));
 
   // Make sure every team slug referenced by these games exists (minimal row —
@@ -261,6 +369,66 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     if (missing.length > 0) await upsert(supabase, 'ufa_teams', missing, 'id');
   }
   if (gameRows.length > 0) await upsert(supabase, 'ufa_games', gameRows, 'id');
+
+  // 1b. Prune orphans — rows we hold for THIS season whose gameID no longer
+  // exists upstream. UFA reschedules/renumbers games (the gameID encodes the
+  // date + both team codes, so a postponed game reappears under a NEW id) and
+  // nothing else ever removes the dead row: it lingers forever as a phantom
+  // fixture on schedules, standings and team pages.
+  //
+  // GATED on seasonFetchComplete, and this gate is load-bearing:
+  // ufa_game_player_stats.game_id is ON DELETE CASCADE, so deleting a game row
+  // silently destroys its stat lines too. If a page walk came back partial
+  // (upstream 5xx mid-walk, page cap, a `total` mismatch), the games we DIDN'T
+  // see are indistinguishable from games that no longer exist — pruning on that
+  // basis would delete real games and cascade away real stats. When in doubt we
+  // keep the row: a phantom fixture is a cosmetic bug, a cascaded stat wipe is
+  // data loss. `pruneSkipped` carries the reason when we decline (null = ran).
+  //
+  // Scoped to `year` so it can never touch another season's rows, and never
+  // deletes when the upstream set is empty (a feed returning nothing for a
+  // season is a fault, not an emptied season).
+  let orphansPruned = 0;
+  let prunedIds: string[] = [];
+  let pruneSkipped: string | null = null;
+  if (!seasonFetchComplete) {
+    pruneSkipped = 'season fetch incomplete';
+  } else if (gameRows.length === 0) {
+    pruneSkipped = 'upstream returned no games';
+  } else {
+    const upstreamIds = new Set(gameRows.map((r) => r.id as string));
+    // Paged explicitly: PostgREST caps a single response at 1000 rows and
+    // truncates SILENTLY. A truncated scan can't invent an orphan (unseen rows
+    // are simply not considered), but paging keeps that true if a season ever
+    // exceeds the cap rather than leaving it a latent cascade-delete hazard.
+    const held: string[] = [];
+    {
+      const PAGE = 1000;
+      for (let from = 0; ; from += PAGE) {
+        const { data, error: heldErr } = await supabase
+          .from('ufa_games')
+          .select('id')
+          .eq('year', year)
+          .range(from, from + PAGE - 1);
+        if (heldErr) throw new Error(`prune scan ufa_games: ${heldErr.message}`);
+        const rows = data ?? [];
+        for (const r of rows) held.push((r as { id: string }).id);
+        if (rows.length < PAGE) break;
+      }
+    }
+    const orphans = held.filter((id) => !upstreamIds.has(id));
+    if (orphans.length > 0) {
+      const { error: delErr } = await supabase
+        .from('ufa_games')
+        .delete()
+        .eq('year', year)
+        .in('id', orphans);
+      if (delErr) throw new Error(`prune delete ufa_games: ${delErr.message}`);
+      orphansPruned = orphans.length;
+      prunedIds = orphans;
+      console.warn(`[sync-ufa] pruned ${orphans.length} orphaned ${year} games: ${orphans.join(', ')}`);
+    }
+  }
 
   // 2. Recent, non-Upcoming games in the window — candidates for stat sync.
   const candidates = games
@@ -331,6 +499,11 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
   const playerRows: Record<string, unknown>[] = [];
   const statRows: Record<string, unknown>[] = [];
 
+  // Built lazily, once, only if a game actually needs it (championship-weekend
+  // / all-star games where roster-reports comes back empty) — the 30-page walk
+  // isn't worth the cost on a normal run where every game resolves directly.
+  let playerNameIndex: Map<string, string | null> | null = null;
+
   for (const g of recent) {
     // Stop starting new games once the fetch budget is (nearly) spent — a game
     // needs a full roster's worth of fetches to be useful, so don't begin one we
@@ -343,10 +516,31 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
       console.warn(`[sync-ufa] roster failed for ${g.gameID}: ${(err as Error).message}`);
       continue;
     }
+    // roster-reports returns {home:[],away:[]} for championship-weekend and
+    // all-star games (confirmed live against the upstream API) — without this
+    // fallback the title game was silently skipped on EVERY hourly run,
+    // forever, with no error (the player-of-the-game / champion badge on
+    // /players/[id] reads this table and stayed permanently stale for the
+    // season's biggest game). Same stats-pages fallback the app's own
+    // boxscore/jersey-number code uses.
+    if ((roster.home ?? []).length === 0 && (roster.away ?? []).length === 0) {
+      if (!playerNameIndex) {
+        try {
+          playerNameIndex = await buildPlayerNameIndex(year);
+        } catch (err) {
+          console.warn(`[sync-ufa] player name index failed: ${(err as Error).message}`);
+          playerNameIndex = new Map();
+        }
+      }
+      const fallback = await fetchRosterViaStatsPages(g.gameID, playerNameIndex);
+      if (fallback) roster = fallback;
+    }
     // Drop "Not Rostered" org players — roster-reports returns the WHOLE org
     // (~70+ entries incl. practice squad); only game-rostered players can have a
     // stat line, and fetching dead logs was burning most of the fetch budget
-    // (~30 wasted fetches/game — starved multi-game runs).
+    // (~30 wasted fetches/game — starved multi-game runs). The stats-pages
+    // fallback has no "Not Rostered" concept (it only returns dressed players),
+    // so `status` is undefined there and this filter is a no-op for it.
     const rosterPlayers = [...(roster.home ?? []), ...(roster.away ?? [])]
       .filter((rp) => rp.status !== 'Not Rostered');
 
@@ -446,6 +640,10 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
   return {
     year,
     gamesUpserted: gameRows.length,
+    seasonFetchComplete,
+    orphansPruned,
+    prunedIds,
+    pruneSkipped,
     recentGamesProcessed: recent.length,
     playerFetches,
     headshotFetches,
