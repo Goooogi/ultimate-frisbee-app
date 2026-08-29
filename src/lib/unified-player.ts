@@ -471,8 +471,17 @@ async function _getUnifiedPlayerProfile(
   // home-state signal, don't suppress — keep the UFA career (default to same
   // person). We only DROP the UFA career when the cluster HAS location data and
   // it contradicts the UFA team's state.
+  //
+  // PRECONDITION — the name must actually be ambiguous. Geography only answers
+  // "WHICH of the same-named people is the pro?"; when the USAU rows all merged
+  // into ONE human there is nobody to confuse them with, and a state mismatch
+  // means the player MOVED, not that this is someone else. Without this check
+  // the gate deletes the real UFA career of every player whose club history is
+  // in a different state than their UFA team — e.g. Chander Boyd-Fliegel
+  // (Oregon/Rhino/Emerald City → NW states) signing with the Oakland Spiders
+  // (CA): his whole 2026 championship season vanished from his profile.
   let attachUfa = true;
-  if (sideUfa && sideUsau && (sideUsau.homeStates?.length ?? 0) > 0) {
+  if (sideUfa && sideUsau && sideUsau.nameIsAmbiguous && (sideUsau.homeStates?.length ?? 0) > 0) {
     const usauStates = new Set(sideUsau.homeStates);
     const ufaStates = sideUfa.stints
       .map(({ stint }) => ufaTeamState(stint.teamId))

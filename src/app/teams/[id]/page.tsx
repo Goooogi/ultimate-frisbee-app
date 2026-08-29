@@ -13,6 +13,7 @@ import {
   getUfaTeamPodiums,
   currentSeasonYear,
 } from '@/lib/ufa/client';
+import { getStatsPagesRoster } from '@/lib/ufa/stats-pages';
 import { teamSeasons } from '@/lib/ufa/season';
 import { TeamMedals } from '@/components/team-medals';
 import { YearSelector } from '@/components/year-selector';
@@ -121,8 +122,17 @@ export default async function TeamPage({ params, searchParams }: Props) {
   if (latestGame) {
     try {
       const roster = await getGameRoster(latestGame.gameID);
-      const ourSide =
-        latestGame.homeTeamID === id ? roster.home : roster.away;
+      let ourSide = latestGame.homeTeamID === id ? roster.home : roster.away;
+      // roster-reports returns {home:[],away:[]} for championship-weekend and
+      // all-star games — a team whose LATEST game is the title game would
+      // otherwise fall back to row-index numbers for its whole roster (bit
+      // the 2026 champion Spiders). Same fallback as getGameBoxscore.
+      if (roster.home.length === 0 && roster.away.length === 0) {
+        const fallback = await getStatsPagesRoster(latestGame.gameID, year).catch(() => null);
+        if (fallback) {
+          ourSide = latestGame.homeTeamID === id ? fallback.home : fallback.away;
+        }
+      }
       for (const r of ourSide) {
         if (r.jerseyNumber != null && r.jerseyNumber !== '') {
           jerseyByPlayer.set(r.playerID, String(r.jerseyNumber));

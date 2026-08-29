@@ -2940,6 +2940,15 @@ export interface UsauPlayerSummary {
    *  Mountain" → CO). Used for cross-league pro-career attribution when a name
    *  splits into multiple people. Empty when no series region is recognized. */
   homeStates: string[];
+  /** Did this display name split into MORE THAN ONE distinct human? False when
+   *  every same-named row merged into a single cluster.
+   *
+   *  This is the precondition for using `homeStates` to attribute a pro career.
+   *  Geography only ever answers "WHICH of the same-named people is the pro?" —
+   *  with exactly one person there is nobody to confuse them with, and a state
+   *  mismatch just means the player MOVED (Portland/Seattle club → Oakland
+   *  Spiders). Dropping the career on that basis deletes real history. */
+  nameIsAmbiguous: boolean;
 }
 
 /**
@@ -2954,6 +2963,105 @@ export interface UsauPlayerSummary {
  * streak, roster overlap, geo, timeline) and a manual override table.
  * Design doc: ~/.claude/projects/<...>/memory/project_usau_player_identity.md
  */
+/**
+ * Build a predicate telling whether two team IDENTITY tuples are really the same
+ * squad registered under two names (see the call site for why this exists).
+ *
+ * Decided by ROSTER OVERLAP, never by name shape: "Rhino"/"Rhino Slam!" share
+ * 24 of 25 players, while genuine prefix-lookalikes ("Oregon"/"Oregon State",
+ * "Virginia"/"Virginia Tech") share essentially none. We use CONTAINMENT — the
+ * smaller roster's share of players also on the larger — because a team's
+ * one-off tournament registration is often a partial squad.
+ *
+ * Only the candidate cluster's own teams are examined, so this adds one query
+ * bounded by the namesakes' team count.
+ */
+async function buildTeamAliasChecker(
+  db: Awaited<ReturnType<typeof supabase>>,
+  candidateRosters: Array<{ team_id: string; season: number }>,
+): Promise<(a: string, b: string) => boolean> {
+  const teamIds = Array.from(new Set(candidateRosters.map((r) => r.team_id)));
+  if (teamIds.length < 2) return () => false;
+
+  // Every player on each candidate team, keyed by team, so we can compare
+  // squads. Paged — a single Nationals team-event can approach the row cap.
+  const membersByTeam = new Map<string, Set<string>>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await db
+      .from('usau_rosters')
+      .select('team_id, player_id, usau_players(display_name)')
+      .in('team_id', teamIds)
+      .range(from, from + PAGE - 1);
+    const rows = (data ?? []) as unknown as Array<{
+      team_id: string;
+      usau_players: { display_name: string } | null;
+    }>;
+    for (const r of rows) {
+      // Compare by NAME, not player_id: the scraper mints a fresh player id per
+      // event registration, so the same human on two of a team's events has two
+      // ids and id-overlap would read as zero.
+      const nm = r.usau_players?.display_name?.toLowerCase();
+      if (!nm) continue;
+      const set = membersByTeam.get(r.team_id) ?? new Set<string>();
+      set.add(nm);
+      membersByTeam.set(r.team_id, set);
+    }
+    if (rows.length < PAGE) break;
+  }
+
+  // Roll team rosters up to the IDENTITY tuple the conflict rule compares.
+  const identityOf = new Map<string, string>();
+  {
+    const { data } = await db
+      .from('usau_teams')
+      .select('id, name, gender_division, competition_level')
+      .in('id', teamIds);
+    for (const t of (data ?? []) as Array<{
+      id: string; name: string | null;
+      gender_division: string | null; competition_level: string | null;
+    }>) {
+      identityOf.set(
+        t.id,
+        [(t.name ?? '').toLowerCase(), t.gender_division ?? '', t.competition_level ?? ''].join('|'),
+      );
+    }
+  }
+  const membersByIdentity = new Map<string, Set<string>>();
+  for (const [teamId, members] of membersByTeam.entries()) {
+    const ident = identityOf.get(teamId);
+    if (!ident) continue;
+    const set = membersByIdentity.get(ident) ?? new Set<string>();
+    for (const m of members) set.add(m);
+    membersByIdentity.set(ident, set);
+  }
+
+  // A real alias shares nearly its whole (smaller) roster. 0.6 sits far above
+  // what distinct teams share (rivals overlap ~0, and even a few players moving
+  // between clubs lands nowhere near this) and comfortably below the 0.96 the
+  // Rhino registrations show, so it tolerates partial tournament squads.
+  const ALIAS_CONTAINMENT = 0.6;
+  const MIN_ROSTER = 5; // tiny rosters overlap by luck — don't judge them
+  const cache = new Map<string, boolean>();
+  return (a: string, b: string): boolean => {
+    if (a === b) return true;
+    const key = a < b ? `${a} ${b}` : `${b} ${a}`;
+    const hit = cache.get(key);
+    if (hit !== undefined) return hit;
+    const sa = membersByIdentity.get(a);
+    const sb = membersByIdentity.get(b);
+    let result = false;
+    if (sa && sb && sa.size >= MIN_ROSTER && sb.size >= MIN_ROSTER) {
+      let shared = 0;
+      const [small, large] = sa.size <= sb.size ? [sa, sb] : [sb, sa];
+      for (const m of small) if (large.has(m)) shared++;
+      result = shared / small.size >= ALIAS_CONTAINMENT;
+    }
+    cache.set(key, result);
+    return result;
+  };
+}
+
 export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSummary | null> {
   const db = await supabase();
   const { data: anchor, error: anchorErr } = await db
@@ -2976,7 +3084,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     .map((p) => p.id);
 
   if (candidateIds.length === 0) {
-    return { id: anchor.id, displayName: anchor.display_name, teamHistory: [], championYears: [], homeStates: [] };
+    return { id: anchor.id, displayName: anchor.display_name, teamHistory: [], championYears: [], homeStates: [], nameIsAmbiguous: false };
   }
 
   // Pull rosters for ALL candidates so we can compute the cluster.
@@ -3060,6 +3168,20 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     const identity = [(t?.name ?? '').toLowerCase(), t?.gender_division ?? '', level].join('|');
     return { track: trackOf(level), identity, qualifying: qualifyingTeamIds.has(r.team_id) };
   };
+  // ── Team ALIASES (same squad, two registered names) ─────────────────────
+  // USAU sometimes registers one team under two names in a single season —
+  // Portland's "Rhino" (Regionals/Nationals/US Open/Pro Champs) and "Rhino
+  // Slam!" (Pro-Elite Challenge West), 2025 Men's CLUB. Both are qualifying
+  // events, so the conflict rule below read them as two different teams in the
+  // same season+track and SPLIT one real human into two profiles.
+  //
+  // Name shape cannot decide this: "Oregon"/"Oregon State" and "Virginia"/
+  // "Virginia Tech" are prefix pairs too, but they are genuinely different
+  // teams — a fuzzy-name rule would merge real rivals. ROSTER OVERLAP can:
+  // the two Rhino registrations share 24 of 25 players (96%), while true
+  // rivals share ~none. So two identities are aliases when one side's roster
+  // is substantially contained in the other's.
+  const identitiesAreAliases = await buildTeamAliasChecker(db, candidateRosters ?? []);
   const rostersByPlayer = new Map<
     string,
     Array<{ season: number; track: string; identity: string; qualifying: boolean }>
@@ -3081,7 +3203,9 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
             sa.track === sb.track &&
             sa.identity !== sb.identity &&
             sa.qualifying &&
-            sb.qualifying
+            sb.qualifying &&
+            // Two registrations of the SAME squad are not a split signal.
+            !identitiesAreAliases(sa.identity, sb.identity)
           ) {
             conflict = true;
             break outer;
@@ -3298,6 +3422,10 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
     teamHistory,
     championYears,
     homeStates: [...homeStatesSet],
+    // Ambiguous only when the conflict rule actually SPLIT the namesakes into
+    // more than one human. All rows landing in one cluster means this name
+    // identifies a single person.
+    nameIsAmbiguous: playerIds.length < candidateIds.length,
   };
 }
 

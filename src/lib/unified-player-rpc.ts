@@ -366,14 +366,27 @@ function homeStatesFromPayload(usauStints: RpcUsauStint[]): string[] {
  * one-for-one, including its conservative fallback: we only DROP the UFA career
  * when the USAU cluster HAS a usable location signal AND it contradicts the UFA
  * team's state. No signal, or a non-US UFA team with no state, means keep.
+ *
+ * `nameIsAmbiguous` is the precondition: geography only ever answers "WHICH of
+ * the same-named people is the pro?". With a single unambiguous human a state
+ * mismatch means the player MOVED (club in one state, UFA team in another) —
+ * dropping on that deletes a real career (it deleted Chander Boyd-Fliegel's
+ * entire 2026 Oakland Spiders championship season). The RPC payload cannot
+ * distinguish "one human" from "one of several", because `usauClusterIds`
+ * carries only the RESOLVED cluster and never the namesake rows that were split
+ * off — so this path can never prove ambiguity and always abstains. That is the
+ * same conservative direction as the coverage rules above: keep the career and
+ * let the multi-query path, which computes the cluster itself, do the dropping.
  */
 function shouldAttachUfa(
   ufaStints: RpcUfaStint[],
   usauStints: RpcUsauStint[],
   homeStates: string[],
+  nameIsAmbiguous: boolean,
 ): boolean {
   if (ufaStints.length === 0) return true;
   if (usauStints.length === 0) return true;
+  if (!nameIsAmbiguous) return true;
   if (homeStates.length === 0) return true;
 
   const usauStates = new Set(homeStates);
@@ -443,7 +456,10 @@ export async function mapRpcProfile(
     payload.homeStates && payload.homeStates.length > 0
       ? payload.homeStates
       : homeStatesFromPayload(rpcUsauStints);
-  const attachUfa = shouldAttachUfa(rpcUfaStints, rpcUsauStints, homeStates);
+  // The payload carries no namesake-split signal, so ambiguity is never
+  // provable here — see shouldAttachUfa's doc. Passing false makes this path
+  // abstain from the geography drop entirely.
+  const attachUfa = shouldAttachUfa(rpcUfaStints, rpcUsauStints, homeStates, false);
 
   const yearMap = new Map<number, SeasonStint[]>();
   const push = (year: number, stint: SeasonStint) => {
