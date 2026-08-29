@@ -5,7 +5,9 @@ import {
   getGameStats,
   getStandings,
   getTeamStats,
+  getAllGamesByYears,
   currentSeasonYear,
+  ufaPlayoffRound,
 } from '@/lib/ufa/client';
 import type {
   UfaGameStatsResponse,
@@ -46,11 +48,15 @@ export default async function GamePage({ params }: Props) {
 
   // Pull season-level data for both teams + this game's stat-leader payload in parallel.
   const year = currentSeasonYear();
-  const [standingsRes, teamStatsRes, gameStatsRes, spotlightRes] = await Promise.allSettled([
+  // The game's OWN season, not the current one — a historical game needs its
+  // own season's bracket for ufaPlayoffRound, not this year's.
+  const gameSeason = parseInt(game.gameID.slice(0, 4), 10) || year;
+  const [standingsRes, teamStatsRes, gameStatsRes, spotlightRes, seasonGamesRes] = await Promise.allSettled([
     getStandings(),
     getTeamStats({ year }),
     getGameStats(game.gameID),
     getUfaSpotlight(game, year),
+    getAllGamesByYears([gameSeason]),
   ]);
   const standings: UfaStanding[] = standingsRes.status === 'fulfilled' ? standingsRes.value : [];
   const teamStats: UfaTeamStat[] = teamStatsRes.status === 'fulfilled' ? (teamStatsRes.value.stats ?? []) : [];
@@ -58,6 +64,8 @@ export default async function GamePage({ params }: Props) {
     gameStatsRes.status === 'fulfilled' ? gameStatsRes.value : null;
   const spotlight =
     spotlightRes.status === 'fulfilled' ? spotlightRes.value : { away: null, home: null };
+  const seasonGames = seasonGamesRes.status === 'fulfilled' ? seasonGamesRes.value : [];
+  const playoffRound = ufaPlayoffRound(game, seasonGames);
 
   const enrichment = {
     awayStanding: standings.find((s) => s.teamID === game.awayTeamID) ?? null,
@@ -69,5 +77,5 @@ export default async function GamePage({ params }: Props) {
     spotlight,
   };
 
-  return <GameDetail game={game} today={today} enrichment={enrichment} />;
+  return <GameDetail game={game} today={today} enrichment={enrichment} playoffRound={playoffRound} />;
 }

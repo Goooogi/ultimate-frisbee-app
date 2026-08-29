@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
 import { useLiveGames } from '@/lib/use-live-games';
 import { gameUiState, formatStartCompact, livePhaseLabel } from '@/lib/ufa/format';
+import type { UfaPlayoffRound } from '@/lib/ufa/client';
 import type {
   UfaGame,
   UfaGameStatCategory,
@@ -39,9 +40,10 @@ interface GameDetailProps {
   game: UfaGame;
   today: Today;
   enrichment?: GameEnrichment;
+  playoffRound?: UfaPlayoffRound | null;
 }
 
-export function GameDetail({ game, today, enrichment }: GameDetailProps) {
+export function GameDetail({ game, today, enrichment, playoffRound }: GameDetailProps) {
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const matchupLabel = `${away.city ?? away.abbr} vs ${home.city ?? home.abbr}`;
@@ -58,7 +60,7 @@ export function GameDetail({ game, today, enrichment }: GameDetailProps) {
             ]}
           />
         </div>
-        <DetailBody game={game} today={today} enrichment={enrichment} />
+        <DetailBody game={game} today={today} enrichment={enrichment} playoffRound={playoffRound} />
       </div>
     </AppShell>
   );
@@ -73,7 +75,17 @@ export function GameDetail({ game, today, enrichment }: GameDetailProps) {
  * dramatic split with stencil + tinted gradient on both themes — colors come
  * from CSS variables so it reads correctly in light and dark.
  */
-function DetailBody({ game: initialGame, today, enrichment }: { game: UfaGame; today: Today; enrichment?: GameEnrichment }) {
+function DetailBody({
+  game: initialGame,
+  today,
+  enrichment,
+  playoffRound,
+}: {
+  game: UfaGame;
+  today: Today;
+  enrichment?: GameEnrichment;
+  playoffRound?: UfaPlayoffRound | null;
+}) {
   // Live score/status polling — makes the "Auto-refreshing · 30s" footer label
   // below actually true. Enrichment (leaders, boxscore) stays render-time.
   const initial = useMemo(() => [initialGame], [initialGame]);
@@ -124,6 +136,18 @@ function DetailBody({ game: initialGame, today, enrichment }: { game: UfaGame; t
             >
               {state.isLive ? 'Live' : state.isFinal ? 'Final' : 'Upcoming'}
             </span>
+            {playoffRound && (
+              <span
+                className={[
+                  'inline-flex items-center text-[11px] font-bold tracking-[0.16em] uppercase rounded-full px-2.5 py-[5px]',
+                  playoffRound === 'championship'
+                    ? 'bg-accent text-accent-ink'
+                    : 'border border-accent text-accent',
+                ].join(' ')}
+              >
+                {playoffRound === 'championship' ? 'Championship' : 'Semifinal'}
+              </span>
+            )}
             {state.isLive && (
               <span className="text-[13px] font-bold tracking-[0.12em] uppercase text-muted">
                 {livePhaseLabel(game.status)}
@@ -242,7 +266,13 @@ function DetailBody({ game: initialGame, today, enrichment }: { game: UfaGame; t
 
       <div className="flex items-center justify-between px-6 pt-3.5 pb-6 md:px-14 md:py-5 border-t border-hairline text-muted">
         <span className="text-[11px] font-semibold tracking-[0.06em]">
-          {state.isLive ? 'Auto-refreshing · 30s' : 'UFA · Regular Season'}
+          {state.isLive
+            ? 'Auto-refreshing · 30s'
+            : playoffRound === 'championship'
+              ? 'UFA · Championship'
+              : playoffRound === 'semifinal'
+                ? 'UFA · Semifinal'
+                : 'UFA · Regular Season'}
         </span>
         <span className="text-[11px] font-semibold tracking-[0.06em] tabular">
           {today.weekday} · {today.month} {today.day}

@@ -445,6 +445,97 @@ function findChampionshipGame(games: UfaGame[]): UfaGame | null {
   return latest(finals);
 }
 
+export type UfaPlayoffRound = 'championship' | 'semifinal';
+
+// `week` labels that decide the round on their own. No season observed
+// (2012-2026) actually uses these, but they're the natural labels for a title
+// game if UFA ever adds one, so they stay as a cheap fast path.
+const CHAMPIONSHIP_WEEKS = ['championship', 'final', 'finals'];
+
+// `week` labels that mark a season's bracket GROUP without naming the round.
+// UFA labels the ENTIRE final weekend with one of these — semis and the title
+// game alike ('championship-weekend' in 2012-22, 'semi-finals' in 2023) — so a
+// game carrying one is in the bracket but its round still has to be resolved
+// positionally, below. Ordered most- to least-specific; the first label present
+// in the season wins.
+const BRACKET_WEEKS = ['championship-weekend', 'semi-finals', 'semifinals'];
+
+// A season's playoff bracket is small. 2024+ carries no playoff labels at all
+// — the bracket is simply the highest `week-N`, which holds exactly 3
+// non-all-star games (2 semis + 1 final). Cap the structural path at that size
+// so a full regular-season week can never be read as a bracket.
+const MAX_BRACKET_GAMES = 4;
+
+function weekNumber(g: UfaGame): number {
+  const m = (g.week ?? '').match(/^week-(\d+)$/);
+  return m ? parseInt(m[1], 10) : -1;
+}
+
+/**
+ * Classify a single game as the season's title game or a semifinal, or null for
+ * anything else (regular season, all-star, undecidable).
+ *
+ * `seasonGames` is the full game list for that game's season; it is required
+ * because NO season observed (2012-2026) labels its title game as such. Every
+ * one either labels the whole final weekend with a single group label
+ * ('championship-weekend' in 2012-22, 'semi-finals' in 2023 — yes, the 2023
+ * FINAL is labeled 'semi-finals') or carries no playoff label at all (2024+,
+ * where the bracket is just the highest `week-N`). In all cases the title game
+ * is the last game of the bracket, which no single game can reveal on its own.
+ * Pass an empty list and nothing resolves.
+ *
+ * The all-star exhibition always returns null: it can carry the same
+ * `week-16` as the real bracket.
+ */
+export function ufaPlayoffRound(
+  game: UfaGame,
+  seasonGames: UfaGame[],
+): UfaPlayoffRound | null {
+  if (isAllStarGame(game)) return null;
+
+  // (a) A label that names the round outright — decidable from the game alone.
+  const wk = (game.week ?? '').toLowerCase();
+  if (CHAMPIONSHIP_WEEKS.includes(wk)) return 'championship';
+
+  // Everything below needs the season's bracket for context.
+  const bracketPool = seasonGames.filter((g) => !isAllStarGame(g));
+  if (bracketPool.length === 0) return null;
+
+  // (b) A bracket-group label ('championship-weekend' in 2012-22, 'semi-finals'
+  // in 2023) covers semis AND the final, so the final has to be picked out of
+  // the group positionally.
+  // (c) 2024+: no labels at all — the bracket is the highest week-N.
+  let bracket: UfaGame[] | null = null;
+  for (const label of BRACKET_WEEKS) {
+    const group = bracketPool.filter((g) => (g.week ?? '').toLowerCase() === label);
+    if (group.length === 0) continue;
+    // The season uses this label, so its bracket is exactly this group — a game
+    // outside it isn't a playoff game.
+    if (wk !== label) return null;
+    bracket = group;
+    break;
+  }
+  if (!bracket) {
+    const gameWeek = weekNumber(game);
+    if (gameWeek < 0) return null;
+    const maxWeek = Math.max(...bracketPool.map(weekNumber));
+    if (gameWeek !== maxWeek) return null;
+    bracket = bracketPool.filter((g) => weekNumber(g) === maxWeek);
+  }
+
+  if (bracket.length > MAX_BRACKET_GAMES) return null;
+
+  // The final is the last game of the bracket. findChampionshipGame only
+  // considers DECIDED finals, so it can't answer while the bracket is still
+  // being played; fall back to the latest-scheduled bracket game, which is the
+  // title game by construction.
+  const decided = findChampionshipGame(bracket);
+  const final =
+    decided ?? bracket.reduce((a, b) => (gameTs(b) > gameTs(a) ? b : a));
+
+  return final.gameID === game.gameID ? 'championship' : 'semifinal';
+}
+
 /**
  * UFA champions by year. Returns a map of `year → teamID` (lowercased).
  *
