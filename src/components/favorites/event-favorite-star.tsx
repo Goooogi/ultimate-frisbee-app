@@ -16,9 +16,13 @@ import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
 import {
   addFavoriteEvent,
+  addFavoriteGame,
   isEventFavorited,
+  isGameFavorited,
   removeFavoriteEvent,
+  removeFavoriteGame,
   type FavoriteEvent,
+  type FavoriteGame,
 } from '@/lib/favorites/data';
 
 function StarGlyph({ filled }: { filled: boolean }) {
@@ -38,7 +42,50 @@ function StarGlyph({ filled }: { filled: boolean }) {
   );
 }
 
+/** Starred tournament (USAU/WFDF/EUF event pages). */
 export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
+  return (
+    <FavoriteStar
+      id={`${event.league}:${event.eventId}`}
+      noun="tournament"
+      subhead="Sign in to get notified for tournaments you follow."
+      isFavorited={() => isEventFavorited(event.league, event.eventId)}
+      add={() => addFavoriteEvent(event)}
+      remove={() => removeFavoriteEvent(event.league, event.eventId)}
+    />
+  );
+}
+
+/** Starred game (UFA/PUL/WUL game pages) — the pro-league twin. */
+export function GameFavoriteStar({ game }: { game: FavoriteGame }) {
+  return (
+    <FavoriteStar
+      id={`${game.league}:${game.gameId}`}
+      noun="game"
+      subhead="Sign in to get notified for games you follow."
+      isFavorited={() => isGameFavorited(game.league, game.gameId)}
+      add={() => addFavoriteGame(game)}
+      remove={() => removeFavoriteGame(game.league, game.gameId)}
+    />
+  );
+}
+
+function FavoriteStar({
+  id,
+  noun,
+  subhead,
+  isFavorited,
+  add,
+  remove,
+}: {
+  /** Stable identity of the starred thing — re-reads state when it changes. */
+  id: string;
+  noun: 'tournament' | 'game';
+  subhead: string;
+  isFavorited: () => Promise<boolean>;
+  add: () => Promise<void>;
+  remove: () => Promise<void>;
+}) {
   const { user } = useAuth();
   const [starred, setStarred] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -52,7 +99,7 @@ export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
       return;
     }
     let cancelled = false;
-    isEventFavorited(event.league, event.eventId)
+    isFavorited()
       .then((v) => {
         if (!cancelled) setStarred(v);
       })
@@ -62,7 +109,9 @@ export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
     return () => {
       cancelled = true;
     };
-  }, [user, event.league, event.eventId]);
+    // isFavorited is a fresh closure every render; `id` is its real dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, id]);
 
   async function handleClick() {
     if (!user) {
@@ -75,9 +124,9 @@ export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
     setBusy(true);
     try {
       if (next) {
-        await addFavoriteEvent(event);
+        await add();
       } else {
-        await removeFavoriteEvent(event.league, event.eventId);
+        await remove();
       }
     } catch {
       setStarred(!next);
@@ -86,6 +135,8 @@ export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
     }
   }
 
+  const label = starred ? `Unstar this ${noun}` : `Star this ${noun}`;
+
   return (
     <>
       <button
@@ -93,8 +144,8 @@ export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
         onClick={handleClick}
         disabled={loaded && busy}
         aria-pressed={starred}
-        aria-label={starred ? 'Unstar this tournament' : 'Star this tournament'}
-        title={starred ? 'Unstar this tournament' : 'Star this tournament'}
+        aria-label={label}
+        title={label}
         className={[
           'inline-flex items-center justify-center w-11 h-11 rounded-full flex-shrink-0 transition-colors duration-150',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent cursor-pointer',
@@ -109,8 +160,8 @@ export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
         open={authOpen}
         dismissible
         onDismiss={() => setAuthOpen(false)}
-        headline="Star this tournament."
-        subhead="Sign in to get notified for tournaments you follow."
+        headline={`Star this ${noun}.`}
+        subhead={subhead}
       />
     </>
   );

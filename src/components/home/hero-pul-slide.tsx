@@ -16,9 +16,12 @@ const PUL_ACCENT = '#1EC98B';
 
 interface HeroPulSlideProps {
   game: PulGame;
+  /** Overrides the state-derived "PUL · Up next" / "PUL · Final" eyebrow —
+   *  a starred game reads "★ Starred · PUL". */
+  eyebrow?: string;
 }
 
-export function HeroPulSlide({ game }: HeroPulSlideProps) {
+export function HeroPulSlide({ game, eyebrow }: HeroPulSlideProps) {
   const isFinal = game.status === 'final';
   const href = `/pul/g/${pulGameHref(game.id)}`;
   const dateStr = game.gameDate ? formatDate(game.gameDate) : null;
@@ -77,7 +80,7 @@ export function HeroPulSlide({ game }: HeroPulSlideProps) {
               className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.12em] uppercase px-2.5 py-[5px] rounded-full flex-shrink-0"
               style={{ color: '#fff', background: PUL_ACCENT }}
             >
-              ◆ PUL · {eyebrowLabel}
+              {eyebrow ?? `◆ PUL · ${eyebrowLabel}`}
             </span>
             {whenLabel && (
               <span className="font-mono text-[12px] truncate" style={{ color: TEXT_MUTED }}>

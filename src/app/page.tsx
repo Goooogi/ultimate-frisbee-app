@@ -40,7 +40,7 @@ import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
 import { listWulGames, getWulCurrentSeason } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
-import { HeroCarousel } from '@/components/home/hero-carousel';
+import { HomeHero, type KeyedSlide } from '@/components/home/home-hero';
 import { HeroUsauSlide } from '@/components/home/hero-usau-slide';
 import { HeroPulSlide } from '@/components/home/hero-pul-slide';
 import { HeroWulSlide } from '@/components/home/hero-wul-slide';
@@ -227,75 +227,97 @@ export default async function HomePage() {
 
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
-  // entries are filtered out so offseason leagues simply don't appear.
-  const slides = [
+  // entries are filtered out so offseason leagues simply don't appear. Each
+  // slide carries an identity key so HomeHero can drop it when the signed-in
+  // user's STARRED items (prepended client-side) already show the same
+  // game/event.
+  const slideCandidates: Array<KeyedSlide | null> = [
     // UFA "Top game" slide — LIVE game only. Rendered ONLY while a UFA game is
     // in progress; dropped otherwise (no past/future fallback, so it can't show
     // a different game than the Game-of-the-week highlight). Suppressed while
     // the playoff slate is active: the live playoff game already has its own
     // labeled slide there, and two cards for one game reads as a bug.
-    topGame && playoffSlate.length === 0 ? (
-      <HeroGameCard
-        key="ufa-top"
-        game={topGame}
-        awayRecord={recordOf(topGame.awayTeamID)}
-        homeRecord={recordOf(topGame.homeTeamID)}
-        eyebrow="Top game"
-      />
-    ) : null,
+    topGame && playoffSlate.length === 0
+      ? {
+          key: `ufa:${topGame.gameID}`,
+          node: (
+            <HeroGameCard
+              key="ufa-top"
+              game={topGame}
+              awayRecord={recordOf(topGame.awayTeamID)}
+              homeRecord={recordOf(topGame.homeTeamID)}
+              eyebrow="Top game"
+            />
+          ),
+        }
+      : null,
     // UFA headline slide(s). During a playoff round: one slide PER game in the
     // round, labeled by round — with two semifinals there is no "the" game of
     // the week, so both show. Otherwise the single win%-picked Game of the
     // week as before (EmptyHero renders in a truly empty off-season).
     ...(playoffSlate.length > 0
-      ? playoffSlate.map(({ game: pg, label }) => (
-          <HeroGameCard
-            key={`ufa-playoff-${pg.gameID}`}
-            game={pg}
-            awayRecord={recordOf(pg.awayTeamID)}
-            homeRecord={recordOf(pg.homeTeamID)}
-            eyebrow={label}
-          />
-        ))
+      ? playoffSlate.map(({ game: pg, label }) => ({
+          key: `ufa:${pg.gameID}`,
+          node: (
+            <HeroGameCard
+              key={`ufa-playoff-${pg.gameID}`}
+              game={pg}
+              awayRecord={recordOf(pg.awayTeamID)}
+              homeRecord={recordOf(pg.homeTeamID)}
+              eyebrow={label}
+            />
+          ),
+        }))
       : [
-          <HeroGameCard
-            key="ufa-gotw"
-            game={gotwGame}
-            awayRecord={recordOf(gotwGame?.awayTeamID)}
-            homeRecord={recordOf(gotwGame?.homeTeamID)}
-            eyebrow="Game of the week"
-          />,
+          {
+            key: gotwGame ? `ufa:${gotwGame.gameID}` : 'ufa:empty',
+            node: (
+              <HeroGameCard
+                key="ufa-gotw"
+                game={gotwGame}
+                awayRecord={recordOf(gotwGame?.awayTeamID)}
+                homeRecord={recordOf(gotwGame?.homeTeamID)}
+                eyebrow="Game of the week"
+              />
+            ),
+          },
         ]),
     // Champ-weekend WUL/PUL All-Star exhibition — its own once-a-year slide,
     // rendered with LEAGUE marks (the API's allstars1/2 ids carry no
     // franchise; see ALL_STAR_TEAM_META for the side-mapping caveat).
-    allStarGame ? (
-      <HeroGameCard
-        key="ufa-allstar"
-        game={allStarGame}
-        eyebrow="All-Star Game"
-        awayMeta={ALL_STAR_TEAM_META[allStarGame.awayTeamID]}
-        homeMeta={ALL_STAR_TEAM_META[allStarGame.homeTeamID]}
-      />
-    ) : null,
+    allStarGame
+      ? {
+          key: `ufa:${allStarGame.gameID}`,
+          node: (
+            <HeroGameCard
+              key="ufa-allstar"
+              game={allStarGame}
+              eyebrow="All-Star Game"
+              awayMeta={ALL_STAR_TEAM_META[allStarGame.awayTeamID]}
+              homeMeta={ALL_STAR_TEAM_META[allStarGame.homeTeamID]}
+            />
+          ),
+        }
+      : null,
     // USAU — tournament card, null when no current event.
-    usauEvent ? <HeroUsauSlide key="usau" event={usauEvent} /> : null,
+    usauEvent ? { key: `usau:${usauEvent.slug}`, node: <HeroUsauSlide key="usau" event={usauEvent} /> } : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.
-    wfdfEvent ? <HeroWfdfSlide key="wfdf" event={wfdfEvent} /> : null,
+    wfdfEvent ? { key: `wfdf:${wfdfEvent.slug}`, node: <HeroWfdfSlide key="wfdf" event={wfdfEvent} /> } : null,
     // PUL — game card, null when no current/recent game.
-    pulFeatured ? <HeroPulSlide key="pul" game={pulFeatured} /> : null,
+    pulFeatured ? { key: `pul:${pulFeatured.id}`, node: <HeroPulSlide key="pul" game={pulFeatured} /> } : null,
     // WUL — game card, null when no current/recent game.
-    wulFeatured ? <HeroWulSlide key="wul" game={wulFeatured} /> : null,
-  ].filter((s): s is React.ReactElement => s !== null);
+    wulFeatured ? { key: `wul:${wulFeatured.id}`, node: <HeroWulSlide key="wul" game={wulFeatured} /> } : null,
+  ];
+  const slides = slideCandidates.filter((s): s is KeyedSlide => s !== null);
 
   return (
     <div className="min-h-screen bg-bg text-ink pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)] lg:pb-0">
       {/* Global top rail — app switching + logo + account (untouched) */}
       <AppRail />
 
-      {/* 1. Full-width hero carousel */}
+      {/* 1. Full-width hero carousel — starred items lead for signed-in users */}
       <div className="px-5 lg:px-10 pt-6 lg:pt-8">
-        <HeroCarousel slides={slides} />
+        <HomeHero slides={slides} />
       </div>
 
       {/* 2. "Every league, one place." strip */}

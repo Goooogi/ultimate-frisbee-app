@@ -55,19 +55,38 @@ export interface FavoritePlayer {
 
 /** A starred tournament — the (league, eventId) pair, with the event's own
  *  fields denormalized (mirrors FavoriteTeam) so the feed/star can render
- *  without a join. USAU/WFDF only per the plan (Push Notifications.md). */
+ *  without a join. The leagues with event pages. MUST stay in sync with the
+ *  user_favorite_events league CHECK (migration 20260907150452) — widening
+ *  this alone means the new league's stars are rejected on insert. EUF stars
+ *  are bookmarks only until send-game-notifications grows an EUF branch. */
 export interface FavoriteEvent {
-  league: 'usau' | 'wfdf';
+  league: Extract<FavoriteLeague, 'usau' | 'wfdf' | 'euf'>;
   eventId: string;
   name: string;
   startDate: string | null;
   endDate: string | null;
 }
 
+/** A starred GAME — the pro-league twin of a starred tournament. gameId is the
+ *  league's own id and IS the route param (UFA "2026-05-16-COL-NY"; PUL/WUL
+ *  slash ids). MUST stay in sync with the user_favorite_games league CHECK
+ *  (migration 20260907150822). Only UFA has a sender leg today; PUL/WUL stars
+ *  are bookmarks until send-game-notifications grows one. */
+export interface FavoriteGame {
+  league: Extract<FavoriteLeague, 'ufa' | 'pul' | 'wul'>;
+  gameId: string;
+  /** The matchup label the game header shows ("Colorado vs New York"). */
+  name: string;
+  /** ISO yyyy-mm-dd, for upcoming-first ordering. */
+  gameDate: string | null;
+}
+
 export interface MyFavorites {
   leagues: FavoriteLeague[];
   teams: FavoriteTeam[];
   players: FavoritePlayer[];
+  games: FavoriteGame[];
+  events: FavoriteEvent[];
 }
 
 /** Hard cap so a script can't balloon a user's favorites row set. Enforced
@@ -75,6 +94,8 @@ export interface MyFavorites {
 export const MAX_FAVORITE_TEAMS = 50;
 /** Same cap for favorite players. */
 export const MAX_FAVORITE_PLAYERS = 50;
+/** Same cap for starred games. */
+export const MAX_FAVORITE_GAMES = 50;
 
 // ─── Reads ──────────────────────────────────────────────────────────────────
 
@@ -84,9 +105,9 @@ export async function getMyFavorites(): Promise<MyFavorites> {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return { leagues: [], teams: [], players: [] };
+  if (!user) return { leagues: [], teams: [], players: [], games: [], events: [] };
 
-  const [teamsRes, leaguesRes, playersRes] = await Promise.all([
+  const [teamsRes, leaguesRes, playersRes, gamesRes, eventsRes] = await Promise.all([
     supabase
       .from('user_favorite_teams')
       .select('league, team_id, name, logo_url')
@@ -104,11 +125,23 @@ export async function getMyFavorites(): Promise<MyFavorites> {
       .select('league, player_id, name, team_name, headshot_url')
       .eq('user_id', user.id)
       .order('created_at', { ascending: true }),
+    supabase
+      .from('user_favorite_games')
+      .select('league, game_id, name, game_date')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false }),
+    supabase
+      .from('user_favorite_events')
+      .select('league, event_id, name, start_date, end_date')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false }),
   ]);
 
   if (teamsRes.error) throw teamsRes.error;
   if (leaguesRes.error) throw leaguesRes.error;
   if (playersRes.error) throw playersRes.error;
+  if (gamesRes.error) throw gamesRes.error;
+  if (eventsRes.error) throw eventsRes.error;
 
   const teams: FavoriteTeam[] = ((teamsRes.data ?? []) as {
     league: FavoriteLeague; team_id: string; name: string; logo_url: string | null;
@@ -132,7 +165,26 @@ export async function getMyFavorites(): Promise<MyFavorites> {
     headshotUrl: r.headshot_url ?? null,
   }));
 
-  return { leagues, teams, players };
+  const games: FavoriteGame[] = ((gamesRes.data ?? []) as {
+    league: FavoriteGame['league']; game_id: string; name: string; game_date: string | null;
+  }[]).map((r) => ({
+    league: r.league,
+    gameId: r.game_id,
+    name: r.name,
+    gameDate: r.game_date ?? null,
+  }));
+
+  const events: FavoriteEvent[] = ((eventsRes.data ?? []) as {
+    league: FavoriteEvent['league']; event_id: string; name: string; start_date: string | null; end_date: string | null;
+  }[]).map((r) => ({
+    league: r.league,
+    eventId: r.event_id,
+    name: r.name,
+    startDate: r.start_date ?? null,
+    endDate: r.end_date ?? null,
+  }));
+
+  return { leagues, teams, players, games, events };
 }
 
 // ─── Team writes ──────────────────────────────────────────────────────────────
@@ -372,5 +424,80 @@ export async function removeFavoriteEvent(
     .eq('user_id', user.id)
     .eq('league', league)
     .eq('event_id', eventId);
+  if (error) throw error;
+}
+
+// ─── Game (starred game) writes ──────────────────────────────────────────────
+
+/** Whether the signed-in user has starred this game. False when signed out. */
+export async function isGameFavorited(
+  league: FavoriteGame['league'],
+  gameId: string,
+): Promise<boolean> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return false;
+  const { data, error } = await supabase
+    .from('user_favorite_games')
+    .select('game_id')
+    .eq('user_id', user.id)
+    .eq('league', league)
+    .eq('game_id', gameId)
+    .maybeSingle();
+  if (error) throw error;
+  return data != null;
+}
+
+/** Star a game. Idempotent (upsert on the (user, league, game) PK). Throws at
+ *  MAX_FAVORITE_GAMES for a genuinely-new game; a re-star of an existing one
+ *  always passes. owner id comes from the session. */
+export async function addFavoriteGame(game: FavoriteGame): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+
+  const { count, error: countErr } = await supabase
+    .from('user_favorite_games')
+    .select('game_id', { count: 'exact', head: true })
+    .eq('user_id', user.id);
+  if (countErr) throw countErr;
+  if ((count ?? 0) >= MAX_FAVORITE_GAMES) {
+    const existing = await isGameFavorited(game.league, game.gameId);
+    if (!existing) throw new Error(`You can star up to ${MAX_FAVORITE_GAMES} games.`);
+  }
+
+  const { error } = await supabase.from('user_favorite_games').upsert(
+    {
+      user_id: user.id,
+      league: game.league,
+      game_id: game.gameId,
+      name: game.name,
+      game_date: game.gameDate,
+    },
+    { onConflict: 'user_id,league,game_id' },
+  );
+  if (error) throw error;
+}
+
+/** Unstar a game by its (league, gameId). No-op if not favorited. */
+export async function removeFavoriteGame(
+  league: FavoriteGame['league'],
+  gameId: string,
+): Promise<void> {
+  const supabase = sessionClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not signed in.');
+  const { error } = await supabase
+    .from('user_favorite_games')
+    .delete()
+    .eq('user_id', user.id)
+    .eq('league', league)
+    .eq('game_id', gameId);
   if (error) throw error;
 }

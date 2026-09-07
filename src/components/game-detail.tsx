@@ -19,6 +19,7 @@ import type { Today } from '@/lib/today';
 import { LiveDotAccent } from '@/components/live-dot';
 import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
+import { GameFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { GameBoxscore } from '@/components/game-boxscore';
 import { TeamLogo } from '@/components/team-logo';
 import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
@@ -47,11 +48,14 @@ export function GameDetail({ game, today, enrichment, playoffRound }: GameDetail
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const matchupLabel = `${away.city ?? away.abbr} vs ${home.city ?? home.abbr}`;
+  // Star only while there's still something to notify about — a final or
+  // cancelled game can never fire (same rule as the event pages).
+  const { isFinal, isCancelled } = gameUiState(game);
 
   return (
     <AppShell>
       <div className="px-5 pt-4 pb-12 lg:px-14 lg:pt-8 lg:pb-14 lg:max-w-[1080px] lg:mx-auto">
-        <div className="px-1 pb-3">
+        <div className="px-1 pb-3 flex items-center justify-between gap-3">
           <Breadcrumbs
             crumbs={[
               { label: 'Home', href: '/' },
@@ -59,6 +63,16 @@ export function GameDetail({ game, today, enrichment, playoffRound }: GameDetail
               { label: matchupLabel },
             ]}
           />
+          {!isFinal && !isCancelled && (
+            <GameFavoriteStar
+              game={{
+                league: 'ufa',
+                gameId: game.gameID,
+                name: matchupLabel,
+                gameDate: game.startTimestamp ? game.startTimestamp.slice(0, 10) : null,
+              }}
+            />
+          )}
         </div>
         <DetailBody game={game} today={today} enrichment={enrichment} playoffRound={playoffRound} />
       </div>

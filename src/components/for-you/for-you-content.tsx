@@ -24,12 +24,18 @@ import {
   type FeedPlayer,
   type FeedTournament,
   type ForYouFeed,
+  type LeagueTopRow,
   type TeamLeader,
   type TeamSnapshot,
   type TeamStat,
 } from '@/lib/for-you/live-data';
 import { resultHref } from '@/lib/usau/search-nav';
+import { usauTeamLogo } from '@/lib/usau/team-logo';
+import { useStarredItems } from '@/lib/favorites/use-starred-items';
+import { starredToFeed } from '@/lib/favorites/starred-feed';
 import { SearchResultIcon } from '@/components/search-result-icon';
+import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { WfdfFlag } from '@/components/wfdf/wfdf-flag';
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
@@ -47,6 +53,12 @@ export function ForYouContent() {
   const [loadError, setLoadError] = useState(false);
   const [year, setYear] = useState<number>(LIVE_YEAR);
 
+  // Starred games + tournaments resolve separately from the feed (their own
+  // per-star fetch), keyed on the loaded favorites so a star elsewhere refetches
+  // on the next visit. Empty until favorites land.
+  const { items: starredItems } = useStarredItems(favorites);
+  const starred = starredToFeed(starredItems);
+
   // Load favorites once. The feed re-fetches when `year` changes (below) — the
   // favorites read doesn't need to repeat.
   useEffect(() => {
@@ -56,13 +68,17 @@ export function ForYouContent() {
         const favs = await getMyFavorites();
         if (cancelled) return;
         // The feed is team- + player-driven — a favorite league alone isn't
-        // enough, but a favorite player (with no teams) IS.
-        if (favs.teams.length === 0 && favs.players.length === 0) {
+        // enough, but a favorite player (with no teams) IS. Stars count as
+        // content too: a user with only stars gets the Starred zone standalone
+        // (the feed query stays team/player-gated below).
+        const hasStars = favs.games.length > 0 || favs.events.length > 0;
+        if (favs.teams.length === 0 && favs.players.length === 0 && !hasStars) {
           setEmpty(true);
           setLoading(false);
           return;
         }
         setFavorites(favs);
+        if (favs.teams.length === 0 && favs.players.length === 0) setLoading(false);
       } catch {
         if (!cancelled) {
           setLoadError(true);
@@ -76,9 +92,10 @@ export function ForYouContent() {
   }, []);
 
   // Fetch the feed for the current favorites + selected year. Runs on first
-  // favorites load and on every year change.
+  // favorites load and on every year change. Skipped for a stars-only user.
   useEffect(() => {
     if (!favorites) return;
+    if (favorites.teams.length === 0 && favorites.players.length === 0) return;
     let cancelled = false;
     setFeedLoading(true);
     (async () => {
@@ -106,8 +123,8 @@ export function ForYouContent() {
       {loading && <LoadingState />}
       {!loading && loadError && <ErrorState />}
       {!loading && !loadError && empty && <EmptyState />}
-      {!loading && !loadError && !empty && feed && (
-        <Loaded feed={feed} year={year} onYearChange={setYear} feedLoading={feedLoading} />
+      {!loading && !loadError && !empty && favorites && (
+        <Loaded feed={feed} starred={starred} year={year} onYearChange={setYear} feedLoading={feedLoading} />
       )}
     </PageShell>
   );
@@ -132,29 +149,35 @@ export function ForYouContent() {
 
 function Loaded({
   feed,
+  starred,
   year,
   onYearChange,
   feedLoading,
 }: {
-  feed: ForYouFeed;
+  /** Null for a stars-only user (no teams/players → no feed query). */
+  feed: ForYouFeed | null;
+  starred: { games: FeedGame[]; tournaments: FeedTournament[] };
   year: number;
   onYearChange: (y: number) => void;
   feedLoading: boolean;
 }) {
   const isPast = year < LIVE_YEAR;
-  const [topPlayer, ...restPlayers] = feed.players;
+  const [topPlayer, ...restPlayers] = feed?.players ?? [];
+
+  // ── STARRED zone — ahead of everything, current season only. ──
+  const hasStarred = !isPast && (starred.games.length > 0 || starred.tournaments.length > 0);
 
   // ── HEADER BAND — spotlight player + hero game. Present when either exists. ──
   const hasSpotlight = !!topPlayer;
-  const hasHero = !!feed.heroGame;
+  const hasHero = !!feed?.heroGame;
   const hasBand = hasSpotlight || hasHero;
 
   // ── MAIN zone content (teams, other players, games) ──
   const mainHasContent =
-    feed.teams.length > 0 || restPlayers.length > 0 || feed.games.length > 0;
+    !!feed && (feed.teams.length > 0 || restPlayers.length > 0 || feed.games.length > 0);
 
   // ── SIDE zone content (tournaments, league standings) ──
-  const sideHasContent = feed.tournaments.length > 0 || feed.leagues.length > 0;
+  const sideHasContent = !!feed && (feed.tournaments.length > 0 || feed.leagues.length > 0);
 
   // Promote-to-fill: if only one side has content, it takes the full width and
   // lays its cards out multi-column instead of a narrow single column.
@@ -171,11 +194,30 @@ function Loaded({
         </p>
       )}
 
+      {/* STARRED — the user's own picks lead the page. Reuses the games and
+          tournaments tiles; rows carry no "Following …" line. */}
+      {hasStarred && (
+        <ZoneGroup label="Starred">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-start">
+            {starred.games.length > 0 && (
+              <div className={starred.tournaments.length > 0 ? 'lg:col-span-7' : 'lg:col-span-12'}>
+                <GamesTile games={starred.games} />
+              </div>
+            )}
+            {starred.tournaments.length > 0 && (
+              <div className={starred.games.length > 0 ? 'lg:col-span-5' : 'lg:col-span-12'}>
+                <TournamentsTile tournaments={starred.tournaments} />
+              </div>
+            )}
+          </div>
+        </ZoneGroup>
+      )}
+
       {/* HEADER BAND. Spotlight + hero sit side-by-side (5/7). A LONE spotlight
           (no hero) is capped at ~half width instead of stretching full-width —
           a featured player card blown out to 12 cols looks broken (stats float
           to the far edge). A lone hero DOES fill 12 (it's built for that). */}
-      {hasBand && (
+      {hasBand && feed && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-stretch">
           {hasSpotlight && (
             <div className={hasHero ? 'lg:col-span-5' : 'lg:col-span-6 lg:col-start-1'}>
@@ -192,7 +234,7 @@ function Loaded({
 
       {/* ZONE GRID — Main (left) + Side (right). Widths flip to full when a
           side is empty (promote-to-fill). */}
-      {(mainHasContent || sideHasContent) && (
+      {feed && (mainHasContent || sideHasContent) && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-5 items-start">
           {/* MAIN */}
           {mainHasContent && (
@@ -210,7 +252,7 @@ function Loaded({
         </div>
       )}
 
-      {isPast && feed.players.length === 0 && feed.tournaments.length === 0 && (
+      {isPast && (!feed || (feed.players.length === 0 && feed.tournaments.length === 0)) && (
         <SoftEmpty text={`No ${year} history for your favorites yet.`} />
       )}
     </div>
@@ -498,9 +540,11 @@ function HeroGameCard({ game }: { game: FeedGame }) {
             <HeroTeamSide side={game.home} league={game.league} winner={homeWin} loser={awayWin} align="left" />
           </div>
 
-          <p className="text-center font-tight text-[11.5px] sm:text-[12.5px] text-faint">
-            Following <span className="text-muted font-semibold">{game.favoriteTeamName}</span>
-          </p>
+          {game.favoriteTeamName && (
+            <p className="text-center font-tight text-[11.5px] sm:text-[12.5px] text-faint">
+              Following <span className="text-muted font-semibold">{game.favoriteTeamName}</span>
+            </p>
+          )}
 
           {/* Players to watch — expanded detail for an upcoming game. Two columns
               (away | home) each listing that team's top season performers. */}
@@ -855,36 +899,77 @@ function LeagueCard({ card }: { card: FeedLeague }) {
         </span>
       </Link>
 
-      <ol className="flex flex-col">
-        {card.rows.map((r) => (
-          <li
-            key={`${r.rank}-${r.teamId ?? r.name}`}
-            className="flex items-center gap-3 px-5 py-2.5 border-b border-hairline last:border-b-0"
-          >
-            <span className="shrink-0 w-5 text-center font-display font-bold text-[13px] text-faint tabular">
-              {r.rank}
+      {card.sections ? (
+        card.sections.map((s) => (
+          <div key={s.title} className="flex flex-col border-b border-hairline last:border-b-0">
+            <span className="px-5 pt-2.5 pb-1 text-[9px] font-bold tracking-[0.12em] uppercase font-tight text-faint">
+              {s.title}
             </span>
-            {r.logoUrl ? (
-              <SearchResultIcon
-                result={{ kind: 'team', id: r.teamId ?? '', name: r.name, hint: null, league: card.league, logoUrl: r.logoUrl }}
-              />
-            ) : (
-              <span className="shrink-0 w-7 h-7 rounded-md bg-ink/5 flex items-center justify-center text-[9px] font-bold text-faint font-tight" aria-hidden="true">
-                {card.league === 'wfdf' ? '◈' : r.name.slice(0, 2).toUpperCase()}
-              </span>
-            )}
-            <span className="flex-1 min-w-0 font-tight font-semibold text-[13px] text-ink truncate">
-              {r.name}
-            </span>
-            {r.detail && (
-              <span className="shrink-0 font-tight text-[11px] font-semibold text-muted tabular">
-                {r.detail}
-              </span>
-            )}
-          </li>
-        ))}
-      </ol>
+            <ol className="flex flex-col">
+              {s.rows.map((r) => (
+                <LeagueRowItem key={`${r.rank}-${r.teamId ?? r.name}`} row={r} league={card.league} />
+              ))}
+            </ol>
+          </div>
+        ))
+      ) : (
+        <ol className="flex flex-col">
+          {card.rows.map((r) => (
+            <LeagueRowItem key={`${r.rank}-${r.teamId ?? r.name}`} row={r} league={card.league} />
+          ))}
+        </ol>
+      )}
     </div>
+  );
+}
+
+function LeagueRowLogo({ row, league }: { row: LeagueTopRow; league: FavoriteLeague }) {
+  if (row.logoUrl) {
+    return (
+      <SearchResultIcon
+        result={{ kind: 'team', id: row.teamId ?? '', name: row.name, hint: null, league, logoUrl: row.logoUrl }}
+      />
+    );
+  }
+  if (league === 'wfdf') {
+    // Club crest when the manifest has one (Worlds clubs are USAU clubs), else
+    // the country flag, else the monogram.
+    if (row.genderDivision && usauTeamLogo(row.name, row.genderDivision, row.competitionLevel)) {
+      return (
+        <UsauTeamLogo name={row.name} genderDivision={row.genderDivision} competitionLevel={row.competitionLevel} size={28} />
+      );
+    }
+    if (row.countryCode) {
+      return (
+        <span className="shrink-0 w-7 h-7 flex items-center justify-center">
+          <WfdfFlag countryCode={row.countryCode} size={18} />
+        </span>
+      );
+    }
+  }
+  return (
+    <span className="shrink-0 w-7 h-7 rounded-md bg-ink/5 flex items-center justify-center text-[9px] font-bold text-faint font-tight" aria-hidden="true">
+      {row.name.slice(0, 2).toUpperCase()}
+    </span>
+  );
+}
+
+function LeagueRowItem({ row, league }: { row: LeagueTopRow; league: FavoriteLeague }) {
+  return (
+    <li className="flex items-center gap-3 px-5 py-2.5 border-b border-hairline last:border-b-0">
+      <span className="shrink-0 w-5 text-center font-display font-bold text-[13px] text-faint tabular">
+        {row.rank}
+      </span>
+      <LeagueRowLogo row={row} league={league} />
+      <span className="flex-1 min-w-0 font-tight font-semibold text-[13px] text-ink truncate">
+        {row.name}
+      </span>
+      {row.detail && (
+        <span className="shrink-0 font-tight text-[11px] font-semibold text-muted tabular">
+          {row.detail}
+        </span>
+      )}
+    </li>
   );
 }
 
@@ -1167,9 +1252,11 @@ function FeedGameTile({ game }: { game: FeedGame }) {
       </div>
       <FeedTeamRow side={game.away} winner={awayWin} loser={homeWin} showScore={isFinal || isLive} league={game.league} />
       <FeedTeamRow side={game.home} winner={homeWin} loser={awayWin} showScore={isFinal || isLive} league={game.league} />
-      <p className="text-[10.5px] text-faint font-tight leading-snug truncate">
-        Following {game.favoriteTeamName}
-      </p>
+      {game.favoriteTeamName && (
+        <p className="text-[10.5px] text-faint font-tight leading-snug truncate">
+          Following {game.favoriteTeamName}
+        </p>
+      )}
     </div>
   );
 }
@@ -1276,7 +1363,7 @@ function TournamentRow({ tournament: t }: { tournament: FeedTournament }) {
             {t.name}
           </span>
           <span className="block text-[10.5px] text-faint font-tight mt-0.5 truncate">
-            {t.favoriteTeamName} · {dateLabel} · {LEAGUE_DISPLAY[t.league]}
+            {[t.favoriteTeamName, dateLabel, LEAGUE_DISPLAY[t.league]].filter(Boolean).join(' · ')}
           </span>
         </span>
         {ord ? (

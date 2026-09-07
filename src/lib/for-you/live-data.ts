@@ -230,6 +230,11 @@ export interface LeagueTopRow {
   logoUrl: string | null;
   /** Right-aligned context — "12-2" (record) or "#1 · 1980" (rating), etc. */
   detail: string | null;
+  /** WFDF only — IOC country code, for the flag fallback when no crest resolves. */
+  countryCode?: string | null;
+  /** WFDF only — lets the UI resolve a club crest via UsauTeamLogo. */
+  genderDivision?: 'Men' | 'Women' | 'Mixed' | null;
+  competitionLevel?: string | null;
 }
 
 /**
@@ -244,7 +249,10 @@ export interface FeedLeague {
   label: string;
   /** Sub-label for grouping (e.g. UFA division name, USAU rank-set). */
   scope: string | null;
+  /** Flattened rows (every section's rows in order) — always populated. */
   rows: LeagueTopRow[];
+  /** Tournament-based leagues (WFDF) split the card by division, top 3 each. */
+  sections?: { title: string; rows: LeagueTopRow[] }[];
   /** Where "see all" routes (league landing / standings page). */
   href: string;
 }
@@ -1271,7 +1279,11 @@ async function usauLeagueCard(division: UsauRankDivision): Promise<FeedLeague | 
   };
 }
 
-/** WFDF: most-recent Worlds event medalists (finalStanding ≤ 3), first division. */
+/** WFDF: most-recent Worlds event medalists (finalStanding ≤ 3), split by
+ *  division in first-appearance order. wfdf_teams.name already IS the club
+ *  (Revolver, PoNY, Chicago Machine) — never club_name, which is NULL on every
+ *  row. Gender + CLUB level let the UI resolve the club crest via UsauTeamLogo,
+ *  with the country flag as fallback. */
 async function wfdfLeagueCard(): Promise<FeedLeague | null> {
   const ev = await getCurrentWfdfEvent().catch(() => null);
   if (!ev) return null;
@@ -1281,18 +1293,38 @@ async function wfdfLeagueCard(): Promise<FeedLeague | null> {
     .filter((t) => t.finalStanding != null && t.finalStanding <= LEAGUE_TOP_N)
     .sort((a, b) => (a.finalStanding ?? 99) - (b.finalStanding ?? 99));
   if (medalists.length === 0) return null;
+  const genderOf = (divisionName: string | null): 'Men' | 'Women' | 'Mixed' | null => {
+    const d = (divisionName ?? '').toLowerCase();
+    if (d.includes('mixed')) return 'Mixed';
+    if (d.includes('women')) return 'Women';
+    if (d.includes('open') || d.includes('men')) return 'Men';
+    return null;
+  };
+  const byDivision = new Map<string, LeagueTopRow[]>();
+  for (const t of medalists) {
+    const title = t.divisionName ?? 'Overall';
+    const list = byDivision.get(title) ?? [];
+    if (list.length >= LEAGUE_TOP_N) continue;
+    list.push({
+      rank: t.finalStanding ?? 0,
+      teamId: t.id,
+      name: t.name,
+      logoUrl: null,
+      detail: null,
+      countryCode: t.countryCode,
+      genderDivision: genderOf(t.divisionName),
+      competitionLevel: 'CLUB',
+    });
+    byDivision.set(title, list);
+  }
+  const sections = [...byDivision].map(([title, rows]) => ({ title, rows }));
   return {
     league: 'wfdf',
     label: 'Worlds',
     scope: `${ev.name}`,
     href: `/wfdf/events/${ev.slug}`,
-    rows: medalists.slice(0, LEAGUE_TOP_N).map((t) => ({
-      rank: t.finalStanding ?? 0,
-      teamId: t.id,
-      name: t.countryName ?? t.name,
-      logoUrl: null, // WFDF uses country flags, rendered by the UI from the name/code
-      detail: t.divisionName,
-    })),
+    rows: sections.flatMap((s) => s.rows),
+    sections,
   };
 }
 

@@ -16,9 +16,11 @@ const TEXT_MUTED = 'rgba(255,255,255,0.75)';
 
 interface HeroUsauSlideProps {
   event: UsauEventSummary;
+  /** Eyebrow pill text — a starred event reads "★ Starred · USAU". */
+  pill?: string;
 }
 
-export function HeroUsauSlide({ event }: HeroUsauSlideProps) {
+export function HeroUsauSlide({ event, pill = 'USAU Tournament' }: HeroUsauSlideProps) {
   const teamCount = event.teams.length;
   const dateRange = formatDateRange(event.startDate, event.endDate);
   const location = [event.city, event.state].filter(Boolean).join(', ');
@@ -48,7 +50,7 @@ export function HeroUsauSlide({ event }: HeroUsauSlideProps) {
               className="inline-flex items-center font-sans text-[10.5px] font-bold tracking-[0.16em] uppercase px-2.5 py-[6px] rounded-full"
               style={{ color: '#fff', background: 'rgba(255,255,255,0.16)' }}
             >
-              USAU Tournament
+              {pill}
             </span>
             <span className="font-mono text-[12px]" style={{ color: TEXT_MUTED }}>
               {levelLabel}

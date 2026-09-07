@@ -15,9 +15,12 @@ const WUL_ACCENT = '#F5A623';
 
 interface HeroWulSlideProps {
   game: WulGame;
+  /** Overrides the state-derived "WUL · Up next" / "WUL · Final" eyebrow —
+   *  a starred game reads "★ Starred · WUL". */
+  eyebrow?: string;
 }
 
-export function HeroWulSlide({ game }: HeroWulSlideProps) {
+export function HeroWulSlide({ game, eyebrow }: HeroWulSlideProps) {
   const isFinal = game.status === 'final';
   const href = `/wul/g/${wulGameHref(game.id)}`;
   const dateStr = game.gameDate ? formatDate(game.gameDate) : null;
@@ -60,7 +63,7 @@ export function HeroWulSlide({ game }: HeroWulSlideProps) {
               className="inline-flex items-center gap-1.5 font-sans text-[10.5px] font-bold tracking-[0.12em] uppercase px-2.5 py-[5px] rounded-full flex-shrink-0"
               style={{ color: '#fff', background: WUL_ACCENT }}
             >
-              ◆ WUL · {eyebrowLabel}
+              {eyebrow ?? `◆ WUL · ${eyebrowLabel}`}
             </span>
             {whenLabel && (
               <span className="font-mono text-[12px] truncate" style={{ color: TEXT_MUTED }}>

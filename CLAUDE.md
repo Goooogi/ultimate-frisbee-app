@@ -68,12 +68,15 @@ and RPCs against the same DB. That means:
 - New SQL functions need `notify pgrst, 'reload schema'` or browser `.rpc()`
   calls 404 even though direct SQL works.
 
-## Open web-side ports from mobile (as of 2026-08-01)
+## Open web-side ports from mobile
 
-- `findUsauPlayerByName()` in `src/lib/usau/data.ts:1007` still uses a raw-column
-  `.ilike` — swap to the `find_usau_player_by_name` RPC (accent-insensitive).
-- `shouldAttachUfa()` in `src/lib/unified-player-rpc.ts:334` has a Canadian-province
-  false positive — filter `ufaStates` to US codes before comparing, or real UFA
-  careers get dropped.
-- The mapper in `src/lib/unified-player-rpc.ts` ignores the new `usauClusterIds`
-  payload key — push each as a `('usau', id)` content ref.
+None — all three 2026-08-01 items verified closed in web code on 2026-08-30:
+`findUsauPlayerByName` is RPC-backed (`find_usau_player_by_name`, null is
+authoritative, falls back only on contract errors), `shouldAttachUfa` filters
+to US state codes (`unified-player-rpc.ts` + `unified-player.ts`), and the
+mapper pushes `usauClusterIds` as `('usau', id)` content refs.
+
+**Grep hazard:** `src/lib/usau/data.ts` embeds literal NUL bytes (cache-key
+delimiters in a template literal, ~line 3048), so macOS grep treats the file
+as binary and silently returns nothing. Search it with `grep -a`, ripgrep, or
+python — a plain grep miss on this file proves nothing.

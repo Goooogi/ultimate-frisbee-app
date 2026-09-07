@@ -4,19 +4,23 @@
 // notify, computes the audience per Hunter's targeting rules, and delivers via
 // Expo's push API to push_tokens.
 //
-// TARGETING — games (2026-08-26, extended to WFDF 2026-08-28):
-//   UFA  game — playoffs (incl. Championship Weekend + All-Star): every user
-//               with UFA in user_favorite_leagues. Regular season: only users
-//               following the home/away team in user_favorite_teams.
-//   USAU game — Nationals (club_nationals / college_d1_championships /
-//               college_d3_championships events): every user with USAU in
-//               user_favorite_leagues. Any other tournament: only users
-//               following team_a/team_b.
-//   WFDF game — team followers ONLY, always (user_favorite_teams league='wfdf').
-//               No league-wide per-game pushes for WFDF — a WFDF weekend is
-//               50+ games; league-wide would spam. WFDF game_start/game_final
-//               are exempt from quiet hours (favorited-team pushes always
-//               send immediately, matching UFA/USAU team-follower behavior).
+// TARGETING — games (Hunter, 2026-09-07; same rule for UFA, USAU and WFDF):
+//   A league favorite means EVERY game in that league; a team favorite NARROWS
+//   it to that team's games. Audience per game = union of
+//     (a) users with the league in user_favorite_leagues who have NO
+//         user_favorite_teams row in that league ("league-only" users);
+//     (b) users following the home/away (team_a/team_b) team in
+//         user_favorite_teams for that league;
+//     (c) users who starred the game (user_favorite_games — UFA today; the
+//         leg is league-generic so PUL/WUL slot in when they get a branch).
+//   Deduped per user. A league+team user gets only their team's games, even
+//   in UFA playoffs / USAU Nationals; a league-only user gets every game the
+//   sender sees for that league — EXCEPT USAU, where the league-only leg is
+//   bounded to FLIGHTED events (template_key IS NOT NULL), mirroring event_*.
+//   This REPLACED the earlier playoffs-only (UFA), Nationals-only (USAU) and
+//   team-followers-only (WFDF) league legs. Spam guard for the league-only
+//   leg is the per-user game_final digest cap below.
+//   game_start/game_final are exempt from quiet hours (see QUIET HOURS).
 //   Always intersected with notification_prefs: push_enabled AND the category
 //   toggle (game_start / game_final). A MISSING prefs row means all-defaults
 //   (everything on) — that contract lives in the mobile app's
@@ -113,12 +117,6 @@ const QUIET_HOURS_END = 21; // 21:00
 // Weekend + All-Star game). Extend this map when a season's structure changes.
 const UFA_PLAYOFF_START_WEEK: Record<number, number> = { 2026: 15 };
 const UFA_PLAYOFF_START_DEFAULT = 15;
-
-const NATIONALS_TEMPLATES = new Set([
-  'club_nationals',
-  'college_d1_championships',
-  'college_d3_championships',
-]);
 
 // ─── MIRROR — keep in lockstep ──────────────────────────────────────────────
 // Deno edge functions can't import from src/, so the bracket/pool/placement
@@ -346,17 +344,20 @@ interface Notice {
   /** Team ids whose followers are in the audience (game_* notices, and the
    *  team-entered leg of event_* notices). */
   teamIds: string[];
-  /** True when league-wide followers (user_favorite_leagues) are also in the
-   *  audience — playoffs/Nationals for game_*, always for event_* (subject to
-   *  the flighted restriction applied separately for USAU). */
+  /** True when league followers (user_favorite_leagues) are also in the
+   *  audience. Always true for game_* (narrowed to LEAGUE-ONLY users — those
+   *  with no team favorite in the league — in resolveAudiences) and for
+   *  event_* (subject to the flighted restriction applied separately for
+   *  USAU). */
   leagueWide: boolean;
   /** event_* only: the event id, for the league-favorite + starred-event +
    *  team-entered audience resolution. */
   eventId?: string;
-  /** event_* only, USAU: whether THIS event is flighted (template_key IS NOT
-   *  NULL). Gates the league-favorite leg of the audience only — team-entered
-   *  and starred-event followers still get notified for an unflighted event.
-   *  Always true for WFDF (no flighted concept there). */
+  /** USAU only (event_* and game_*): whether THIS event is flighted
+   *  (template_key IS NOT NULL). Gates the league-favorite leg of the audience
+   *  only — team-entered/team-follower and starred followers still get
+   *  notified for an unflighted event. Always true for WFDF (no flighted
+   *  concept there). */
   isFlighted?: boolean;
   /** player_stats only: the single favorited-player audience member — no
    *  broader union applies to this category. */
@@ -425,13 +426,12 @@ async function ufaCandidates(sb: SupabaseClient, now: number): Promise<Notice[]>
       body: playoff ? 'UFA Playoffs — starting soon' : 'UFA — starting soon',
       data: { league: 'ufa', gameId: g.id, category: 'game_start' },
       teamIds: [g.home_team_id, g.away_team_id].filter(Boolean) as string[],
-      leagueWide: playoff,
+      leagueWide: true,
       quietHours: false,
       venueTz: null,
     });
   }
   for (const g of finals.data ?? []) {
-    const playoff = ufaIsPlayoff(g.week, g.year);
     notices.push({
       league: 'ufa',
       dedupId: g.id,
@@ -440,7 +440,7 @@ async function ufaCandidates(sb: SupabaseClient, now: number): Promise<Notice[]>
       body: `Final: ${nameOf(g.away_team_id)} ${g.away_score ?? '–'}, ${nameOf(g.home_team_id)} ${g.home_score ?? '–'}`,
       data: { league: 'ufa', gameId: g.id, category: 'game_final' },
       teamIds: [g.home_team_id, g.away_team_id].filter(Boolean) as string[],
-      leagueWide: playoff,
+      leagueWide: true,
       quietHours: false,
       venueTz: null,
     });
@@ -497,7 +497,6 @@ async function usauGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
   const notices: Notice[] = [];
   for (const g of startRows) {
     const ev = eventById.get(String(g.event_id));
-    const nationals = NATIONALS_TEMPLATES.has(ev?.template_key ?? '');
     notices.push({
       league: 'usau',
       dedupId: String(g.id),
@@ -506,7 +505,8 @@ async function usauGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
       body: `${ev?.name ?? 'USAU'} — starting soon`,
       data: { league: 'usau', gameId: String(g.id), eventId: String(g.event_id), category: 'game_start' },
       teamIds: [g.team_a_id, g.team_b_id].filter(Boolean) as string[],
-      leagueWide: nationals,
+      leagueWide: true,
+      isFlighted: ev?.template_key != null,
       quietHours: false,
       venueTz: null,
     });
@@ -516,7 +516,6 @@ async function usauGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
     // scoreless sometimes and would push a blank result.
     if (g.score_a == null || g.score_b == null) continue;
     const ev = eventById.get(String(g.event_id));
-    const nationals = NATIONALS_TEMPLATES.has(ev?.template_key ?? '');
     notices.push({
       league: 'usau',
       dedupId: String(g.id),
@@ -525,7 +524,8 @@ async function usauGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
       body: `Final: ${nameOf(g.team_a_id)} ${g.score_a}, ${nameOf(g.team_b_id)} ${g.score_b}`,
       data: { league: 'usau', gameId: String(g.id), eventId: String(g.event_id), category: 'game_final' },
       teamIds: [g.team_a_id, g.team_b_id].filter(Boolean) as string[],
-      leagueWide: nationals,
+      leagueWide: true,
+      isFlighted: ev?.template_key != null,
       quietHours: false,
       venueTz: null,
       eventName: ev?.name,
@@ -591,8 +591,8 @@ async function wfdfGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
       body: `${eventName.get(String(g.event_id)) ?? 'WFDF'} — starting soon`,
       data: { league: 'wfdf', gameId: String(g.id), eventId: String(g.event_id ?? ''), category: 'game_start' },
       teamIds: [g.home_team_id, g.away_team_id].filter(Boolean) as string[],
-      leagueWide: false, // WFDF: team followers only, never league-wide per-game
-      quietHours: false, // favorited-team games are exempt from quiet hours
+      leagueWide: true,
+      quietHours: false, // game pushes are exempt from quiet hours
       venueTz: null,
     });
   }
@@ -606,7 +606,7 @@ async function wfdfGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
       body: `Final: ${nameOf(g.away_team_id)} ${g.away_score}, ${nameOf(g.home_team_id)} ${g.home_score}`,
       data: { league: 'wfdf', gameId: String(g.id), eventId: String(g.event_id ?? ''), category: 'game_final' },
       teamIds: [g.home_team_id, g.away_team_id].filter(Boolean) as string[],
-      leagueWide: false,
+      leagueWide: true,
       quietHours: false,
       venueTz: null,
       eventName: eventName.get(String(g.event_id)),
@@ -1303,10 +1303,15 @@ async function resolveAudiences(
   );
   const playerNotices = notices.filter((n) => n.category === 'player_stats');
 
-  // ── game_* audience: team followers (+ league-wide for playoff/Nationals) ──
+  // ── game_* audience: league-ONLY favorites ∪ team followers ∪ starred game ──
+  // (Hunter, 2026-09-07 — see TARGETING header.) A team favorite narrows a
+  // league favorite, so the league leg is league favorites MINUS anyone with
+  // a team favorite in that league; those users come in through the team leg
+  // for their own team's games only.
   const leagues = [...new Set(gameNotices.map((n) => n.league))];
   const teamFollowers = new Map<string, Map<string, string[]>>();
-  const leagueFollowers = new Map<string, string[]>();
+  const leagueOnlyFollowers = new Map<string, string[]>();
+  const starredGameAudience = new Map<string, Set<string>>(); // "league:gameId" -> user_ids
 
   for (const league of leagues) {
     const teamIds = [...new Set(gameNotices.filter((n) => n.league === league).flatMap((n) => n.teamIds))];
@@ -1325,10 +1330,49 @@ async function resolveAudiences(
       }
       teamFollowers.set(league, byTeam);
     }
-    if (gameNotices.some((n) => n.league === league && n.leagueWide)) {
-      const { data, error } = await sb.from('user_favorite_leagues').select('user_id').eq('league', league);
+
+    // Every user with ANY team favorite in this league — unbounded by design,
+    // so page past PostgREST's 1000-row cap: a truncated set would silently
+    // promote league+team users to league-only and push them every game.
+    const usersWithTeamFav = new Set<string>();
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await sb
+        .from('user_favorite_teams')
+        .select('user_id')
+        .eq('league', league)
+        .order('user_id', { ascending: true })
+        .range(from, from + PAGE - 1);
       if (error) throw error;
-      leagueFollowers.set(league, (data ?? []).map((r) => r.user_id));
+      for (const r of data ?? []) usersWithTeamFav.add(r.user_id);
+      if ((data ?? []).length < PAGE) break;
+    }
+    const { data: leagueFavs, error: leagueErr } = await sb
+      .from('user_favorite_leagues')
+      .select('user_id')
+      .eq('league', league);
+    if (leagueErr) throw leagueErr;
+    leagueOnlyFollowers.set(
+      league,
+      (leagueFavs ?? []).map((r) => r.user_id).filter((u) => !usersWithTeamFav.has(u)),
+    );
+
+    // Starred-game leg — league-generic (the table's CHECK admits ufa/pul/wul;
+    // usau/wfdf simply match nothing). A starred game notifies its own users
+    // regardless of league/team favorites; same prefs gate applies below.
+    const gameIds = [...new Set(gameNotices.filter((n) => n.league === league).map((n) => n.dedupId))];
+    if (gameIds.length > 0) {
+      const { data, error } = await sb
+        .from('user_favorite_games')
+        .select('user_id, game_id')
+        .eq('league', league)
+        .in('game_id', gameIds);
+      if (error) throw error;
+      for (const r of data ?? []) {
+        const key = `${league}:${String(r.game_id)}`;
+        if (!starredGameAudience.has(key)) starredGameAudience.set(key, new Set());
+        starredGameAudience.get(key)!.add(r.user_id);
+      }
     }
   }
 
@@ -1385,7 +1429,14 @@ async function resolveAudiences(
     const users = new Set<string>();
     const byTeam = teamFollowers.get(n.league);
     for (const t of n.teamIds) for (const u of byTeam?.get(String(t)) ?? []) users.add(u);
-    if (n.leagueWide) for (const u of leagueFollowers.get(n.league) ?? []) users.add(u);
+    // League-only leg: USAU is bounded to FLIGHTED events (Hunter, 2026-09-07
+    // second ask) — a league-only USAU user would otherwise get a push per
+    // scheduled game across every scraped sectionals; UFA/WFDF stay every game.
+    // Team followers + starred games still cover unflighted tournaments.
+    if (n.leagueWide && (n.league !== 'usau' || n.isFlighted !== false)) {
+      for (const u of leagueOnlyFollowers.get(n.league) ?? []) users.add(u);
+    }
+    for (const u of starredGameAudience.get(`${n.league}:${n.dedupId}`) ?? []) users.add(u);
     userSets.set(n, users);
     for (const u of users) allUsers.add(u);
   }

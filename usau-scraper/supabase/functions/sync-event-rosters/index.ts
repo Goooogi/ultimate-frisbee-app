@@ -115,6 +115,22 @@ interface SyncResult {
   error?: string;
 }
 
+// Records that we actually fetched this event-team's page. Callers use it to
+// tell "no roster published upstream" apart from "not scraped yet" — without
+// it, a page that yields no rows looks like pending work forever.
+async function markRosterChecked(
+  db: ReturnType<typeof supabase>,
+  eventID: string,
+  teamUUID: string,
+): Promise<void> {
+  const { error } = await db
+    .from('usau_event_teams')
+    .update({ roster_checked_at: new Date().toISOString() })
+    .eq('event_id', eventID)
+    .eq('team_id', teamUUID);
+  if (error) console.error(`roster_checked_at update: ${stringifyErr(error)}`);
+}
+
 async function syncTeam(
   db: ReturnType<typeof supabase>,
   eventID: string,
@@ -140,6 +156,10 @@ async function syncTeam(
 
   const { roster, goals, assists } = parseTeamPage(html);
   if (roster.length === 0) {
+    // Page fetched fine, USAU just publishes no roster for it. Stamp it so the
+    // backfill stops re-scraping a page that will never yield rows. Only on
+    // this path — a fetch failure above must stay unstamped so it retries.
+    await markRosterChecked(db, eventID, teamUUID);
     return { team: teamName, rosterSize: 0, withGoals: 0, withAssists: 0, skipped: true };
   }
 
@@ -224,6 +244,7 @@ async function syncTeam(
     .from('usau_teams')
     .update({ last_scraped_at: new Date().toISOString() })
     .eq('id', teamUUID);
+  await markRosterChecked(db, eventID, teamUUID);
 
   return { team: teamName, rosterSize: roster.length, withGoals, withAssists };
 }

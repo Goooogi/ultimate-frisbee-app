@@ -138,7 +138,7 @@ function bracketTailLower(name: string | null | undefined): string {
  *  accepts 1st/first-place/championship/finals/bracket-play, rejects anything
  *  carrying an ordinal ≥ the bare number (so "3rd Place" / "5th Place Bracket"
  *  never crown a champion) plus consolation/placement. */
-function isChampionshipBracketName(name: string | null | undefined): boolean {
+export function isChampionshipBracketName(name: string | null | undefined): boolean {
   const b = bracketTailLower(name);
   if (!b) return false;
   if (/\b1st place\b/.test(b) || /\bfirst place\b/.test(b)) return true;
@@ -1879,8 +1879,14 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   // 4b. Pool-record fallback — same rule as the /scores tab. Divisions that
   // never played a bracket (pool-play-only, e.g. an event whose Women's bracket
   // isn't scraped yet) get the unique best-pool-record team as de-facto winner,
-  // badged "Pool leader". Skips divisions already decided by a bracket final.
-  const poolWinners = await bestPoolRecordWinners(db, eventIds, decidedKeys);
+  // badged "Pool leader". Skips divisions already decided by a bracket final,
+  // and events that HAVE a championship bracket (its final just isn't decided
+  // or scraped yet) — same gate as recentUsauTournamentPage. Events here are
+  // already end_date < today, so only the bracket half is needed.
+  const eventsWithBracket = await eventsWithChampionshipBracket(db, eventIds);
+  const poolEligibleIds = eventIds.filter((id) => !eventsWithBracket.has(id));
+  const poolWinners =
+    poolEligibleIds.length > 0 ? await bestPoolRecordWinners(db, poolEligibleIds, decidedKeys) : [];
   for (const w of poolWinners) {
     if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
     championsByEvent.get(w.eventId)!.push({
@@ -2367,7 +2373,16 @@ export async function recentUsauTournamentPage(
   // Already won via bracket — plus cancelled-final divisions, where a pool
   // leader would misrepresent a bracket that reached its final.
   const decidedKeys = new Set([...best.keys(), ...cancelledKeys]);
-  const poolWinners = await bestPoolRecordWinners(db, eventIds, decidedKeys);
+
+  // No "Pool leader" when a championship bracket exists (its final just hasn't
+  // been decided/scraped yet) or the event is still in play — a Saturday pool
+  // leader is not a result.
+  const eventsWithBracket = await eventsWithChampionshipBracket(db, eventIds);
+  const poolEligibleIds = recent
+    .filter((e) => !eventsWithBracket.has(e.id) && e.end_date != null && e.end_date < today)
+    .map((e) => e.id);
+  const poolWinners =
+    poolEligibleIds.length > 0 ? await bestPoolRecordWinners(db, poolEligibleIds, decidedKeys) : [];
   for (const w of poolWinners) {
     if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
     championsByEvent.get(w.eventId)!.push({
@@ -2433,6 +2448,34 @@ export async function recentUsauTournamentPage(
     page: safePage,
     pageCount,
   };
+}
+
+/**
+ * Events (of `eventIds`) that have at least one CHAMPIONSHIP-bracket game in
+ * a tree round. Paged: bracket rows across a page of events can exceed
+ * PostgREST's 1000-row cap. (Ported from mobile — keep in sync.)
+ */
+async function eventsWithChampionshipBracket(
+  db: Awaited<ReturnType<typeof supabase>>,
+  eventIds: string[],
+): Promise<Set<string>> {
+  const PAGE = 1000;
+  const out = new Set<string>();
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('usau_games')
+      .select('id, event_id, bracket_name')
+      .in('event_id', eventIds)
+      .in('round', ['prequarter', 'quarter', 'semi', 'final'])
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    const rows = page ?? [];
+    for (const r of rows) {
+      if (isChampionshipBracketName(r.bracket_name)) out.add(r.event_id);
+    }
+    if (rows.length < PAGE) break;
+  }
+  return out;
 }
 
 /**
@@ -3717,6 +3760,53 @@ function dropSupersededGames(games: EventGameRow[]): EventGameRow[] {
   });
 }
 
+const TREE_ROUND_ORDER = ['prequarter', 'quarter', 'semi', 'final'] as const;
+
+function isInformativePlaceholder(s: string | null | undefined): boolean {
+  return !!s && s.trim().toLowerCase() !== 'tbd';
+}
+
+/**
+ * Drop bracket rounds nothing fed. USAU sometimes emits a round of fully blank
+ * rows (null teams, null placeholders, no location) beside semis seeded straight
+ * from pools — Midas the III showed a TBD Quarterfinals column USAU never had.
+ * dropSupersededGames keys on field+time so it cannot see these.
+ *
+ * Grouped by EXACT bracket_name (ghost rows share their siblings' name). Walks
+ * final → prequarters: a blank round is unfed only when the nearest round
+ * downstream is fully seeded. A blank round with nothing seeded below it (an
+ * upcoming final under seeded semis, a whole pre-tournament bracket) is real.
+ * (Ported from mobile — keep in sync.)
+ */
+function dropUnfedUpstreamRounds(games: EventGameRow[]): EventGameRow[] {
+  const blank = (g: EventGameRow) =>
+    g.teamAId == null &&
+    g.teamBId == null &&
+    !isInformativePlaceholder(g.teamAPlaceholder) &&
+    !isInformativePlaceholder(g.teamBPlaceholder);
+  const seeded = (g: EventGameRow) => g.teamAId != null && g.teamBId != null;
+  const byBracket = new Map<string, EventGameRow[]>();
+  for (const g of games) {
+    if (!g.bracketName || !(TREE_ROUND_ORDER as readonly string[]).includes(g.round)) continue;
+    const list = byBracket.get(g.bracketName) ?? [];
+    list.push(g);
+    byBracket.set(g.bracketName, list);
+  }
+  const dropIds = new Set<string>();
+  for (const list of byBracket.values()) {
+    const rounds = TREE_ROUND_ORDER.map((r) => list.filter((g) => g.round === r));
+    let downstreamSeeded = false;
+    for (let i = rounds.length - 1; i >= 0; i--) {
+      const round = rounds[i];
+      if (round.length === 0) continue;
+      if (round.every(seeded)) downstreamSeeded = true;
+      else if (downstreamSeeded && round.every(blank)) for (const g of round) dropIds.add(g.id);
+      else downstreamSeeded = false;
+    }
+  }
+  return dropIds.size === 0 ? games : games.filter((g) => !dropIds.has(g.id));
+}
+
 export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const db = await supabase();
   // Case-INSENSITIVE slug match. USAU slugs are canonically lowercase, but the
@@ -3766,7 +3856,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
     };
   });
 
-  const games = dropSupersededGames(
+  const games = dropUnfedUpstreamRounds(dropSupersededGames(
     (gameRes.data ?? []).map((g) => {
       const ta = (g as { team_a: { name: string } | null }).team_a;
       const tb = (g as { team_b: { name: string } | null }).team_b;
@@ -3790,7 +3880,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
         teamBPlaceholder: g.team_b_placeholder ?? null,
       };
     }),
-  );
+  ));
 
   return {
     id: event.id,

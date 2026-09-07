@@ -19,6 +19,7 @@ import { GameTile } from '@/components/home/game-grid-section';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { WulTeamLogo } from '@/components/wul-team-logo';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { usauToday } from '@/lib/today';
 
 // ─── Public interfaces ────────────────────────────────────────────────────────
 
@@ -257,6 +258,8 @@ function TrophyIcon() {
 
 function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
   const dateRange = formatDateRange(major.startDate, major.endDate);
+  // Still being played (or ends today) → "In progress", not "Results pending".
+  const inProgress = (major.endDate ?? major.startDate ?? '') >= usauToday();
   // Card is a container (not a single anchor) so each division row can be its
   // own link into that division's bracket — nested anchors are invalid HTML.
   return (
@@ -285,7 +288,7 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
       <div className="flex flex-col gap-2">
         {major.champions.length === 0 ? (
           <span className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
-            {major.cancelledFinals?.length ? 'Final cancelled' : 'Results pending'}
+            {major.cancelledFinals?.length ? 'Final cancelled' : inProgress ? 'In progress' : 'Results pending'}
           </span>
         ) : (
           major.champions.map((c) => (

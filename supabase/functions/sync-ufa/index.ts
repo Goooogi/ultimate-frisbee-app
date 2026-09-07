@@ -34,10 +34,12 @@
 //
 // Request body (all optional):
 //   { "year": 2026, "windowDays": 14, "maxGames": 12, "retryDays": 5,
-//     "maxPlayerFetches": 120 }   (larger for manual repair runs; wall-clock caps ~400)
+//     "maxPlayerFetches": 120, "prune": true }
+//   (larger for manual repair runs; wall-clock caps ~400)
 // Auth: verify_jwt off (server-to-server; pg_cron passes the service-role key).
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
+import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 
 const UFA_BASE = 'https://www.backend.ufastats.com/web-v1';
 const UA = 'Mozilla/5.0 (the-layout fantasy sync)';
@@ -65,6 +67,50 @@ const MAX_PLAYER_FETCHES = 120;
 // wall-clock — subsequent hourly runs finish the rest. Once set, never re-fetched.
 const MAX_HEADSHOT_FETCHES = 40;
 
+// ── Orphan pruning ───────────────────────────────────────────────────────────
+// UFA has NO "Cancelled" status. When a game is rescheduled or dropped they
+// simply DELETE the row and (for a reschedule) publish a new one under a new
+// date-keyed gameID. Because this sync is upsert-only, the superseded row used
+// to live in ufa_games forever, frozen at 'Upcoming' with null scores.
+//
+// That is not cosmetic. Two real 2026 orphans were found on 2026-08-29:
+//   • 2026-07-17-IND-PIT — 'Upcoming', superseded by 2026-07-19-IND-PIT
+//     (Final 29-25, same teams, same week-13). It was the ONLY non-terminal
+//     row of the season, and the player-profile champion gate keyed on
+//     "every game Final", so this single row suppressed the "UFA Champion
+//     2026" chip for the entire championship roster.
+//   • 2026-08-27-OAK-NY — week '', score 0-0, start_timestamp in 2025 but
+//     stored under year=2026: a corrupt duplicate of the real semifinal
+//     2026-08-27-NY-OAK, showing up as a phantom game in schedules/records.
+//
+// So: after a SUCCESSFUL, COMPLETE season fetch, delete rows for that year that
+// upstream no longer lists.
+//
+// SAFETY — pruning is a delete, so it only runs when we are certain the fetch
+// is trustworthy. All of these must hold:
+//   1. fetchGames() reported a clean termination (a short final page), NOT a
+//      page-cap bailout. A truncated fetch would look like "upstream dropped
+//      the tail of the season" and delete real games.
+//   2. The fetch returned at least MIN_PRUNE_GAMES rows. Guards against an
+//      upstream blip returning an empty/near-empty season (their `limit>20`
+//      handling already returns an error object rather than games — see
+//      MAX_GAMES_LIMIT — and we must never read that as "delete everything").
+//   3. The number of rows to delete is at most MAX_PRUNE_PER_RUN. A correct
+//      prune removes a handful of superseded rows; wanting to delete dozens
+//      means something is wrong upstream or in our year bookkeeping, so we
+//      refuse and report instead of destroying the season.
+// Any guard failing skips the prune and surfaces the reason in the response —
+// the run still succeeds, the orphans just survive to the next run.
+//
+// Child rows in ufa_game_player_stats are removed first (explicit, rather than
+// relying on an FK cascade that may not be declared).
+const MIN_PRUNE_GAMES = 50;
+const MAX_PRUNE_PER_RUN = 10;
+
+/** Long-edge px for stored headshots — matches scripts/backfill-ufa-headshots.ts.
+ *  The app renders a ~176px (retina) avatar box from the PLAIN stored object. */
+const HEADSHOT_MAX_PX = 400;
+
 const WATCHUFA_PLAYER = 'https://www.watchufa.com/league/players';
 const HEADSHOT_RE = /src="(https:\/\/[^"]*\/profile-images\/[^"]*_profile\.[A-Za-z]+)"/i;
 const HEADSHOT_BUCKET = 'ufa-headshots';
@@ -74,8 +120,9 @@ const MIME: Record<string, string> = {
 
 /**
  * Self-host a player's UFA headshot: scrape the watchufa profile page for the
- * image src, download it, upload to the ufa-headshots bucket as {id}.{ext}, and
- * return OUR public object URL (the app renders it through the image transform).
+ * image src, download it, downscale it, upload to the ufa-headshots bucket as
+ * {id}.{ext}, and return OUR public object URL (served PLAIN — the app does not
+ * use Supabase's image transform, which bills per unique origin image).
  * We self-host rather than store the watchufa hotlink because those are full-res
  * multi-MB originals off a third-party CDN — slow, flaky, and they can vanish.
  * Soft-fails to null at every step so a missing/blocked headshot never breaks
@@ -107,9 +154,24 @@ async function fetchHeadshotUrl(supabase: SupabaseClient, playerID: string): Pro
     return null;
   }
 
-  // 3. Upload to our bucket as {id}.{ext} (upsert → self-heals on change).
+  // 3. Downscale before storing. Upstream images are ~3.4 MB 2400x3000 camera
+  // originals; the app serves these objects PLAIN (no image transform — that
+  // endpoint bills per unique origin image, 100/cycle on Pro) into a ~176px
+  // avatar box, so storing the original ships ~99% waste on every render.
+  // Soft-fails to the original bytes if decode/encode throws.
   let ext = (srcUrl.split('.').pop() ?? 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '');
   if (ext === 'jpeg') ext = 'jpg';
+  try {
+    const img = await Image.decode(bytes);
+    const scale = HEADSHOT_MAX_PX / Math.max(img.width, img.height);
+    if (scale < 1) {
+      img.resize(Math.round(img.width * scale), Math.round(img.height * scale));
+      bytes = await img.encodeJPEG(80);
+      ext = 'jpg'; // re-encoded as JPEG regardless of the source container
+    }
+  } catch { /* keep the original bytes */ }
+
+  // 4. Upload to our bucket as {id}.{ext} (upsert → self-heals on change).
   const objectPath = `${playerID}.${ext}`;
   const { error } = await supabase.storage
     .from(HEADSHOT_BUCKET)
@@ -333,7 +395,86 @@ function gameRowOf(g: ApiGame, year: number) {
   };
 }
 
-async function run(body: { year?: number; windowDays?: number; maxGames?: number; retryDays?: number; maxPlayerFetches?: number }) {
+interface PruneResult {
+  pruned: number;
+  prunedIds: string[];
+  skipped: string | null;
+}
+
+/**
+ * Delete stored games for `year` that upstream no longer lists. See the
+ * "Orphan pruning" block above for why this exists and what each guard
+ * protects against. Never throws: a prune failure must not fail the sync.
+ */
+async function pruneOrphans(
+  supabase: SupabaseClient,
+  year: number,
+  upstreamIds: Set<string>,
+  fetchComplete: boolean,
+): Promise<PruneResult> {
+  const none: PruneResult = { pruned: 0, prunedIds: [], skipped: null };
+
+  if (!fetchComplete) {
+    return { ...none, skipped: 'season fetch hit the page cap (possibly truncated)' };
+  }
+  if (upstreamIds.size < MIN_PRUNE_GAMES) {
+    return {
+      ...none,
+      skipped: `upstream returned only ${upstreamIds.size} games (< ${MIN_PRUNE_GAMES})`,
+    };
+  }
+
+  // Paged explicitly: PostgREST caps a single response at 1000 rows and
+  // truncates SILENTLY. A truncated scan can't invent an orphan (unseen rows
+  // are simply not considered), but paging keeps that true if a season ever
+  // exceeds the cap rather than leaving it a latent under-prune.
+  const held: string[] = [];
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('ufa_games')
+        .select('id')
+        .eq('year', year)
+        .range(from, from + PAGE - 1);
+      if (error) return { ...none, skipped: `could not read stored games: ${error.message}` };
+      const rows = data ?? [];
+      for (const r of rows) held.push((r as { id: string }).id);
+      if (rows.length < PAGE) break;
+    }
+  }
+
+  const orphans = held.filter((id) => !upstreamIds.has(id));
+
+  if (orphans.length === 0) return none;
+  if (orphans.length > MAX_PRUNE_PER_RUN) {
+    return {
+      ...none,
+      skipped:
+        `${orphans.length} orphans exceeds the ${MAX_PRUNE_PER_RUN}-per-run safety cap ` +
+        `— refusing to delete; investigate before pruning`,
+    };
+  }
+
+  // Child stat rows first (don't rely on an FK cascade being declared).
+  const { error: statErr } = await supabase
+    .from('ufa_game_player_stats')
+    .delete()
+    .in('game_id', orphans);
+  if (statErr) return { ...none, skipped: `could not delete stat rows: ${statErr.message}` };
+
+  const { error: gameErr } = await supabase
+    .from('ufa_games')
+    .delete()
+    .eq('year', year)
+    .in('id', orphans);
+  if (gameErr) return { ...none, skipped: `could not delete game rows: ${gameErr.message}` };
+
+  console.warn(`[sync-ufa] pruned ${orphans.length} orphan game(s) for ${year}: ${orphans.join(', ')}`);
+  return { pruned: orphans.length, prunedIds: orphans, skipped: null };
+}
+
+async function run(body: { year?: number; windowDays?: number; maxGames?: number; retryDays?: number; maxPlayerFetches?: number; prune?: boolean }) {
   const supabase = db();
   const now = new Date();
   const year = body.year ?? (now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1);
@@ -341,6 +482,7 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
   const maxGames = body.maxGames ?? DEFAULT_MAX_GAMES;
   const retryDays = body.retryDays ?? DEFAULT_RETRY_DAYS;
   const maxPlayerFetches = body.maxPlayerFetches ?? MAX_PLAYER_FETCHES;
+  const prune = body.prune ?? true;
   const windowStartMs = now.getTime() - windowDays * 86400_000;
   const retryStartMs = now.getTime() - retryDays * 86400_000;
 
@@ -370,65 +512,13 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
   }
   if (gameRows.length > 0) await upsert(supabase, 'ufa_games', gameRows, 'id');
 
-  // 1b. Prune orphans — rows we hold for THIS season whose gameID no longer
-  // exists upstream. UFA reschedules/renumbers games (the gameID encodes the
-  // date + both team codes, so a postponed game reappears under a NEW id) and
-  // nothing else ever removes the dead row: it lingers forever as a phantom
-  // fixture on schedules, standings and team pages.
-  //
-  // GATED on seasonFetchComplete, and this gate is load-bearing:
-  // ufa_game_player_stats.game_id is ON DELETE CASCADE, so deleting a game row
-  // silently destroys its stat lines too. If a page walk came back partial
-  // (upstream 5xx mid-walk, page cap, a `total` mismatch), the games we DIDN'T
-  // see are indistinguishable from games that no longer exist — pruning on that
-  // basis would delete real games and cascade away real stats. When in doubt we
-  // keep the row: a phantom fixture is a cosmetic bug, a cascaded stat wipe is
-  // data loss. `pruneSkipped` carries the reason when we decline (null = ran).
-  //
-  // Scoped to `year` so it can never touch another season's rows, and never
-  // deletes when the upstream set is empty (a feed returning nothing for a
-  // season is a fault, not an emptied season).
-  let orphansPruned = 0;
-  let prunedIds: string[] = [];
-  let pruneSkipped: string | null = null;
-  if (!seasonFetchComplete) {
-    pruneSkipped = 'season fetch incomplete';
-  } else if (gameRows.length === 0) {
-    pruneSkipped = 'upstream returned no games';
-  } else {
-    const upstreamIds = new Set(gameRows.map((r) => r.id as string));
-    // Paged explicitly: PostgREST caps a single response at 1000 rows and
-    // truncates SILENTLY. A truncated scan can't invent an orphan (unseen rows
-    // are simply not considered), but paging keeps that true if a season ever
-    // exceeds the cap rather than leaving it a latent cascade-delete hazard.
-    const held: string[] = [];
-    {
-      const PAGE = 1000;
-      for (let from = 0; ; from += PAGE) {
-        const { data, error: heldErr } = await supabase
-          .from('ufa_games')
-          .select('id')
-          .eq('year', year)
-          .range(from, from + PAGE - 1);
-        if (heldErr) throw new Error(`prune scan ufa_games: ${heldErr.message}`);
-        const rows = data ?? [];
-        for (const r of rows) held.push((r as { id: string }).id);
-        if (rows.length < PAGE) break;
-      }
-    }
-    const orphans = held.filter((id) => !upstreamIds.has(id));
-    if (orphans.length > 0) {
-      const { error: delErr } = await supabase
-        .from('ufa_games')
-        .delete()
-        .eq('year', year)
-        .in('id', orphans);
-      if (delErr) throw new Error(`prune delete ufa_games: ${delErr.message}`);
-      orphansPruned = orphans.length;
-      prunedIds = orphans;
-      console.warn(`[sync-ufa] pruned ${orphans.length} orphaned ${year} games: ${orphans.join(', ')}`);
-    }
-  }
+  // 1b. Drop rows upstream no longer lists (reschedules, removals, corrupt
+  //     duplicates). Runs AFTER the upsert so a rescheduled game's replacement
+  //     row is already present before its predecessor is removed. Every safety
+  //     guard lives in pruneOrphans() — see the "Orphan pruning" block above.
+  const pruneResult: PruneResult = prune
+    ? await pruneOrphans(supabase, year, new Set(gameRows.map((r) => r.id as string)), seasonFetchComplete)
+    : { pruned: 0, prunedIds: [], skipped: 'prune disabled by request' };
 
   // 2. Recent, non-Upcoming games in the window — candidates for stat sync.
   const candidates = games
@@ -472,8 +562,15 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
     })
     .slice(0, maxGames);
 
-  // Players that already have a (self-hosted) headshot → never re-fetch. One
-  // paged sweep of the non-null set; cheap vs. re-hitting watchufa + Storage.
+  // Players we should NOT spend a headshot fetch on: those who already have a
+  // self-hosted headshot, PLUS those we've already checked and found to have no
+  // image upstream (headshot_checked_at set).
+  //
+  // The second half matters: the per-run budget is only MAX_HEADSHOT_FETCHES,
+  // and ~half of all players have no watchufa photo at all. Without the
+  // checked-at filter every run burned its whole budget re-scraping the same
+  // imageless early-alphabet ids, so players later in the alphabet were never
+  // reached — that's why ~1,858 rows sat null indefinitely.
   const existingHeadshots = new Set<string>();
   {
     const PAGE = 1000;
@@ -481,7 +578,7 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
       const { data } = await supabase
         .from('ufa_players')
         .select('id')
-        .not('headshot_url', 'is', null)
+        .or('headshot_url.not.is.null,headshot_checked_at.not.is.null')
         .range(from, from + PAGE - 1);
       const rows = data ?? [];
       for (const r of rows) existingHeadshots.add((r as { id: string }).id);
@@ -497,6 +594,8 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
   let fetchBudgetHit = false; // true once we stop starting new games mid-cap
   const playersSeen = new Set<string>();
   const playerRows: Record<string, unknown>[] = [];
+  // Headshot results applied after the bulk upsert (see PGRST102 note below).
+  const headshotUpdates: { id: string; url: string | null }[] = [];
   const statRows: Record<string, unknown>[] = [];
 
   // Built lazily, once, only if a game actually needs it (championship-weekend
@@ -577,24 +676,33 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
         const { first, last } = splitName(full);
 
         // Headshot: only scrape (watchufa profile page) when we DON'T already
-        // have one for this player and we're under the per-run headshot budget.
-        // Headshots almost never change, so once set we skip forever. Keeping
-        // the field OUT of the upsert row when we don't scrape avoids clobbering
-        // an existing headshot_url with null.
-        const row: Record<string, unknown> = {
+        // have one for this player (or haven't already checked) and we're under
+        // the per-run budget. Headshots almost never change, so once resolved we
+        // skip forever.
+        //
+        // The result is applied as a SEPARATE targeted update, never as a key on
+        // this bulk-upsert row: PostgREST requires every row in one upsert to
+        // have identical keys (PGRST102), so a conditionally-present column
+        // would fail the whole batch as soon as one player is scraped and
+        // another isn't. It also avoids clobbering an existing headshot_url
+        // with null.
+        playerRows.push({
           id: rp.playerID,
           first_name: rp.firstName ?? first,
           last_name: rp.lastName ?? last,
           full_name: full || rp.playerID,
           current_team_id: teamId,
           updated_at: new Date().toISOString(),
-        };
+        });
         if (headshotFetches < MAX_HEADSHOT_FETCHES && !existingHeadshots.has(rp.playerID)) {
           const url = await fetchHeadshotUrl(supabase, rp.playerID);
           headshotFetches++;
-          if (url) row.headshot_url = url;
+          existingHeadshots.add(rp.playerID); // don't re-scrape within this run
+          // Stamp the attempt either way — a null result means "no image
+          // upstream", which must be remembered so the next run spends its
+          // budget on someone else instead of re-scraping this player forever.
+          headshotUpdates.push({ id: rp.playerID, url });
         }
-        playerRows.push(row);
       }
 
       // the stat line for THIS game
@@ -637,13 +745,22 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
   if (playerRows.length > 0) await upsert(supabase, 'ufa_players', playerRows, 'id');
   if (statRows.length > 0) await upsert(supabase, 'ufa_game_player_stats', statRows, 'game_id,player_id');
 
+  // Headshot results: one targeted update per scraped player. Runs AFTER the
+  // upsert so the row exists, and stays out of that batch to keep its keys
+  // uniform (PGRST102). Capped by MAX_HEADSHOT_FETCHES, so this is <=40 updates.
+  for (const h of headshotUpdates) {
+    const patch: Record<string, unknown> = { headshot_checked_at: new Date().toISOString() };
+    if (h.url) patch.headshot_url = h.url;
+    await supabase.from('ufa_players').update(patch).eq('id', h.id);
+  }
+
   return {
     year,
     gamesUpserted: gameRows.length,
     seasonFetchComplete,
-    orphansPruned,
-    prunedIds,
-    pruneSkipped,
+    orphansPruned: pruneResult.pruned,
+    prunedIds: pruneResult.prunedIds,
+    pruneSkipped: pruneResult.skipped,
     recentGamesProcessed: recent.length,
     playerFetches,
     headshotFetches,
@@ -666,7 +783,10 @@ Deno.serve(async (req) => {
     });
   }
   playerLogCache.clear();
-  let body: { year?: number; windowDays?: number; maxGames?: number; retryDays?: number; maxPlayerFetches?: number } = {};
+  let body: {
+    year?: number; windowDays?: number; maxGames?: number; retryDays?: number;
+    maxPlayerFetches?: number; prune?: boolean;
+  } = {};
   try { body = await req.json(); } catch { /* empty ok */ }
   try {
     const result = await run(body);

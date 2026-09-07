@@ -11,6 +11,7 @@
 import Link from 'next/link';
 import { AppShell } from '@/components/page-shell';
 import { Breadcrumbs } from '@/components/breadcrumbs';
+import { GameFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { PlayerSpotlightSection } from '@/components/pro/player-spotlight-section';
 import {
@@ -121,9 +122,16 @@ function DetailBody({ game, boxscore, spotlight }: PulGameDetailProps) {
             { label: matchupLabel },
           ]}
         />
-        <span className="text-[10.5px] font-bold tracking-[0.18em] text-accent uppercase flex-shrink-0">
-          PUL · {formatWeekLabel(game.weekLabel)}
-        </span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-[10.5px] font-bold tracking-[0.18em] text-accent uppercase">
+            PUL · {formatWeekLabel(game.weekLabel)}
+          </span>
+          {!isFinal && (
+            <GameFavoriteStar
+              game={{ league: 'pul', gameId: game.id, name: matchupLabel, gameDate: game.gameDate }}
+            />
+          )}
+        </div>
       </div>
 
       {/* ── Score card: status strip + score block, one floating unit ──── */}
