@@ -33,6 +33,7 @@ import {
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import type { FantasyWeek } from '@/lib/fantasy/weeks';
 import { formatWeekLabel } from '@/lib/fantasy/weeks';
+import { getProjections, projectedPoints, projectionKey, type ProjectionMap } from '@/lib/fantasy/projections';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,7 +53,18 @@ function buildSlots(contest: ContestView): SlotState[] {
   return Array.from({ length: s.flex }, () => ({ role: 'flex' as const, player: null, preview: null }));
 }
 
-export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
+interface ContestRosterBuilderProps {
+  contest: ContestView;
+  /** When present, the slot typeahead filters this pool locally (substring
+   *  match; whole pool on focus) instead of calling searchContestPlayers —
+   *  used by the Team tab for drafted contests to restrict lineups to a
+   *  team's owned players. Web port of the mobile app's RosterBuilder pool
+   *  mode (altiusapps/mobileapp-thelayout ·
+   *  src/components/fantasy/RosterBuilder.tsx). */
+  pool?: FantasyPlayerHit[];
+}
+
+export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProps) {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
 
@@ -73,6 +85,21 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
   const [saveOk, setSaveOk] = useState(false);
 
   const isEventMode = contest.settings.mode === 'event';
+
+  const [projections, setProjections] = useState<ProjectionMap | undefined>(undefined);
+  useEffect(() => {
+    if (isEventMode) {
+      setProjections(undefined);
+      return;
+    }
+    let cancelled = false;
+    getProjections(contest.id)
+      .then((m) => !cancelled && setProjections(m))
+      .catch(() => !cancelled && setProjections(undefined));
+    return () => {
+      cancelled = true;
+    };
+  }, [contest.id, isEventMode]);
 
   // ── Load periods (schedule) ─────────────────────────────────────────────
   useEffect(() => {
@@ -230,9 +257,7 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
         </p>
         <Link
           href={
-            contest.competition === 'ufa'
-              ? `/fantasy/ufa/l/${contest.id}`
-              : `/fantasy/contests/${contest.id}`
+            `/fantasy/l/${contest.id}`
           }
           className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
         >
@@ -276,6 +301,7 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
             onSelect={handleSelectPlayer}
             onClear={handleClearPlayer}
             disabled={isLocked}
+            pool={pool}
           />
         ) : (
           <>
@@ -287,6 +313,8 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
               onSelect={handleSelectPlayer}
               onClear={handleClearPlayer}
               disabled={isLocked}
+              pool={pool}
+              projections={projections}
             />
             <RoleSlotGroup
               contest={contest}
@@ -296,6 +324,8 @@ export function ContestRosterBuilder({ contest }: { contest: ContestView }) {
               onSelect={handleSelectPlayer}
               onClear={handleClearPlayer}
               disabled={isLocked}
+              pool={pool}
+              projections={projections}
             />
           </>
         )}
@@ -505,6 +535,9 @@ interface TypeaheadProps {
   onSelect: (slotIndex: number, player: FantasyPlayerHit) => void;
   onClear: (slotIndex: number) => void;
   disabled?: boolean;
+  /** When present, search filters this pool locally instead of calling
+   *  searchContestPlayers — see ContestRosterBuilderProps.pool above. */
+  pool?: FantasyPlayerHit[];
 }
 
 function PlayerTypeahead({
@@ -516,6 +549,7 @@ function PlayerTypeahead({
   onSelect,
   onClear,
   disabled = false,
+  pool,
 }: TypeaheadProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<FantasyPlayerHit[]>([]);
@@ -526,6 +560,15 @@ function PlayerTypeahead({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const search = useCallback(async (q: string) => {
+    if (pool) {
+      // Pool mode: filter locally (case-insensitive substring); an empty
+      // query shows the whole pool while the field is focused.
+      const needle = q.trim().toLowerCase();
+      const hits = needle ? pool.filter((p) => p.fullName.toLowerCase().includes(needle)) : pool;
+      setResults(hits.filter((h) => !usedPlayerIds.has(h.playerId)));
+      setOpen(true);
+      return;
+    }
     if (q.length < 2) {
       setResults([]);
       setOpen(false);
@@ -542,13 +585,21 @@ function PlayerTypeahead({
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contest, usedPlayerIds]);
+  }, [contest, usedPlayerIds, pool]);
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     setQuery(val);
+    if (pool) {
+      void search(val); // local filter — no debounce needed
+      return;
+    }
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => search(val), 200);
+  };
+
+  const handleFocus = () => {
+    if (pool) void search(query);
   };
 
   const handleSelect = (player: FantasyPlayerHit) => {
@@ -651,7 +702,7 @@ function PlayerTypeahead({
           type="text"
           value={query}
           onChange={handleInput}
-          onFocus={() => query.length >= 2 && setOpen(true)}
+          onFocus={() => (pool ? handleFocus() : query.length >= 2 && setOpen(true))}
           disabled={disabled}
           placeholder={`Search ${role === 'offender' ? 'offender' : role === 'defender' ? 'defender' : 'player'}…`}
           aria-label={`Search for a player to add as ${role}`}
@@ -753,12 +804,22 @@ function PlayerTypeahead({
   );
 }
 
-function PreviewBadge({ points }: { points: number | null }) {
-  if (points === null) return null;
+function PreviewBadge({ points, projPoints }: { points: number | null; projPoints?: number | null }) {
+  if (points === null && projPoints == null) return null;
   return (
-    <div className="flex items-center gap-1 mt-1.5 pl-8" aria-label={`Season preview: ${points} points`}>
-      <span className="font-tight text-[11px] text-faint">Season preview:</span>
-      <span className="font-tight text-[11px] font-bold text-ink tabular">{points} pts</span>
+    <div className="flex items-center gap-1 mt-1.5 pl-8 flex-wrap" aria-label={`Season preview: ${points} points`}>
+      {points !== null && (
+        <>
+          <span className="font-tight text-[11px] text-faint">Season preview:</span>
+          <span className="font-tight text-[11px] font-bold text-ink tabular">{points} pts</span>
+        </>
+      )}
+      {projPoints != null && (
+        <span className="font-tight text-[11px] text-faint tabular">
+          {points !== null ? ' · ' : ''}
+          {`Proj ${projPoints}`}
+        </span>
+      )}
     </div>
   );
 }
@@ -773,6 +834,8 @@ function RoleSlotGroup({
   onSelect,
   onClear,
   disabled,
+  pool,
+  projections,
 }: {
   contest: ContestView;
   role: 'offender' | 'defender';
@@ -781,9 +844,12 @@ function RoleSlotGroup({
   onSelect: (slotIndex: number, player: FantasyPlayerHit) => void;
   onClear: (slotIndex: number) => void;
   disabled: boolean;
+  pool?: FantasyPlayerHit[];
+  projections?: ProjectionMap;
 }) {
   const roleSlots = slots.filter((s) => s.role === role);
   const filled = roleSlots.filter((s) => s.player !== null).length;
+  const playerLeague = contest.competitionDef.playerLeague;
 
   return (
     <div>
@@ -821,8 +887,16 @@ function RoleSlotGroup({
                 onSelect={onSelect}
                 onClear={onClear}
                 disabled={disabled}
+                pool={pool}
               />
-              {slot.player && <PreviewBadge points={slot.preview} />}
+              {slot.player && (
+                <PreviewBadge
+                  points={slot.preview}
+                  projPoints={
+                    projections ? projectedPoints(projections.get(projectionKey(playerLeague, slot.player.playerId)), role) : null
+                  }
+                />
+              )}
             </div>
           );
         })}
@@ -838,6 +912,7 @@ function FlexSlotGroup({
   onSelect,
   onClear,
   disabled,
+  pool,
 }: {
   contest: ContestView;
   slots: SlotState[];
@@ -845,6 +920,7 @@ function FlexSlotGroup({
   onSelect: (slotIndex: number, player: FantasyPlayerHit) => void;
   onClear: (slotIndex: number) => void;
   disabled: boolean;
+  pool?: FantasyPlayerHit[];
 }) {
   const filled = slots.filter((s) => s.player !== null).length;
   return (
@@ -871,6 +947,7 @@ function FlexSlotGroup({
             onSelect={onSelect}
             onClear={onClear}
             disabled={disabled}
+            pool={pool}
           />
         ))}
       </div>

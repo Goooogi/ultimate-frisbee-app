@@ -26,6 +26,8 @@ import {
 } from './competitions';
 import type { FantasyWeek } from './weeks';
 import type { LeaderboardRow } from './data';
+import type { DraftRef } from './draft-room';
+import type { DraftStatus, DraftType } from './draft-room';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -52,6 +54,8 @@ export interface FantasyLeagueSummary {
   createdAt: string;
   memberCount: number;
   contestCount: number;
+  logoUrl: string | null;
+  logoIcon: string | null;
 }
 
 export type LeagueRole = 'commissioner' | 'member';
@@ -108,7 +112,7 @@ function mapContestRow(r: Record<string, unknown>): ContestView | null {
 export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary | null> {
   const { data, error } = await anon()
     .from('fantasy_leagues')
-    .select('id, name, owner_id, created_at')
+    .select('id, name, owner_id, created_at, logo_url, logo_icon')
     .eq('id', leagueId)
     .maybeSingle();
   if (error) throw error;
@@ -126,6 +130,8 @@ export async function getLeague(leagueId: string): Promise<FantasyLeagueSummary 
     createdAt: data.created_at as string,
     memberCount: members ?? 0,
     contestCount: contests ?? 0,
+    logoUrl: (data.logo_url as string) ?? null,
+    logoIcon: (data.logo_icon as string) ?? null,
   };
 }
 
@@ -285,11 +291,25 @@ export async function getContestTeam(teamId: string): Promise<ContestTeamView | 
 
 // ─── My leagues (session) ────────────────────────────────────────────────────
 
+export interface MyLeagueContestRow {
+  contestId: string;
+  competition: CompetitionId;
+  competitionDef: CompetitionDef;
+  seasonYear: number;
+  name: string;
+  status: ContestStatus;
+  settings: ContestSettings;
+  draft: { status: 'scheduled' | 'live' | 'complete'; type: 'snake' | 'auction'; scheduledAt: string | null } | null;
+}
+
 export interface MyLeagueRow {
   leagueId: string;
   name: string;
   role: LeagueRole;
   memberCount: number;
+  logoUrl: string | null;
+  logoIcon: string | null;
+  contests: MyLeagueContestRow[];
 }
 
 /** Leagues the signed-in user belongs to. [] when signed out. */
@@ -302,7 +322,7 @@ export async function getMyLeagues(): Promise<MyLeagueRow[]> {
 
   const { data, error } = await supabase
     .from('fantasy_league_members')
-    .select('league_id, role, fantasy_leagues:league_id (name)')
+    .select('league_id, role, fantasy_leagues:league_id (name, logo_url, logo_icon)')
     .eq('user_id', user.id)
     .order('joined_at', { ascending: false });
   if (error) throw error;
@@ -322,13 +342,72 @@ export async function getMyLeagues(): Promise<MyLeagueRow[]> {
     counts.set(id, (counts.get(id) ?? 0) + 1);
   }
 
+  // Fan out to each league's contests, then to each contest's draft — two
+  // bounded queries (a user is in few leagues, a league has few contests),
+  // so the hub can show a one-glance status chip per league row without a
+  // per-row round trip.
+  const { data: contestRows } = await supabase
+    .from('fantasy_contests')
+    .select('id, league_id, competition, season_year, name, status, settings')
+    .in('league_id', ids)
+    .limit(1000);
+  const contestsByLeague = new Map<string, Record<string, unknown>[]>();
+  for (const c of contestRows ?? []) {
+    const leagueId = (c as Record<string, unknown>).league_id as string;
+    const list = contestsByLeague.get(leagueId) ?? [];
+    list.push(c as Record<string, unknown>);
+    contestsByLeague.set(leagueId, list);
+  }
+
+  const contestIds = (contestRows ?? []).map((c) => (c as Record<string, unknown>).id as string);
+  const draftsByContest = new Map<string, Record<string, unknown>>();
+  if (contestIds.length > 0) {
+    const { data: draftRows } = await supabase
+      .from('fantasy_drafts')
+      .select('contest_id, status, draft_type, scheduled_at')
+      .in('contest_id', contestIds)
+      .limit(1000);
+    for (const d of draftRows ?? []) {
+      const row = d as Record<string, unknown>;
+      draftsByContest.set(row.contest_id as string, row);
+    }
+  }
+
   return rows.map((r) => {
-    const lg = r.fantasy_leagues as { name?: string } | null;
+    const lg = r.fantasy_leagues as { name?: string; logo_url?: string | null; logo_icon?: string | null } | null;
+    const leagueId = r.league_id as string;
+    const contests: MyLeagueContestRow[] = (contestsByLeague.get(leagueId) ?? [])
+      .map((c): MyLeagueContestRow | null => {
+        const def = getCompetition(c.competition as string);
+        if (!def) return null;
+        const draftRow = draftsByContest.get(c.id as string);
+        return {
+          contestId: c.id as string,
+          competition: def.id,
+          competitionDef: def,
+          seasonYear: c.season_year as number,
+          name: c.name as string,
+          status: (c.status as ContestStatus) ?? 'open',
+          settings: parseContestSettings(def, c.settings),
+          draft: draftRow
+            ? {
+                status: draftRow.status as DraftStatus,
+                type: (draftRow.draft_type as DraftType) ?? 'snake',
+                scheduledAt: (draftRow.scheduled_at as string) ?? null,
+              }
+            : null,
+        };
+      })
+      .filter((c): c is MyLeagueContestRow => c !== null);
+
     return {
-      leagueId: r.league_id as string,
+      leagueId,
       name: lg?.name ?? 'League',
       role: (r.role as LeagueRole) ?? 'member',
-      memberCount: counts.get(r.league_id as string) ?? 1,
+      memberCount: counts.get(leagueId) ?? 1,
+      logoUrl: lg?.logo_url ?? null,
+      logoIcon: lg?.logo_icon ?? null,
+      contests,
     };
   });
 }
@@ -515,6 +594,42 @@ export async function resolveEventForCompetition(
       endDate: (data.end_date as string) ?? null,
     };
   }
+  if (competition === 'eucs') {
+    const { data, error } = await anon()
+      .from('euf_events')
+      .select('id, name, start_date, end_date')
+      .eq('year', seasonYear)
+      .eq('kind', 'eucf')
+      .order('start_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) {
+      return {
+        eventId: data.id as string,
+        name: data.name as string,
+        startDate: (data.start_date as string) ?? null,
+        endDate: (data.end_date as string) ?? null,
+      };
+    }
+    // Fallback: kind may be mis-tagged for older rows — match by name.
+    const fallback = await anon()
+      .from('euf_events')
+      .select('id, name, start_date, end_date')
+      .eq('year', seasonYear)
+      .ilike('name', '%EUCF%')
+      .order('start_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fallback.error) throw fallback.error;
+    if (!fallback.data) return null;
+    return {
+      eventId: fallback.data.id as string,
+      name: fallback.data.name as string,
+      startDate: (fallback.data.start_date as string) ?? null,
+      endDate: (fallback.data.end_date as string) ?? null,
+    };
+  }
   return null; // season competitions don't bind to a single event
 }
 
@@ -658,4 +773,363 @@ export async function createContestTeam(
     throw error;
   }
   return data.id as string;
+}
+
+// ─── League limits, logo, format (commissioner-only RPCs) ────────────────────
+
+/** Team cap for a contest (commissioner-only). unlimited only applies to
+ *  USAU Club Nationals. */
+export async function setContestLimits(contestId: string, maxTeams: number, unlimited?: boolean): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_set_contest_limits', {
+    p_contest: contestId,
+    p_max_teams: maxTeams,
+    p_unlimited: unlimited ?? false,
+  });
+  if (error) throw error;
+}
+
+/** Set a league's logo — a custom uploaded url XOR a stock icon token, never
+ *  both (pass the other as null). Commissioner-only. */
+export async function setLeagueLogo(leagueId: string, logo: { url: string | null; icon: string | null }): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_set_league_logo', {
+    p_league: leagueId,
+    p_url: logo.url,
+    p_icon: logo.icon,
+  });
+  if (error) throw error;
+}
+
+/** Set a weekly-stats contest's scoring format (h2h or points). Commissioner-
+ *  only; locked once a schedule has been generated. */
+export async function setContestFormat(contestId: string, format: 'h2h' | 'points'): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_set_contest_format', {
+    p_contest: contestId,
+    p_format: format,
+  });
+  if (error) throw error;
+}
+
+/** Generate the H2H schedule for a contest (needs >=4 teams, >=3 future
+ *  periods). Commissioner-only; usually triggered automatically on draft
+ *  completion, but exposed for manual/no-draft leagues too. */
+export async function generateSchedule(contestId: string): Promise<number> {
+  const { data, error } = await sessionClient().rpc('fantasy_generate_schedule', { p_contest: contestId });
+  if (error) throw error;
+  return (data as number) ?? 0;
+}
+
+// ─── H2H matchups + standings ─────────────────────────────────────────────────
+
+export interface Matchup {
+  id: string;
+  contestId: string;
+  period: string;
+  stage: 'regular' | 'semifinal' | 'final' | 'third';
+  homeTeamId: string;
+  awayTeamId: string | null;
+  homeSeed: number | null;
+  awaySeed: number | null;
+  homePoints: number | null;
+  awayPoints: number | null;
+  winnerTeamId: string | null;
+  scored: boolean;
+}
+
+export interface H2HStandingRow {
+  teamId: string;
+  teamName: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  pointsFor: number;
+  pointsAgainst: number;
+  rank: number;
+}
+
+function mapMatchup(r: Record<string, unknown>): Matchup {
+  return {
+    id: r.id as string,
+    contestId: r.contest_id as string,
+    period: r.period as string,
+    stage: r.stage as Matchup['stage'],
+    homeTeamId: r.home_team_id as string,
+    awayTeamId: (r.away_team_id as string) ?? null,
+    homeSeed: (r.home_seed as number) ?? null,
+    awaySeed: (r.away_seed as number) ?? null,
+    homePoints: r.home_points != null ? Number(r.home_points) : null,
+    awayPoints: r.away_points != null ? Number(r.away_points) : null,
+    winnerTeamId: (r.winner_team_id as string) ?? null,
+    scored: Boolean(r.scored),
+  };
+}
+
+/** A contest's H2H matchups, optionally scoped to one period. Public read. */
+export async function getMatchups(contestId: string, period?: string): Promise<Matchup[]> {
+  let q = anon()
+    .from('fantasy_matchups')
+    .select('id, contest_id, period, stage, home_team_id, away_team_id, home_seed, away_seed, home_points, away_points, winner_team_id, scored')
+    .eq('contest_id', contestId)
+    .order('period');
+  if (period) q = q.eq('period', period);
+  const { data, error } = await q;
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(mapMatchup);
+}
+
+/** H2H standings for a contest (wins/losses/ties, points for/against, rank).
+ *  Public read. */
+export async function getH2HStandings(contestId: string): Promise<H2HStandingRow[]> {
+  const { data, error } = await anon().rpc('fantasy_h2h_standings', { p_contest: contestId });
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    teamId: r.team_id as string,
+    teamName: r.team_name as string,
+    wins: r.wins as number,
+    losses: r.losses as number,
+    ties: r.ties as number,
+    pointsFor: Number(r.points_for),
+    pointsAgainst: Number(r.points_against),
+    rank: r.rank as number,
+  }));
+}
+
+// ─── Ownership / add-drop ──────────────────────────────────────────────────────
+
+export interface TeamPlayer {
+  contestId: string;
+  teamId: string;
+  playerLeague: string;
+  playerId: string;
+  playerName: string;
+  acquiredVia: 'draft' | 'add';
+  price: number | null;
+  acquiredAt: string;
+}
+
+function mapTeamPlayer(r: Record<string, unknown>): TeamPlayer {
+  return {
+    contestId: r.contest_id as string,
+    teamId: r.team_id as string,
+    playerLeague: r.player_league as string,
+    playerId: r.player_id as string,
+    playerName: r.player_name as string,
+    acquiredVia: r.acquired_via as 'draft' | 'add',
+    price: (r.price as number) ?? null,
+    acquiredAt: r.acquired_at as string,
+  };
+}
+
+/** A contest's ownership ledger (or one team's slice of it). Public read. */
+export async function getTeamPlayers(contestId: string, teamId?: string): Promise<TeamPlayer[]> {
+  let q = anon()
+    .from('fantasy_team_players')
+    .select('contest_id, team_id, player_league, player_id, player_name, acquired_via, price, acquired_at')
+    .eq('contest_id', contestId);
+  if (teamId) q = q.eq('team_id', teamId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(mapTeamPlayer);
+}
+
+/** Swap a player your team owns for an undrafted player from the season
+ *  pool. Drafted weekly-stats contests only; blocked while the current
+ *  period's games are in progress. */
+export async function addDrop(
+  contestId: string,
+  drop: DraftRef,
+  add: DraftRef,
+): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_add_drop', {
+    p_contest: contestId,
+    p_drop_league: drop.playerLeague,
+    p_drop_id: drop.playerId,
+    p_add_league: add.playerLeague,
+    p_add_id: add.playerId,
+    p_add_name: add.playerName,
+  });
+  if (error) throw error;
+}
+
+// ─── Trades (2026-09-08) ───────────────────────────────────────────────────
+
+export type TradeStatus = 'proposed' | 'accepted' | 'executed' | 'rejected' | 'cancelled' | 'vetoed';
+
+export interface TradeRef {
+  playerLeague: string;
+  playerId: string;
+  playerName: string;
+}
+
+export interface Trade {
+  id: string;
+  contestId: string;
+  proposerTeamId: string;
+  receiverTeamId: string;
+  give: TradeRef[];
+  get: TradeRef[];
+  note: string | null;
+  status: TradeStatus;
+  createdBy: string;
+  createdAt: string;
+  respondedAt: string | null;
+  /** When an accepted trade executes unless the commissioner vetoes/approves. */
+  executesAt: string | null;
+  executedAt: string | null;
+}
+
+function mapTrade(r: Record<string, unknown>): Trade {
+  return {
+    id: r.id as string,
+    contestId: r.contest_id as string,
+    proposerTeamId: r.proposer_team_id as string,
+    receiverTeamId: r.receiver_team_id as string,
+    give: (r.give as TradeRef[]) ?? [],
+    get: (r.get as TradeRef[]) ?? [],
+    note: (r.note as string | null) ?? null,
+    status: r.status as TradeStatus,
+    createdBy: r.created_by as string,
+    createdAt: r.created_at as string,
+    respondedAt: (r.responded_at as string | null) ?? null,
+    executesAt: (r.executes_at as string | null) ?? null,
+    executedAt: (r.executed_at as string | null) ?? null,
+  };
+}
+
+/** Public: every trade in a contest, newest first. */
+export async function getTrades(contestId: string): Promise<Trade[]> {
+  const { data, error } = await sessionClient().from('fantasy_trades').select('*').eq('contest_id', contestId).order('created_at', { ascending: false }).limit(200);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(mapTrade);
+}
+
+/** Member: offer `give` (mine) for `get` (theirs). 1–4 players a side. */
+export async function proposeTrade(contestId: string, receiverTeamId: string, give: TradeRef[], get: TradeRef[], note?: string): Promise<Trade> {
+  const { data, error } = await sessionClient().rpc('fantasy_propose_trade', {
+    p_contest: contestId,
+    p_receiver_team: receiverTeamId,
+    p_give: give,
+    p_get: get,
+    p_note: note ?? null,
+  });
+  if (error) throw error;
+  return mapTrade(data as Record<string, unknown>);
+}
+
+export type TradeAction = 'accept' | 'reject' | 'cancel' | 'veto' | 'approve';
+
+/** accept/reject (receiver) · cancel (proposer) · veto/approve (commissioner). */
+export async function respondTrade(tradeId: string, action: TradeAction): Promise<Trade> {
+  const { data, error } = await sessionClient().rpc('fantasy_respond_trade', { p_trade: tradeId, p_action: action });
+  if (error) throw error;
+  return mapTrade(data as Record<string, unknown>);
+}
+
+// ─── Waivers / FAAB (2026-09-08) ─────────────────────────────────────────────
+
+export type WaiverMode = 'none' | 'faab';
+export type WaiverClaimStatus = 'pending' | 'won' | 'lost' | 'voided' | 'cancelled';
+
+export interface WaiverPlayer {
+  contestId: string;
+  playerLeague: string;
+  playerId: string;
+  playerName: string;
+  /** When claims on this player resolve (drop time + waiver window). */
+  availableAt: string;
+}
+
+export interface WaiverClaim {
+  id: string;
+  contestId: string;
+  teamId: string;
+  add: TradeRef;
+  drop: TradeRef | null;
+  bid: number;
+  status: WaiverClaimStatus;
+  processAt: string;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+/** Effective waiver settings for a contest (absent = first-come add/drop). */
+export function waiverSettings(settings: ContestSettings): { mode: WaiverMode; budget: number; hours: number } {
+  const raw = settings as unknown as Record<string, unknown>;
+  return {
+    mode: raw.waivers === 'faab' ? 'faab' : 'none',
+    budget: typeof raw.faabBudget === 'number' ? (raw.faabBudget as number) : 100,
+    hours: typeof raw.waiverHours === 'number' ? (raw.waiverHours as number) : 48,
+  };
+}
+
+/** Commissioner: waiver mode + FAAB budget + window hours. */
+export async function setWaiverSettings(contestId: string, mode: WaiverMode, budget = 100, hours = 48): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_set_waiver_settings', {
+    p_contest: contestId,
+    p_mode: mode,
+    p_budget: budget,
+    p_hours: hours,
+  });
+  if (error) throw error;
+}
+
+/** Public: players currently inside their waiver window. */
+export async function getWaiverPlayers(contestId: string): Promise<WaiverPlayer[]> {
+  const { data, error } = await anon().from('fantasy_waiver_players').select('*').eq('contest_id', contestId).limit(500);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    contestId: r.contest_id as string,
+    playerLeague: r.player_league as string,
+    playerId: r.player_id as string,
+    playerName: r.player_name as string,
+    availableAt: r.available_at as string,
+  }));
+}
+
+function mapWaiverClaim(r: Record<string, unknown>): WaiverClaim {
+  return {
+    id: r.id as string,
+    contestId: r.contest_id as string,
+    teamId: r.team_id as string,
+    add: { playerLeague: r.add_league as string, playerId: r.add_id as string, playerName: r.add_name as string },
+    drop: r.drop_id ? { playerLeague: r.drop_league as string, playerId: r.drop_id as string, playerName: (r.drop_name as string) ?? '' } : null,
+    bid: Number(r.bid ?? 0),
+    status: r.status as WaiverClaimStatus,
+    processAt: r.process_at as string,
+    createdAt: r.created_at as string,
+    resolvedAt: (r.resolved_at as string | null) ?? null,
+  };
+}
+
+/** My pending claims + everyone's resolved claims (RLS). Newest first. */
+export async function getWaiverClaims(contestId: string): Promise<WaiverClaim[]> {
+  const { data, error } = await sessionClient().from('fantasy_waiver_claims').select('*').eq('contest_id', contestId).order('created_at', { ascending: false }).limit(200);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map(mapWaiverClaim);
+}
+
+/** FAAB dollars already spent by a team. */
+export async function getFaabSpent(contestId: string, teamId: string): Promise<number> {
+  const { data, error } = await anon().rpc('fantasy_faab_spent', { p_contest: contestId, p_team: teamId });
+  if (error) throw error;
+  return Number(data ?? 0);
+}
+
+/** Place (or replace) a sealed bid. `drop` optional when the roster has room. */
+export async function claimWaiver(contestId: string, add: TradeRef, bid: number, drop?: TradeRef | null): Promise<WaiverClaim> {
+  const { data, error } = await sessionClient().rpc('fantasy_claim_waiver', {
+    p_contest: contestId,
+    p_add_league: add.playerLeague,
+    p_add_id: add.playerId,
+    p_add_name: add.playerName,
+    p_bid: bid,
+    p_drop_league: drop?.playerLeague ?? null,
+    p_drop_id: drop?.playerId ?? null,
+  });
+  if (error) throw error;
+  return mapWaiverClaim(data as Record<string, unknown>);
+}
+
+export async function cancelWaiverClaim(claimId: string): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_cancel_waiver_claim', { p_claim: claimId });
+  if (error) throw error;
 }

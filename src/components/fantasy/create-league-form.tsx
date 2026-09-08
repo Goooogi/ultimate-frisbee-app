@@ -18,13 +18,20 @@ import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 import type { CompetitionId } from '@/lib/fantasy/competitions';
 import { GAMES } from '@/lib/fantasy/games';
 
-export function CreateLeagueForm() {
+interface CreateLeagueFormProps {
+  /** Preseeds the game picker (from the hub's ?game= query string). Only
+   *  applied when it's a valid, LIVE game id — an invalid or coming-soon id
+   *  from a malformed query string falls back to the default. */
+  initialGameId?: CompetitionId;
+}
+
+export function CreateLeagueForm({ initialGameId }: CreateLeagueFormProps) {
   return (
     <AuthGate
       headline="Sign in to create a league."
       subhead="Leagues are free — pick your game, then invite your friends."
     >
-      <Form />
+      <Form initialGameId={initialGameId} />
     </AuthGate>
   );
 }
@@ -39,10 +46,14 @@ const GAME_OPTIONS: PillSelectOption<CompetitionId>[] = GAMES.filter((g) => g.st
   }),
 );
 
-function Form() {
+const LIVE_GAME_IDS = new Set(GAMES.filter((g) => g.status === 'live').map((g) => g.id));
+
+function Form({ initialGameId }: CreateLeagueFormProps) {
   const router = useRouter();
   const [name, setName] = useState('');
-  const [gameId, setGameId] = useState<CompetitionId>('ufa');
+  const [gameId, setGameId] = useState<CompetitionId>(
+    initialGameId && LIVE_GAME_IDS.has(initialGameId) ? initialGameId : 'ufa',
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,13 +73,7 @@ function Form() {
         () => null,
       );
       await revalidateFantasyLeague(leagueId, contestId ?? undefined).catch(() => null);
-      router.push(
-        contestId
-          ? gameId === 'ufa'
-            ? `/fantasy/ufa/l/${contestId}`
-            : `/fantasy/contests/${contestId}`
-          : `/fantasy/leagues/${leagueId}`,
-      );
+      router.push(contestId ? `/fantasy/l/${contestId}` : `/fantasy/leagues/${leagueId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create your league. Please try again.');
       setSaving(false);

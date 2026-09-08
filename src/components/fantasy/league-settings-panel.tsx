@@ -57,7 +57,7 @@ export function LeagueSettingsPanel({ leagueId, leagueName, contests, isCommissi
 
 // ─── League name ──────────────────────────────────────────────────────────────
 
-function NameCard({ leagueId, initialName }: { leagueId: string; initialName: string }) {
+export function NameCard({ leagueId, initialName }: { leagueId: string; initialName: string }) {
   const router = useRouter();
   const [name, setName] = useState(initialName);
   const [saving, setSaving] = useState(false);
@@ -119,7 +119,7 @@ function NameCard({ leagueId, initialName }: { leagueId: string; initialName: st
 
 // ─── Roster composition (per contest) ─────────────────────────────────────────
 
-function RosterCard({ leagueId, contest }: { leagueId: string; contest: ContestView }) {
+export function RosterCard({ leagueId, contest }: { leagueId: string; contest: ContestView }) {
   const router = useRouter();
   const s = contest.settings;
   const isWeekly = s.mode === 'weekly-stats';
@@ -182,7 +182,7 @@ function RosterCard({ leagueId, contest }: { leagueId: string; contest: ContestV
 
 // ─── Scoring (read-only) ──────────────────────────────────────────────────────
 
-function ScoringCard() {
+export function ScoringCard() {
   return (
     <Card title="Scoring">
       <div className="flex flex-wrap items-center justify-between gap-3">

@@ -49,21 +49,13 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Players',  href: '/players',  match: '/players' },
 ];
 
-// Fantasy is its own sub-app: it gets a Fantasy-specific secondary nav instead
-// of the league (Scores/Schedule/Teams/Players) tabs, and no league switcher.
-// "Hub" only lights up on the exact game-hub landing (/fantasy) — everything
-// under /fantasy/ufa/* (the only live game in P0) gets its own tabs so a user
-// inside the UFA game isn't shown a dead "Hub" highlight.
-//
-// No "Leaderboard" tab (removed 2026-08-27): standings are a property of a
-// league, never a top-level destination — ESPN/Yahoo/Sleeper all scope them
-// inside the league. The UFA Public League's standings live at its own
-// league page like every private league's.
-const FANTASY_NAV_ITEMS: NavItem[] = [
-  { label: 'Hub',          href: '/fantasy',           match: '/fantasy' },
-  { label: 'My Leagues',   href: '/fantasy/leagues',   match: '/fantasy/leagues' },
-  { label: 'My Team',      href: '/fantasy/ufa/team',  match: '/fantasy/ufa/team' },
-];
+// Fantasy is its own sub-app with NO section nav at all (2026-09-07 IA
+// rework): the hub (/fantasy) has no sub-nav — My Leagues/Mini Games/Start a
+// League are just hub sections — and in-league nav (Team/Draft/Standings/
+// Settings) is rendered by the league layout itself, not this bar. Fantasy
+// paths fall through the same "no subnav" path as admin/settings/playbook
+// below (isLeaguePage gate), they just need an explicit carve-out since
+// /fantasy isn't in LEAGUE_PREFIXES.
 
 // WFDF is event-scoped — its pages live under /wfdf/* with no ?league= param, so
 // it gets its own secondary-nav items (Events/Teams/Players) and no league
@@ -92,35 +84,6 @@ const EUF_NAV_ITEMS: NavItem[] = [
   { label: 'Teams',    href: '/euf/clubs',    match: '/euf/clubs',   aliases: ['/euf/clubs', '/euf/teams'] },
   { label: 'Players',  href: '/euf/players',  match: '/euf/players', aliases: ['/euf/players'] },
 ];
-
-// The hub (/fantasy) is a distinct landing from the UFA game home
-// (/fantasy/ufa), and /fantasy/ufa/team is nested under the game — so plain
-// prefix matching would light up multiple tabs at once. Use exact/segment-
-// aware matching for the fantasy tabs.
-function isFantasyActive(pathname: string, item: NavItem): boolean {
-  if (item.match === '/fantasy') {
-    // Hub covers the game-picker landing AND a game home (/fantasy/ufa) —
-    // both are "browsing the games" rather than a league or team surface.
-    return pathname === '/fantasy' || pathname === '/fantasy/ufa';
-  }
-  if (item.match === '/fantasy/ufa/team') {
-    return pathname === '/fantasy/ufa/team' || pathname.startsWith('/fantasy/ufa/team/');
-  }
-  if (item.match === '/fantasy/leagues') {
-    // The whole leagues layer: the list, a league home, its contests
-    // (legacy + game-scoped), and the invite/join flows all live under
-    // "My Leagues".
-    return (
-      pathname === '/fantasy/leagues' ||
-      pathname.startsWith('/fantasy/leagues/') ||
-      pathname.startsWith('/fantasy/contests/') ||
-      pathname.startsWith('/fantasy/ufa/l/') ||
-      pathname.startsWith('/fantasy/invite/') ||
-      pathname.startsWith('/fantasy/join/')
-    );
-  }
-  return false;
-}
 
 function isActive(pathname: string, item: NavItem): boolean {
   if (item.match === '/') return pathname === '/';
@@ -152,10 +115,14 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
 
+  // Fantasy has no section nav (hub sections aren't tabs; in-league nav is
+  // its own layout-owned component) — never falls into isLeaguePage below.
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+  if (isFantasy) return null;
+
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
   const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
-  if (!isFantasy && !isLeaguePage(pathname)) return null;
+  if (!isLeaguePage(pathname)) return null;
 
   const activeLeague = searchParams.get('league')
     ? parseLeagueParam(searchParams.get('league'))
@@ -164,19 +131,19 @@ export function useSectionTabs(): { tabs: ResolvedSectionTab[]; ariaLabel: strin
   const activeLevel = parseLevelParam(searchParams.get('level'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
-  const noQs = isFantasy || isWfdf || isEuf;
-  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
+  const noQs = isWfdf || isEuf;
+  const items = isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
 
   const tabs: ResolvedSectionTab[] = items.map((item) => ({
     label: item.label,
     href: item.soon ? '#' : noQs ? item.href : `${item.href}${leagueQs}`,
-    active: item.soon ? false : isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item),
+    active: item.soon ? false : isActive(pathname, item),
     soon: item.soon,
   }));
 
   return {
     tabs,
-    ariaLabel: isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages',
+    ariaLabel: isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages',
   };
 }
 
@@ -206,19 +173,22 @@ function GamesPageSwitcherPillsInner() {
   const pathname = usePathname() ?? '/';
   const searchParams = useSearchParams();
 
-  // Fantasy sub-app: its own secondary nav, no league switcher.
+  // Fantasy sub-app: no section nav at all now — hub sections aren't tabs,
+  // in-league nav is its own layout-owned component.
   const isFantasy = pathname === '/fantasy' || pathname.startsWith('/fantasy/');
+  if (isFantasy) return null;
+
   // WFDF: event-scoped hub — own secondary nav, no ?league= qs, no switcher.
   const isWfdf = pathname === '/wfdf' || pathname.startsWith('/wfdf/');
   const isEuf = pathname === '/euf' || pathname.startsWith('/euf/');
 
-  // The page switcher belongs ONLY to league pages and the fantasy sub-app.
-  // On everything else (admin, settings, playbook, 12-0, home, …) render
-  // nothing — no stray league tabs where they don't apply.
-  if (!isFantasy && !isLeaguePage(pathname)) return null;
+  // The page switcher belongs ONLY to league pages. On everything else
+  // (admin, settings, playbook, 12-0, home, …) render nothing — no stray
+  // league tabs where they don't apply.
+  if (!isLeaguePage(pathname)) return null;
 
   // Preserve active league + division across sub-page navigations — same
-  // logic as SidebarNav. (Not used on Fantasy / WFDF pages, which carry no qs.)
+  // logic as SidebarNav. (Not used on WFDF/EUCS pages, which carry no qs.)
   const activeLeague = searchParams.get('league')
     ? parseLeagueParam(searchParams.get('league'))
     : (inferLeagueFromPath(pathname) ?? DEFAULT_LEAGUE);
@@ -226,15 +196,15 @@ function GamesPageSwitcherPillsInner() {
   const activeLevel = parseLevelParam(searchParams.get('level'));
   const leagueQs = buildLeagueQs(activeLeague, activeDivision, activeLevel);
 
-  // Sub-app pages (Fantasy, WFDF) carry no league query string; standard
+  // Sub-app pages (WFDF, EUCS) carry no league query string; standard
   // league pages get the ?league= qs on every link.
-  const noQs = isFantasy || isWfdf || isEuf;
-  const items = isFantasy ? FANTASY_NAV_ITEMS : isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
+  const noQs = isWfdf || isEuf;
+  const items = isWfdf ? WFDF_NAV_ITEMS : isEuf ? EUF_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <nav
       className="flex items-center gap-0.5 bg-ink/5 rounded-full p-0.5"
-      aria-label={isFantasy ? 'Fantasy pages' : isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages'}
+      aria-label={isWfdf ? 'WFDF pages' : isEuf ? 'EUCS pages' : 'Games pages'}
     >
       {items.map((item) => {
         // "Coming soon" placeholder — greyed out, non-navigable.
@@ -257,8 +227,8 @@ function GamesPageSwitcherPillsInner() {
           );
         }
 
-        const active = isFantasy ? isFantasyActive(pathname, item) : isActive(pathname, item);
-        // Fantasy + WFDF links carry no league query string.
+        const active = isActive(pathname, item);
+        // WFDF/EUCS links carry no league query string.
         const href = noQs ? item.href : `${item.href}${leagueQs}`;
         return (
           <Link

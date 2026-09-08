@@ -2,13 +2,23 @@
 const nextConfig = {
   reactStrictMode: true,
   async redirects() {
-    // Fantasy V2 game-hub IA inversion (2026-08-27): the UFA landing moved
-    // from /fantasy/team* to /fantasy/ufa/team*. Not permanent — the old
-    // paths may get reused if URL structure shifts again during the rest of
-    // the V2 rollout.
+    // Fantasy V2 hub + nav rework (2026-09-07): the game-picker hub collapsed
+    // into a single Sleeper-style front door at /fantasy, and every in-league
+    // route moved to the canonical /fantasy/l/:id scheme. Not permanent — the
+    // old paths may get reused if URL structure shifts again during rollout.
     return [
-      { source: '/fantasy/team', destination: '/fantasy/ufa/team', permanent: false },
-      { source: '/fantasy/team/:id', destination: '/fantasy/ufa/team/:id', permanent: false },
+      { source: '/fantasy/team', destination: '/fantasy/my-team', permanent: false },
+      { source: '/fantasy/ufa', destination: '/fantasy', permanent: false },
+      { source: '/fantasy/ufa/team', destination: '/fantasy/my-team', permanent: false },
+      { source: '/fantasy/ufa/team/:id', destination: '/fantasy/team/:id', permanent: false },
+      { source: '/fantasy/leagues', destination: '/fantasy', permanent: false },
+      { source: '/fantasy/ufa/l/:id', destination: '/fantasy/l/:id', permanent: false },
+      { source: '/fantasy/ufa/l/:id/:rest*', destination: '/fantasy/l/:id/:rest*', permanent: false },
+      { source: '/fantasy/contests/:id', destination: '/fantasy/l/:id', permanent: false },
+      { source: '/fantasy/contests/:id/:rest*', destination: '/fantasy/l/:id/:rest*', permanent: false },
+      { source: '/fantasy/usau-club-nationals', destination: '/fantasy', permanent: false },
+      { source: '/fantasy/wfdf-wucc', destination: '/fantasy', permanent: false },
+      { source: '/fantasy/eucs', destination: '/fantasy', permanent: false },
     ];
   },
 };

@@ -1,0 +1,54 @@
+// /fantasy/l/[contestId]/* — canonical in-league layout (Sleeper model,
+// 2026-09-07 IA). Server Component: resolves the contest (+ league, when
+// private) and renders the shared league chrome — back link, league logo,
+// name, commissioner gear, and the in-league sub-tabs (Match/League · Team ·
+// Players · League) — around whatever page the route renders as `children`.
+//
+// Web port of the mobile app's LeagueShell.tsx
+// (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueShell.tsx).
+// Every screen inside a league (root, team, players, league, draft,
+// settings, t/[teamId]) shares this one shell instead of each page
+// re-fetching the contest and re-rendering the header.
+
+import { AppShell } from '@/components/page-shell';
+import { getContest, getLeague } from '@/lib/fantasy/leagues';
+import { LeagueHeader } from '@/components/fantasy/league-header';
+import { LeagueSectionNav } from '@/components/fantasy/league-section-nav';
+
+export default async function LeagueLayout({
+  children,
+  params,
+}: {
+  children: React.ReactNode;
+  params: { contestId: string };
+}) {
+  const contest = await getContest(params.contestId).catch(() => null);
+
+  if (!contest) {
+    return (
+      <AppShell hideFooterMobile>
+        <div className="px-5 pt-4 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto lg:px-14 lg:max-w-[1080px]">
+          <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+            <p className="text-muted font-tight text-[14px]">
+              This league doesn&apos;t exist, or you don&apos;t have access to it.
+            </p>
+          </div>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const league = contest.leagueId ? await getLeague(contest.leagueId).catch(() => null) : null;
+
+  return (
+    <AppShell hideFooterMobile>
+      <div className="px-5 lg:mx-auto lg:px-14 lg:max-w-[1080px]">
+        <LeagueHeader contest={contest} league={league} />
+      </div>
+      <LeagueSectionNav contest={contest} />
+      <div className="px-5 pt-6 pb-12 lg:pt-8 lg:pb-14 lg:mx-auto lg:px-14 lg:max-w-[1080px]">
+        {children}
+      </div>
+    </AppShell>
+  );
+}

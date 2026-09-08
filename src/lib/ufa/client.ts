@@ -405,7 +405,7 @@ function decidedFinals(games: UfaGame[]): UfaGame[] {
  * back to the structural one (last decided final in the highest week).
  * Returns the championship game, or null if none can be identified.
  */
-function findChampionshipGame(games: UfaGame[]): UfaGame | null {
+export function findChampionshipGame(games: UfaGame[]): UfaGame | null {
   const finals = decidedFinals(games);
   if (finals.length === 0) return null;
 

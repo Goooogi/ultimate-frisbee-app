@@ -1,0 +1,88 @@
+// /fantasy/l/[contestId]/team — the Team tab. Weekly contest → the roster
+// builder (pool mode + Bench card when the contest is drafted, restricting
+// lineups to owned players). Event contest with a completed draft → a
+// read-only seeded roster. Event contest without a completed draft → "built
+// in the draft" card. Signed-out users still see the shell; the builder /
+// bench island itself is auth-gated (AuthModal on write attempts, per the
+// shared conventions).
+
+import { getContest, getMyContestTeam } from '@/lib/fantasy/leagues';
+import { getDraft } from '@/lib/fantasy/draft-room';
+import { getContestTeamRoster } from '@/lib/fantasy/draft';
+import { TeamTabClient } from '@/components/fantasy/team-tab-client';
+
+export const revalidate = 0;
+export const dynamic = 'force-dynamic';
+
+export default async function ContestTeamPage({ params }: { params: { contestId: string } }) {
+  const contest = await getContest(params.contestId).catch(() => null);
+  if (!contest) return null;
+
+  const isEventMode = contest.settings.mode === 'event';
+  const isDrafted = contest.settings.draft === true;
+
+  if (!isEventMode) {
+    // Weekly contest: the builder resolves its own team/period/roster client-
+    // side (same as the legacy /fantasy/contests/[id]/team route) — pool mode
+    // and the Bench card need the signed-in user's team, which isn't known at
+    // request time for a force-dynamic-but-still-server page without a
+    // session read here, so that resolution is delegated to a client island.
+    return <TeamTabClient contest={contest} />;
+  }
+
+  // Event mode: seeded roster once the draft is complete.
+  const draft = await getDraft(contest.id).catch(() => null);
+  const draftComplete = draft?.status === 'complete';
+
+  if (!contest.settings.draft || !draftComplete) {
+    return (
+      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <h2 className="font-tight text-[16px] font-bold text-ink mb-2">Your roster is built in the draft</h2>
+        <p className="font-tight text-[14px] text-muted">
+          Once the draft completes, your seeded roster will show up here.
+        </p>
+      </div>
+    );
+  }
+
+  const myTeam = await getMyContestTeam(contest.id).catch(() => null);
+  if (!myTeam) {
+    return (
+      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <p className="font-tight text-[14px] text-muted">
+          Create a team on the league page before viewing your roster.
+        </p>
+      </div>
+    );
+  }
+
+  const roster = await getContestTeamRoster(contest, myTeam.id, 'event').catch(() => []);
+
+  if (roster.length === 0) {
+    return (
+      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <h2 className="font-tight text-[16px] font-bold text-ink mb-2">No roster yet</h2>
+        <p className="font-tight text-[14px] text-muted">Your team wasn&apos;t seeded a roster from the draft.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+      {roster.map((slot, idx) => (
+        <div
+          key={slot.playerId}
+          className={['flex items-center gap-3 px-5 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
+        >
+          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-ink/5 text-[9px] font-bold flex items-center justify-center font-tight text-ink">
+            {slot.role === 'offender' ? 'O' : 'D'}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-tight text-[14px] font-semibold text-ink truncate">{slot.fullName}</span>
+            {slot.teamName && <span className="block font-tight text-[11px] text-muted truncate">{slot.teamName}</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -52,7 +52,15 @@ import { StandingsStrip } from '@/components/home/standings-strip';
 import { RankingsCard } from '@/components/home/rankings-card';
 import { UpNextCards } from '@/components/home/up-next-card';
 import { RecentResultsCards } from '@/components/home/recent-results-card';
-import { PulStandingsSection, WulStandingsSection } from '@/components/home/league-standings-sections';
+import {
+  PulStandingsSection,
+  WulStandingsSection,
+  UfaSeasonCompleteSection,
+  UsauSeasonCompleteSection,
+  WfdfSeasonCompleteSection,
+} from '@/components/home/league-standings-sections';
+import { StandingsCarousel } from '@/components/home/standings-carousel';
+import { getWfdfSeasonCompleteCards } from '@/lib/home/season-complete';
 import { StandoutsCarousel } from '@/components/home/standouts-carousel';
 import { getStandoutPerformances } from '@/lib/home/standouts';
 import { SiteFooter } from '@/components/site-footer';
@@ -75,7 +83,7 @@ export default async function HomePage() {
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
@@ -111,6 +119,9 @@ export default async function HomePage() {
       // the home carousel. UFA/PUL/WUL wired; only leagues with recent games
       // contribute. Cheap windowed Supabase reads (per-game box-score tables).
       getStandoutPerformances(),
+      // WFDF: champion-per-division cards for the most recent completed Worlds
+      // year — the "Season complete" carousel's WFDF page(s).
+      getWfdfSeasonCompleteCards(),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -224,6 +235,33 @@ export default async function HomePage() {
   // the 4th slot is always the latest regular-season game, not a quarter.
   const pulRecentFour = pickPulRecentFour(pulGames);
   const wulRecentFour = pickWulRecentFour(wulGames);
+
+  // ── "Season complete" carousel pages ────────────────────────────────────────
+  // Order matches the mobile app: UFA → USAU → PUL → WUL → WFDF. Every one of
+  // these sections is an async server component that resolves to null when its
+  // league has nothing to show (in-season, or no data), so we await them all
+  // here: the carousel needs its final card count up front to render the right
+  // number of dots, and a null page would otherwise leave a dead dot.
+  const wfdfSeasonCards =
+    wfdfSeasonRes.status === 'fulfilled' ? wfdfSeasonRes.value : [];
+
+  const [ufaSeasonNode, usauSeasonNode, pulSeasonNode, wulSeasonNode] = await Promise.all([
+    UfaSeasonCompleteSection(),
+    UsauSeasonCompleteSection(),
+    PulStandingsSection(),
+    WulStandingsSection(),
+  ]);
+
+  const seasonCompleteCards: Array<{ label: string; node: React.ReactNode }> = [
+    ...(ufaSeasonNode ? [{ label: 'UFA', node: ufaSeasonNode }] : []),
+    ...(usauSeasonNode ? [{ label: 'USAU', node: usauSeasonNode }] : []),
+    ...(pulSeasonNode ? [{ label: 'PUL', node: pulSeasonNode }] : []),
+    ...(wulSeasonNode ? [{ label: 'WUL', node: wulSeasonNode }] : []),
+    ...wfdfSeasonCards.map((card) => ({
+      label: card.name,
+      node: <WfdfSeasonCompleteSection key={card.slug} card={card} />,
+    })),
+  ];
 
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
@@ -393,11 +431,21 @@ export default async function HomePage() {
         <RankingsCard />
       </div>
 
-      {/* 4c. PUL/WUL standings — two-up row */}
-      <div className="px-5 lg:px-10 pt-5 lg:pt-6 grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <PulStandingsSection />
-        <WulStandingsSection />
-      </div>
+      {/* 4c. "Season complete" carousel — UFA / USAU champion cards, PUL / WUL
+             top-8 standings, and the WFDF event champion card(s): one swipeable
+             card per league on mobile, a grid on desktop. Matches the mobile
+             app's season-complete carousel (its home screen section 5c) — the
+             two-up PUL/WUL row this replaces left UFA/USAU/WFDF champions with
+             nowhere to live. */}
+      {seasonCompleteCards.length > 0 && (
+        <div className="px-5 lg:px-10 pt-5 lg:pt-6">
+          <StandingsCarousel
+            cards={seasonCompleteCards.map((c) => c.node)}
+            labels={seasonCompleteCards.map((c) => c.label)}
+            desktopColsClass="grid-cols-2"
+          />
+        </div>
+      )}
 
       {/* 5. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on wide
              screens so the row packs evenly with no lopsided column. */}

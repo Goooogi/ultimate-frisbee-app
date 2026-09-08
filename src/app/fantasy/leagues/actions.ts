@@ -36,6 +36,7 @@ export async function revalidateFantasyLeague(leagueId?: string, contestId?: str
   if (contestId && UUID_RE.test(contestId)) {
     revalidatePath(`/fantasy/contests/${contestId}`);
     revalidatePath(`/fantasy/ufa/l/${contestId}`);
+    revalidatePath(`/fantasy/l/${contestId}`, 'layout');
   }
 }
 

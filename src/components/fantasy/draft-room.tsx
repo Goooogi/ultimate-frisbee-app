@@ -1,26 +1,34 @@
 'use client';
 
-// Draft Room — shared client island rendered by both draft routes
-// (/fantasy/ufa/l/[id]/draft and /fantasy/contests/[id]/draft). Draft state
-// comes exclusively from src/lib/fantasy/draft-room.ts (the frozen backend
-// contract — P2, 2026-08-27); nothing here talks to fantasy_drafts /
-// fantasy_draft_picks / fantasy_draft_queues directly.
+// Draft Room — shared client island rendered by the canonical in-league
+// route (/fantasy/l/[contestId]/draft). Draft state comes exclusively from
+// src/lib/fantasy/draft-room.ts (the frozen backend contract — P2,
+// 2026-08-27; auction + readiness/reschedule added 2026-09-08); nothing here
+// talks to fantasy_drafts / fantasy_draft_picks / fantasy_draft_queues
+// directly.
+//
+// Gate (before any room renders — mirrors mobile DraftRoom.tsx):
+//   Public League → never drafts.
+//   No draft row → "No draft scheduled yet" (+ commissioner settings link).
+//   scheduled AND >4h out → countdown card, no room.
+//   Otherwise → dispatch by draft.status + draft.draftType.
 //
 // State machine (draft.status, from the contract):
 //   scheduled → lobby: countdown to scheduledAt (or "starts whenever"), queue
-//     building enabled, commissioner sees Start Now once past scheduledAt.
-//   live → the room: pick clock, board/players/queue/picks tabs, my-team
-//     on-the-clock banner + document.title prefix.
-//   complete → summary: each team's haul + links to standings/team views.
+//     building enabled, readiness warning strip, commissioner Start Now.
+//   live → the room: snake (pick clock, board/players/queue/picks) or
+//     auction (nominate/bid clock, players/budgets/results/queue).
+//   complete → summary: each team's haul (+ auction prices) + link back.
 //
-// Clock resolution: any open client can call resolveDraftClock() when the
-// countdown hits 0 — server-side first-caller-wins, so no coordination is
-// needed beyond a small random jitter to avoid every open tab firing at once.
+// Clock resolution: any open client can call resolveDraftClock() /
+// resolveAuction() when a clock hits 0 — server-side first-caller-wins, so no
+// coordination is needed beyond a small random jitter to avoid every open tab
+// firing at once.
 //
-// Realtime: subscribeDraft() refetches getDraft + getDraftPicks on any pick
-// insert or draft-row update; also refetches on window focus (tab was
-// backgrounded through a pick). Queue is loaded once (owner-private) and
-// saved via a debounced saveDraftQueue call.
+// Realtime: subscribeDraft() (snake) or subscribeAuction() (auction)
+// refetches on relevant table changes; also refetches on window focus and
+// polls every 20s while live as a fallback. Queue is loaded once
+// (owner-private) and saved via a debounced saveDraftQueue call.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -32,21 +40,32 @@ import {
   getDraft,
   getDraftPicks,
   getMyDraftQueue,
+  getDraftReadiness,
+  getOpenNomination,
+  getNominations,
+  getDraftPrices,
   startDraft,
   makeDraftPick,
   resolveDraftClock,
+  resolveAuction,
   saveDraftQueue,
   subscribeDraft,
+  subscribeAuction,
   unsubscribeDraft,
   teamOnClock,
   roundOf,
   type Draft,
   type DraftPick,
   type DraftRef,
+  type DraftReadiness,
+  type DraftNomination,
+  type DraftPrice,
 } from '@/lib/fantasy/draft-room';
 import { searchContestPlayers } from '@/lib/fantasy/draft';
 import { getMyContestTeam, type ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
+import { AuctionRoom } from './draft/auction-room';
+import { CommissionerBar } from './draft/commissioner-bar';
 
 interface TeamInfo {
   id: string;
@@ -60,21 +79,38 @@ interface Props {
   /** Every team in this contest — needed to render names on the board/ticker
    *  and to resolve "team on the clock" to a display name. */
   teams: TeamInfo[];
-  /** Where "back" / standings / team links point — differs between the UFA
-   *  canonical route and the generic contest route. */
+  /** Where "back" / standings / team links point. */
   basePath: string;
 }
 
 type RoomTab = 'players' | 'board' | 'queue' | 'picks';
 
+const ROOM_OPENS_BEFORE_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+function formatDraftTime(iso: string): string {
+  return new Date(iso).toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 export function DraftRoom({ contest, teams, basePath }: Props) {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
+  const isPublicLeague = contest.leagueId == null;
+
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picks, setPicks] = useState<DraftPick[]>([]);
+  const [openNomination, setOpenNomination] = useState<DraftNomination | null>(null);
+  const [nominations, setNominations] = useState<DraftNomination[]>([]);
+  const [prices, setPrices] = useState<DraftPrice[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [readiness, setReadiness] = useState<DraftReadiness | null>(null);
 
   const [myTeam, setMyTeam] = useState<TeamInfo | null>(null);
   const [queue, setQueue] = useState<DraftRef[]>([]);
@@ -91,7 +127,21 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     try {
       const d = await getDraft(contest.id);
       setDraft(d);
-      setPicks(d ? await getDraftPicks(d.id) : []);
+      if (!d) {
+        setPicks([]);
+        setOpenNomination(null);
+        setNominations([]);
+        return;
+      }
+      const isAuction = d.draftType === 'auction';
+      const [p, open, noms] = await Promise.all([
+        getDraftPicks(d.id),
+        isAuction ? getOpenNomination(d.id) : Promise.resolve(null),
+        isAuction ? getNominations(d.id) : Promise.resolve([]),
+      ]);
+      setPicks(p);
+      setOpenNomination(open);
+      setNominations(noms);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load the draft.');
     }
@@ -101,22 +151,73 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    getDraft(contest.id)
-      .then(async (d) => {
+    setLoadError(null);
+    (async () => {
+      try {
+        const d = await getDraft(contest.id);
         if (cancelled) return;
         setDraft(d);
-        if (d) setPicks(await getDraftPicks(d.id));
-      })
-      .catch((err) => {
+        if (d) {
+          const isAuction = d.draftType === 'auction';
+          const [p, open, noms] = await Promise.all([
+            getDraftPicks(d.id),
+            isAuction ? getOpenNomination(d.id) : Promise.resolve(null),
+            isAuction ? getNominations(d.id) : Promise.resolve([]),
+          ]);
+          if (cancelled) return;
+          setPicks(p);
+          setOpenNomination(open);
+          setNominations(noms);
+        }
+      } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Could not load the draft.');
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, [contest.id]);
+
+  // ── Draft readiness (lobby warning strip; public read, but only useful
+  // once we know a league exists) ─────────────────────────────────────────
+  useEffect(() => {
+    if (isPublicLeague) {
+      setReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    getDraftReadiness(contest.id)
+      .then((r) => {
+        if (!cancelled) setReadiness(r);
+      })
+      .catch(() => {
+        if (!cancelled) setReadiness(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [contest.id, isPublicLeague]);
+
+  // ── Auction suggested prices ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!draft || draft.draftType !== 'auction') {
+      setPrices([]);
+      return;
+    }
+    let cancelled = false;
+    getDraftPrices(draft.id)
+      .then((p) => {
+        if (!cancelled) setPrices(p);
+      })
+      .catch(() => {
+        if (!cancelled) setPrices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [draft?.id, draft?.draftType]);
 
   // ── My team ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -151,12 +252,11 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
       .catch(() => setIsCommissioner(false));
   }, [user, contest.leagueId]);
 
-  // ── Realtime subscription ───────────────────────────────────────────────
+  // ── Realtime subscription — snake vs auction wiring differs ─────────────
   useEffect(() => {
     if (!draft) return;
-    const channel = subscribeDraft(draft.id, () => {
-      refetch();
-    });
+    const isAuction = draft.draftType === 'auction';
+    const channel = isAuction ? subscribeAuction(draft.id, () => refetch()) : subscribeDraft(draft.id, () => refetch());
     const onFocus = () => refetch();
     window.addEventListener('focus', onFocus);
     return () => {
@@ -164,35 +264,149 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
       window.removeEventListener('focus', onFocus);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft?.id]);
+  }, [draft?.id, draft?.draftType]);
 
-  // ── On-the-clock title prefix ────────────────────────────────────────────
-  const onClockTeamId = draft && draft.status === 'live' ? teamOnClock(draft) : null;
-  const isMyClock = !!myTeam && onClockTeamId === myTeam.id;
+  // ── Poll fallback every 20s while live ───────────────────────────────────
   useEffect(() => {
-    const original = document.title;
-    if (isMyClock) document.title = `● Your pick — ${original.replace(/^● Your pick — /, '')}`;
+    if (draft?.status !== 'live') return;
+    const id = setInterval(() => refetch(), 20_000);
+    return () => clearInterval(id);
+  }, [draft?.status, refetch]);
+
+  // ── Snake clock resolution ───────────────────────────────────────────────
+  const snakeRemainingMs = useClockRemaining(
+    draft?.draftType === 'snake' && draft.status === 'live' ? draft.currentStartedAt : null,
+    draft?.pickSeconds ?? 60,
+  );
+  const snakeResolvedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!draft || draft.draftType !== 'snake' || draft.status !== 'live' || draft.pausedAt) return;
+    if (snakeRemainingMs === null || snakeRemainingMs > 0) return;
+    const key = `${draft.currentOverall}:${draft.currentStartedAt}`;
+    if (snakeResolvedKeyRef.current === key) return;
+    snakeResolvedKeyRef.current = key;
+    const jitter = 200 + Math.random() * 800;
+    const t = setTimeout(() => {
+      resolveDraftClock(draft.id).then(refetch).catch(() => {});
+    }, jitter);
+    return () => clearTimeout(t);
+  }, [snakeRemainingMs, draft, refetch]);
+
+  // ── Auction clock resolution (bidding + nominating) ──────────────────────
+  const nominationDeadline = useMemo(() => {
+    if (!draft || draft.draftType !== 'auction' || draft.status !== 'live') return null;
+    return draft.currentStartedAt
+      ? new Date(draft.currentStartedAt).getTime() + draft.nominationSeconds * 1000
+      : null;
+  }, [draft]);
+  const [auctionNow, setAuctionNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (draft?.draftType !== 'auction' || draft?.status !== 'live') return;
+    const id = setInterval(() => setAuctionNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [draft?.draftType, draft?.status]);
+
+  const auctionResolvedKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!draft || draft.draftType !== 'auction' || draft.status !== 'live' || draft.pausedAt) return;
+    let expired = false;
+    let key: string | null = null;
+    if (openNomination) {
+      const remaining = new Date(openNomination.endsAt).getTime() - auctionNow;
+      if (remaining <= 0) {
+        expired = true;
+        key = `bid:${openNomination.id}`;
+      }
+    } else if (nominationDeadline !== null) {
+      if (nominationDeadline - auctionNow <= 0) {
+        expired = true;
+        key = `nom:${draft.currentOverall}:${draft.currentStartedAt}`;
+      }
+    }
+    if (!expired || key === null || auctionResolvedKeyRef.current === key) return;
+    auctionResolvedKeyRef.current = key;
+    const jitter = 200 + Math.random() * 800;
+    const t = setTimeout(() => {
+      resolveAuction(draft.id).then(refetch).catch(() => {});
+    }, jitter);
+    return () => clearTimeout(t);
+  }, [draft, openNomination, nominationDeadline, auctionNow, refetch]);
+
+  const bidRemainingMs = useDeadlineRemaining(openNomination?.endsAt ?? null);
+  const nominationRemainingMs = useClockRemaining(
+    draft?.draftType === 'auction' && draft.status === 'live' && !openNomination ? draft.currentStartedAt : null,
+    draft?.nominationSeconds ?? 30,
+  );
+
+  // ── document.title prefix — on the clock (snake), nominating, or high
+  // bidder (auction) ────────────────────────────────────────────────────────
+  const onClockTeamId = draft && draft.status === 'live' && draft.draftType === 'snake' ? teamOnClock(draft) : null;
+  const isMyClock = !!myTeam && onClockTeamId === myTeam.id && !draft?.pausedAt;
+  const nominatingTeamId = draft && draft.status === 'live' && draft.draftType === 'auction' ? draft.draftOrder[((draft.currentOverall - 1) % Math.max(draft.draftOrder.length, 1) + draft.draftOrder.length) % Math.max(draft.draftOrder.length, 1)] : null;
+  const isMyNominateTurn = !!myTeam && !openNomination && nominatingTeamId === myTeam.id && !draft?.pausedAt;
+  const isMyHighBid = !!myTeam && !!openNomination && openNomination.highTeamId === myTeam.id;
+  const titlePrefix = isMyClock
+    ? '● Your pick'
+    : isMyNominateTurn
+      ? "● You're nominating"
+      : isMyHighBid
+        ? '● High bidder'
+        : null;
+  useEffect(() => {
+    const original = document.title.replace(/^● [^—]+ — /, '');
+    if (titlePrefix) document.title = `${titlePrefix} — ${original}`;
+    else document.title = original;
     return () => {
-      document.title = original.replace(/^● Your pick — /, '');
+      document.title = original;
     };
-  }, [isMyClock]);
+  }, [titlePrefix]);
 
-  if (loading) return <RoomSkeleton />;
-
-  if (loadError || !draft) {
+  // ── Gate: Public League never drafts ─────────────────────────────────────
+  if (isPublicLeague) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
         <p className="text-muted font-tight text-[14px]">
-          {loadError ?? 'No draft is scheduled for this league yet.'}
+          The Public League doesn&apos;t draft — join or create a private league to run a draft.
         </p>
-        <Link
-          href={basePath}
-          className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
-        >
-          Back to league
-        </Link>
       </div>
     );
+  }
+
+  if (loading) return <RoomSkeleton />;
+
+  if (loadError) {
+    return (
+      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <p className="text-muted font-tight text-[14px]">{loadError}</p>
+      </div>
+    );
+  }
+
+  // ── Gate: no draft scheduled yet ─────────────────────────────────────────
+  if (!draft) {
+    return (
+      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <p className="text-muted font-tight text-[14px]">No draft scheduled yet.</p>
+        {isCommissioner && (
+          <Link
+            href={`${basePath}/settings`}
+            className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+          >
+            Schedule it in League settings
+          </Link>
+        )}
+      </div>
+    );
+  }
+
+  // ── Gate: room opens 4h before scheduledAt ───────────────────────────────
+  const opensSoon =
+    draft.status === 'scheduled' &&
+    draft.scheduledAt != null &&
+    new Date(draft.scheduledAt).getTime() - Date.now() > ROOM_OPENS_BEFORE_MS;
+
+  if (opensSoon && draft.scheduledAt) {
+    return <RoomOpensSoonCard scheduledAt={draft.scheduledAt} />;
   }
 
   return (
@@ -202,11 +416,41 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           draft={draft}
           teams={teams}
           isCommissioner={isCommissioner}
+          readiness={readiness}
           onStarted={refetch}
         />
       )}
 
-      {draft.status === 'live' && (
+      {draft.status === 'live' && isCommissioner && (
+        <CommissionerBar draft={draft} pickCount={picks.length} refetch={refetch} />
+      )}
+
+      {draft.status === 'live' && draft.pausedAt && (
+        <p role="status" className="px-4 py-3 rounded-card-sm bg-accent/10 text-accent font-tight text-[12.5px] text-center">
+          Draft paused by the commissioner
+        </p>
+      )}
+
+      {draft.status === 'live' && draft.draftType === 'auction' && (
+        <AuctionRoom
+          contest={contest}
+          draft={draft}
+          picks={picks}
+          teamById={teamById}
+          myTeam={myTeam}
+          queue={queue}
+          setQueue={setQueue}
+          openNomination={openNomination}
+          nominations={nominations}
+          prices={prices}
+          bidRemainingMs={bidRemainingMs}
+          nominationRemainingMs={nominationRemainingMs}
+          onRequireAuth={() => setAuthOpen(true)}
+          refetch={refetch}
+        />
+      )}
+
+      {draft.status === 'live' && draft.draftType === 'snake' && (
         <LiveRoom
           contest={contest}
           draft={draft}
@@ -241,17 +485,43 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   );
 }
 
+// ─── Gate: room opens soon ──────────────────────────────────────────────────
+
+function RoomOpensSoonCard({ scheduledAt }: { scheduledAt: string }) {
+  const countdown = useCountdown(scheduledAt);
+  return (
+    <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+      <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-accent mb-2.5 font-tight">
+        Draft room opens 4 hours before the draft
+      </div>
+      <h2 className="font-display italic text-[28px] lg:text-[34px] font-bold tracking-[-0.02em] leading-[0.95] text-ink mb-2">
+        {countdown}
+      </h2>
+      <p className="text-muted font-tight text-[13px]">{formatDraftTime(scheduledAt)}</p>
+    </div>
+  );
+}
+
 // ─── Lobby (scheduled) ────────────────────────────────────────────────────────
+
+function settingsLine(draft: Draft): string {
+  if (draft.draftType === 'auction') {
+    return `Auction · $${draft.budget} budget · ${draft.rounds} roster spots · ${draft.nominationSeconds}s to nominate · ${draft.bidSeconds}s bids`;
+  }
+  return `Snake · ${draft.rounds} rounds · ${draft.pickSeconds}s clock`;
+}
 
 function LobbyPanel({
   draft,
   teams,
   isCommissioner,
+  readiness,
   onStarted,
 }: {
   draft: Draft;
   teams: TeamInfo[];
   isCommissioner: boolean;
+  readiness: DraftReadiness | null;
   onStarted: () => void;
 }) {
   const [starting, setStarting] = useState(false);
@@ -282,9 +552,20 @@ function LobbyPanel({
         {draft.scheduledAt ? countdown : 'Starts whenever the commissioner is ready'}
       </h2>
       <p className="text-muted font-tight text-[13px] mb-6">
-        Snake draft &middot; {draft.rounds} rounds &middot; {draft.pickSeconds}s pick clock
-        {orderKnown ? ' — order is locked.' : ' — order is randomized when the draft goes live.'}
+        {settingsLine(draft)}
+        {orderKnown ? ' — order re-shuffles when the draft starts.' : ''}
       </p>
+
+      {readiness && !readiness.rostersReady && (
+        <p className="max-w-md mx-auto mb-5 px-4 py-3 rounded-card-sm bg-live/10 text-live font-tight text-[12.5px] leading-[1.4]" role="alert">
+          Rosters not set on {readiness.sourceLabel} — draft will be another day.
+        </p>
+      )}
+      {readiness?.missed && (
+        <p className="max-w-md mx-auto mb-5 px-4 py-3 rounded-card-sm bg-live/10 text-live font-tight text-[12.5px] leading-[1.4]" role="alert">
+          This draft&apos;s scheduled time has passed. The commissioner needs to reschedule it.
+        </p>
+      )}
 
       {orderKnown && (
         <ol className="max-w-sm mx-auto mb-6 space-y-1.5 text-left">
@@ -393,14 +674,14 @@ function LiveRoom({
     resolvedRef.current = false;
   }, [draft.currentOverall, draft.currentStartedAt]);
   useEffect(() => {
-    if (remainingMs === null || remainingMs > 0 || resolvedRef.current) return;
+    if (remainingMs === null || remainingMs > 0 || resolvedRef.current || draft.pausedAt) return;
     resolvedRef.current = true;
     const jitter = 200 + Math.random() * 800;
     const t = setTimeout(() => {
       resolveDraftClock(draft.id).then(refetch).catch(() => {});
     }, jitter);
     return () => clearTimeout(t);
-  }, [remainingMs, draft.id, refetch]);
+  }, [remainingMs, draft.id, draft.pausedAt, refetch]);
 
   const tabs: FloatingTab[] = [
     { id: 'players', label: 'Players', icon: PlayersIcon },
@@ -427,7 +708,7 @@ function LiveRoom({
               {isMyClock ? "You're on the clock" : `${onClockTeam?.teamName ?? 'Team'} is on the clock`}
             </div>
           </div>
-          <ClockDial remainingMs={remainingMs} pickSeconds={draft.pickSeconds} urgent={isMyClock} />
+          <ClockDial remainingMs={remainingMs} pickSeconds={draft.pickSeconds} urgent={isMyClock} paused={Boolean(draft.pausedAt)} />
         </div>
       </div>
 
@@ -551,18 +832,40 @@ function useClockRemaining(startedAt: string | null, pickSeconds: number): numbe
   return deadline - now;
 }
 
-function ClockDial({ remainingMs, pickSeconds, urgent }: { remainingMs: number | null; pickSeconds: number; urgent: boolean }) {
+/** Same shape but for an absolute ISO deadline (auction bidding clock). */
+function useDeadlineRemaining(endsAt: string | null): number | null {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!endsAt) return;
+    const id = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(id);
+  }, [endsAt]);
+  if (!endsAt) return null;
+  return new Date(endsAt).getTime() - now;
+}
+
+function ClockDial({
+  remainingMs,
+  pickSeconds,
+  urgent,
+  paused = false,
+}: {
+  remainingMs: number | null;
+  pickSeconds: number;
+  urgent: boolean;
+  paused?: boolean;
+}) {
   const sec = remainingMs === null ? pickSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
-  const low = sec <= 10;
+  const low = !paused && sec <= 10;
   return (
     <div
       className={[
         'flex-shrink-0 flex items-center justify-center w-16 h-16 rounded-full font-tight text-[20px] font-bold tabular',
-        low ? 'bg-live/10 text-live' : urgent ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
+        low ? 'bg-live/10 text-live' : urgent && !paused ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
       ].join(' ')}
-      aria-label={`${sec} seconds remaining`}
+      aria-label={paused ? 'Draft paused' : `${sec} seconds remaining`}
     >
-      {sec}
+      {paused ? 'II' : sec}
     </div>
   );
 }
@@ -1036,6 +1339,7 @@ function PicksPanel({ picks, teamById }: { picks: DraftPick[]; teamById: Map<str
               </div>
               <div className="font-tight text-[11px] text-muted truncate">
                 {teamById.get(p.teamId)?.teamName ?? 'Team'}
+                {p.price != null ? ` · $${p.price}` : ''}
               </div>
             </div>
           </li>
@@ -1078,7 +1382,7 @@ function CompletePanel({
           href={basePath}
           className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full min-h-[44px] bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase hover:opacity-90 transition-opacity duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
         >
-          View standings
+          View league
         </Link>
       </div>
 
@@ -1100,6 +1404,7 @@ function CompletePanel({
                 {haul.map((p) => (
                   <li key={p.overall} className="font-tight text-[12.5px] text-muted truncate">
                     {p.playerName}
+                    {p.price != null && <span className="text-faint"> &middot; ${p.price}</span>}
                   </li>
                 ))}
               </ul>

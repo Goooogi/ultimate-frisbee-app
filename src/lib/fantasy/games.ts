@@ -4,11 +4,10 @@
 // mode, player pool, etc.). This module adds presentation-only fields the
 // hub/game-home pages need: card copy, status, badge, brand mark.
 //
-// Statuses (Hunter, 2026-08-27): ufa + usau-club-nationals='live' (Club Nats
-// activated same day — leagues can form now; drafting is window-gated, see
-// draftOpensDate below), usau-college-nationals / pul / wul='coming-soon',
-// wfdf-wucc='hidden' (stays test-only until Hunter lifts the flag — mirrors
-// competitions.ts' testOnly on wfdf-wucc).
+// Statuses (Hunter, 2026-08-27; wfdf-wucc/eucs promoted to live 2026-09-08):
+// ufa + usau-club-nationals + wfdf-wucc + eucs='live' (event games are
+// window-gated, see draftOpensDate below), usau-college-nationals / pul /
+// wul='coming-soon'.
 
 import type { CompetitionId } from './competitions';
 
@@ -76,8 +75,16 @@ export const GAMES: GameDef[] = [
     id: 'wfdf-wucc',
     name: 'WFDF Fantasy',
     blurb: 'Fantasy for WFDF Worlds events.',
-    status: 'hidden',
+    status: 'live',
     logoSrc: '/WFDF_Logo.webp',
+    accent: 'ink',
+  },
+  {
+    id: 'eucs',
+    name: 'EUCS Fantasy',
+    blurb: 'Fantasy for the European Ultimate Club Series.',
+    status: 'live',
+    logoSrc: '/EUF_Logo.webp',
     accent: 'ink',
   },
 ];

@@ -1,4 +1,4 @@
-// score-fantasy: compute + persist fantasy scores — CONTEST-AWARE.
+// score-fantasy: compute + persist fantasy scores — CONTEST-AWARE. (v4)
 //
 // Since the leagues/contests build (2026-08-15) every fantasy team belongs to a
 // fantasy_contests row (global UFA pool included; legacy contest-less teams are
@@ -9,6 +9,9 @@
 //   2. For every non-complete contest, scores every LOCKED period's FROZEN
 //      rosters against that contest's competition data and upserts one
 //      fantasy_scores row per (team, period). Idempotent.
+//   3. (v4) format=h2h weekly contests additionally get their fantasy_matchups
+//      rows filled in from those same scores, and — once the regular season
+//      completes — semifinal/final/third-place rows generated from standings.
 //
 // Competition sources:
 //   ufa  — ufa_game_player_stats per native week           (full statline)
@@ -18,6 +21,7 @@
 //   usau — usau_player_event_stats event totals (G/A only; no placement bonus
 //          in v1 — final_placement coverage is too sparse to be fair)
 //   wfdf — wfdf_rosters event totals (G/A/callahans) + final_standing bonus
+//   euf  — euf_rosters event totals (G/A only; no placement bonus — mirrors USAU)
 //
 // Scope rule (unchanged, confirmed 2026-07-05): a period scores the roster
 // saved FOR that period. No roster → no row (0). New teams start scoring from
@@ -107,7 +111,8 @@ type Competition =
   | 'wul'
   | 'usau-club-nationals'
   | 'usau-college-nationals'
-  | 'wfdf-wucc';
+  | 'wfdf-wucc'
+  | 'eucs';
 
 interface ContestRow {
   id: string;
@@ -115,7 +120,7 @@ interface ContestRow {
   competition: Competition;
   season_year: number;
   status: string;
-  settings: { mode?: string; eventId?: string } | null;
+  settings: { mode?: string; eventId?: string; format?: 'h2h' | 'points'; schedule?: { regular: string[]; semifinal: string; final: string } } | null;
 }
 
 interface PeriodRow {
@@ -327,6 +332,34 @@ async function usauEventPoints(
   return out;
 }
 
+async function eufEventPoints(
+  supabase: SupabaseClient,
+  eventId: string,
+  playerIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (playerIds.length === 0) return out;
+
+  // No placement bonus for EUF in v1 — mirrors USAU (no final-standing data
+  // ingested for EUCS yet). G/A only.
+  for (const part of chunk(playerIds, 150)) {
+    const rows = await fetchAll<Record<string, any>>((from, to) =>
+      supabase
+        .from('euf_rosters')
+        .select('id, event_id, goals, assists')
+        .eq('event_id', eventId)
+        .in('id', part)
+        .order('id')
+        .range(from, to),
+    );
+    for (const r of rows) {
+      const pts = (r.goals ?? 0) * EVENT_SCORING.goal + (r.assists ?? 0) * EVENT_SCORING.assist;
+      out.set(r.id, pts);
+    }
+  }
+  return out;
+}
+
 async function wfdfEventPoints(
   supabase: SupabaseClient,
   eventId: string,
@@ -376,6 +409,14 @@ async function run(body: { contest?: string }) {
   const { error: rebuildErr } = await supabase.rpc('fantasy_rebuild_all_periods');
   if (rebuildErr) console.error('[score-fantasy] period rebuild failed:', rebuildErr.message);
 
+  // 1b. Roster moves that were waiting on a clock: accepted trades past their
+  // 24 h review and due FAAB waiver claims (both no-op inside a lock window
+  // and get retried next tick). Service-role-only RPCs.
+  const { data: tradesRun, error: tradesErr } = await supabase.rpc('fantasy_execute_due_trades');
+  if (tradesErr) console.error('[score-fantasy] execute_due_trades failed:', tradesErr.message);
+  const { data: waiversRun, error: waiversErr } = await supabase.rpc('fantasy_process_waivers');
+  if (waiversErr) console.error('[score-fantasy] process_waivers failed:', waiversErr.message);
+
   // 2. Contests to score.
   const contests = await fetchAll<ContestRow>((from, to) => {
     let q = supabase
@@ -387,7 +428,7 @@ async function run(body: { contest?: string }) {
     if (body.contest) q = q.eq('id', body.contest);
     return q;
   });
-  if (contests.length === 0) return { contestsScored: 0, rowsUpserted: 0, note: 'no contests' };
+  if (contests.length === 0) return { contestsScored: 0, rowsUpserted: 0, note: 'no contests', tradesExecuted: (tradesRun as number) ?? 0, waiversWon: (waiversRun as number) ?? 0 };
 
   // 3. Locked periods per contest.
   const periods = await fetchAll<PeriodRow>((from, to) =>
@@ -399,6 +440,7 @@ async function run(body: { contest?: string }) {
       .range(from, to),
   );
   const lockedPeriods = new Map<string, Set<string>>(); // contest → periods
+  const completePeriods = new Map<string, Set<string>>(); // contest → periods with every game final
   for (const p of periods) {
     if (!p.lock_at || nowMs < new Date(p.lock_at).getTime()) continue;
     let set = lockedPeriods.get(p.contest_id);
@@ -407,6 +449,14 @@ async function run(body: { contest?: string }) {
       lockedPeriods.set(p.contest_id, set);
     }
     set.add(p.period);
+    if (p.complete) {
+      let done = completePeriods.get(p.contest_id);
+      if (!done) {
+        done = new Set();
+        completePeriods.set(p.contest_id, done);
+      }
+      done.add(p.period);
+    }
   }
 
   // 4. Teams → contest. Legacy contest-less teams fold into the global UFA
@@ -515,7 +565,9 @@ async function run(body: { contest?: string }) {
       const pointsOf =
         comp === 'wfdf-wucc'
           ? await wfdfEventPoints(supabase, eventId, playerIds)
-          : await usauEventPoints(supabase, eventId, playerIds);
+          : comp === 'eucs'
+            ? await eufEventPoints(supabase, eventId, playerIds)
+            : await usauEventPoints(supabase, eventId, playerIds);
       for (const [teamId, byPeriod] of byTeam) {
         for (const [period, roster] of byPeriod) {
           let points = 0;
@@ -537,10 +589,288 @@ async function run(body: { contest?: string }) {
     if (error) throw error;
   }
 
-  return { contestsScored, rowsUpserted: upserts.length };
+  // 8. H2H fill-in: for format=h2h weekly contests, write matchup points/
+  // winners from the scores just computed (or already on file, for locked
+  // periods this run didn't touch), then seed playoff rounds once eligible.
+  let matchupsUpdated = 0;
+  const decidedMatchupIds: string[] = []; // rows this run set scored=true → matchup_result pushes
+  const decidedRows: Array<{ contest: ContestRow; matchup: Record<string, any>; period: string; homePts: number; awayPts: number; winnerTeamId: string | null }> = [];
+  const h2hContests = contests.filter(
+    (c) => (c.competition === 'ufa' || c.competition === 'pul' || c.competition === 'wul') && c.settings?.format === 'h2h',
+  );
+
+  if (h2hContests.length > 0) {
+    // team_id|week -> points, seeded from this run's upserts.
+    const scoreMap = new Map<string, number>();
+    for (const u of upserts) scoreMap.set(`${u.team_id}|${u.week}`, u.points);
+
+    for (const contest of h2hContests) {
+      const matchups = await fetchAll<Record<string, any>>((from, to) =>
+        supabase
+          .from('fantasy_matchups')
+          .select('id, period, stage, home_team_id, away_team_id, scored')
+          .eq('contest_id', contest.id)
+          .eq('scored', false)
+          .order('id')
+          .range(from, to),
+      );
+      if (matchups.length === 0) continue;
+
+      const locked = lockedPeriods.get(contest.id) ?? new Set<string>();
+      const pending = matchups.filter((m) => m.away_team_id !== null && locked.has(m.period));
+      if (pending.length === 0) continue;
+
+      // Fallback: read fantasy_scores for any (team, period) not covered by
+      // this run's upserts (a period locked in a prior run, not rescored now).
+      const missingKeys: { team_id: string; week: string }[] = [];
+      for (const m of pending) {
+        for (const teamId of [m.home_team_id, m.away_team_id as string]) {
+          if (!scoreMap.has(`${teamId}|${m.period}`)) missingKeys.push({ team_id: teamId, week: m.period });
+        }
+      }
+      if (missingKeys.length > 0) {
+        const teamIds = [...new Set(missingKeys.map((k) => k.team_id))];
+        const fallback = await fetchAll<{ team_id: string; week: string; points: number }>((from, to) =>
+          supabase.from('fantasy_scores').select('team_id, week, points').in('team_id', teamIds).order('team_id').range(from, to),
+        );
+        for (const f of fallback) scoreMap.set(`${f.team_id}|${f.week}`, Number(f.points));
+      }
+
+      // Period completeness = every matchup for that (contest, period) is
+      // now resolvable (home + away both have a score on file).
+      const periodRows = new Map<string, typeof pending>();
+      for (const m of pending) {
+        const arr = periodRows.get(m.period) ?? [];
+        arr.push(m);
+        periodRows.set(m.period, arr);
+      }
+
+      // A matchup is only FINAL (scored=true, winner set) once its period is
+      // complete — every game in the week is Final. While the week is still in
+      // play the hourly run keeps refreshing the running points only, so a
+      // result is never frozen on a half-played week.
+      const complete = completePeriods.get(contest.id) ?? new Set<string>();
+
+      for (const [period, rows] of periodRows) {
+        const isFinal = complete.has(period);
+
+        for (const m of rows) {
+          const homePts = scoreMap.get(`${m.home_team_id}|${period}`) ?? 0;
+          const awayPts = scoreMap.get(`${(m.away_team_id as string)}|${period}`) ?? 0;
+          let winnerTeamId: string | null = null;
+          if (isFinal) {
+            if (homePts !== awayPts) {
+              winnerTeamId = homePts > awayPts ? m.home_team_id : (m.away_team_id as string);
+            } else if (m.stage !== 'regular') {
+              // Playoff tie-break: higher seed wins (home is always the higher
+              // seed for semis/final per the seeding pass below).
+              winnerTeamId = m.home_team_id;
+            }
+          }
+          const { error } = await supabase
+            .from('fantasy_matchups')
+            .update({
+              home_points: Math.round(homePts * 100) / 100,
+              away_points: Math.round(awayPts * 100) / 100,
+              winner_team_id: winnerTeamId,
+              scored: isFinal,
+            })
+            .eq('id', m.id);
+          if (error) throw error;
+          matchupsUpdated += 1;
+          if (isFinal) {
+            decidedMatchupIds.push(m.id as string);
+            decidedRows.push({ contest, matchup: m, period, homePts, awayPts, winnerTeamId });
+          }
+        }
+      }
+    }
+
+    // League feed: one matchup_final activity row per decided matchup.
+    if (decidedRows.length > 0) {
+      const teamIds = [...new Set(decidedRows.flatMap((d) => [d.matchup.home_team_id as string, d.matchup.away_team_id as string]))];
+      const { data: teamRows } = await supabase.from('fantasy_teams').select('id, team_name').in('id', teamIds);
+      const nameOf = new Map((teamRows ?? []).map((t: Record<string, any>) => [t.id as string, t.team_name as string]));
+      const label = (period: string, stage: string) => {
+        if (stage === 'semifinal') return 'Semifinal';
+        if (stage === 'final') return 'Final';
+        if (stage === 'third') return 'Third-place game';
+        const wk = period.match(/^week-(\d+)$/);
+        return wk ? `Week ${wk[1]}` : period;
+      };
+      const { error: actErr } = await supabase.from('fantasy_league_activity').insert(
+        decidedRows.map((d) => ({
+          league_id: d.contest.league_id,
+          contest_id: d.contest.id,
+          kind: 'matchup_final',
+          payload: {
+            matchupId: d.matchup.id,
+            period: d.period,
+            stage: d.matchup.stage,
+            label: label(d.period, d.matchup.stage as string),
+            homeName: nameOf.get(d.matchup.home_team_id as string) ?? 'Home',
+            awayName: nameOf.get(d.matchup.away_team_id as string) ?? 'Away',
+            homePoints: Math.round(d.homePts * 100) / 100,
+            awayPoints: Math.round(d.awayPts * 100) / 100,
+            winnerTeamId: d.winnerTeamId,
+            tie: d.winnerTeamId == null,
+          },
+        })),
+      );
+      if (actErr) console.error('[score-fantasy] activity insert failed:', actErr.message);
+    }
+
+    // 9. Playoff seeding: once every regular-season matchup for a contest is
+    // scored and semifinal rows don't exist yet, seed semis from standings
+    // (#1 v #4, #2 v #3, home = higher seed). Once both semis are scored and
+    // no final exists, seed the final (winners) + third-place (losers).
+    for (const contest of h2hContests) {
+      const schedule = contest.settings?.schedule;
+      if (!schedule?.regular?.length) continue;
+
+      const regularRows = await fetchAll<{ id: string; scored: boolean }>((from, to) =>
+        supabase
+          .from('fantasy_matchups')
+          .select('id, scored')
+          .eq('contest_id', contest.id)
+          .eq('stage', 'regular')
+          .order('id')
+          .range(from, to),
+      );
+      const regularComplete = regularRows.length > 0 && regularRows.every((r) => r.scored);
+
+      const semiRows = await fetchAll<Record<string, any>>((from, to) =>
+        supabase.from('fantasy_matchups').select('*').eq('contest_id', contest.id).eq('stage', 'semifinal').order('id').range(from, to),
+      );
+
+      if (regularComplete && semiRows.length === 0) {
+        const { data: standings, error: standingsErr } = await supabase.rpc('fantasy_h2h_standings', { p_contest: contest.id });
+        if (standingsErr) {
+          console.error('[score-fantasy] fantasy_h2h_standings failed:', standingsErr.message);
+        } else {
+          const top4 = ((standings ?? []) as Record<string, any>[]).slice(0, 4);
+          if (top4.length === 4) {
+            const [s1, s2, s3, s4] = top4;
+            const { error } = await supabase.from('fantasy_matchups').insert([
+              {
+                contest_id: contest.id,
+                period: schedule.semifinal,
+                stage: 'semifinal',
+                home_team_id: s1.team_id,
+                away_team_id: s4.team_id,
+                home_seed: s1.rank,
+                away_seed: s4.rank,
+              },
+              {
+                contest_id: contest.id,
+                period: schedule.semifinal,
+                stage: 'semifinal',
+                home_team_id: s2.team_id,
+                away_team_id: s3.team_id,
+                home_seed: s2.rank,
+                away_seed: s3.rank,
+              },
+            ]);
+            if (error && (error as { code?: string }).code !== '23505') throw error;
+          }
+        }
+      }
+
+      if (semiRows.length === 2 && semiRows.every((r) => r.scored)) {
+        const finalRows = await fetchAll<Record<string, any>>((from, to) =>
+          supabase.from('fantasy_matchups').select('id').eq('contest_id', contest.id).eq('stage', 'final').order('id').range(from, to),
+        );
+        if (finalRows.length === 0) {
+          const winners: { teamId: string; seed: number | null }[] = [];
+          const losers: { teamId: string; seed: number | null }[] = [];
+          for (const s of semiRows) {
+            const winnerId = s.winner_team_id as string | null;
+            if (!winnerId) continue; // unresolved tie with no seed rule available — skip seeding this run
+            const loserId = winnerId === s.home_team_id ? s.away_team_id : s.home_team_id;
+            const winnerSeed = winnerId === s.home_team_id ? s.home_seed : s.away_seed;
+            const loserSeed = winnerId === s.home_team_id ? s.away_seed : s.home_seed;
+            winners.push({ teamId: winnerId, seed: winnerSeed });
+            losers.push({ teamId: loserId, seed: loserSeed });
+          }
+          if (winners.length === 2 && losers.length === 2) {
+            winners.sort((a, b) => (a.seed ?? 99) - (b.seed ?? 99));
+            losers.sort((a, b) => (a.seed ?? 99) - (b.seed ?? 99));
+            const { error } = await supabase.from('fantasy_matchups').insert([
+              {
+                contest_id: contest.id,
+                period: schedule.final,
+                stage: 'final',
+                home_team_id: winners[0].teamId,
+                away_team_id: winners[1].teamId,
+                home_seed: winners[0].seed,
+                away_seed: winners[1].seed,
+              },
+              {
+                contest_id: contest.id,
+                period: schedule.final,
+                stage: 'third',
+                home_team_id: losers[0].teamId,
+                away_team_id: losers[1].teamId,
+                home_seed: losers[0].seed,
+                away_seed: losers[1].seed,
+              },
+            ]);
+            if (error && (error as { code?: string }).code !== '23505') throw error;
+          }
+        }
+      }
+    }
+  }
+
+  // 10. Weekly-result pushes for the matchups decided this run. Fire-and-
+  // forget into notify-fantasy (it dedups per matchup+team) — a push failure
+  // must never fail a scoring run.
+  if (decidedMatchupIds.length > 0) {
+    try {
+      const url = Deno.env.get('SUPABASE_URL');
+      const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      const res = await fetch(`${url}/functions/v1/notify-fantasy`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+        body: JSON.stringify({ event: 'matchups', matchupIds: decidedMatchupIds }),
+      });
+      if (!res.ok) console.error('[score-fantasy] notify-fantasy HTTP', res.status);
+    } catch (err) {
+      console.error('[score-fantasy] notify-fantasy failed:', err);
+    }
+  }
+
+  return { contestsScored, rowsUpserted: upserts.length, matchupsUpdated, matchupsDecided: decidedMatchupIds.length, tradesExecuted: (tradesRun as number) ?? 0, waiversWon: (waiversRun as number) ?? 0 };
+}
+
+// verify_jwt only proves the bearer token was signed by this project — any
+// signed-in user's access token passes it. This function runs with the
+// service role and calls service-only RPCs, so it must additionally require
+// the caller to BE the service role: the raw service key (what pg_cron sends
+// from the vault) or a JWT whose role claim is service_role.
+function isServiceCaller(req: Request): boolean {
+  const auth = req.headers.get('authorization') ?? '';
+  const token = auth.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return false;
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+  if (serviceKey && token === serviceKey) return true;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+    return payload?.role === 'service_role';
+  } catch {
+    return false;
+  }
 }
 
 Deno.serve(async (req) => {
+  if (!isServiceCaller(req)) {
+    return new Response(JSON.stringify({ error: 'forbidden' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'POST only' }), {
       status: 405,
@@ -561,9 +891,9 @@ Deno.serve(async (req) => {
     });
   } catch (err) {
     console.error('[score-fantasy] failed:', err);
-    return new Response(
-      JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } },
-    );
+    return new Response(JSON.stringify({ ok: false, error: 'scoring failed — see function logs' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 });

@@ -64,12 +64,29 @@ function extractEventTeamIdsByName(html: string): Map<string, string> {
 /** Generate plausible slug variants. ultirzr sometimes derives slugs in
  *  ways that don't match USAU's URL (e.g. "Men's" → "men-s" instead of
  *  "mens"). Try the primary first, then fall through alternates. */
-function slugVariants(slug: string): string[] {
+function slugVariants(slug: string, allowYearStrip = false): string[] {
   const variants = new Set<string>();
-  variants.add(slug);
-  variants.add(slug.replace(/-s-/g, 's-'));     // men-s-regional → mens-regional
-  variants.add(slug.replace(/-s$/, 's'));        // …-men-s → …-mens
-  variants.add(slug.replace(/-s-/g, 's-').replace(/-s$/, 's'));
+  const forms = [
+    slug,
+    slug.replace(/-s-/g, 's-'),                  // men-s-regional → mens-regional
+    slug.replace(/-s$/, 's'),                     // …-men-s → …-mens
+    slug.replace(/-s-/g, 's-').replace(/-s$/, 's'),
+  ];
+  for (const f of forms) variants.add(f);
+  // USAU serves many recurring tournaments at a YEAR-LESS url — our slug
+  // carries the year (from ultirzr or a year-disambiguated ingest), so the
+  // year-suffixed url 404s and the event resolves zero team urls.
+  //
+  // DANGEROUS without the caller's gate: USAU keeps ONE page per recurring
+  // tournament name, and it holds whichever season we happened to ingest under
+  // the bare slug. Verified 2026-09-07: /events/heavyweights/ lists our 2014
+  // event's teams (8/8 matched 2014, not 2018), so stripping the year on
+  // heavyweights-2018 would write 2014 rosters onto 2018 teams. Only the
+  // caller can tell the difference — it checks for a year-less twin event in
+  // the DB — so this variant is opt-in, never automatic.
+  if (allowYearStrip) {
+    for (const f of forms) variants.add(f.replace(/-(19|20)\d{2}$/, ''));
+  }
   return Array.from(variants);
 }
 
@@ -89,6 +106,27 @@ async function resolveOneEvent(
     competitionLevel === 'MASTERS' ||
     competitionLevel === 'GRAND_MASTERS' ||
     competitionLevel === 'GREAT_GRAND_MASTERS';
+
+  // Year-strip gate. Our slug may carry a year USAU's url doesn't use, in
+  // which case the year-suffixed page 404s and this event resolves nothing.
+  // Stripping is only SAFE when no other event already owns the bare slug: if
+  // one does, USAU's single page for that tournament holds THAT season, and
+  // scraping it here would attribute another year's teams to this event.
+  const stripped = slug.replace(/-(19|20)\d{2}$/, '');
+  let allowYearStrip = false;
+  if (stripped !== slug) {
+    const { data: twin } = await db
+      .from('usau_events')
+      .select('id')
+      .ilike('usau_slug', stripped)
+      .neq('id', eventUuid)
+      .limit(1);
+    allowYearStrip = !twin || twin.length === 0;
+    if (!allowYearStrip) {
+      console.log(`[resolver] ${slug}: year-strip blocked — "${stripped}" belongs to another event`);
+    }
+  }
+
   const slugLower = slug.toLowerCase();
   const levelSegments: ScheduleUrlLevel[] = isMastersEvent
     ? slugLower.includes('great-grand')
@@ -151,7 +189,7 @@ async function resolveOneEvent(
 
     for (const seg of levelSegments) {
       let html: string | null = null;
-      outer: for (const candidate of slugVariants(usedSlug ?? slug)) {
+      outer: for (const candidate of slugVariants(usedSlug ?? slug, allowYearStrip)) {
         for (const url of eventScheduleUrlVariants(candidate, urlGender, seg)) {
           try {
             html = await fetchHtml(url);
@@ -185,8 +223,16 @@ async function resolveOneEvent(
     }
     lastUsedSlug = usedSlug;
 
-    // Persist the working slug only once if it changed.
-    if (usedSlug !== slug) {
+    // Persist the working slug only once if it changed — but NEVER persist a
+    // year-stripped one. usau_slug is the public identity (the
+    // /usau/events/[slug] route key and the favorites key), and the year-less
+    // form is typically already owned by another season's event (USAU reuses
+    // one page per recurring tournament). Rewriting to it would 404 live links,
+    // orphan saved favorites, and undo the year-disambiguation that
+    // ingest-from-ultirzr adds to keep seasons apart. Fetching from it is fine;
+    // adopting it as our identity is not.
+    const isYearStripped = usedSlug === slug.replace(/-(19|20)\d{2}$/, '') && usedSlug !== slug;
+    if (usedSlug !== slug && !isYearStripped) {
       const { error: updErr } = await db
         .from('usau_events')
         .update({ usau_slug: usedSlug })
