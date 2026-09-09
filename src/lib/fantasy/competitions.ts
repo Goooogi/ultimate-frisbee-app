@@ -137,9 +137,11 @@ export const COMPETITIONS: CompetitionDef[] = [
     testOnly: false,
   },
   {
+    // Id stays 'wfdf-wucc' (it's persisted on existing contests); the game
+    // now covers ANY WFDF event, so the user-facing labels say just "WFDF".
     id: 'wfdf-wucc',
-    label: 'WFDF WUCC',
-    shortLabel: 'WUCC',
+    label: 'WFDF',
+    shortLabel: 'WFDF',
     mode: 'event',
     playerLeague: 'wfdf',
     defaultSettings: EVENT_DEFAULT,

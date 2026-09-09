@@ -18,7 +18,7 @@ import { canUseUtcg } from '@/lib/auth/types';
 const LINKS: Array<{ label: string; href: string; tag?: 'beta' | 'soon' }> = [
   { label: 'GAMES',     href: '/scores' },
   { label: 'PLAYBOOK',  href: '/playbook' },
-  { label: 'FANTASY',   href: '/fantasy',  tag: 'soon' },
+  { label: 'FANTASY',   href: '/fantasy' },
   { label: 'STANDINGS', href: '/teams' },
 ];
 

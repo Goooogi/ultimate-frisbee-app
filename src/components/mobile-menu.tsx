@@ -1843,12 +1843,11 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
             </div>
           )}
 
-          {/* ── FANTASY (beta) ───────────────────────────────────────── */}
+          {/* ── FANTASY ──────────────────────────────────────────────── */}
           <SubAppRow
             app="fantasy"
             href="/fantasy"
             label="Fantasy"
-            badge="BETA"
             active={activeApp === 'fantasy'}
             onClose={onClose}
           />

@@ -123,6 +123,10 @@ export function AppShell({ topNavSlot, hideFooterMobile, children }: AppShellPro
 interface PageShellProps {
   /** Big page title shown above content. */
   title: string;
+  /** Title scale. 'default' is the 36/56px editorial size every page uses;
+   *  'compact' (28px) is for hub pages whose content is a dense list and where
+   *  the full-size title dwarfs it. Opt-in — omitting it changes nothing. */
+  titleSize?: 'default' | 'compact';
   /** Short caption between the title and content. */
   subtitle?: string;
   /** Small uppercase eyebrow above the title (e.g., "UFA · 2026 Season"). */
@@ -166,6 +170,7 @@ export function PageShell({
   eyebrow,
   controls,
   titleLeft,
+  titleSize,
   topNavSlot,
   breadcrumbs,
   breadcrumbsSlot,
@@ -199,6 +204,7 @@ export function PageShell({
             subtitle={subtitle}
             eyebrow={eyebrow}
             titleLeft={titleLeft}
+            titleSize={titleSize}
             controls={controls}
           />
         </div>
@@ -280,16 +286,23 @@ function PageHeader({
   subtitle,
   eyebrow,
   titleLeft,
+  titleSize,
   controls,
 }: {
   title: string;
   subtitle?: string;
   eyebrow?: string;
   titleLeft?: React.ReactNode;
+  titleSize?: 'default' | 'compact';
   controls?: React.ReactNode;
 }) {
   const h1 = (
-    <h1 className="m-0 font-display italic text-[36px] lg:text-[56px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
+    <h1
+      className={[
+        'm-0 font-display italic font-bold tracking-[-0.02em] leading-[0.95] text-ink',
+        titleSize === 'compact' ? 'text-[28px]' : 'text-[36px] lg:text-[56px]',
+      ].join(' ')}
+    >
       {title}
     </h1>
   );

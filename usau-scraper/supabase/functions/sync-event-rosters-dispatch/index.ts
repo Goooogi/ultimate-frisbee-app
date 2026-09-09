@@ -50,6 +50,24 @@ const MAX_TEAMS_PER_RUN = 40;
 const MAX_TEAMS_PER_EVENT_PER_RUN = 8;
 
 /**
+ * Per-event cap for events that start within IMMINENT_DAYS. The baseline 8 is
+ * tuned for steady state; it starves a Series weekend, when ~17 Sectionals
+ * enter the 7-day window at once and share one 40-team budget (measured:
+ * ~23 teams/day cleared, so 145 unrostered teams needed ~6 days — rosters
+ * would have landed AFTER the games). A 16-team Sectional needs 2+ days at a
+ * cap of 8 (Hunter, 2026-09-09).
+ *
+ * Only the PER-EVENT share is raised, and only for events about to start.
+ * MAX_TEAMS_PER_RUN and MAX_CONCURRENT_TEAMS are deliberately unchanged: the
+ * global budget still bounds total requests per firing, and concurrency is what
+ * got our egress IP rate-limited before. This just lets an event that plays in
+ * 3 days win a bigger slice of the same budget than one 7 days out.
+ */
+const IMMINENT_MAX_TEAMS_PER_EVENT_PER_RUN = 20;
+/** An event starting within this many days counts as imminent. */
+const IMMINENT_DAYS = 3;
+
+/**
  * Run `items` through `fn` with at most `limit` in flight. Preserves order.
  */
 async function pooled<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
@@ -92,6 +110,15 @@ function stringifyErr(err: unknown): string {
       .filter(Boolean).join(' ') || JSON.stringify(err);
   }
   return String(err);
+}
+
+/** True when the event starts within IMMINENT_DAYS (or has already started but
+ *  is still running — an in-progress event needs its rosters now, not later).
+ *  Unknown start_date is treated as NOT imminent so it keeps baseline pacing. */
+function isImminent(startDate?: string | null): boolean {
+  if (!startDate) return false;
+  const cutoff = new Date(Date.now() + IMMINENT_DAYS * 86400_000).toISOString().slice(0, 10);
+  return startDate <= cutoff;
 }
 
 /** Fire sync-event-rosters for one team without waiting for it to finish. */
@@ -160,6 +187,9 @@ async function dispatchEvent(
   includeResolved: boolean,
   /** Max teams this event may launch this run (global budget remainder). */
   budget: number = Number.MAX_SAFE_INTEGER,
+  /** Event start_date (yyyy-mm-dd). Events starting within IMMINENT_DAYS get a
+   *  larger per-event share so a Series weekend's rosters land before games. */
+  startDate?: string | null,
 ): Promise<EventDispatchResult> {
   await resolveEventUrls(slug);
 
@@ -211,7 +241,10 @@ async function dispatchEvent(
     [teamIds[i], teamIds[j]] = [teamIds[j], teamIds[i]];
   }
   const totalNeeded = teamIds.length;
-  const allowance = Math.max(0, Math.min(budget, MAX_TEAMS_PER_EVENT_PER_RUN));
+  const perEventCap = isImminent(startDate)
+    ? IMMINENT_MAX_TEAMS_PER_EVENT_PER_RUN
+    : MAX_TEAMS_PER_EVENT_PER_RUN;
+  const allowance = Math.max(0, Math.min(budget, perEventCap));
   const slice = allowance >= totalNeeded ? teamIds : teamIds.slice(0, allowance);
   const dispatches = await pooled(slice, MAX_CONCURRENT_TEAMS, (id) => dispatchTeam(slug, id));
   const launched = dispatches.filter((d) => d.dispatched).length;
@@ -233,12 +266,15 @@ async function run(body: RequestBody) {
   if (slug) {
     const { data: event, error: evErr } = await db
       .from('usau_events')
-      .select('id, season')
+      .select('id, season, start_date')
       .eq('usau_slug', slug)
       .maybeSingle();
     if (evErr) throw new Error(`load event: ${stringifyErr(evErr)}`);
     if (!event) throw new Error(`event '${slug}' not found`);
-    const r = await dispatchEvent(db, event.id, slug, event.season, includeResolved);
+    const r = await dispatchEvent(
+      db, event.id, slug, event.season, includeResolved,
+      Number.MAX_SAFE_INTEGER, event.start_date,
+    );
     return { rowsProcessed: 0, result: { mode: 'event', ...r } };
   }
 
@@ -253,7 +289,7 @@ async function run(body: RequestBody) {
   const lookahead = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
   const { data: events, error: evErr } = await db
     .from('usau_events')
-    .select('id, usau_slug, season')
+    .select('id, usau_slug, season, start_date')
     .in('competition_level', FLAGSHIP_LEVELS)
     .lte('start_date', lookahead)
     .gte('end_date', today)
@@ -277,7 +313,7 @@ async function run(body: RequestBody) {
       continue;
     }
     try {
-      const r = await dispatchEvent(db, e.id, e.usau_slug, e.season, includeResolved, budgetLeft);
+      const r = await dispatchEvent(db, e.id, e.usau_slug, e.season, includeResolved, budgetLeft, e.start_date);
       budgetLeft -= r.dispatched;
       perEvent.push(r);
     } catch (err) {
@@ -293,6 +329,8 @@ async function run(body: RequestBody) {
       liveEvents: live.length,
       maxTeamsPerRun: MAX_TEAMS_PER_RUN,
       maxTeamsPerEventPerRun: MAX_TEAMS_PER_EVENT_PER_RUN,
+      imminentMaxTeamsPerEventPerRun: IMMINENT_MAX_TEAMS_PER_EVENT_PER_RUN,
+      imminentDays: IMMINENT_DAYS,
       maxConcurrentTeams: MAX_CONCURRENT_TEAMS,
       totalDispatched: perEvent.reduce((s, r) => s + r.dispatched, 0),
       totalDeferred: perEvent.reduce((s, r) => s + (r.deferred ?? 0), 0),

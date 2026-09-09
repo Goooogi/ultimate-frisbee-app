@@ -38,7 +38,7 @@ function sessionClient(): AnyClient {
   return createSessionClient() as unknown as AnyClient;
 }
 
-/** The beta runs the current UFA season. */
+/** The Public League runs the current UFA season. */
 export function fantasySeasonYear(now: Date = new Date()): number {
   return now.getFullYear();
 }
@@ -268,7 +268,7 @@ export async function getTeamWeekBreakdown(
   return { week, totalPoints, players };
 }
 
-/** The global beta leaderboard: all league_id-NULL teams ranked by total points. */
+/** The global Public League leaderboard: all league_id-NULL teams ranked by total points. */
 export async function getLeaderboard(
   year = fantasySeasonYear(),
   limit = 200,
@@ -566,7 +566,7 @@ export async function setAvatarIcon(ref: string | null): Promise<void> {
 }
 
 /**
- * Create (or return existing) the signed-in user's beta team. owner_id comes
+ * Create (or return existing) the signed-in user's Public League team. owner_id comes
  * from the session; owner_username is force-set by a DB trigger from the
  * profile, so a client value can't stick (defense in depth: we don't send one).
  * Requires the user to have a username first (their leaderboard identity) —
@@ -585,7 +585,7 @@ export async function createMyTeam(
   const name = teamName.trim();
   if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
 
-  // Attach the team to the global UFA contest (the beta pool became a real
+  // Attach the team to the global UFA contest (the Public League pool became a real
   // contest row). This is REQUIRED, not best-effort: getMyTeam() resolves the
   // user's Public League team by contest_id, so a contest_id-null insert would
   // create a team its owner can never see again. Fail loud instead.

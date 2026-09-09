@@ -24,7 +24,7 @@ export default async function FantasyHubPage() {
   const globalContest = await getGlobalContest('ufa', fantasySeasonYear()).catch(() => null);
 
   return (
-    <PageShell title="Fantasy Ultimate" controls={<PlayMenu />} hideFooterMobile>
+    <PageShell title="Fantasy Ultimate" titleSize="compact" controls={<PlayMenu />} hideFooterMobile>
       <MyLeaguesList globalContest={globalContest} />
       <MiniGamesTile />
       <StartALeagueList games={orderedGames} starts={starts} />

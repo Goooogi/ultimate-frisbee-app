@@ -4,10 +4,16 @@
 // mode, player pool, etc.). This module adds presentation-only fields the
 // hub/game-home pages need: card copy, status, badge, brand mark.
 //
-// Statuses (Hunter, 2026-08-27; wfdf-wucc/eucs promoted to live 2026-09-08):
-// ufa + usau-club-nationals + wfdf-wucc + eucs='live' (event games are
-// window-gated, see draftOpensDate below), usau-college-nationals / pul /
-// wul='coming-soon'.
+// Statuses (Hunter, 2026-08-27; wfdf-wucc promoted to live 2026-09-08):
+// ufa + usau-club-nationals + wfdf-wucc='live' (event games are window-gated,
+// see draftOpensDate below), usau-college-nationals / pul / wul='coming-soon'.
+// eucs='coming-soon' — shown but greyed (Hunter, 2026-09-08) until we define a
+// resolver that identifies the season's championship (EUCF); the series has no
+// single start date we can point a league at.
+//
+// 'wfdf-wucc' is a WFDF-wide game despite its id: resolveEventForCompetition
+// returns the season's soonest un-ended wfdf_events row of ANY kind, so it
+// rides WJUC/WMUCC/WUGC as well as WUCC.
 
 import type { CompetitionId } from './competitions';
 
@@ -20,8 +26,6 @@ export interface GameDef {
   /** One-line card description. */
   blurb: string;
   status: GameStatus;
-  /** Small pill on the card ("Beta"), if any. */
-  badge?: string;
   /** Brand mark in /public. */
   logoSrc: string;
   /** Tailwind-safe accent token for the card's wash/border (existing design
@@ -35,7 +39,6 @@ export const GAMES: GameDef[] = [
     name: 'UFA Fantasy',
     blurb: 'Season-long fantasy for the UFA — draft, set your lineup, outscore your friends.',
     status: 'live',
-    badge: 'Beta',
     logoSrc: '/UFA-red.png',
     accent: 'accent',
   },
@@ -83,7 +86,7 @@ export const GAMES: GameDef[] = [
     id: 'eucs',
     name: 'EUCS Fantasy',
     blurb: 'Fantasy for the European Ultimate Club Series.',
-    status: 'live',
+    status: 'coming-soon',
     logoSrc: '/EUF_Logo.webp',
     accent: 'ink',
   },

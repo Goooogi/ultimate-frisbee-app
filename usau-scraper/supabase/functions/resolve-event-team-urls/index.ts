@@ -30,6 +30,13 @@ interface RequestBody {
   limit?: number;
   skipResolved?: boolean;
   slug?: string;
+  /** Process only this gender bucket. Large multi-division events exceed the
+   *  150s wall clock in one call (each gender tries several slug × url
+   *  variants at 2s a fetch), so an operator can split them one gender per
+   *  call. 'unknown' targets the teams whose usau_teams.gender_division is
+   *  NULL — on some events that's the majority, and they're the slowest
+   *  because they're attempted under every gender. */
+  gender?: 'Men' | 'Women' | 'Mixed' | 'unknown';
 }
 
 function stringifyErr(err: unknown): string {
@@ -73,6 +80,23 @@ function slugVariants(slug: string, allowYearStrip = false): string[] {
     slug.replace(/-s-/g, 's-').replace(/-s$/, 's'),
   ];
   for (const f of forms) variants.add(f);
+  // ultirzr names some events by CONCATENATING the tournament with its host or
+  // co-located event ("TCT Elite Select Challenge 2023 Indy Invite"), so our
+  // slug carries a trailing suffix USAU's url doesn't have and the event
+  // resolves zero team urls. Truncating everything AFTER an interior year
+  // recovers it: tct-elite-select-challenge-2023-indy-invite →
+  // tct-elite-select-challenge-2023 (verified 2026-09-09: 200 with all 16 Men's
+  // teams matching our rows exactly; same for the 2022 edition).
+  //
+  // Unlike the year-STRIP below this needs no gate — it KEEPS the year, so it
+  // can never resolve to a different season's page. Requiring an interior year
+  // (something before it, something after it) also means a year-leading slug
+  // like "2023-u-s-open-club-championships-icc" is left alone rather than
+  // truncated to a bare "2023".
+  for (const f of forms) {
+    const m = f.match(/^(.+-(?:19|20)\d{2})-.+$/);
+    if (m) variants.add(m[1]);
+  }
   // USAU serves many recurring tournaments at a YEAR-LESS url — our slug
   // carries the year (from ultirzr or a year-disambiguated ingest), so the
   // year-suffixed url 404s and the event resolves zero team urls.
@@ -95,6 +119,7 @@ async function resolveOneEvent(
   eventUuid: string,
   slug: string,
   competitionLevel: string | null,
+  onlyGender?: RequestBody['gender'],
 ): Promise<{ resolved: number; skipped: number; error?: string; usedSlug?: string }> {
   // Masters events need masters URL segments, and one combined event (the
   // Masters Championships) hosts Masters + Grand Masters + Great Grand
@@ -112,6 +137,17 @@ async function resolveOneEvent(
   // Stripping is only SAFE when no other event already owns the bare slug: if
   // one does, USAU's single page for that tournament holds THAT season, and
   // scraping it here would attribute another year's teams to this event.
+  //
+  // TWO ways the bare slug can belong to a season that isn't ours, and both
+  // must block:
+  //   (a) another event already HOLDS the year-less slug (e.g. 2014 owns
+  //       "heavyweights", so heavyweights-2018 must not scrape it); and
+  //   (b) SIBLINGS share the base — "usa-ultimate-national-championships"
+  //       exists for 2014/15/16/17/18/21, and USAU serves ONE page for that
+  //       name. No row holds the bare slug, so check (a) passes, but the page
+  //       can only be one of those seasons. This is the year-less collision
+  //       that merged 5 Nationals + 740 games into one event; never strip when
+  //       more than one season shares the base.
   const stripped = slug.replace(/-(19|20)\d{2}$/, '');
   let allowYearStrip = false;
   if (stripped !== slug) {
@@ -121,9 +157,20 @@ async function resolveOneEvent(
       .ilike('usau_slug', stripped)
       .neq('id', eventUuid)
       .limit(1);
-    allowYearStrip = !twin || twin.length === 0;
+    const holdsBare = !!twin && twin.length > 0;
+
+    const { data: siblings } = await db
+      .from('usau_events')
+      .select('id')
+      .ilike('usau_slug', `${stripped}-%`)
+      .neq('id', eventUuid)
+      .limit(1);
+    const hasSibling = !!siblings && siblings.length > 0;
+
+    allowYearStrip = !holdsBare && !hasSibling;
     if (!allowYearStrip) {
-      console.log(`[resolver] ${slug}: year-strip blocked — "${stripped}" belongs to another event`);
+      const why = holdsBare ? 'another event holds it' : 'other seasons share this base slug';
+      console.log(`[resolver] ${slug}: year-strip blocked — "${stripped}": ${why}`);
     }
   }
 
@@ -155,7 +202,16 @@ async function resolveOneEvent(
   };
   const partsByGender = new Map<string, Part[]>();
   for (const p of (parts ?? []) as unknown as Part[]) {
-    const g = p.usau_teams?.gender_division ?? 'Men';
+    const raw = p.usau_teams?.gender_division ?? null;
+    // `onlyGender` lets an operator split an event that can't finish inside
+    // the 150s wall clock. 'unknown' selects the NULL-gender teams, which
+    // default into the 'Men' bucket below but are the expensive ones (no
+    // division to aim at, so every variant gets tried).
+    if (onlyGender) {
+      const matches = onlyGender === 'unknown' ? raw === null : raw === onlyGender;
+      if (!matches) continue;
+    }
+    const g = raw ?? 'Men';
     if (!partsByGender.has(g)) partsByGender.set(g, []);
     partsByGender.get(g)!.push(p);
   }
@@ -232,7 +288,11 @@ async function resolveOneEvent(
     // ingest-from-ultirzr adds to keep seasons apart. Fetching from it is fine;
     // adopting it as our identity is not.
     const isYearStripped = usedSlug === slug.replace(/-(19|20)\d{2}$/, '') && usedSlug !== slug;
-    if (usedSlug !== slug && !isYearStripped) {
+    // Same reasoning for the suffix-truncated variant: it's a fetch path, not
+    // our identity. usau_slug is already published in links and favorites, so
+    // adopting the shortened form would 404 them.
+    const isSuffixTruncated = usedSlug !== slug && slug.startsWith(`${usedSlug}-`);
+    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated) {
       const { error: updErr } = await db
         .from('usau_events')
         .update({ usau_slug: usedSlug })
@@ -322,7 +382,7 @@ async function run(body: RequestBody) {
     if (!skipResolved) {
       // future: support force-rerun
     }
-    const result = await resolveOneEvent(db, e.id, e.usau_slug, e.competition_level);
+    const result = await resolveOneEvent(db, e.id, e.usau_slug, e.competition_level, body.gender);
     perEvent.push({
       slug: result.usedSlug ?? e.usau_slug,
       season: e.season,
@@ -356,6 +416,7 @@ Deno.serve(async (req) => {
       if (url.searchParams.get('season')) body.season = parseInt(url.searchParams.get('season')!, 10);
       if (url.searchParams.get('limit')) body.limit = parseInt(url.searchParams.get('limit')!, 10);
       if (url.searchParams.get('slug')) body.slug = url.searchParams.get('slug')!;
+      if (url.searchParams.get('gender')) body.gender = url.searchParams.get('gender')! as RequestBody['gender'];
     }
   } catch {
     // empty body OK

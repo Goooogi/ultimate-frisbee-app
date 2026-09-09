@@ -25,13 +25,7 @@ const SCORING_ROWS: { stat: string; off: string; def: string; neg: boolean }[] =
 export function FantasyRulesContent({ headingId }: { headingId?: string }) {
   return (
     <>
-      {/* Beta pill + explanation */}
       <div className="mb-5">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="inline-flex items-center px-2.5 py-[3px] rounded-full text-[9px] font-bold tracking-[0.14em] uppercase bg-accent text-accent-ink">
-            Beta
-          </span>
-        </div>
         <h2
           id={headingId}
           className="font-display italic text-[22px] lg:text-[28px] font-bold tracking-[-0.02em] text-ink leading-[0.95] mb-2"

@@ -1,6 +1,6 @@
 // Multi-league draft + roster operations for CONTEST teams.
 //
-// The beta's data.ts speaks UFA only (searchDraftablePlayers, saveRoster).
+// The Public League's data.ts speaks UFA only (searchDraftablePlayers, saveRoster).
 // This module is the contest-aware generalization: which player pool a contest
 // drafts from, how a roster is composed, and when it locks all come from the
 // ContestView (competition def + frozen settings snapshot).

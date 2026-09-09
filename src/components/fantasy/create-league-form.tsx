@@ -36,12 +36,14 @@ export function CreateLeagueForm({ initialGameId }: CreateLeagueFormProps) {
   );
 }
 
-// Only live games can be created against; coming-soon ones render disabled so
-// the roadmap is visible without allowing a create that has nowhere to go.
+// Only live games can be created against; the rest render dimmed/disabled so
+// the roadmap is visible without allowing a create that has nowhere to go. No
+// "soon" suffix — unavailability is carried by the disabled state alone
+// (Hunter, 2026-09-08: no "beta"/"coming soon" wording anywhere in Fantasy).
 const GAME_OPTIONS: PillSelectOption<CompetitionId>[] = GAMES.filter((g) => g.status !== 'hidden').map(
   (g) => ({
     value: g.id,
-    label: g.status === 'live' ? g.name : `${g.name} — soon`,
+    label: g.name,
     disabled: g.status !== 'live',
   }),
 );

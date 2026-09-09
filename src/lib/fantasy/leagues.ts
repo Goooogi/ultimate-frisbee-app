@@ -579,11 +579,20 @@ export async function resolveEventForCompetition(
     };
   }
   if (competition === 'wfdf-wucc') {
+    // ANY WFDF event, not just WUCC: the season's soonest event that hasn't
+    // ended yet (WJUC, WMUCC, WUGC…). Rosters and teams are keyed per event
+    // id, so the draft pool and scoring need no change. The hub's "Play greys
+    // out until a startDate exists" rule then activates WFDF on its own as
+    // soon as an upcoming event is ingested.
+    const today = new Date().toISOString().slice(0, 10);
     const { data, error } = await anon()
       .from('wfdf_events')
       .select('id, name, start_date, end_date')
       .eq('year', seasonYear)
-      .ilike('season_id', 'wucc%')
+      .not('start_date', 'is', null)
+      .or(`end_date.gte.${today},and(end_date.is.null,start_date.gte.${today})`)
+      .order('start_date', { ascending: true })
+      .limit(1)
       .maybeSingle();
     if (error) throw error;
     if (!data) return null;
@@ -700,7 +709,7 @@ export async function createContest(
 }
 
 /** The global/public contest for a competition + season (league_id NULL,
- *  service-managed — e.g. the beta UFA pool), or null if none exists. */
+ *  service-managed — e.g. the Public League UFA pool), or null if none exists. */
 export async function getGlobalContest(
   competition: CompetitionId,
   seasonYear: number,
