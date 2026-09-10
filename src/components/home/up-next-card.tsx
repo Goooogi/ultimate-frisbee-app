@@ -7,7 +7,9 @@
 // Exports UpNextCards — a fragment of 0-2 cards (UFA, then USAU) — so
 // page.tsx can drop it straight into a `grid grid-cols-1 lg:grid-cols-2`
 // row as its own "Up next" section; each card renders only when it has
-// data, same gating as before.
+// data. When only ONE league has anything upcoming (UFA's off-season, most
+// of the year) that card spans the full row and its rows flow into two
+// columns on lg, so the section never shows a half-empty row.
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
@@ -81,20 +83,21 @@ export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
     hasUfa && hasUsau
       ? Math.min(ufaGames.length, usauEvents.length, MAX_UP_NEXT_ROWS)
       : MAX_UP_NEXT_ROWS;
+  const alone = hasUfa !== hasUsau;
 
   return (
     <>
       {hasUfa && (
-        <CardShell title="Up next" pill="UFA">
+        <CardShell title="Up next" pill="UFA" alone={alone} rows={Math.min(ufaGames.length, rowCount)}>
           {ufaGames.slice(0, rowCount).map((g, i) => (
-            <UfaUpNextRow key={g.gameID} game={g} first={i === 0} />
+            <UfaUpNextRow key={g.gameID} game={g} first={i === 0} secondColumnStart={alone && i === splitAt(Math.min(ufaGames.length, rowCount))} />
           ))}
         </CardShell>
       )}
       {hasUsau && (
-        <CardShell title="Up next" pill="USAU">
+        <CardShell title="Up next" pill="USAU" alone={alone} rows={Math.min(usauEvents.length, rowCount)}>
           {usauEvents.slice(0, rowCount).map((e, i) => (
-            <UsauEventRow key={e.slug} event={e} first={i === 0} />
+            <UsauEventRow key={e.slug} event={e} first={i === 0} secondColumnStart={alone && i === splitAt(Math.min(usauEvents.length, rowCount))} />
           ))}
         </CardShell>
       )}
@@ -102,20 +105,65 @@ export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
   );
 }
 
+/** Index of the first row in the second column of a lone card's lg layout
+ *  (column-major: chronology reads DOWN the first column, then the second). */
+function splitAt(rows: number): number {
+  return Math.ceil(rows / 2);
+}
+
+// Literal class strings so Tailwind keeps them; index = rows per column.
+const LG_ROWS: Record<number, string> = {
+  1: 'lg:grid-rows-1',
+  2: 'lg:grid-rows-2',
+  3: 'lg:grid-rows-3',
+};
+
+/** Row-list classes: a lone card with 2+ rows lays them out in two lg
+ *  columns, column-major, with a wide gutter between the columns. */
+function rowsClass(alone: boolean, rows: number): string {
+  if (!alone || rows < 2) return 'flex flex-col';
+  return `flex flex-col ${LG_ROWS[splitAt(rows)] ?? 'lg:grid-rows-3'} lg:grid lg:grid-cols-2 lg:grid-flow-col lg:gap-x-8`;
+}
+
 // ─── Shared card shell ────────────────────────────────────────────────────
 
-function CardShell({ title, pill, children }: { title: string; pill: string; children: React.ReactNode }) {
+function CardShell({
+  title,
+  pill,
+  alone,
+  rows,
+  children,
+}: {
+  title: string;
+  pill: string;
+  /** The only Up next card on the page → span the whole lg row. */
+  alone: boolean;
+  rows: number;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="bg-surface rounded-card-lg shadow-card px-6 py-5">
+    <div
+      className={[
+        'h-full flex flex-col bg-surface rounded-card-lg shadow-card px-6 py-5',
+        alone ? 'lg:col-span-2' : '',
+      ].join(' ')}
+    >
       <div className="flex items-center justify-between gap-3 mb-3.5">
         <h3 className="font-display italic font-bold text-[22px] leading-none tracking-[-0.01em] text-ink m-0">
           {title}
         </h3>
         <LeaguePill>{pill}</LeaguePill>
       </div>
-      <div className="flex flex-col">{children}</div>
+      <div className={rowsClass(alone, rows)}>{children}</div>
     </div>
   );
+}
+
+/** Hairline rule: every row but the first, except the row that opens the
+ *  second lg column of a lone card (it sits at the top of its column). */
+function rowBorder(first: boolean, secondColumnStart: boolean): string {
+  if (first) return '';
+  return secondColumnStart ? 'border-t border-hairline lg:border-t-0' : 'border-t border-hairline';
 }
 
 function LeaguePill({ children }: { children: React.ReactNode }) {
@@ -128,7 +176,15 @@ function LeaguePill({ children }: { children: React.ReactNode }) {
 
 // ─── UFA row ──────────────────────────────────────────────────────────────
 
-function UfaUpNextRow({ game, first }: { game: UfaGame; first: boolean }) {
+function UfaUpNextRow({
+  game,
+  first,
+  secondColumnStart,
+}: {
+  game: UfaGame;
+  first: boolean;
+  secondColumnStart: boolean;
+}) {
   const away = teamMeta(game.awayTeamID);
   const home = teamMeta(game.homeTeamID);
   const state = gameUiState(game);
@@ -139,7 +195,7 @@ function UfaUpNextRow({ game, first }: { game: UfaGame; first: boolean }) {
       href={`/g/${game.gameID}`}
       className={[
         'grid grid-cols-[1fr_auto] gap-3 items-center py-[11px]',
-        first ? '' : 'border-t border-hairline',
+        rowBorder(first, secondColumnStart),
         'hover:opacity-80 transition-opacity',
       ].join(' ')}
     >
@@ -171,7 +227,15 @@ function UfaUpNextRow({ game, first }: { game: UfaGame; first: boolean }) {
 
 // ─── USAU row — one upcoming flighted tournament ─────────────────────────
 
-function UsauEventRow({ event, first }: { event: UpcomingUsauEvent; first: boolean }) {
+function UsauEventRow({
+  event,
+  first,
+  secondColumnStart,
+}: {
+  event: UpcomingUsauEvent;
+  first: boolean;
+  secondColumnStart: boolean;
+}) {
   const dateRange = formatDateRange(event.startDate, event.endDate);
   const meta = [dateRange, event.flightLabel].filter(Boolean).join(' · ');
 
@@ -184,7 +248,7 @@ function UsauEventRow({ event, first }: { event: UpcomingUsauEvent; first: boole
       href={`/usau/events/${event.slug}`}
       className={[
         'flex items-baseline gap-3 py-[11px]',
-        first ? '' : 'border-t border-hairline',
+        rowBorder(first, secondColumnStart),
         'hover:opacity-80 transition-opacity',
       ].join(' ')}
     >

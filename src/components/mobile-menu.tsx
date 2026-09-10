@@ -1787,6 +1787,15 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
           {/* ── Divider between The League and the standalone sub-apps ── */}
           <div className="my-1.5 border-t border-hairline" aria-hidden="true" />
 
+          {/* ── FANTASY ──────────────────────────────────────────────── */}
+          <SubAppRow
+            app="fantasy"
+            href="/fantasy"
+            label="Fantasy"
+            active={activeApp === 'fantasy'}
+            onClose={onClose}
+          />
+
           {/* ── PLAYBOOK ─────────────────────────────────────────────── */}
           <SubAppRow
             app="playbook"
@@ -1842,15 +1851,6 @@ export function MobileMenu({ open, onClose, triggerRef }: MobileMenuProps) {
               )}
             </div>
           )}
-
-          {/* ── FANTASY ──────────────────────────────────────────────── */}
-          <SubAppRow
-            app="fantasy"
-            href="/fantasy"
-            label="Fantasy"
-            active={activeApp === 'fantasy'}
-            onClose={onClose}
-          />
 
           {/* ── JERSEY EXCHANGE ──────────────────────────────────────────
               Community board for trading/selling real jerseys. Public to

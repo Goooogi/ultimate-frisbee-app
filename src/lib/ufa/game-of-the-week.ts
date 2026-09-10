@@ -197,6 +197,65 @@ export function pickPlayoffSlate(games: UfaGame[]): PlayoffSlateGame[] {
   return slate.map((game, i) => ({ game, label: labelFor(i) }));
 }
 
+export type UfaPlayoffRoundLabel = 'championship' | 'semifinal' | 'divisional';
+export interface UfaPlayoffGame {
+  game: UfaGame;
+  round: UfaPlayoffRoundLabel;
+}
+
+/**
+ * Every DECIDED playoff game of the season in `games`, newest first
+ * (championship → semifinals → divisional round). The home "Season complete"
+ * card's rows. Returns [] until a structural bracket exists AND its title game
+ * is final — so a half-played bracket, or a regular season with no playoff
+ * weeks yet, never reads as a finished season.
+ *
+ * Same structural playoff detection as pickPlayoffSlate (weeks after the last
+ * ≥6-game bulk week holding ≤4 real games), applied to finished games instead
+ * of upcoming ones. 2026 shape: week-15 (4 divisional games) + week-16 (2
+ * semis + final) = 7 rows; the all-star exhibition shares week-16 and is
+ * excluded. Round labels are positional: the chronologically last bracket game
+ * is the title game, the two before it are the semis, anything earlier is the
+ * divisional round.
+ */
+export function ufaPlayoffGames(games: UfaGame[]): UfaPlayoffGame[] {
+  const real = games.filter((g) => !isAllStarGame(g));
+
+  const counts = new Map<number, number>();
+  for (const g of real) {
+    const n = weekNum(g.week ?? '');
+    if (n === Number.MAX_SAFE_INTEGER) continue;
+    counts.set(n, (counts.get(n) ?? 0) + 1);
+  }
+  let lastBulkWeek = -Infinity;
+  for (const [n, c] of counts) {
+    if (c >= 6 && n > lastBulkWeek) lastBulkWeek = n;
+  }
+  if (!Number.isFinite(lastBulkWeek)) return [];
+
+  const bracket = real
+    .filter((g) => {
+      const n = weekNum(g.week ?? '');
+      return n !== Number.MAX_SAFE_INTEGER && n > lastBulkWeek && (counts.get(n) ?? 0) <= 4;
+    })
+    .sort((a, b) => startTs(a) - startTs(b));
+  if (bracket.length === 0) return [];
+
+  // Title undecided (or bracket still being played) → not a complete season.
+  const title = bracket[bracket.length - 1];
+  const ts = gameUiState(title);
+  if (!ts.isFinal || title.awayScore === title.homeScore) return [];
+
+  const decided = bracket.filter((g) => gameUiState(g).isFinal);
+  const lastIdx = decided.length - 1;
+  return decided
+    .map((game, i): UfaPlayoffGame => ({
+      game,
+      round: i === lastIdx ? 'championship' : i >= lastIdx - 2 ? 'semifinal' : 'divisional',
+    }))
+    .reverse();
+}
+
 /** The champ-weekend all-star game's hero window: while it's upcoming/live,
  *  plus 3 days after it goes final so the result lingers through the weekend.
  *  Returns undefined outside that window (the slide drops — it's a

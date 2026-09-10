@@ -7,14 +7,20 @@
 //   1. Nav (AppRail — untouched)
 //   2. Full-width hero carousel (UFA → USAU → WFDF → PUL → WUL)
 //   3. "Every league, one place." strip
-//   4. "Up next" — UFA + USAU cards, side by side on desktop
+//   4. "Up next" — UFA + USAU cards, side by side on desktop (a lone card
+//      spans the row with two inner columns)
 //   5. LEAGUE STANDINGS group — "Top of the league" (4 UFA division cards),
-//      USAU Rankings (full-width 4×4 grid of the top 16, aligned to the UFA
-//      cards above it), then PUL + WUL standings (two-up row)
-//   6. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on desktop
+//      USAU Rankings (full-width 4×4 grid of the top 16), then the "Season
+//      complete" carousel
+//   6. "Recent results" — one card per IN-SEASON league (swipe row on mobile)
 //   7. Footer
 //
-// Any league with no current content is simply omitted from the carousel.
+// Which leagues appear where is decided by src/lib/home/season-phase.ts: a
+// league is `in-season` (Recent results), `complete` (Season complete, for six
+// months after its final) or `dormant` (neither). Every section wrapper is
+// gated on content, so an empty section is absent — never a blank band — and
+// the row primitives (StandingsCarousel / UpNextCards) rebalance to whatever
+// count is left. Any league with no current content is simply omitted.
 
 import React from 'react';
 import Link from 'next/link';
@@ -53,14 +59,30 @@ import { RankingsCard } from '@/components/home/rankings-card';
 import { UpNextCards } from '@/components/home/up-next-card';
 import { RecentResultsCards } from '@/components/home/recent-results-card';
 import {
-  PulStandingsSection,
-  WulStandingsSection,
+  PulSeasonCompleteSection,
+  WulSeasonCompleteSection,
   UfaSeasonCompleteSection,
   UsauSeasonCompleteSection,
   WfdfSeasonCompleteSection,
 } from '@/components/home/league-standings-sections';
 import { StandingsCarousel } from '@/components/home/standings-carousel';
-import { getWfdfSeasonCompleteCards } from '@/lib/home/season-complete';
+import {
+  getWfdfSeasonCompleteCards,
+  getUfaSeasonCompleteCard,
+  getUsauSeasonCompleteCard,
+  getUsauCollegeSeasonCompleteCard,
+} from '@/lib/home/season-complete';
+import {
+  homeNow,
+  ufaSeasonPhase,
+  pulSeasonPhase,
+  wulSeasonPhase,
+  usauClubSeasonPhase,
+  usauCollegeSeasonPhase,
+  wfdfEventPhase,
+  isCollegeChampionshipsName,
+} from '@/lib/home/season-phase';
+import { getPulStandingsCached, getWulStandingsCached } from '@/lib/cached-readers';
 import { StandoutsCarousel } from '@/components/home/standouts-carousel';
 import { getStandoutPerformances } from '@/lib/home/standouts';
 import { SiteFooter } from '@/components/site-footer';
@@ -71,6 +93,9 @@ import { SiteFooter } from '@/components/site-footer';
 // 2026-08-11 (vault).
 export const revalidate = 300;
 
+/** How long a finished game may headline the hero as "Game of the week". */
+const HERO_RESULT_WINDOW_DAYS = 14;
+
 export const metadata: Metadata = {
   title: 'The Layout · Ultimate Frisbee',
   description:
@@ -78,12 +103,15 @@ export const metadata: Metadata = {
 };
 
 export default async function HomePage() {
-  const year = currentSeasonYear();
+  // One clock for every phase decision on the page (HOME_AS_OF overrides it
+  // outside production so any month can be previewed).
+  const now = homeNow();
+  const year = currentSeasonYear(now);
 
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes, usauCollegeRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
@@ -109,9 +137,12 @@ export default async function HomePage() {
       (async () => listPulGames({ season: await getPulCurrentSeason() }))(),
       // WUL: same rule.
       (async () => listWulGames({ season: await getWulCurrentSeason() }))(),
-      // USAU: recent completed majors (TCT events) with champions, for "Recent results"
-      // — 4 to match the other leagues' 4-row groups in that card.
-      recentUsauMajorsWithChampions(4),
+      // USAU: recent completed CLUB majors (TCT events) with champions — ONE
+      // scan shared by "Recent results" (first 4), the Club Nationals "Season
+      // complete" card (found by name) and the club season-phase (a major
+      // newer than Nationals = next season underway). 12 reaches back through
+      // a full club season. `limit` only slices the output; cost is the same.
+      recentUsauMajorsWithChampions(12),
       // WFDF: current Worlds event — same Wed weekend-cadence flip as USAU
       // (e.g. WMUCC through Tue, then WJUC from Wednesday).
       getCurrentWfdfEvent(),
@@ -119,9 +150,15 @@ export default async function HomePage() {
       // the home carousel. UFA/PUL/WUL wired; only leagues with recent games
       // contribute. Cheap windowed Supabase reads (per-game box-score tables).
       getStandoutPerformances(),
-      // WFDF: champion-per-division cards for the most recent completed Worlds
-      // year — the "Season complete" carousel's WFDF page(s).
-      getWfdfSeasonCompleteCards(),
+      // WFDF: podium-per-division cards for every Worlds that ended within the
+      // last six months — the "Season complete" carousel's WFDF page(s).
+      getWfdfSeasonCompleteCards(now),
+      // USAU College Championships (D-I + D-III), one card, for the spring →
+      // autumn window when Club has nothing complete. Two events, tiny scan.
+      recentUsauMajorsWithChampions(2, {
+        competitionLevels: ['COLLEGE_D1', 'COLLEGE_D3'],
+        nameFilter: isCollegeChampionshipsName,
+      }),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -153,7 +190,7 @@ export default async function HomePage() {
   // ended within the last ~2 weeks — otherwise a months-old Worlds would linger
   // in the loop. (USAU can headline year-round because its calendar is dense.)
   const wfdfPick = wfdfRes.status === 'fulfilled' ? wfdfRes.value : null;
-  const twoWeeksAgoIso = new Date(Date.now() - 14 * 86400_000).toISOString().slice(0, 10);
+  const twoWeeksAgoIso = new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 10);
   const wfdfEvent =
     wfdfPick && (wfdfPick.endDate ?? wfdfPick.startDate ?? '') >= twoWeeksAgoIso
       ? wfdfPick
@@ -175,12 +212,26 @@ export default async function HomePage() {
   //               (games[0] keeps it from being empty mid-season; EmptyHero
   //               renders for a truly empty slate).
   const topGame = pickTopGame(games, standings);
-  // Fallback keeps the UFA slide non-empty mid-season, but must NEVER be a
-  // cancelled/postponed game (those aren't upcoming/live/final, so the pickers
-  // already skip them — the raw games[0] fallback would leak one) NOR the
-  // all-star exhibition (it has its own slide — no game appears on two cards).
+  // Fallback keeps the UFA slide non-empty mid-season: the soonest upcoming/
+  // live game, else the most recent final — but only for HERO_RESULT_WINDOW_DAYS
+  // after it was played, so a finished season's title game doesn't headline
+  // as "Game of the week" until next April (Hunter, 2026-09-09). Never a
+  // cancelled/postponed game NOR the all-star exhibition (it has its own
+  // slide — no game appears on two cards). Undefined → the UFA slide drops
+  // when another league has a slide, else the EmptyHero off-season card.
+  const heroResultCutoff = now.getTime() - HERO_RESULT_WINDOW_DAYS * 86400_000;
+  const heroPool = games.filter((g) => !isAllStarGame(g) && !gameUiState(g).isCancelled);
+  const heroTs = (g: UfaGame): number => (g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0);
   const firstShowableGame =
-    games.find((g) => !isAllStarGame(g) && !gameUiState(g).isCancelled) ?? games[0];
+    heroPool
+      .filter((g) => {
+        const st = gameUiState(g);
+        return st.isUpcoming || st.isLive;
+      })
+      .sort((a, b) => heroTs(a) - heroTs(b))[0] ??
+    heroPool
+      .filter((g) => gameUiState(g).isFinal && heroTs(g) >= heroResultCutoff)
+      .sort((a, b) => heroTs(b) - heroTs(a))[0];
   const gotwGame = pickUpcomingGameOfWeek(games, standings) ?? firstShowableGame;
 
   // Playoff mode: when the soonest active week is a playoff round, EVERY game
@@ -224,8 +275,9 @@ export default async function HomePage() {
     .sort((a, b) => tsOf(b) - tsOf(a))
     .slice(0, 4);
 
-  // Recent USAU majors (TCT events with champions) — for "Recent results".
+  // Recent USAU CLUB majors (TCT events with champions), newest first.
   const usauMajors = usauMajorsRes.status === 'fulfilled' ? usauMajorsRes.value : [];
+  const usauCollege = usauCollegeRes.status === 'fulfilled' ? usauCollegeRes.value : [];
 
   // For "Recent results": up to 4 rows per league regardless of age (the
   // pickLeagueGame 7-day window is for the hero carousel only — for the
@@ -236,25 +288,67 @@ export default async function HomePage() {
   const pulRecentFour = pickPulRecentFour(pulGames);
   const wulRecentFour = pickWulRecentFour(wulGames);
 
-  // ── "Season complete" carousel pages ────────────────────────────────────────
-  // Order matches the mobile app: UFA → USAU → PUL → WUL → WFDF. Every one of
-  // these sections is an async server component that resolves to null when its
-  // league has nothing to show (in-season, or no data), so we await them all
-  // here: the carousel needs its final card count up front to render the right
-  // number of dots, and a null page would otherwise leave a dead dot.
-  const wfdfSeasonCards =
-    wfdfSeasonRes.status === 'fulfilled' ? wfdfSeasonRes.value : [];
+  // ── Season phase per league ─────────────────────────────────────────────────
+  // UFA's title game lives in whichever year last ran a bracket: from Jan 1
+  // until the new season's playoffs, that's the PREVIOUS year, so pull it in
+  // (one cached API read, Jan–Aug only) rather than let the champion card
+  // vanish at the year boundary. Sep+ the current year always has it.
+  const prevYearGames: UfaGame[] =
+    now.getUTCMonth() < 8 ? await getAllGamesByYears([year - 1]).catch(() => []) : [];
+  // Dedupe by gameID: the current-week feed keeps serving last season's final
+  // weekend into January, and a doubled week-16 reads as a bulk week.
+  const ufaPoolByID = new Map<string, UfaGame>();
+  for (const g of prevYearGames) ufaPoolByID.set(g.gameID, g);
+  for (const g of games) ufaPoolByID.set(g.gameID, g);
+  const ufaPhasePool = Array.from(ufaPoolByID.values());
+  const ufaPhase = ufaSeasonPhase(ufaPhasePool, now);
+  const pulPhase = pulSeasonPhase(pulGames, now);
+  const wulPhase = wulSeasonPhase(wulGames, now);
+  const usauPhase = usauClubSeasonPhase(usauMajors, usauUpcomingEvents, now);
+  const collegePhase = usauCollegeSeasonPhase(usauCollege, usauUpcomingEvents, now);
 
-  const [ufaSeasonNode, usauSeasonNode, pulSeasonNode, wulSeasonNode] = await Promise.all([
-    UfaSeasonCompleteSection(),
-    UsauSeasonCompleteSection(),
-    PulStandingsSection(),
-    WulStandingsSection(),
+  // ── "Season complete" carousel pages ────────────────────────────────────────
+  // Order: UFA → USAU (Club, College) → PUL → WUL → WFDF. A league contributes
+  // only while its phase is `complete`; each section resolves to null when the
+  // data can't back a card, so a null page never leaves a dead dot.
+  const wfdfSeasonCards = (wfdfSeasonRes.status === 'fulfilled' ? wfdfSeasonRes.value : []).filter(
+    (card) => wfdfEventPhase(card, now).phase === 'complete',
+  );
+
+  // PUL/WUL standings are read only for a completed season (cached readers),
+  // for the season whose final the playoff pickers resolved.
+  const pulSeason = pulRecentFour[0]?.game.season;
+  const wulSeason = wulRecentFour[0]?.game.season;
+  const [pulStandings, wulStandings] = await Promise.all([
+    pulPhase.phase === 'complete' && pulSeason ? getPulStandingsCached(pulSeason).catch(() => []) : [],
+    wulPhase.phase === 'complete' && wulSeason ? getWulStandingsCached(wulSeason).catch(() => []) : [],
   ]);
+
+  const ufaSeasonNode =
+    ufaPhase.phase === 'complete'
+      ? UfaSeasonCompleteSection({ card: getUfaSeasonCompleteCard(ufaPhasePool, standings) })
+      : null;
+  const usauSeasonNode =
+    usauPhase.phase === 'complete'
+      ? UsauSeasonCompleteSection({ card: getUsauSeasonCompleteCard(usauMajors) })
+      : null;
+  const collegeSeasonNode =
+    collegePhase.phase === 'complete'
+      ? UsauSeasonCompleteSection({ card: getUsauCollegeSeasonCompleteCard(usauCollege) })
+      : null;
+  const pulSeasonNode =
+    pulPhase.phase === 'complete' && pulSeason
+      ? PulSeasonCompleteSection({ season: pulSeason, playoffs: pulRecentFour, standings: pulStandings })
+      : null;
+  const wulSeasonNode =
+    wulPhase.phase === 'complete' && wulSeason
+      ? WulSeasonCompleteSection({ season: wulSeason, playoffs: wulRecentFour, standings: wulStandings })
+      : null;
 
   const seasonCompleteCards: Array<{ label: string; node: React.ReactNode }> = [
     ...(ufaSeasonNode ? [{ label: 'UFA', node: ufaSeasonNode }] : []),
-    ...(usauSeasonNode ? [{ label: 'USAU', node: usauSeasonNode }] : []),
+    ...(usauSeasonNode ? [{ label: 'USAU Club', node: usauSeasonNode }] : []),
+    ...(collegeSeasonNode ? [{ label: 'USAU College', node: collegeSeasonNode }] : []),
     ...(pulSeasonNode ? [{ label: 'PUL', node: pulSeasonNode }] : []),
     ...(wulSeasonNode ? [{ label: 'WUL', node: wulSeasonNode }] : []),
     ...wfdfSeasonCards.map((card) => ({
@@ -262,6 +356,22 @@ export default async function HomePage() {
       node: <WfdfSeasonCompleteSection key={card.slug} card={card} />,
     })),
   ];
+
+  // ── "Recent results" cards — in-season leagues only ─────────────────────────
+  // A finished season lives in the "Season complete" card instead (its playoff
+  // rows carry the same results), so no league appears in both sections.
+  const recentResultCards = RecentResultsCards({
+    ufaGames: ufaPhase.phase === 'in-season' ? recent : [],
+    usauMajors: usauPhase.phase === 'in-season' ? usauMajors.slice(0, 4) : [],
+    pulGames: pulPhase.phase === 'in-season' ? pulRecentFour : [],
+    wulGames: wulPhase.phase === 'in-season' ? wulRecentFour : [],
+  });
+
+  // "Top of the league" — the standings feed carries its own season, so the
+  // eyebrow follows the data (not the calendar year) and a zeroed preseason
+  // table hides rather than showing 0-0 rows.
+  const standingsYear = standings.length > 0 ? Math.max(...standings.map((s) => s.year)) : year;
+  const showStandings = standings.some((s) => s.wins + s.losses + s.ties > 0);
 
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
@@ -292,7 +402,9 @@ export default async function HomePage() {
     // UFA headline slide(s). During a playoff round: one slide PER game in the
     // round, labeled by round — with two semifinals there is no "the" game of
     // the week, so both show. Otherwise the single win%-picked Game of the
-    // week as before (EmptyHero renders in a truly empty off-season).
+    // week. With no game to show (off-season, two weeks past the final) the
+    // slide is dropped — unless it would be the ONLY slide, in which case it
+    // renders the EmptyHero off-season card so the carousel never goes empty.
     ...(playoffSlate.length > 0
       ? playoffSlate.map(({ game: pg, label }) => ({
           key: `ufa:${pg.gameID}`,
@@ -306,20 +418,22 @@ export default async function HomePage() {
             />
           ),
         }))
-      : [
-          {
-            key: gotwGame ? `ufa:${gotwGame.gameID}` : 'ufa:empty',
-            node: (
-              <HeroGameCard
-                key="ufa-gotw"
-                game={gotwGame}
-                awayRecord={recordOf(gotwGame?.awayTeamID)}
-                homeRecord={recordOf(gotwGame?.homeTeamID)}
-                eyebrow="Game of the week"
-              />
-            ),
-          },
-        ]),
+      : gotwGame || !(allStarGame || usauEvent || wfdfEvent || pulFeatured || wulFeatured)
+        ? [
+            {
+              key: gotwGame ? `ufa:${gotwGame.gameID}` : 'ufa:empty',
+              node: (
+                <HeroGameCard
+                  key="ufa-gotw"
+                  game={gotwGame}
+                  awayRecord={recordOf(gotwGame?.awayTeamID)}
+                  homeRecord={recordOf(gotwGame?.homeTeamID)}
+                  eyebrow="Game of the week"
+                />
+              ),
+            },
+          ]
+        : []),
     // Champ-weekend WUL/PUL All-Star exhibition — its own once-a-year slide,
     // rendered with LEAGUE marks (the API's allstars1/2 ids carry no
     // franchise; see ALL_STAR_TEAM_META for the side-mapping caveat).
@@ -390,21 +504,24 @@ export default async function HomePage() {
       )}
 
       {/* 4. "Up next" — UFA + USAU cards, side by side on desktop so they
-             fill the width instead of stacking narrow in a single column. */}
-      <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <UpNextCards ufaGames={upNext} usauEvents={usauUpcomingEvents} />
-      </div>
+             fill the width instead of stacking narrow in a single column; a
+             lone card spans both columns. Wrapper only when there's a card. */}
+      {(upNext.length > 0 || usauUpcomingEvents.length > 0) && (
+        <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 lg:grid-cols-2 gap-5">
+          <UpNextCards ufaGames={upNext} usauEvents={usauUpcomingEvents} />
+        </div>
+      )}
 
       {/* 4. LEAGUE STANDINGS group — every league's current standing, together,
              in one vertical stack: UFA divisions → USAU rankings → PUL/WUL. */}
 
       {/* 4a. "Top of the league" — UFA division cards */}
-      {standings.length > 0 && (
+      {showStandings && (
         <div className="px-5 lg:px-10 pt-9 lg:pt-11">
           <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
             <div>
               <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
-                UFA · {year}
+                UFA · {standingsYear}
               </span>
               <h2 className="font-display italic font-bold text-[26px] lg:text-[34px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
                 Top of the league
@@ -431,32 +548,31 @@ export default async function HomePage() {
         <RankingsCard />
       </div>
 
-      {/* 4c. "Season complete" carousel — UFA / USAU champion cards, PUL / WUL
-             top-8 standings, and the WFDF event champion card(s): one swipeable
-             card per league on mobile, a grid on desktop. Matches the mobile
-             app's season-complete carousel (its home screen section 5c) — the
-             two-up PUL/WUL row this replaces left UFA/USAU/WFDF champions with
-             nowhere to live. */}
+      {/* 4c. "Season complete" carousel — one equal-height card per league
+             whose season finished in the last six months (UFA bracket, USAU
+             champions, PUL/WUL playoffs + standings, WFDF podiums): a swipe
+             row on mobile, a balanced grid on desktop. */}
       {seasonCompleteCards.length > 0 && (
         <div className="px-5 lg:px-10 pt-5 lg:pt-6">
           <StandingsCarousel
             cards={seasonCompleteCards.map((c) => c.node)}
             labels={seasonCompleteCards.map((c) => c.label)}
-            desktopColsClass="grid-cols-2"
+            ariaLabel="Completed seasons"
           />
         </div>
       )}
 
-      {/* 5. "Recent results" — UFA/USAU/PUL/WUL cards, 4-across on wide
-             screens so the row packs evenly with no lopsided column. */}
-      <div className="px-5 lg:px-10 pt-9 lg:pt-11 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
-        <RecentResultsCards
-          ufaGames={recent}
-          usauMajors={usauMajors}
-          pulGames={pulRecentFour}
-          wulGames={wulRecentFour}
-        />
-      </div>
+      {/* 5. "Recent results" — one card per in-season league: a swipe row on
+             mobile, a balanced grid (no lopsided column) on desktop. */}
+      {recentResultCards.length > 0 && (
+        <div className="px-5 lg:px-10 pt-9 lg:pt-11">
+          <StandingsCarousel
+            cards={recentResultCards.map((c) => c.node)}
+            labels={recentResultCards.map((c) => c.label)}
+            ariaLabel="Recent results"
+          />
+        </div>
+      )}
 
       <div className="pt-9 lg:pt-11">
         <SiteFooter />

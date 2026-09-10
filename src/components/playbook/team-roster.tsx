@@ -1,30 +1,27 @@
 'use client';
 
-// /playbook/roster — the "Team" surface.
+// Team roster panel — the athlete list for ONE team, rendered inline on the
+// Team landing page (/playbook/teams, manage-teams.tsx) under its Roster tab.
 //
 // A roster player is an ATHLETE, deliberately decoupled from an app login: a
 // coach enters all 25 names on day one without waiting for anyone to sign up.
 // pb_team_members stays what it is — who can SEE and EDIT the playbook.
 //
-// Roster is team-scoped by definition, so the personal scope shows a prompt to
-// pick a team instead of an empty list.
+// The panel owns the roster state for its team and reports it up through
+// `onRosterChange` so the Lines tab (TeamLines) can build units from it. The
+// landing page keys it by team id, so a team switch remounts it clean.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { PlaybookShell } from './playbook-shell';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { TeamLines } from './team-lines';
 import {
   addRosterPlayer,
   deleteRosterPlayer,
-  listMyTeams,
   listRoster,
   updateRosterPlayer,
   type RosterPlayer,
   type RosterPosition,
-  type Team,
 } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
-import { loadScopePref, saveScopePref } from '@/lib/playbook/scope-pref';
 
 const POSITIONS: Array<{ value: RosterPosition; label: string }> = [
   { value: 'handler', label: 'Handler' },
@@ -32,75 +29,52 @@ const POSITIONS: Array<{ value: RosterPosition; label: string }> = [
   { value: 'hybrid', label: 'Hybrid' },
 ];
 
-export function TeamRoster() {
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [scopeID, setScopeID] = useState<string | undefined>(undefined);
+export function TeamRosterPanel({
+  teamID,
+  canEdit,
+  onRosterChange,
+}: {
+  teamID: string;
+  canEdit: boolean;
+  onRosterChange?: (roster: RosterPlayer[]) => void;
+}) {
   const [roster, setRoster] = useState<RosterPlayer[]>([]);
-  const [hydrated, setHydrated] = useState(false);
-  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterLoading, setRosterLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingID, setEditingID] = useState<string | null>(null);
   const [removing, setRemoving] = useState<RosterPlayer | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
-  const [tab, setTab] = useState<'roster' | 'lines'>('roster');
 
-  const currentTeam = teams.find((t) => t.id === scopeID);
-  const canEdit = currentTeam?.role === 'owner' || currentTeam?.role === 'coach';
-
-  // Load teams once, then default the scope to the first team the user has —
-  // the roster is meaningless in personal scope, so landing on a team is the
-  // useful default.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      setRosterLoading(true);
       try {
-        const [t, pref] = await Promise.all([listMyTeams(), loadScopePref()]);
-        if (cancelled) return;
-        setTeams(t);
-        // Prefer the account's persisted scope when it's one of these teams
-        // ('personal' means nothing on a roster page); else the first team.
-        const preferred =
-          pref && pref !== 'personal' && t.some((tm) => tm.id === pref) ? pref : t[0]?.id;
-        if (preferred) setScopeID(preferred);
+        setError(null);
+        const rows = await listRoster(teamID);
+        if (!cancelled) setRoster(rows);
       } catch (err) {
-        if (!cancelled) setError(formatSupabaseError(err, 'Load teams'));
+        if (!cancelled) setError(formatSupabaseError(err, 'Load roster'));
+        console.error('[team-roster] listRoster failed', err);
       } finally {
-        if (!cancelled) setHydrated(true);
+        if (!cancelled) setRosterLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  const refreshRoster = useCallback(async (teamID: string) => {
-    setRosterLoading(true);
-    try {
-      setError(null);
-      setRoster(await listRoster(teamID));
-    } catch (err) {
-      setError(formatSupabaseError(err, 'Load roster'));
-      console.error('[team-roster] listRoster failed', err);
-    } finally {
-      setRosterLoading(false);
-    }
-  }, []);
+  }, [teamID]);
 
   useEffect(() => {
-    if (!scopeID) {
-      setRoster([]);
-      return;
-    }
-    refreshRoster(scopeID);
-  }, [scopeID, refreshRoster]);
+    onRosterChange?.(roster);
+  }, [roster, onRosterChange]);
 
   const handleAdd = useCallback(
     async (input: { name: string; number: string; position: RosterPosition }) => {
-      if (!scopeID) return;
       try {
         setError(null);
         const created = await addRosterPlayer({
-          teamID: scopeID,
+          teamID,
           name: input.name,
           number: input.number,
           position: input.position,
@@ -111,7 +85,7 @@ export function TeamRoster() {
         console.error('[team-roster] addRosterPlayer failed', err);
       }
     },
-    [scopeID],
+    [teamID],
   );
 
   const handleUpdate = useCallback(
@@ -155,145 +129,59 @@ export function TeamRoster() {
   }, [active]);
 
   return (
-    <PlaybookShell
-      teams={teams}
-      currentTeamID={scopeID}
-      onSwitchTeam={(id) => {
-        setScopeID(id);
-        // Keep the app-wide playbook scope in sync — switching teams here
-        // should be remembered on the Plays surface too.
-        saveScopePref(id);
-      }}
-      pageTitle="Team"
-    >
-      {/* Bottom padding clears the fixed mobile tab bar + home-indicator safe
-          area (same recipe as the home page) — pb-12 alone left the last row
-          pinned under the bar with no scroll room (Hunter, 2026-08-27). */}
-      <div className="px-4 pt-4 pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)] lg:px-8 lg:pt-6 lg:pb-12">
-        <div className="max-w-[860px] mx-auto">
-          {/* Header is roster-only (Hunter, 2026-08-27): the copy describes the
-              roster, and on Lines the team name is already in the scope
-              switcher — the block just pushed the lines below the fold. */}
-          {tab !== 'lines' && (
-            <div className="mb-6 lg:mb-8">
-              <h1 className="m-0 font-display italic text-[28px] lg:text-[36px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
-                {currentTeam?.name ?? 'Team'}
-              </h1>
-              <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[14px]">
-                Your roster of athletes. Players here don&rsquo;t need an account —
-                add everyone now, link logins later.
-              </p>
-            </div>
-          )}
+    <>
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
+        >
+          {error}
+        </div>
+      )}
 
-          {error && (
-            <div
-              role="alert"
-              className="mb-4 text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2"
-            >
-              {error}
-            </div>
-          )}
+      {/* Squad summary — reads at a glance whether the lines will work. */}
+      <div className="flex flex-wrap gap-2 mb-5">
+        <StatChip label="Active" value={active.length} />
+        <StatChip label="Handlers" value={counts.handler} />
+        <StatChip label="Cutters" value={counts.cutter} />
+        <StatChip label="Hybrid" value={counts.hybrid} />
+        {benched.length > 0 && <StatChip label="Benched" value={benched.length} muted />}
+      </div>
 
-          {!hydrated ? (
-            <p className="text-[12px] text-faint font-tight">Loading…</p>
-          ) : teams.length === 0 ? (
-            <EmptyState
-              title="No teams yet"
-              body="A roster belongs to a team. Create one on the Teams page, then come back here to add players."
-              href="/playbook/teams"
-              cta="Go to Teams"
+      {canEdit && <AddPlayerForm onAdd={handleAdd} />}
+
+      {rosterLoading ? (
+        <p className="text-[12px] text-faint font-tight mt-4">Loading roster…</p>
+      ) : roster.length === 0 ? (
+        <p className="text-[12px] text-faint font-tight mt-4">
+          {canEdit ? 'No players yet — add your first above.' : 'No players on this roster yet.'}
+        </p>
+      ) : (
+        <div className="flex flex-col gap-7 mt-6">
+          <RosterSection
+            heading={`Active · ${active.length}`}
+            players={active}
+            canEdit={canEdit}
+            editingID={editingID}
+            onEdit={setEditingID}
+            onCancelEdit={() => setEditingID(null)}
+            onSave={handleUpdate}
+            onRemove={setRemoving}
+          />
+          {benched.length > 0 && (
+            <RosterSection
+              heading={`Benched · ${benched.length}`}
+              players={benched}
+              canEdit={canEdit}
+              editingID={editingID}
+              onEdit={setEditingID}
+              onCancelEdit={() => setEditingID(null)}
+              onSave={handleUpdate}
+              onRemove={setRemoving}
             />
-          ) : !scopeID ? (
-            <EmptyState
-              title="Pick a team"
-              body="Rosters are per-team. Use the team switcher to choose one."
-            />
-          ) : (
-            <>
-              {/* Roster / Lines switch. Two options, so a segmented control
-                  rather than a dropdown. */}
-              <div
-                role="tablist"
-                aria-label="Team sections"
-                className="flex items-center gap-1 p-1 mb-5 rounded-full bg-ink/5 w-fit"
-              >
-                {(['roster', 'lines'] as const).map((t) => (
-                  <button
-                    key={t}
-                    type="button"
-                    role="tab"
-                    aria-selected={tab === t}
-                    onClick={() => setTab(t)}
-                    className={[
-                      'px-4 py-2 rounded-full cursor-pointer transition-colors',
-                      'text-[10px] font-bold tracking-[0.16em] uppercase font-tight',
-                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                      tab === t
-                        ? 'bg-surface text-ink shadow-soft'
-                        : 'text-muted hover:text-ink',
-                    ].join(' ')}
-                  >
-                    {t === 'roster' ? 'Roster' : 'Lines'}
-                  </button>
-                ))}
-              </div>
-
-              {tab === 'lines' ? (
-                <TeamLines teamID={scopeID} roster={roster} canEdit={canEdit} />
-              ) : (
-                <>
-              {/* Squad summary — reads at a glance whether the lines will work. */}
-              <div className="flex flex-wrap gap-2 mb-5">
-                <StatChip label="Active" value={active.length} />
-                <StatChip label="Handlers" value={counts.handler} />
-                <StatChip label="Cutters" value={counts.cutter} />
-                <StatChip label="Hybrid" value={counts.hybrid} />
-                {benched.length > 0 && <StatChip label="Benched" value={benched.length} muted />}
-              </div>
-
-              {canEdit && <AddPlayerForm onAdd={handleAdd} />}
-
-              {rosterLoading ? (
-                <p className="text-[12px] text-faint font-tight mt-4">Loading roster…</p>
-              ) : roster.length === 0 ? (
-                <p className="text-[12px] text-faint font-tight mt-4">
-                  {canEdit
-                    ? 'No players yet — add your first above.'
-                    : 'No players on this roster yet.'}
-                </p>
-              ) : (
-                <div className="flex flex-col gap-7 mt-6">
-                  <RosterSection
-                    heading={`Active · ${active.length}`}
-                    players={active}
-                    canEdit={canEdit}
-                    editingID={editingID}
-                    onEdit={setEditingID}
-                    onCancelEdit={() => setEditingID(null)}
-                    onSave={handleUpdate}
-                    onRemove={setRemoving}
-                  />
-                  {benched.length > 0 && (
-                    <RosterSection
-                      heading={`Benched · ${benched.length}`}
-                      players={benched}
-                      canEdit={canEdit}
-                      editingID={editingID}
-                      onEdit={setEditingID}
-                      onCancelEdit={() => setEditingID(null)}
-                      onSave={handleUpdate}
-                      onRemove={setRemoving}
-                    />
-                  )}
-                </div>
-              )}
-                </>
-              )}
-            </>
           )}
         </div>
-      </div>
+      )}
 
       <ConfirmDialog
         open={removing !== null}
@@ -305,7 +193,7 @@ export function TeamRoster() {
         onConfirm={handleRemove}
         onCancel={() => setRemoving(null)}
       />
-    </PlaybookShell>
+    </>
   );
 }
 
@@ -582,38 +470,6 @@ function StatChip({ label, value, muted = false }: { label: string; value: numbe
         {label}
       </span>
     </span>
-  );
-}
-
-function EmptyState({
-  title,
-  body,
-  href,
-  cta,
-}: {
-  title: string;
-  body: string;
-  href?: string;
-  cta?: string;
-}) {
-  return (
-    <div className="p-6 rounded-card bg-surface shadow-card flex flex-col items-start gap-2">
-      <span className="text-[14px] font-bold text-ink font-tight">{title}</span>
-      <p className="text-[13px] text-muted font-medium font-tight m-0">{body}</p>
-      {href && cta && (
-        <a
-          href={href}
-          className={[
-            'mt-2 inline-flex items-center px-5 py-3 rounded-full cursor-pointer',
-            'bg-ink text-bg hover:opacity-90 transition-opacity',
-            'font-tight text-[11px] font-bold tracking-[0.16em] uppercase',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          ].join(' ')}
-        >
-          {cta}
-        </a>
-      )}
-    </div>
   );
 }
 

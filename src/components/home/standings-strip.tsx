@@ -60,22 +60,6 @@ export function StandingsStrip({ standings, teamStats = [] }: StandingsStripProp
   const statByTeam = new Map<string, UfaTeamStat>();
   for (const t of teamStats) statByTeam.set(t.teamID, t);
 
-  // Choose a grid column count that lets every division get its own column
-  // on desktop but stacks gracefully on smaller breakpoints. Most UFA
-  // seasons have 4 divisions; we tier 1/2/4 to keep the math simple.
-  // Desktop grid column count — every division gets its own column on wide
-  // screens, tiered down for tablet. The MOBILE view is a swipe carousel
-  // (StandingsCarousel), so grid-cols-1 no longer matters below sm.
-  const colCount = columns.length;
-  const desktopColsClass =
-    colCount >= 4
-      ? 'sm:grid-cols-2 lg:grid-cols-4'
-      : colCount === 3
-        ? 'sm:grid-cols-2 lg:grid-cols-3'
-        : colCount === 2
-          ? 'sm:grid-cols-2'
-          : 'sm:grid-cols-1';
-
   const cards = columns.map((col) => (
     <DivisionCard key={col.divName} col={col} statByTeam={statByTeam} />
   ));
@@ -84,7 +68,7 @@ export function StandingsStrip({ standings, teamStats = [] }: StandingsStripProp
     <StandingsCarousel
       cards={cards}
       labels={columns.map((c) => c.divName)}
-      desktopColsClass={desktopColsClass}
+      ariaLabel="Divisions"
     />
   );
 }

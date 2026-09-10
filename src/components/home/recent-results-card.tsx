@@ -5,11 +5,11 @@
 // winner-emphasized rows with hairline separators) instead of one combined
 // card with in-card league-pill dividers.
 //
-// Exports RecentResultsCards — a fragment of 0-4 cards (UFA, USAU, PUL,
-// WUL, in that order) — so page.tsx can drop it straight into a
-// `grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4` row as its own
-// "Recent results" section; each card renders only when it has data, same
-// gating as before.
+// Exports RecentResultsCards — 0-4 labeled card nodes (UFA, USAU, PUL, WUL,
+// in that order) for page.tsx to hand to StandingsCarousel: a swipe row on
+// mobile, a balanced grid on desktop. Each card renders only when it has
+// data; page.tsx only passes a league's data while its season-phase is
+// `in-season` (a finished season moves to the "Season complete" card).
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
@@ -29,55 +29,72 @@ interface RecentResultsCardsProps {
   wulGames: WulRecentGame[];
 }
 
-/** Renders the "Recent results" card group: UFA, USAU, PUL, WUL — each its
- *  own card, shown only when it has data. Returns null (no wrapper element)
- *  when nothing has content. */
-export function RecentResultsCards({ ufaGames, usauMajors, pulGames, wulGames }: RecentResultsCardsProps) {
-  const hasUfa = ufaGames.length > 0;
-  const hasUsau = usauMajors.length > 0;
-  const hasPul = pulGames.length > 0;
-  const hasWul = wulGames.length > 0;
-  if (!hasUfa && !hasUsau && !hasPul && !hasWul) return null;
-
-  return (
-    <>
-      {hasUfa && (
-        <CardShell pill="UFA">
+/** Builds the "Recent results" card group: UFA, USAU, PUL, WUL — each its
+ *  own card, present only when it has data. Returns [] when nothing has
+ *  content so the caller can skip the section wrapper entirely. */
+export function RecentResultsCards({
+  ufaGames,
+  usauMajors,
+  pulGames,
+  wulGames,
+}: RecentResultsCardsProps): Array<{ label: string; node: React.ReactNode }> {
+  const cards: Array<{ label: string; node: React.ReactNode }> = [];
+  if (ufaGames.length > 0) {
+    cards.push({
+      label: 'UFA',
+      node: (
+        <CardShell key="ufa" pill="UFA">
           {ufaGames.slice(0, 4).map((g, i) => (
             <UfaRecentRow key={g.gameID} game={g} first={i === 0} />
           ))}
         </CardShell>
-      )}
-      {hasUsau && (
-        <CardShell pill="USAU">
+      ),
+    });
+  }
+  if (usauMajors.length > 0) {
+    cards.push({
+      label: 'USAU',
+      node: (
+        <CardShell key="usau" pill="USAU">
           {usauMajors.slice(0, 4).map((m, i) => (
             <UsauMajorRow key={m.slug} major={m} first={i === 0} />
           ))}
         </CardShell>
-      )}
-      {hasPul && (
-        <CardShell pill="PUL">
+      ),
+    });
+  }
+  if (pulGames.length > 0) {
+    cards.push({
+      label: 'PUL',
+      node: (
+        <CardShell key="pul" pill="PUL">
           {pulGames.map((g, i) => (
             <PulRecentRow key={g.game.id} entry={g} first={i === 0} />
           ))}
         </CardShell>
-      )}
-      {hasWul && (
-        <CardShell pill="WUL">
+      ),
+    });
+  }
+  if (wulGames.length > 0) {
+    cards.push({
+      label: 'WUL',
+      node: (
+        <CardShell key="wul" pill="WUL">
           {wulGames.map((g, i) => (
             <WulRecentRow key={g.game.id} entry={g} first={i === 0} />
           ))}
         </CardShell>
-      )}
-    </>
-  );
+      ),
+    });
+  }
+  return cards;
 }
 
 // ─── Shared card shell ────────────────────────────────────────────────────
 
 function CardShell({ pill, children }: { pill: string; children: React.ReactNode }) {
   return (
-    <div className="bg-surface rounded-card-lg shadow-card px-6 py-5">
+    <div className="h-full flex flex-col bg-surface rounded-card-lg shadow-card px-6 py-5">
       <div className="flex items-center justify-between gap-3 mb-3.5">
         <h3 className="font-display italic font-bold text-[22px] leading-none tracking-[-0.01em] text-ink m-0">
           Recent results
@@ -97,7 +114,7 @@ function LeaguePill({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ScoreDuo({ awayScore, homeScore, awayWin }: { awayScore: number; homeScore: number; awayWin: boolean }) {
+export function ScoreDuo({ awayScore, homeScore, awayWin }: { awayScore: number; homeScore: number; awayWin: boolean }) {
   return (
     <span className="font-display italic font-bold text-[18px] tabular flex-shrink-0">
       <span className={awayWin ? 'text-accent' : 'text-ink'}>{awayScore}</span>

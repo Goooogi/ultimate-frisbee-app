@@ -1,80 +1,42 @@
 'use client';
 
-// /playbook/teams — team management surface.
+// /playbook/teams — the Team landing page (ported from mobile, Hunter
+// 2026-09-09). The landing page IS the team: a switcher chip strip (only
+// when you have more than one), the selected team's card (→ detail page:
+// members with roles, invites, rename/delete/leave), then the roster and
+// lines right here. No Owned / Coaching / Member grouping any more, and no
+// Leave action on this page.
 //
-// Supabase-backed:
-//   • List teams I own / coach / am a member of (via listMyTeams)
-//   • Owners + coaches can invite by email (create_team_invite RPC) — we
-//     surface the generated share link inline so the user can copy it.
-//   • Owners can rename + delete teams.
-//   • Owners + coaches can revoke pending invites.
-//   • Members can leave; owners can transfer ownership later (out of scope).
+// Selection defaults to the first owned team, else the first team, and is
+// mirrored into the app-wide playbook scope pref so Plays follows along.
+// TeamRosterPanel stays mounted under both tabs (hidden under Lines) because
+// it holds the roster TeamLines depends on; both are keyed by team id so a
+// switch remounts them clean.
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { PlaybookShell } from './playbook-shell';
-import { AlertDialog, ConfirmDialog, PromptDialog } from '@/components/confirm-dialog';
+import { TeamRosterPanel } from './team-roster';
+import { TeamLines } from './team-lines';
 import { TEAM_COLORS } from '@/lib/playbook/teams';
-import {
-  createInvite,
-  createTeam,
-  deleteTeam,
-  leaveTeam,
-  listMyTeams,
-  listPendingInvites,
-  listTeamMembers,
-  renameTeam,
-  revokeInvite,
-  type PendingInvite,
-  type Team,
-  type TeamMember,
-  type TeamRole,
-} from '@/lib/playbook/data';
+import { createTeam, listMyTeams, type RosterPlayer, type Team } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
-import { sendInviteEmail, resendInviteEmail } from '@/app/playbook/teams/actions';
+import { loadScopePref, saveScopePref } from '@/lib/playbook/scope-pref';
 
-interface ScopeShellProps {
-  teams: Team[];
-  scopeID?: string;
-  onSwitchScope: (id: string) => void;
-}
+const ROLE_LABEL: Record<Team['role'], string> = { owner: 'Owner', coach: 'Coach', member: 'Member' };
 
 export function ManageTeams() {
   const [teams, setTeams] = useState<Team[]>([]);
-  const [invitesByTeam, setInvitesByTeam] = useState<Record<string, PendingInvite[]>>({});
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [showCreate, setShowCreate] = useState(false);
-  const [invitingTeamID, setInvitingTeamID] = useState<string | null>(null);
-  const [resendingInviteID, setResendingInviteID] = useState<string | null>(null);
-  const [scopeID, setScopeID] = useState<string | undefined>(undefined);
+  const [selectedID, setSelectedID] = useState<string | undefined>(undefined);
+  const [tab, setTab] = useState<'roster' | 'lines'>('roster');
+  const [roster, setRoster] = useState<RosterPlayer[]>([]);
 
-  // Roster expand/collapse state.
-  // rosterCache: undefined = never fetched, 'loading' = in flight, TeamMember[] = loaded.
-  const [expandedRosters, setExpandedRosters] = useState<Set<string>>(new Set());
-  const [rosterCache, setRosterCache] = useState<Record<string, TeamMember[] | 'loading'>>({});
-
-  // In-app dialogs, replacing window.confirm / alert / prompt. `notice` is a
-  // one-button acknowledgement; the other two carry the row they act on.
-  const [notice, setNotice] = useState<{ title: string; body?: React.ReactNode } | null>(null);
-  const [renaming, setRenaming] = useState<Team | null>(null);
-  const [pendingAction, setPendingAction] = useState<
-    | { kind: 'delete'; team: Team }
-    | { kind: 'leave'; team: Team }
-    | null
-  >(null);
-  const [actionBusy, setActionBusy] = useState(false);
-
-  // Re-load teams + pending invites for every owned/coach team.
   const refresh = useCallback(async () => {
     try {
-      const t = await listMyTeams();
-      setTeams(t);
-      const editorTeams = t.filter((tt) => tt.role === 'owner' || tt.role === 'coach');
-      const invs = await Promise.all(
-        editorTeams.map(async (tt) => [tt.id, await listPendingInvites(tt.id)] as const),
-      );
-      setInvitesByTeam(Object.fromEntries(invs));
+      setTeams(await listMyTeams());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not load teams.');
     } finally {
@@ -82,209 +44,75 @@ export function ManageTeams() {
     }
   }, []);
 
+  // First load: teams + the account's persisted scope. Prefer that scope when
+  // it's one of these teams ('personal' means nothing here), else the first
+  // owned team, else the first team.
   useEffect(() => {
-    refresh();
-  }, [refresh]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [t, pref] = await Promise.all([listMyTeams(), loadScopePref()]);
+        if (cancelled) return;
+        setTeams(t);
+        const preferred =
+          pref && pref !== 'personal' && t.some((tm) => tm.id === pref)
+            ? pref
+            : (t.find((tm) => tm.role === 'owner') ?? t[0])?.id;
+        if (preferred) setSelectedID(preferred);
+      } catch (err) {
+        if (!cancelled) setError(formatSupabaseError(err, 'Load teams'));
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Keep the selection valid as teams change (a just-created team gets
+  // selected; a deleted one falls back).
+  useEffect(() => {
+    if (teams.length === 0) return;
+    if (selectedID && teams.some((t) => t.id === selectedID)) return;
+    setSelectedID((teams.find((t) => t.role === 'owner') ?? teams[0]).id);
+  }, [teams, selectedID]);
+
+  const selectTeam = useCallback((id: string) => {
+    setSelectedID(id);
+    setTab('roster');
+    saveScopePref(id);
+  }, []);
 
   const handleCreate = useCallback(
     async (name: string, shortName: string, color: string) => {
       try {
         setError(null);
-        await createTeam({ name, shortName, color });
+        const created = await createTeam({ name, shortName, color });
         setShowCreate(false);
         await refresh();
+        selectTeam(created.id);
       } catch (err) {
         setError(formatSupabaseError(err, 'Create team'));
         console.error('[manage-teams] createTeam failed', err);
       }
     },
-    [refresh],
+    [refresh, selectTeam],
   );
 
-  const handleRename = useCallback(
-    async (id: string, name: string) => {
-      try {
-        setError(null);
-        await renameTeam(id, name);
-        await refresh();
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Rename team'));
-        console.error('[manage-teams] renameTeam failed', err);
-      }
-    },
-    [refresh],
-  );
-
-  // Both destructive actions are gated by ConfirmDialog (see the end of the
-  // tree) — the row buttons only set `pendingAction`.
-  const runPendingAction = useCallback(async () => {
-    if (!pendingAction) return;
-    const { kind, team } = pendingAction;
-    setActionBusy(true);
-    try {
-      setError(null);
-      if (kind === 'delete') await deleteTeam(team.id);
-      else await leaveTeam(team.id);
-      setPendingAction(null);
-      await refresh();
-    } catch (err) {
-      setError(formatSupabaseError(err, kind === 'delete' ? 'Delete team' : 'Leave team'));
-      console.error(`[manage-teams] ${kind}Team failed`, err);
-      setPendingAction(null);
-    } finally {
-      setActionBusy(false);
-    }
-  }, [pendingAction, refresh]);
-
-  const handleInvite = useCallback(
-    async (teamID: string, email: string, role: 'coach' | 'member') => {
-      try {
-        setError(null);
-        const { token } = await createInvite(teamID, email, role);
-
-        // Attempt to send via Resend. If it fails, fall back to copy-link so
-        // the invite (already created in the DB) is still usable.
-        try {
-          await sendInviteEmail({ teamId: teamID, email, role, token });
-          setNotice({ title: 'Invite sent', body: `We emailed the invite to ${email}.` });
-        } catch (emailErr) {
-          // Email failed — the token still exists. Surface the link manually so
-          // it stays usable. The link is rendered selectable rather than pushed
-          // through window.prompt, which was the only way to show it before.
-          const link = `${window.location.origin}/playbook/invite/${token}`;
-          const errMsg =
-            emailErr instanceof Error ? emailErr.message : 'Could not send the email automatically.';
-          let copied = false;
-          try {
-            await navigator.clipboard.writeText(link);
-            copied = true;
-          } catch {
-            copied = false;
-          }
-          setNotice({
-            title: 'Share this link',
-            body: (
-              <div className="flex flex-col gap-2">
-                <span>
-                  We couldn&rsquo;t email {email} automatically
-                  {copied ? ' — the link is on your clipboard.' : '. Copy the link below to share it.'}
-                </span>
-                <code className="block px-3 py-2 rounded-card bg-surface text-[12px] text-ink font-mono break-all select-all">
-                  {link}
-                </code>
-                <span className="text-[11px] text-faint">({errMsg})</span>
-              </div>
-            ),
-          });
-          console.warn('[manage-teams] sendInviteEmail failed, fell back to copy-link', emailErr);
-        }
-
-        setInvitingTeamID(null);
-        await refresh();
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Send invite'));
-        console.error('[manage-teams] createInvite failed', err);
-      }
-    },
-    [refresh],
-  );
-
-  const handleRevokeInvite = useCallback(
-    async (inviteID: string) => {
-      try {
-        setError(null);
-        await revokeInvite(inviteID);
-        await refresh();
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Revoke invite'));
-        console.error('[manage-teams] revokeInvite failed', err);
-      }
-    },
-    [refresh],
-  );
-
-  const handleResendInvite = useCallback(
-    async (inviteID: string, email: string) => {
-      if (resendingInviteID) return; // guard against double-clicks mid-send
-      try {
-        setError(null);
-        setResendingInviteID(inviteID);
-        await resendInviteEmail({ inviteId: inviteID });
-        setNotice({ title: 'Invite re-sent', body: `We emailed the invite to ${email} again.` });
-      } catch (err) {
-        setError(formatSupabaseError(err, 'Resend invite'));
-        console.error('[manage-teams] resendInviteEmail failed', err);
-      } finally {
-        setResendingInviteID(null);
-      }
-    },
-    [resendingInviteID],
-  );
-
-  const handleToggleRoster = useCallback(
-    async (teamID: string) => {
-      const isOpen = expandedRosters.has(teamID);
-      if (isOpen) {
-        // Collapse — just toggle; keep the cache so re-expand is instant.
-        setExpandedRosters((prev) => {
-          const next = new Set(prev);
-          next.delete(teamID);
-          return next;
-        });
-        return;
-      }
-
-      // Expand.
-      setExpandedRosters((prev) => new Set(prev).add(teamID));
-
-      // Only fetch if we don't already have data.
-      if (rosterCache[teamID] !== undefined) return;
-
-      setRosterCache((prev) => ({ ...prev, [teamID]: 'loading' }));
-      try {
-        const members = await listTeamMembers(teamID);
-        setRosterCache((prev) => ({ ...prev, [teamID]: members }));
-      } catch (err) {
-        console.error('[manage-teams] listTeamMembers failed', err);
-        // Remove 'loading' so the UI doesn't stay stuck; collapse too.
-        setRosterCache((prev) => {
-          const next = { ...prev };
-          delete next[teamID];
-          return next;
-        });
-        setExpandedRosters((prev) => {
-          const next = new Set(prev);
-          next.delete(teamID);
-          return next;
-        });
-        setError('Could not load roster.');
-      }
-    },
-    [expandedRosters, rosterCache],
-  );
-
-  const owned = teams.filter((t) => t.role === 'owner');
-  const coaching = teams.filter((t) => t.role === 'coach');
-  const memberOf = teams.filter((t) => t.role === 'member');
+  const selected = teams.find((t) => t.id === selectedID) ?? null;
+  const canManage = selected?.role === 'owner' || selected?.role === 'coach';
 
   return (
-    <PlaybookShell
-      teams={teams}
-      currentTeamID={scopeID}
-      onSwitchTeam={setScopeID}
-      pageTitle="Teams"
-    >
-      <div className="px-4 pt-4 pb-12 lg:px-8 lg:pt-6 lg:pb-12">
+    <PlaybookShell teams={teams} currentTeamID={selectedID} onSwitchTeam={selectTeam} pageTitle="Team">
+      {/* Bottom padding clears the fixed mobile tab bar + home-indicator safe
+          area (same recipe as the home page). */}
+      <div className="px-4 pt-4 pb-[calc(max(env(safe-area-inset-bottom),0.75rem)+96px)] lg:px-8 lg:pt-6 lg:pb-12">
         <div className="max-w-[860px] mx-auto">
-          <div className="flex flex-wrap items-end justify-between gap-4 mb-6 lg:mb-8">
-            <div>
-              <h1 className="m-0 font-display italic text-[28px] lg:text-[36px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
-                Teams
-              </h1>
-              <p className="text-muted font-medium font-tight mt-2 text-[13px] lg:text-[14px]">
-                Switch between squads, invite players, and manage the ones you own. Invites live for 14 days — share the generated link with your players.
-              </p>
-            </div>
+          <div className="flex items-center justify-between gap-4 mb-5 lg:mb-6">
+            <h1 className="m-0 font-display italic text-[28px] lg:text-[36px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
+              Team
+            </h1>
             <button
               type="button"
               onClick={() => setShowCreate((v) => !v)}
@@ -314,297 +142,134 @@ export function ManageTeams() {
 
           {!hydrated ? (
             <p className="text-[12px] text-faint font-tight">Loading teams…</p>
-          ) : (
-            <div className="flex flex-col gap-7 mt-2">
-              <TeamSection
-                heading={`Owned · ${owned.length}`}
-                empty="You don't own a team yet — create one above."
-                teams={owned}
-                invitesByTeam={invitesByTeam}
-                renderActions={(t) => (
-                  <>
-                    <SmallButton onClick={() => setInvitingTeamID(t.id)} variant="primary">
-                      Invite
-                    </SmallButton>
-                    <SmallButton onClick={() => setRenaming(t)} variant="ghost">
-                      Rename
-                    </SmallButton>
-                    <SmallButton
-                      onClick={() => setPendingAction({ kind: 'delete', team: t })}
-                      variant="danger"
-                    >
-                      Delete
-                    </SmallButton>
-                  </>
-                )}
-                inviteRowFor={invitingTeamID}
-                onInviteSubmit={handleInvite}
-                onInviteCancel={() => setInvitingTeamID(null)}
-                onRevokeInvite={handleRevokeInvite}
-                onResendInvite={handleResendInvite}
-                resendingInviteID={resendingInviteID}
-                expandedRosters={expandedRosters}
-                rosterCache={rosterCache}
-                onToggleRoster={handleToggleRoster}
-              />
-
-              <TeamSection
-                heading={`Coaching · ${coaching.length}`}
-                empty="Not coaching any teams."
-                teams={coaching}
-                invitesByTeam={invitesByTeam}
-                renderActions={(t) => (
-                  <>
-                    <SmallButton onClick={() => setInvitingTeamID(t.id)} variant="primary">
-                      Invite
-                    </SmallButton>
-                    <SmallButton onClick={() => setPendingAction({ kind: 'leave', team: t })} variant="ghost">
-                      Leave
-                    </SmallButton>
-                  </>
-                )}
-                inviteRowFor={invitingTeamID}
-                onInviteSubmit={handleInvite}
-                onInviteCancel={() => setInvitingTeamID(null)}
-                onRevokeInvite={handleRevokeInvite}
-                onResendInvite={handleResendInvite}
-                resendingInviteID={resendingInviteID}
-                expandedRosters={expandedRosters}
-                rosterCache={rosterCache}
-                onToggleRoster={handleToggleRoster}
-              />
-
-              <TeamSection
-                heading={`Member · ${memberOf.length}`}
-                empty="You're not a member of any other teams."
-                teams={memberOf}
-                renderActions={(t) => (
-                  <SmallButton onClick={() => setPendingAction({ kind: 'leave', team: t })} variant="ghost">
-                    Leave
-                  </SmallButton>
-                )}
-              />
+          ) : teams.length === 0 ? (
+            <div className="p-6 rounded-card bg-surface shadow-card flex flex-col items-start gap-2">
+              <span className="text-[14px] font-bold text-ink font-tight">No teams yet</span>
+              <p className="text-[13px] text-muted font-medium font-tight m-0">
+                Create one above, or ask a coach for an invite.
+              </p>
             </div>
+          ) : (
+            <>
+              {/* Team switcher — only when there is something to switch between. */}
+              {teams.length > 1 && (
+                <div
+                  role="tablist"
+                  aria-label="Your teams"
+                  className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 lg:mx-0 lg:px-0 mb-4"
+                >
+                  {teams.map((t) => {
+                    const active = t.id === selectedID;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => selectTeam(t.id)}
+                        className={[
+                          'inline-flex items-center gap-2 pl-1.5 pr-3.5 py-1.5 rounded-full flex-shrink-0 cursor-pointer transition-colors',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                          active ? 'bg-ink text-bg' : 'bg-surface shadow-card text-muted hover:text-ink',
+                        ].join(' ')}
+                      >
+                        <TeamBadge team={t} size="sm" />
+                        <span className="text-[12px] font-bold font-tight whitespace-nowrap">{t.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {selected && (
+                <>
+                  {/* Selected team → members / roles / invites / manage. */}
+                  <Link
+                    href={`/playbook/teams/${selected.id}`}
+                    className="flex items-center gap-3 px-3 py-3 mb-5 rounded-card bg-surface shadow-card transition-shadow hover:shadow-lift no-underline"
+                  >
+                    <TeamBadge team={selected} size="md" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[14px] font-bold text-ink font-tight truncate">{selected.name}</div>
+                      <div className="text-[11px] font-medium text-faint font-tight mt-0.5">
+                        {selected.memberCount} {selected.memberCount === 1 ? 'member' : 'members'}
+                      </div>
+                    </div>
+                    <span
+                      className={[
+                        'text-[10px] font-bold tracking-[0.16em] uppercase font-tight rounded-full px-2.5 py-1 flex-shrink-0',
+                        selected.role === 'owner' ? 'text-accent bg-accent/10' : 'text-muted bg-ink/5',
+                      ].join(' ')}
+                    >
+                      {ROLE_LABEL[selected.role]}
+                    </span>
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" className="text-faint flex-shrink-0">
+                      <path d="M6 3.5L10.5 8L6 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
+                    </svg>
+                  </Link>
+
+                  {/* Roster / Lines — two options, so a segmented control. */}
+                  <div
+                    role="tablist"
+                    aria-label="Team sections"
+                    className="flex items-center gap-1 p-1 mb-5 rounded-full bg-ink/5 w-fit"
+                  >
+                    {(['roster', 'lines'] as const).map((t) => (
+                      <button
+                        key={t}
+                        type="button"
+                        role="tab"
+                        aria-selected={tab === t}
+                        onClick={() => setTab(t)}
+                        className={[
+                          'px-4 py-2 rounded-full cursor-pointer transition-colors',
+                          'text-[10px] font-bold tracking-[0.16em] uppercase font-tight',
+                          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                          tab === t ? 'bg-surface text-ink shadow-soft' : 'text-muted hover:text-ink',
+                        ].join(' ')}
+                      >
+                        {t === 'roster' ? 'Roster' : 'Lines'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className={tab === 'roster' ? '' : 'hidden'}>
+                    <TeamRosterPanel
+                      key={selected.id}
+                      teamID={selected.id}
+                      canEdit={canManage}
+                      onRosterChange={setRoster}
+                    />
+                  </div>
+                  {tab === 'lines' && (
+                    <TeamLines key={selected.id} teamID={selected.id} roster={roster} canEdit={canManage} />
+                  )}
+                </>
+              )}
+            </>
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={pendingAction !== null}
-        title={
-          pendingAction?.kind === 'delete'
-            ? `Delete “${pendingAction.team.name}”?`
-            : `Leave “${pendingAction?.team.name ?? 'this team'}”?`
-        }
-        body={
-          pendingAction?.kind === 'delete'
-            ? 'Members lose access and every play on this team is removed. This can’t be undone.'
-            : 'You’ll lose access to this team’s plays. You can rejoin if someone invites you again.'
-        }
-        confirmLabel={pendingAction?.kind === 'delete' ? 'Delete' : 'Leave'}
-        busyLabel={pendingAction?.kind === 'delete' ? 'Deleting…' : 'Leaving…'}
-        busy={actionBusy}
-        onConfirm={runPendingAction}
-        onCancel={() => setPendingAction(null)}
-      />
-
-      <PromptDialog
-        open={renaming !== null}
-        title="Rename team"
-        label="Team name"
-        initialValue={renaming?.name ?? ''}
-        maxLength={60}
-        confirmLabel="Save"
-        onSubmit={async (value) => {
-          const target = renaming;
-          setRenaming(null);
-          if (target && value !== target.name) await handleRename(target.id, value);
-        }}
-        onCancel={() => setRenaming(null)}
-      />
-
-      <AlertDialog
-        open={notice !== null}
-        title={notice?.title ?? ''}
-        body={notice?.body}
-        onClose={() => setNotice(null)}
-      />
     </PlaybookShell>
   );
 }
 
 // ── pieces ───────────────────────────────────────────────────────────────
 
-function TeamSection({
-  heading,
-  empty,
-  teams,
-  invitesByTeam,
-  renderActions,
-  inviteRowFor,
-  onInviteSubmit,
-  onInviteCancel,
-  onRevokeInvite,
-  onResendInvite,
-  resendingInviteID,
-  expandedRosters,
-  rosterCache,
-  onToggleRoster,
-}: {
-  heading: string;
-  empty: string;
-  teams: Team[];
-  invitesByTeam?: Record<string, PendingInvite[]>;
-  renderActions: (team: Team) => React.ReactNode;
-  inviteRowFor?: string | null;
-  onInviteSubmit?: (teamID: string, email: string, role: 'coach' | 'member') => void;
-  onInviteCancel?: () => void;
-  onRevokeInvite?: (inviteID: string) => void;
-  onResendInvite?: (inviteID: string, email: string) => void;
-  resendingInviteID?: string | null;
-  expandedRosters?: Set<string>;
-  rosterCache?: Record<string, TeamMember[] | 'loading'>;
-  onToggleRoster?: (teamID: string) => void;
-}) {
+/** Team color disc with the short name — the badge every team row/chip uses.
+ *  The color is user-chosen data, so it has to be an inline background. */
+export function TeamBadge({ team, size }: { team: Pick<Team, 'color' | 'shortName'>; size: 'sm' | 'md' }) {
   return (
-    <section>
-      <h2 className="text-[10px] font-bold tracking-[0.18em] uppercase font-tight mb-3 pb-2 border-b border-hairline text-muted">
-        {heading}
-      </h2>
-      {teams.length === 0 ? (
-        <p className="text-[12px] text-faint font-tight">{empty}</p>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {teams.map((t) => {
-            const invites = invitesByTeam?.[t.id] ?? [];
-            const isExpanded = expandedRosters?.has(t.id) ?? false;
-            const rosterEntry = rosterCache?.[t.id];
-            const rosterMembers = Array.isArray(rosterEntry) ? rosterEntry : null;
-            const isLoadingRoster = rosterEntry === 'loading';
-
-            // Sort order: owner first, then coaches, then members; stable within each tier by joinedAt.
-            const ROLE_ORDER: Record<TeamRole, number> = { owner: 0, coach: 1, member: 2 };
-            const sortedMembers = rosterMembers
-              ? [...rosterMembers].sort(
-                  (a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || a.joinedAt - b.joinedAt,
-                )
-              : null;
-
-            return (
-              <li key={t.id}>
-                <div className="flex items-center gap-3 px-3 py-3 rounded-card bg-surface shadow-card transition-shadow hover:shadow-lift">
-                  <span
-                    aria-hidden="true"
-                    className="inline-flex items-center justify-center w-10 h-10 rounded-full flex-shrink-0 text-[11px] font-bold tracking-[0.04em] text-white"
-                    style={{ background: t.color }}
-                  >
-                    {t.shortName}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[14px] font-bold text-ink font-tight truncate">
-                      {t.name}
-                    </div>
-                    <div className="text-[11px] font-medium text-faint font-tight mt-0.5">
-                      {onToggleRoster ? (
-                        <button
-                          type="button"
-                          onClick={() => onToggleRoster(t.id)}
-                          aria-expanded={isExpanded}
-                          className="cursor-pointer underline-offset-2 hover:text-ink hover:underline transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm"
-                        >
-                          {t.memberCount} {t.memberCount === 1 ? 'member' : 'members'}
-                        </button>
-                      ) : (
-                        <span>
-                          {t.memberCount} {t.memberCount === 1 ? 'member' : 'members'}
-                        </span>
-                      )}
-                      {invites.length > 0 && ` · ${invites.length} pending`}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 flex-wrap justify-end">{renderActions(t)}</div>
-                </div>
-
-                {isExpanded && (
-                  <ul className="mt-1.5 ml-12 flex flex-col gap-1">
-                    {isLoadingRoster && (
-                      <li className="flex items-center gap-3 px-3 py-2 bg-surface rounded-card-sm shadow-soft">
-                        <span className="text-[12px] text-faint font-tight font-medium">
-                          Loading members…
-                        </span>
-                      </li>
-                    )}
-                    {sortedMembers?.map((m) => {
-                      const displayName =
-                        m.displayName ??
-                        (m.email.includes('@') ? m.email.split('@')[0] : m.email);
-                      return (
-                        <li
-                          key={m.userID}
-                          className="flex items-center gap-3 px-3 py-2 bg-surface rounded-card-sm shadow-soft"
-                        >
-                          <span
-                            className={[
-                              'text-[10px] font-bold tracking-[0.16em] uppercase font-tight flex-shrink-0',
-                              m.role === 'owner' ? 'text-accent' : 'text-faint',
-                            ].join(' ')}
-                          >
-                            {m.role}
-                          </span>
-                          <span className="text-[12px] font-medium text-ink font-tight truncate min-w-0 flex-1">
-                            {displayName}
-                          </span>
-                          <span className="text-[11px] text-muted font-tight truncate min-w-0 hidden sm:block">
-                            {m.email}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-
-                {invites.length > 0 && onRevokeInvite && (
-                  <ul className="mt-1.5 ml-12 flex flex-col gap-1">
-                    {invites.map((inv) => (
-                      <li
-                        key={inv.id}
-                        className="flex items-center gap-3 px-3 py-2 bg-surface rounded-card-sm shadow-soft"
-                      >
-                        <span className="text-[10px] font-bold tracking-[0.16em] uppercase text-faint font-tight">
-                          Pending
-                        </span>
-                        <span className="text-[12px] font-medium text-ink font-tight truncate flex-1 min-w-0">
-                          {inv.email}
-                        </span>
-                        <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted font-tight">
-                          {inv.role}
-                        </span>
-                        {onResendInvite && (
-                          <SmallButton
-                            onClick={() => onResendInvite(inv.id, inv.email)}
-                            variant="ghost"
-                            disabled={resendingInviteID === inv.id}
-                          >
-                            {resendingInviteID === inv.id ? 'Sending…' : 'Resend'}
-                          </SmallButton>
-                        )}
-                        <SmallButton onClick={() => onRevokeInvite(inv.id)} variant="ghost">
-                          Revoke
-                        </SmallButton>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-
-                {inviteRowFor === t.id && onInviteSubmit && onInviteCancel && (
-                  <InviteForm teamName={t.name} onSubmit={(email, role) => onInviteSubmit(t.id, email, role)} onCancel={onInviteCancel} />
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </section>
+    <span
+      aria-hidden="true"
+      className={[
+        'inline-flex items-center justify-center rounded-full flex-shrink-0 font-bold tracking-[0.04em] text-white',
+        size === 'sm' ? 'w-6 h-6 text-[8px]' : 'w-10 h-10 text-[11px]',
+      ].join(' ')}
+      style={{ background: team.color }}
+    >
+      {team.shortName}
+    </span>
   );
 }
 
@@ -705,57 +370,6 @@ function CreateTeamForm({
           Create team
         </SmallButton>
       </div>
-    </form>
-  );
-}
-
-function InviteForm({
-  teamName,
-  onSubmit,
-  onCancel,
-}: {
-  teamName: string;
-  onSubmit: (email: string, role: 'coach' | 'member') => void;
-  onCancel: () => void;
-}) {
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'coach' | 'member'>('member');
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        const trimmed = email.trim().toLowerCase();
-        if (!trimmed) return;
-        onSubmit(trimmed, role);
-      }}
-      className="mt-1.5 ml-12 p-3 border border-dashed border-accent/40 bg-surface flex items-center gap-2 flex-wrap rounded-card-sm shadow-soft"
-    >
-      <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-faint font-tight">
-        Invite to {teamName}
-      </span>
-      <input
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        required
-        placeholder="player@example.com"
-        autoFocus
-        className="flex-1 min-w-[180px] bg-bg border border-border px-2 py-1.5 text-[12px] text-ink font-tight focus-visible:outline-none focus-visible:border-ink rounded"
-      />
-      <select
-        value={role}
-        onChange={(e) => setRole(e.target.value as 'coach' | 'member')}
-        className="bg-bg border border-border px-2 py-1.5 text-[11px] font-bold tracking-[0.14em] uppercase text-ink font-tight rounded cursor-pointer focus-visible:outline-none focus-visible:border-ink"
-      >
-        <option value="member">Member</option>
-        <option value="coach">Coach</option>
-      </select>
-      <SmallButton onClick={() => {}} variant="primary" type="submit">
-        Send
-      </SmallButton>
-      <SmallButton onClick={onCancel} variant="ghost" type="button">
-        Cancel
-      </SmallButton>
     </form>
   );
 }

@@ -1206,6 +1206,9 @@ export interface UpcomingUsauEvent {
   /** TCT flight display label ("Pro Flight", "Select Flight", …) when the event
    *  maps to one; null for pinnacle/Masters/College events (still listed). */
   flightLabel: string | null;
+  /** usau_events.competition_level ('CLUB', 'COLLEGE_D1', …) — lets the home
+   *  season-phase logic scope "next event" to one level. */
+  competitionLevel: string | null;
 }
 
 /**
@@ -1277,6 +1280,7 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
       startDate: e.start_date,
       endDate: e.end_date,
       flightLabel: flight ? FLIGHT_LABELS[flight] : null,
+      competitionLevel: e.competition_level,
     };
   });
 }
@@ -1773,6 +1777,10 @@ export interface UsauMajorWithChampions {
      *  than a bracket final (pool-play-only events with no bracket). The card
      *  labels these "Pool leader" instead of "Champion". */
     viaPoolRecord?: boolean;
+    /** Loser of the bracket final — the home "Season complete" card's
+     *  "Finalist" row. Absent for pool-record winners. */
+    runnerUpName?: string;
+    runnerUpId?: string;
   }>;
   /** Divisions whose championship final was cancelled with no champion (2026
    *  Vacationland washout). The card says "Final cancelled" instead of the
@@ -1788,9 +1796,22 @@ export interface UsauMajorWithChampions {
  *
  * Events with no scraped finals are omitted (we can't show a champion for them).
  */
-export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajorWithChampions[]> {
+export interface RecentMajorsOpts {
+  /** Competition levels to scan (default ['CLUB']). */
+  competitionLevels?: CompetitionLevel[];
+  /** Event-name predicate replacing the default "named TCT flight" filter —
+   *  e.g. the College Championships, which carry no flight name. */
+  nameFilter?: (name: string) => boolean;
+}
+
+export async function recentUsauMajorsWithChampions(
+  limit = 3,
+  opts: RecentMajorsOpts = {},
+): Promise<UsauMajorWithChampions[]> {
   const db = await supabase();
   const today = usauToday();
+  const levels = opts.competitionLevels ?? ['CLUB'];
+  const isMajor = opts.nameFilter ?? ((name: string) => flightForName(name) !== null);
 
   // 1. Pull the most-recent completed CLUB events. Scan wide (300 ≈ a bit over
   // a full season of the club calendar): flight-named majors are a small
@@ -1801,7 +1822,7 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   const { data: events } = await db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date')
-    .eq('competition_level', 'CLUB')
+    .in('competition_level', levels)
     .lt('end_date', today)
     .order('end_date', { ascending: false, nullsFirst: false })
     .limit(300);
@@ -1813,7 +1834,7 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
     name: string;
     start_date: string | null;
     end_date: string | null;
-  }>).filter((e) => flightForName(e.name) !== null);
+  }>).filter((e) => isMajor(e.name));
 
   if (majorEvents.length === 0) return [];
 
@@ -1844,10 +1865,7 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
   };
 
   // 4. Group champions by event_id.
-  const championsByEvent = new Map<
-    string,
-    Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string; viaPoolRecord?: boolean }>
-  >();
+  const championsByEvent = new Map<string, UsauMajorWithChampions['champions']>();
   // `${eventId}|${division}` pairs already settled by a bracket final — used to
   // skip the pool-record fallback for divisions that DID play a bracket.
   const decidedKeys = new Set<string>();
@@ -1858,6 +1876,8 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
     const aWon = g.score_a > g.score_b;
     const winnerId = aWon ? g.team_a_id : g.team_b_id;
     const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
+    const runnerUpId = aWon ? g.team_b_id : g.team_a_id;
+    const runnerUpName = (aWon ? g.team_b?.name : g.team_a?.name) ?? undefined;
 
     let division = (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
     if (!division) {
@@ -1872,7 +1892,13 @@ export async function recentUsauMajorsWithChampions(limit = 3): Promise<UsauMajo
     // Avoid duplicate divisions.
     const existing = championsByEvent.get(g.event_id)!;
     if (existing.some((c) => c.division === division)) continue;
-    existing.push({ division: division as 'Men' | 'Women' | 'Mixed', teamName: winnerName, teamId: winnerId });
+    existing.push({
+      division: division as 'Men' | 'Women' | 'Mixed',
+      teamName: winnerName,
+      teamId: winnerId,
+      runnerUpName,
+      runnerUpId,
+    });
     decidedKeys.add(`${g.event_id}|${division}`);
   }
 
