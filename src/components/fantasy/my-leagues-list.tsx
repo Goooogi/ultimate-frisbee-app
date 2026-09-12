@@ -1,8 +1,7 @@
 'use client';
 
-// "My Leagues" — the fantasy hub's first section. Public League pinned first
-// (open to everyone), then each of the signed-in user's league contests as a
-// row with a status pill (draft state / live / final / open). Port of the
+// "My Leagues" — the fantasy hub's first section. Each of the signed-in
+// user's league contests as a row with a status pill (draft state / live / final / open). Port of the
 // mobile hub's My Leagues card (altiusapps/mobileapp-thelayout ·
 // app/(app)/fantasy/index.tsx) — same status-chip logic, same row shape.
 //
@@ -17,15 +16,6 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { getMyLeagues, type MyLeagueRow, type MyLeagueContestRow } from '@/lib/fantasy/leagues';
 import { contestFormat } from '@/lib/fantasy/competitions';
-import { getGame } from '@/lib/fantasy/games';
-import type { ContestView } from '@/lib/fantasy/leagues';
-
-interface MyLeaguesListProps {
-  /** The public/open-to-everyone Public League, resolved server-side (anon
-   *  read) and passed down — pinned above the user's private leagues. Null
-   *  when it doesn't exist yet for the current season. */
-  globalContest: ContestView | null;
-}
 
 interface StatusChip {
   label: string;
@@ -76,7 +66,7 @@ function StatusPill({ chip }: { chip: StatusChip }) {
   );
 }
 
-export function MyLeaguesList({ globalContest }: MyLeaguesListProps) {
+export function MyLeaguesList() {
   const { user, loading } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
   const [leagues, setLeagues] = useState<MyLeagueRow[]>([]);
@@ -114,30 +104,6 @@ export function MyLeaguesList({ globalContest }: MyLeaguesListProps) {
       </h2>
 
       <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-        {globalContest && (
-          <Link
-            href={`/fantasy/l/${globalContest.id}`}
-            className={[
-              'flex items-center gap-3 px-5 py-3.5',
-              'no-underline transition-colors duration-150',
-              'hover:bg-surface-hi border-b border-hairline',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-            ].join(' ')}
-          >
-            <LeagueLogo name="Public League" logoSrc={getGame('ufa')?.logoSrc} size={40} />
-            <span className="min-w-0 flex-1 flex flex-col gap-0.5">
-              <span className="font-tight text-[14px] font-semibold text-ink truncate">Public League</span>
-              <span className="font-tight text-[11px] text-muted truncate">
-                UFA · {globalContest.seasonYear}
-              </span>
-            </span>
-            <span className="flex-shrink-0 text-[9.5px] font-bold tracking-[0.08em] uppercase px-2 py-[3px] rounded-full bg-ink/[0.06] text-faint whitespace-nowrap">
-              Open to all
-            </span>
-            <ChevronGlyph />
-          </Link>
-        )}
-
         {loading || leaguesLoading ? (
           <div className="p-6 flex items-center justify-center" aria-hidden="true">
             <span className="w-5 h-5 rounded-full border-2 border-ink/15 border-t-accent animate-spin" />
@@ -190,7 +156,7 @@ export function MyLeaguesList({ globalContest }: MyLeaguesListProps) {
                       'no-underline transition-colors duration-150',
                       'hover:bg-surface-hi',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-                      idx > 0 || globalContest ? 'border-t border-hairline' : '',
+                      idx > 0 ? 'border-t border-hairline' : '',
                     ].join(' ')}
                   >
                     <LeagueLogo

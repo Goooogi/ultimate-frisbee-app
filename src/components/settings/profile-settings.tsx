@@ -449,7 +449,7 @@ export function ProfileSettings() {
           Public identity
         </h2>
         <p className="mt-1 text-[12px] text-faint font-tight leading-snug">
-          Your display name shows on the fantasy leaderboard. Your handle is your unique @identity across the platform.
+          Your display name shows in your fantasy leagues. Your handle is your unique @identity across the platform.
         </p>
       </div>
 

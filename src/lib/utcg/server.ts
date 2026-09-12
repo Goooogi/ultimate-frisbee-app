@@ -3,8 +3,8 @@ import 'server-only';
 // UTCG server-side reads for the SIGNED-IN user.
 //
 // Wallet + owned cards are RLS "read-own", so we must resolve auth via the
-// cookie-aware SERVER client (same rationale as fantasy/server.ts — the browser
-// client has no cookie context in a Server Component and would read empty).
+// cookie-aware SERVER client — the browser client has no cookie context in a
+// Server Component and would read empty.
 // The heavy card hydration reuses the isomorphic anon helpers in data.ts.
 
 import { createClient as createServerSupabase } from '@/lib/supabase/server';

@@ -1,8 +1,6 @@
 // score-fantasy: compute + persist fantasy scores — CONTEST-AWARE. (v4)
 //
-// Since the leagues/contests build (2026-08-15) every fantasy team belongs to a
-// fantasy_contests row (global UFA pool included; legacy contest-less teams are
-// folded into the global UFA contest for their season). Each run:
+// Every fantasy team belongs to a private-league fantasy_contests row. Each run:
 //
 //   1. Refreshes fantasy_contest_periods via fantasy_rebuild_all_periods()
 //      (SQL owns the lock schedule — this fn only READS periods).
@@ -133,8 +131,6 @@ interface PeriodRow {
 interface TeamRow {
   id: string;
   contest_id: string | null;
-  league_id: string | null;
-  season_year: number;
 }
 
 interface SlotRow {
@@ -459,23 +455,17 @@ async function run(body: { contest?: string }) {
     }
   }
 
-  // 4. Teams → contest. Legacy contest-less teams fold into the global UFA
-  //    contest for their season (transition-window inserts).
+  // 4. Teams → contest.
   const teams = await fetchAll<TeamRow>((from, to) =>
     supabase
       .from('fantasy_teams')
-      .select('id, contest_id, league_id, season_year')
+      .select('id, contest_id')
       .order('id')
       .range(from, to),
   );
-  const globalUfaByYear = new Map<number, string>();
-  for (const c of contests) {
-    if (c.league_id === null && c.competition === 'ufa') globalUfaByYear.set(c.season_year, c.id);
-  }
   const contestOfTeam = new Map<string, string>();
   for (const t of teams) {
-    const cid = t.contest_id ?? (t.league_id === null ? globalUfaByYear.get(t.season_year) : undefined);
-    if (cid) contestOfTeam.set(t.id, cid);
+    if (t.contest_id) contestOfTeam.set(t.id, t.contest_id);
   }
 
   // 5. All roster slots, attributed to (contest, period); keep only locked ones.

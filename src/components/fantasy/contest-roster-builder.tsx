@@ -1,9 +1,8 @@
 'use client';
 
 // Contest Roster Builder — client component.
-// Generalizes roster-builder.tsx's interaction patterns (typeahead w/ 200ms
-// debounce, slot cards, lock banner, auth-gated save) across a contest's
-// settings-driven shape:
+// Typeahead w/ 200ms debounce, slot cards, lock banner and auth-gated save,
+// across a contest's settings-driven shape:
 //   weekly-stats mode → offenders+defenders slot groups + period selector
 //   event mode        → single flat flex list, no roles, one 'event' period
 //

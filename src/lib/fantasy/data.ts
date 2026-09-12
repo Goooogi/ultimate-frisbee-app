@@ -1,7 +1,7 @@
 // Fantasy data layer — reads (public, anon-safe) + writes (owner-gated).
 //
 // READ functions use the anon publishable key and work from Server Components
-// (leaderboard, public team view) with NO session — mirrors wul_*/pul_* reads.
+// with NO session — mirrors wul_*/pul_* reads.
 // WRITE functions run client-side, derive owner_id from supabase.auth.getUser()
 // (never trust the client), and rely on RLS + the owner_username trigger for
 // enforcement. Mirrors src/lib/playbook/data.ts.
@@ -14,7 +14,6 @@ import { createClient as createAnonClient, type SupabaseClient } from '@supabase
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { scoreStatLine, roundPoints, type FantasyRole } from './scoring';
 import { ufaRowToStatLine, type UfaStatRow } from './ufa-adapter';
-import { buildWeeks, activeWeek, type WeekGame } from './weeks';
 import { moderateName } from '@/lib/moderation';
 
 // fantasy_*/ufa_* tables aren't in database.types.ts (same as wul_*/pul_*), so
@@ -38,7 +37,7 @@ function sessionClient(): AnyClient {
   return createSessionClient() as unknown as AnyClient;
 }
 
-/** The Public League runs the current UFA season. */
+/** Default season year for UFA stat reads. */
 export function fantasySeasonYear(now: Date = new Date()): number {
   return now.getFullYear();
 }
@@ -75,18 +74,6 @@ export interface WeekBreakdown {
   players: WeekPlayerScore[];
 }
 
-export interface FantasyTeamView {
-  id: string;
-  teamName: string;
-  /** Owner's display name — the primary public label. */
-  ownerDisplayName: string | null;
-  /** Owner's unique @handle — shown as a secondary disambiguator / fallback. */
-  ownerUsername: string | null;
-  seasonYear: number;
-  totalPoints: number;
-  weeklyPoints: { week: string; points: number }[];
-}
-
 export interface LeaderboardRow {
   teamId: string;
   teamName: string;
@@ -95,104 +82,7 @@ export interface LeaderboardRow {
   totalPoints: number;
 }
 
-// ─── Player search (from our ufa_players DB, not the external API) ────────────
-
-/**
- * Search draftable players by name. Reads ufa_players (populated by the sync),
- * so results carry the exact player_id slugs the roster FK needs and resolve
- * instantly. Joined to ufa_teams for a display team name.
- */
-export async function searchDraftablePlayers(
-  query: string,
-  limit = 20,
-): Promise<FantasyPlayerHit[]> {
-  const needle = query.trim();
-  if (needle.length < 2) return [];
-  // Escape ILIKE wildcards so a '%' or '_' in the query is treated as a literal
-  // character, not a pattern (prevents accidental match-all / expensive scans).
-  const escaped = needle.replace(/[\\%_]/g, (c) => `\\${c}`);
-
-  const { data, error } = await anon()
-    .from('ufa_players')
-    .select('id, full_name, current_team_id, ufa_teams:current_team_id (name, full_name)')
-    .ilike('full_name', `%${escaped}%`)
-    .order('full_name')
-    .limit(limit);
-  if (error) throw error;
-
-  return (data ?? []).map((r: Record<string, unknown>) => {
-    const team = r.ufa_teams as { name?: string; full_name?: string } | null;
-    return {
-      playerId: r.id as string,
-      fullName: (r.full_name as string) ?? (r.id as string),
-      teamId: (r.current_team_id as string) ?? null,
-      teamName: team?.full_name ?? team?.name ?? null,
-    };
-  });
-}
-
-// ─── Week resolution (from ufa_games) ────────────────────────────────────────
-
-/** All UFA games for a season as the minimal shape weeks.ts needs. */
-async function seasonWeekGames(year: number, client: AnyClient = anon()): Promise<WeekGame[]> {
-  const { data, error } = await client
-    .from('ufa_games')
-    .select('week, start_timestamp, status')
-    .eq('year', year);
-  if (error) throw error;
-  return (data ?? []).map((g: Record<string, unknown>) => ({
-    week: (g.week as string) ?? null,
-    startTimestamp: (g.start_timestamp as string) ?? null,
-    status: (g.status as string) ?? 'Upcoming',
-  }));
-}
-
-/**
- * The week a manager is currently setting a lineup for = earliest editable week.
- * Returns { week, lockAt, unlockAt, locked } or null if no schedule. lockAt is
- * the week's first game kickoff (when it locks); unlockAt is the Monday 00:00 ET
- * it (and thus the next week's editing) reopens.
- */
-export async function currentFantasyWeek(
-  year = fantasySeasonYear(),
-  now: Date = new Date(),
-): Promise<{ week: string; lockAt: string | null; unlockAt: string | null; locked: boolean } | null> {
-  const weeks = buildWeeks(await seasonWeekGames(year), now);
-  const w = activeWeek(weeks, now);
-  return w ? { week: w.week, lockAt: w.lockAt, unlockAt: w.unlockAt, locked: w.locked } : null;
-}
-
 // ─── Team + roster reads ──────────────────────────────────────────────────────
-
-/** A single team with its season roster (latest week's slots) — public view. */
-export async function getFantasyTeam(teamId: string): Promise<FantasyTeamView | null> {
-  const { data: team, error } = await anon()
-    .from('fantasy_teams')
-    .select('id, team_name, owner_display_name, owner_username, season_year')
-    .eq('id', teamId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!team) return null;
-
-  const { data: scores } = await anon()
-    .from('fantasy_scores')
-    .select('week, points')
-    .eq('team_id', teamId);
-
-  const weekly = (scores ?? [])
-    .map((s: Record<string, unknown>) => ({ week: s.week as string, points: Number(s.points) }))
-    .sort((a, b) => a.week.localeCompare(b.week, undefined, { numeric: true }));
-
-  return {
-    id: team.id,
-    teamName: team.team_name,
-    ownerDisplayName: team.owner_display_name ?? null,
-    ownerUsername: team.owner_username ?? null,
-    seasonYear: team.season_year,
-    totalPoints: roundPoints(weekly.reduce((acc, w) => acc + w.points, 0)),
-    weeklyPoints: weekly,
-  };
-}
 
 /** Roster slots for a team + week, joined to player/team names. */
 export async function getTeamRoster(teamId: string, week: string): Promise<RosterSlot[]> {
@@ -268,110 +158,7 @@ export async function getTeamWeekBreakdown(
   return { week, totalPoints, players };
 }
 
-/** The global Public League leaderboard: all league_id-NULL teams ranked by total points. */
-export async function getLeaderboard(
-  year = fantasySeasonYear(),
-  limit = 200,
-): Promise<LeaderboardRow[]> {
-  const { data: teams, error } = await anon()
-    .from('fantasy_teams')
-    .select('id, team_name, owner_display_name, owner_username')
-    .is('league_id', null)
-    .eq('season_year', year)
-    .limit(limit);
-  if (error) throw error;
-  if (!teams || teams.length === 0) return [];
-
-  // Sum weekly scores per team. One query for all scores in this team set.
-  const ids = teams.map((t: Record<string, unknown>) => t.id as string);
-  const { data: scores } = await anon()
-    .from('fantasy_scores')
-    .select('team_id, points')
-    .in('team_id', ids);
-
-  const totals = new Map<string, number>();
-  for (const s of scores ?? []) {
-    const id = (s as Record<string, unknown>).team_id as string;
-    totals.set(id, (totals.get(id) ?? 0) + Number((s as Record<string, unknown>).points));
-  }
-
-  return teams
-    .map((t: Record<string, unknown>) => ({
-      teamId: t.id as string,
-      teamName: t.team_name as string,
-      ownerDisplayName: (t.owner_display_name as string) ?? null,
-      ownerUsername: (t.owner_username as string) ?? null,
-      totalPoints: roundPoints(totals.get(t.id as string) ?? 0),
-    }))
-    .sort((a, b) => b.totalPoints - a.totalPoints);
-}
-
 // ─── Writes (client-side; owner derived from session) ────────────────────────
-
-/** The signed-in user's Public League team for this season, if any.
- *
- *  Keyed on the global contest's id, NOT `league_id is null`: every team row
- *  carries league_id=null (createContestTeam sets it unconditionally), so that
- *  filter stopped discriminating once private contests existed and this
- *  maybeSingle() would see multiple rows — one user owning both a Public
- *  League team and a private-contest team in the same season broke their own
- *  My Team tab. contest_id is the real discriminator. */
-export async function getMyTeam(year = fantasySeasonYear()): Promise<FantasyTeamView | null> {
-  const supabase = sessionClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return null;
-
-  const { data: contest } = await supabase
-    .from('fantasy_contests')
-    .select('id')
-    .is('league_id', null)
-    .eq('competition', 'ufa')
-    .eq('season_year', year)
-    .maybeSingle();
-  if (!contest) return null;
-
-  const { data, error } = await supabase
-    .from('fantasy_teams')
-    .select('id')
-    .eq('owner_id', user.id)
-    .eq('contest_id', contest.id as string)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return null;
-  return getFantasyTeam(data.id as string);
-}
-
-/**
- * The signed-in user's saved roster for a given week, so the builder can
- * pre-fill their existing picks instead of showing empty search boxes.
- *
- * `week` is the week the builder edits (the current/open week). If that week
- * has no slots yet — e.g. a new week opened and they haven't re-saved — we
- * fall back to the most recent PRIOR week that does have a roster, so the user
- * always sees their last-known lineup to tweak rather than a blank slate.
- * Returns [] when the user has no team / no saved roster at all.
- */
-export async function getMyTeamRoster(week: string): Promise<RosterSlot[]> {
-  const team = await getMyTeam();
-  if (!team) return [];
-
-  // Preferred: this exact week.
-  const current = await getTeamRoster(team.id, week);
-  if (current.length > 0) return current;
-
-  // Fallback: the latest week that has any slots for this team.
-  const { data: weeks } = await anon()
-    .from('fantasy_roster_slots')
-    .select('week')
-    .eq('team_id', team.id);
-  const latest = (weeks ?? [])
-    .map((r: Record<string, unknown>) => r.week as string)
-    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))[0];
-  if (!latest) return [];
-  return getTeamRoster(team.id, latest);
-}
 
 export interface MyProfile {
   displayName: string | null;
@@ -395,11 +182,6 @@ export async function getMyProfile(): Promise<MyProfile | null> {
     displayName: (data.display_name as string) ?? null,
     username: (data.username as string) ?? null,
   };
-}
-
-/** The signed-in user's current public handle (profiles.username), or null. */
-export async function getMyUsername(): Promise<string | null> {
-  return (await getMyProfile())?.username ?? null;
 }
 
 /** profiles.username constraint: lowercase, 3–30 chars, alnum + underscore. */
@@ -563,146 +345,6 @@ export async function setAvatarIcon(ref: string | null): Promise<void> {
       await supabase.storage.from('avatars').remove([oldPath]).catch(() => {});
     }
   }
-}
-
-/**
- * Create (or return existing) the signed-in user's Public League team. owner_id comes
- * from the session; owner_username is force-set by a DB trigger from the
- * profile, so a client value can't stick (defense in depth: we don't send one).
- * Requires the user to have a username first (their leaderboard identity) —
- * the caller (builder) collects one via setMyUsername before calling this.
- */
-export async function createMyTeam(
-  teamName: string,
-  year = fantasySeasonYear(),
-): Promise<string> {
-  const supabase = sessionClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in.');
-
-  const name = teamName.trim();
-  if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
-
-  // Attach the team to the global UFA contest (the Public League pool became a real
-  // contest row). This is REQUIRED, not best-effort: getMyTeam() resolves the
-  // user's Public League team by contest_id, so a contest_id-null insert would
-  // create a team its owner can never see again. Fail loud instead.
-  const { data: contest } = await supabase
-    .from('fantasy_contests')
-    .select('id')
-    .is('league_id', null)
-    .eq('competition', 'ufa')
-    .eq('season_year', year)
-    .maybeSingle();
-  if (!contest) throw new Error('The public league for this season is not open yet.');
-
-  const { data, error } = await supabase
-    .from('fantasy_teams')
-    .insert({
-      owner_id: user.id,
-      team_name: name,
-      season_year: year,
-      league_id: null,
-      contest_id: contest.id as string,
-    })
-    .select('id')
-    .single();
-  if (error) throw error;
-  return data.id as string;
-}
-
-/**
- * Rename the signed-in user's team. Same validation + moderation as
- * createMyTeam's name rule (1–40 chars, moderated). The UPDATE is gated by RLS
- * ("fantasy_teams update own": owner_id = auth.uid() in both USING and
- * WITH CHECK), so a user can only rename a team they own — we pass the id but
- * ownership is enforced at the DB, not trusted from the client. Returns the
- * trimmed name so the caller can reflect it without a refetch.
- */
-export async function renameMyTeam(teamId: string, teamName: string): Promise<string> {
-  const supabase = sessionClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in.');
-
-  const name = teamName.trim();
-  if (name.length < 1 || name.length > 40) throw new Error('Team name must be 1–40 characters.');
-  const bad = moderateName(name, 'Team name');
-  if (bad) throw new Error(bad);
-
-  const { error, count } = await supabase
-    .from('fantasy_teams')
-    .update({ team_name: name }, { count: 'exact' })
-    .eq('id', teamId)
-    .eq('owner_id', user.id);
-  if (error) throw error;
-  // RLS would have blocked a non-owner (0 rows) — surface it rather than
-  // silently reporting success.
-  if (count === 0) throw new Error('Could not rename this team.');
-  return name;
-}
-
-export interface RosterInput {
-  playerId: string;
-  role: FantasyRole;
-}
-
-/**
- * Replace a team's roster for a given week with exactly 4 offenders + 3
- * defenders. Refuses to write if the week has already locked (server-side check
- * against the schedule) or the composition is wrong. delete-then-insert per
- * (team, week) so re-saves reconcile cleanly. The caps trigger + is_valid
- * function are the DB backstops; we validate here for a friendly error.
- */
-export async function saveRoster(
-  teamId: string,
-  week: string,
-  slots: RosterInput[],
-  year = fantasySeasonYear(),
-): Promise<void> {
-  const supabase = sessionClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not signed in.');
-
-  // Composition guard (mirrors fantasy_roster_is_valid).
-  const off = slots.filter((s) => s.role === 'offender').length;
-  const def = slots.filter((s) => s.role === 'defender').length;
-  if (slots.length !== 7 || off !== 4 || def !== 3) {
-    throw new Error('Roster must be exactly 4 offenders and 3 defenders.');
-  }
-  const uniquePlayers = new Set(slots.map((s) => s.playerId));
-  if (uniquePlayers.size !== slots.length) {
-    throw new Error('A player can only be rostered once.');
-  }
-
-  // Lock guard: don't allow editing a week that has already started.
-  // Tests lockAt, not `locked` — `locked` is only true inside
-  // [lockAt, unlockAt), so a finished week reads unlocked once its unlock
-  // passes, and the delete-then-insert below would wipe a scored roster.
-  const weeks = buildWeeks(await seasonWeekGames(year, supabase), new Date());
-  const target = weeks.find((w) => w.week === week);
-  if (target?.lockAt && new Date(target.lockAt).getTime() <= Date.now()) {
-    throw new Error(`${week} is locked — its games have started.`);
-  }
-
-  // Ownership is enforced by RLS; we still fail fast client-side.
-  // delete-then-insert this (team, week).
-  const del = await supabase.from('fantasy_roster_slots').delete().eq('team_id', teamId).eq('week', week);
-  if (del.error) throw del.error;
-
-  const rows = slots.map((s) => ({
-    team_id: teamId,
-    week,
-    player_id: s.playerId,
-    role: s.role,
-  }));
-  const ins = await supabase.from('fantasy_roster_slots').insert(rows);
-  if (ins.error) throw ins.error;
 }
 
 // ─── Scoring preview (client hint) ────────────────────────────────────────────

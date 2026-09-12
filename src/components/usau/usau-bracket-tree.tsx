@@ -347,10 +347,12 @@ function MatchCard({
   ) {
     tone = 'upcoming';
   }
-  // Cancelled games carry 0–0 in the DB; showing "0 0" under a Cancelled pill
-  // reads like a played shutout, so blank the scores instead.
-  const scoreA = tone === 'cancelled' ? null : game.scoreA;
-  const scoreB = tone === 'cancelled' ? null : game.scoreB;
+  // Cancelled games carry 0–0 in the DB, and so does USAU's unplayed
+  // placeholder on a scheduled game (rows scraped before 2026-09-11) — "0 0"
+  // under either reads like a played shutout, so blank the scores instead.
+  const unplayed = game.status === 'scheduled' && game.scoreA === 0 && game.scoreB === 0;
+  const scoreA = tone === 'cancelled' || unplayed ? null : game.scoreA;
+  const scoreB = tone === 'cancelled' || unplayed ? null : game.scoreB;
 
   return (
     <article

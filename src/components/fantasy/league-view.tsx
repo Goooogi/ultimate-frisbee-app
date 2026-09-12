@@ -1,8 +1,8 @@
 'use client';
 
 // LeagueView — the "League" tab body (root tab for points/event contests;
-// 4th tab for h2h weekly contests). Top → bottom: my-team CTA, draft card
-// (private leagues only), standings (h2h or points), playoffs mini-section,
+// 4th tab for h2h weekly contests). Top → bottom: my-team CTA, draft card,
+// standings (h2h or points), playoffs mini-section,
 // schedule strip (weekly only), invite code + members panel. Web port of the
 // mobile app's LeagueView.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueView.tsx).
@@ -64,7 +64,6 @@ export function LeagueView({ contest }: { contest: ContestView }) {
   const { user } = useAuth();
   const isH2H = contestFormat(contest.settings) === 'h2h';
   const isWeekly = contest.settings.mode === 'weekly-stats';
-  const isPrivate = Boolean(contest.leagueId);
   const isFaab = waiverSettings(contest.settings).mode === 'faab';
 
   const [weeks, setWeeks] = useState<FantasyWeek[]>([]);
@@ -121,11 +120,11 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       {/* ── My team CTA ────────────────────────────────────────────────── */}
       <MyContestTeamCta contest={contest} />
 
-      {/* ── Draft card (private leagues only) ─────────────────────────── */}
-      {isPrivate && <DraftCard contest={contest} leagueId={contest.leagueId as string} />}
+      {/* ── Draft card ─────────────────────────── */}
+      <DraftCard contest={contest} leagueId={contest.leagueId as string} />
 
-      {/* ── Recent activity (private leagues only) ────────────────────── */}
-      {isPrivate && <RecentActivityCard contest={contest} />}
+      {/* ── Recent activity ────────────────────── */}
+      <RecentActivityCard contest={contest} />
 
       {/* ── Standings ──────────────────────────────────────────────────── */}
       <section aria-labelledby="standings-heading">
@@ -206,11 +205,11 @@ export function LeagueView({ contest }: { contest: ContestView }) {
         )}
       </section>
 
-      {/* ── Trades (private leagues only) ─────────────────────────────── */}
-      {isPrivate && <TradesCard contest={contest} />}
+      {/* ── Trades ─────────────────────────────── */}
+      <TradesCard contest={contest} />
 
       {/* ── Waivers (private FAAB weekly leagues only) ────────────────── */}
-      {isPrivate && isWeekly && isFaab && <WaiversCard contest={contest} />}
+      {isWeekly && isFaab && <WaiversCard contest={contest} />}
 
       {/* ── Playoffs ───────────────────────────────────────────────────── */}
       {hasPlayoffs && (
@@ -242,13 +241,9 @@ export function LeagueView({ contest }: { contest: ContestView }) {
         </section>
       )}
 
-      {/* ── Invite + members (private leagues only) ───────────────────── */}
-      {isPrivate && (
-        <>
-          <InviteCodeRow leagueId={contest.leagueId as string} canRegenerate={isCommissioner} />
-          <LeagueMembersPanel leagueId={contest.leagueId as string} members={members} onLeaveRedirect="/fantasy" />
-        </>
-      )}
+      {/* ── Invite + members ───────────────────── */}
+      <InviteCodeRow leagueId={contest.leagueId as string} canRegenerate={isCommissioner} />
+      <LeagueMembersPanel leagueId={contest.leagueId as string} members={members} onLeaveRedirect="/fantasy" />
     </div>
   );
 }

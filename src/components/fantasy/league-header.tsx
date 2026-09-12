@@ -22,7 +22,6 @@ export function LeagueHeader({ contest, league }: Props) {
   const { user } = useAuth();
   const [isCommissioner, setIsCommissioner] = useState(false);
 
-  const isPublic = !contest.leagueId;
   const title = league?.name ?? contest.name;
   const game = getGame(contest.competition);
 
@@ -66,36 +65,34 @@ export function LeagueHeader({ contest, league }: Props) {
 
       <div className="min-w-0 flex-1">
         <h1 className="m-0 font-display italic text-[20px] lg:text-[22px] font-bold tracking-[-0.02em] leading-[1.1] text-ink truncate">
-          {isPublic ? 'Public League' : title}
+          {title}
         </h1>
         <p className="m-0 font-tight text-[12px] text-muted truncate">
           {contest.competitionDef.shortLabel} · {contest.seasonYear}
         </p>
       </div>
 
-      {!isPublic && (
-        <Link
-          href={`/fantasy/l/${contest.id}/feed`}
-          aria-label="League feed and chat"
-          className={[
-            'flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full',
-            'text-ink hover:text-accent hover:bg-ink/5 transition-colors duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          ].join(' ')}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M4 5h16a1 1 0 011 1v9a1 1 0 01-1 1H9l-4.5 4V16H4a1 1 0 01-1-1V6a1 1 0 011-1z"
-              stroke="currentColor"
-              strokeWidth={1.7}
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          </svg>
-        </Link>
-      )}
+      <Link
+        href={`/fantasy/l/${contest.id}/feed`}
+        aria-label="League feed and chat"
+        className={[
+          'flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full',
+          'text-ink hover:text-accent hover:bg-ink/5 transition-colors duration-150',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        ].join(' ')}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M4 5h16a1 1 0 011 1v9a1 1 0 01-1 1H9l-4.5 4V16H4a1 1 0 01-1-1V6a1 1 0 011-1z"
+            stroke="currentColor"
+            strokeWidth={1.7}
+            strokeLinejoin="round"
+            strokeLinecap="round"
+          />
+        </svg>
+      </Link>
 
-      {isCommissioner && !isPublic && (
+      {isCommissioner && (
         <Link
           href={`/fantasy/l/${contest.id}/settings`}
           aria-label="League settings"

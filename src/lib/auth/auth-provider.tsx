@@ -270,7 +270,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (typeof document !== 'undefined') {
         // 5-minute, lax, path-scoped cookie. Not sensitive (a local path), but
         // scoped tight so it doesn't linger. The callback validates it anyway.
-        document.cookie = `oauth_next=${encodeURIComponent(next)}; Max-Age=300; Path=/; SameSite=Lax`;
+        // Secure on https only: Safari drops Secure cookies set on http://localhost.
+        const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+        document.cookie = `oauth_next=${encodeURIComponent(next)}; Max-Age=300; Path=/; SameSite=Lax${secure}`;
       }
       const redirectTo = `${origin}/auth/callback`;
       const { error } = await supabase.auth.signInWithOAuth({

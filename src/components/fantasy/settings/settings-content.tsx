@@ -6,8 +6,7 @@
 // Name → Logo → Teams/Limits → Format (weekly-stats only) → Roster → Draft →
 // Player prices (auction + scheduled only) → Scoring.
 //
-// Gating: Public League contests (no leagueId) are service-managed — nothing
-// to configure. Non-commissioners see a locked-out message. Role is resolved
+// Gating: non-commissioners see a locked-out message. Role is resolved
 // client-side (same pattern as league-home-client.tsx) since this is the
 // commissioner-only screen and the RPCs re-check server-side regardless.
 
@@ -77,20 +76,7 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
     router.refresh();
   };
 
-  if (!contest.leagueId) {
-    return (
-      <section aria-labelledby="league-settings-heading" className="space-y-4">
-        <h2 id="league-settings-heading" className={HEADING_CLASS}>
-          Settings
-        </h2>
-        <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
-          <p className="text-muted font-tight text-[14px]">
-            The Public League is service-managed — there&apos;s nothing to configure here.
-          </p>
-        </div>
-      </section>
-    );
-  }
+  if (!contest.leagueId) return null;
 
   if (roleLoading) {
     return (

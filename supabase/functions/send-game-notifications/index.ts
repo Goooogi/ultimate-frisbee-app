@@ -229,6 +229,34 @@ function usauEventTz(ev: { venue_tz: string | null; state: string | null }): str
   return usauVenueTz(ev.state);
 }
 
+/** First resolvable venue zone per series group, across ALL its members. The
+ *  scraper infers venue_tz row by row from entrants, so one division can stay
+ *  null (0-team rows never resolve) while its siblings resolve — left on UTC,
+ *  that division would pull its group's notices into the night. */
+async function seriesGroupZones(sb: SupabaseClient, keys: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (keys.length === 0) return out;
+  const { data, error } = await sb
+    .from('usau_events')
+    .select('series_group_key, venue_tz, state')
+    .in('series_group_key', keys)
+    .order('id', { ascending: true });
+  if (error) throw error;
+  for (const r of data ?? []) {
+    const tz = usauEventTz(r);
+    if (tz && !out.has(r.series_group_key)) out.set(r.series_group_key, tz);
+  }
+  return out;
+}
+
+/** An event's own venue zone; a series member without one borrows its group's. */
+function usauZone(
+  ev: { venue_tz: string | null; state: string | null; series_group_key?: string | null },
+  groupZones: Map<string, string>,
+): string | null {
+  return usauEventTz(ev) ?? (ev.series_group_key ? groupZones.get(ev.series_group_key) ?? null : null);
+}
+
 /** The UTC dates either side of `now`: every venue's local "today" is one of them. */
 function datesAround(now: number): string[] {
   return [-1, 0, 1].map((d) => new Date(now + d * 86_400_000).toISOString().slice(0, 10));
@@ -359,9 +387,18 @@ function seriesRep<T extends { series_division: string | null }>(members: T[]): 
   return [...members].sort((a, b) => rank(a.series_division) - rank(b.series_division))[0];
 }
 
-/** YYYY-MM-DD of `iso` on the venue-local wall clock (UTC when tz unknown). */
+/** YYYY-MM-DD of `iso` on the venue-local wall clock (UTC when tz unknown).
+ *  Built from parts, not a locale's date pattern, so the runtime's ICU data
+ *  can't change the shape the start filter and group keys compare against. */
 function localDate(iso: string, tz: string | null): string {
-  return new Date(iso).toLocaleDateString('en-CA', { timeZone: tz ?? 'UTC' });
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz ?? 'UTC',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(iso));
+  const part = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
 function chunk<T>(arr: T[], size: number): T[][] {
@@ -693,7 +730,11 @@ async function usauEventStartCandidates(sb: SupabaseClient, now: number): Promis
     .select('id, name, start_date, template_key, state, venue_tz, series_group_key, series_group_name, series_division')
     .in('start_date', datesAround(now));
   if (error) throw error;
-  const data = (rows ?? []).filter((ev) => ev.start_date === localDate(nowIso, usauEventTz(ev)));
+  const groupZones = await seriesGroupZones(
+    sb,
+    [...new Set((rows ?? []).map((ev) => ev.series_group_key).filter((k): k is string => !!k))],
+  );
+  const data = (rows ?? []).filter((ev) => ev.start_date === localDate(nowIso, usauZone(ev, groupZones)));
   if (data.length === 0) return [];
 
   const notices: Notice[] = [];
@@ -715,7 +756,7 @@ async function usauEventStartCandidates(sb: SupabaseClient, now: number): Promis
       eventId: String(ev.id),
       isFlighted: ev.template_key != null,
       quietHours: true,
-      venueTz: usauEventTz(ev),
+      venueTz: usauZone(ev, groupZones),
     });
   }
   // Series members (one row per division) collapse to ONE notice per group
@@ -735,7 +776,7 @@ async function usauEventStartCandidates(sb: SupabaseClient, now: number): Promis
       seriesGroupKey: key,
       isFlighted: members.some((m) => m.template_key != null),
       quietHours: true,
-      venueTz: usauEventTz(rep),
+      venueTz: usauZone(rep, groupZones),
     });
   }
   return notices;
@@ -777,6 +818,10 @@ async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Prom
     .in('id', eventIds);
   if (evErr) throw evErr;
   const eventById = new Map((events ?? []).map((e) => [String(e.id), e]));
+  const groupZones = await seriesGroupZones(
+    sb,
+    [...new Set((events ?? []).map((e) => e.series_group_key).filter((k): k is string => !!k))],
+  );
 
   // Series members claim per-DAY group keys, which would re-fire on every day
   // with bracket games (the event-id key made it once per event) — so a
@@ -811,7 +856,7 @@ async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Prom
     if (!ev) continue;
     if (ev.series_group_key) {
       if (begunEarlier.has(eventId)) continue;
-      const dedupId = `grp:${ev.series_group_key}:${localDate(first.scheduled_at, usauEventTz(ev))}`;
+      const dedupId = `grp:${ev.series_group_key}:${localDate(first.scheduled_at, usauZone(ev, groupZones))}`;
       const prev = seriesFirst.get(dedupId);
       if (!prev || first.scheduled_at < prev.at) seriesFirst.set(dedupId, { ev, at: first.scheduled_at });
       continue;
@@ -828,7 +873,7 @@ async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Prom
       eventId,
       isFlighted: ev.template_key != null,
       quietHours: true,
-      venueTz: usauEventTz(ev),
+      venueTz: usauZone(ev, groupZones),
     });
   }
   for (const [dedupId, { ev }] of seriesFirst) {
@@ -846,7 +891,7 @@ async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Prom
       seriesGroupKey: ev.series_group_key,
       isFlighted: ev.template_key != null,
       quietHours: true,
-      venueTz: usauEventTz(ev),
+      venueTz: usauZone(ev, groupZones),
     });
   }
   return notices;
@@ -887,6 +932,10 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
     const teamName = new Map((teams.data ?? []).map((t) => [String(t.id), t.name]));
     const teamDivision = new Map((teams.data ?? []).map((t) => [String(t.id), t.gender_division]));
     const eventById = new Map((events.data ?? []).map((e) => [String(e.id), e]));
+    const groupZones = await seriesGroupZones(
+      sb,
+      [...new Set((events.data ?? []).map((e) => e.series_group_key).filter((k): k is string => !!k))],
+    );
 
     const handledKeys = new Set<string>();
     for (const g of champRows) {
@@ -919,7 +968,7 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
         seriesGroupKey: ev.series_group_key ?? undefined,
         isFlighted: ev.template_key != null,
         quietHours: true,
-        venueTz: usauEventTz(ev),
+        venueTz: usauZone(ev, groupZones),
       });
     }
   }
@@ -965,6 +1014,10 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
     .in('id', eventIds);
   if (evErr) throw evErr;
   const eventById = new Map((events ?? []).map((e) => [String(e.id), e]));
+  const groupZones = await seriesGroupZones(
+    sb,
+    [...new Set((events ?? []).map((e) => e.series_group_key).filter((k): k is string => !!k))],
+  );
 
   const poolOnlyTeamIds = new Set<string>();
   const poolOnlyResults = new Map<string, { eventId: string; games: NonNullable<typeof allEventGames> }>();
@@ -1035,7 +1088,7 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
       seriesGroupKey: ev.series_group_key ?? undefined,
       isFlighted: ev.template_key != null,
       quietHours: true,
-      venueTz: usauEventTz(ev),
+      venueTz: usauZone(ev, groupZones),
     });
   }
 

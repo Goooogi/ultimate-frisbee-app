@@ -256,10 +256,8 @@ export interface ContestTeamView {
   weeklyPoints: { week: string; points: number }[];
 }
 
-/** A team's header + per-period totals, scoped to its contest — the
- *  competition-agnostic counterpart to data.ts' getFantasyTeam (which is
- *  UFA-only via fantasy_roster_slots' ufa_players join). Used by the public
- *  contest-scoped team view (any competition). */
+/** A team's header + per-period totals, scoped to its contest (any
+ *  competition). Used by the public contest-scoped team view. */
 export async function getContestTeam(teamId: string): Promise<ContestTeamView | null> {
   const { data: team, error } = await anon()
     .from('fantasy_teams')
@@ -708,23 +706,6 @@ export async function createContest(
   return contestId;
 }
 
-/** The global/public contest for a competition + season (league_id NULL,
- *  service-managed — e.g. the Public League UFA pool), or null if none exists. */
-export async function getGlobalContest(
-  competition: CompetitionId,
-  seasonYear: number,
-): Promise<ContestView | null> {
-  const { data, error } = await anon()
-    .from('fantasy_contests')
-    .select('id, league_id, competition, season_year, name, status, settings, created_at')
-    .is('league_id', null)
-    .eq('competition', competition)
-    .eq('season_year', seasonYear)
-    .maybeSingle();
-  if (error) throw error;
-  return data ? mapContestRow(data as Record<string, unknown>) : null;
-}
-
 // ─── Contest team (one per member per contest) ───────────────────────────────
 
 /** The signed-in user's team in a contest, or null. */
@@ -771,7 +752,6 @@ export async function createContestTeam(
       contest_id: contestId,
       team_name: name,
       season_year: seasonYear,
-      league_id: null,
     })
     .select('id')
     .single();

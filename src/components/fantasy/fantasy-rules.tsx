@@ -1,12 +1,9 @@
 // Fantasy rules + scoring content. Presentational Server Component (reads the
 // SCORING constant only).
 //
-// The rules now live in a modal (see FantasyRulesModal), so this file exposes
-// the *content* (`FantasyRulesContent`) separately from any card chrome. The
-// legacy `FantasyRules` card wrapper is kept for the optional `showCta` inline
-// use, but the primary surfaces (leaderboard + My Team) trigger the modal.
+// The rules live in a modal (see FantasyRulesModal); this file exposes only
+// the *content* (`FantasyRulesContent`), with no card chrome.
 
-import Link from 'next/link';
 import { SCORING } from '@/lib/fantasy/scoring';
 
 const SCORING_ROWS: { stat: string; off: string; def: string; neg: boolean }[] = [
@@ -31,7 +28,7 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
           className="font-display italic text-[22px] lg:text-[28px] font-bold tracking-[-0.02em] text-ink leading-[0.95] mb-2"
         >
           Build a seven-player roster.
-          <br className="hidden sm:block" /> Compete on one global leaderboard.
+          <br className="hidden sm:block" /> Compete against your league.
         </h2>
         <p className="text-muted font-tight text-[14px] lg:text-[15px] leading-relaxed max-w-[560px]">
           Draft 4 offenders and 3 defenders from across the UFA. The role you assign each
@@ -94,47 +91,5 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
         </p>
       </div>
     </>
-  );
-}
-
-interface FantasyRulesProps {
-  /** Show the "Build your team" CTA row at the bottom (default false). */
-  showCta?: boolean;
-}
-
-/**
- * Inline rules card. Retained for surfaces that want the rules rendered in
- * place (with an optional CTA) rather than behind the modal trigger.
- */
-export function FantasyRules({ showCta = false }: FantasyRulesProps) {
-  return (
-    <section aria-labelledby="fantasy-rules-heading" className="mb-8">
-      <div className="bg-surface rounded-card-lg shadow-card p-6 lg:p-8">
-        <FantasyRulesContent headingId="fantasy-rules-heading" />
-
-        {showCta && (
-          <div className="mt-6 pt-5 border-t border-hairline flex flex-col sm:flex-row sm:items-center gap-3">
-            <Link
-              href="/fantasy/ufa/team"
-              className={[
-                'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full',
-                'bg-accent text-accent-ink',
-                'font-tight text-[13px] font-bold tracking-[0.06em] uppercase',
-                'transition-opacity duration-150 hover:opacity-90 cursor-pointer',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-              ].join(' ')}
-            >
-              Build your team
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                <path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </Link>
-            <p className="text-[11px] text-faint font-tight">
-              Free to play. Sign in required only to save your roster.
-            </p>
-          </div>
-        )}
-      </div>
-    </section>
   );
 }

@@ -440,7 +440,7 @@ export type Database = {
           created_at: string
           created_by: string | null
           id: string
-          league_id: string | null
+          league_id: string
           name: string
           season_year: number
           settings: Json
@@ -451,7 +451,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
-          league_id?: string | null
+          league_id: string
           name: string
           season_year: number
           settings?: Json
@@ -462,7 +462,7 @@ export type Database = {
           created_at?: string
           created_by?: string | null
           id?: string
-          league_id?: string | null
+          league_id?: string
           name?: string
           season_year?: number
           settings?: Json
@@ -765,7 +765,7 @@ export type Database = {
       }
       fantasy_teams: {
         Row: {
-          contest_id: string | null
+          contest_id: string
           created_at: string
           id: string
           league_id: string | null
@@ -777,7 +777,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          contest_id?: string | null
+          contest_id: string
           created_at?: string
           id?: string
           league_id?: string | null
@@ -789,7 +789,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
-          contest_id?: string | null
+          contest_id?: string
           created_at?: string
           id?: string
           league_id?: string | null

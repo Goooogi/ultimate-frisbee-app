@@ -8,7 +8,6 @@
 // directly.
 //
 // Gate (before any room renders — mirrors mobile DraftRoom.tsx):
-//   Public League → never drafts.
 //   No draft row → "No draft scheduled yet" (+ commissioner settings link).
 //   scheduled AND >4h out → countdown card, no room.
 //   Otherwise → dispatch by draft.status + draft.draftType.
@@ -101,8 +100,6 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
-  const isPublicLeague = contest.leagueId == null;
-
   const [draft, setDraft] = useState<Draft | null>(null);
   const [picks, setPicks] = useState<DraftPick[]>([]);
   const [openNomination, setOpenNomination] = useState<DraftNomination | null>(null);
@@ -180,13 +177,8 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     };
   }, [contest.id]);
 
-  // ── Draft readiness (lobby warning strip; public read, but only useful
-  // once we know a league exists) ─────────────────────────────────────────
+  // ── Draft readiness (lobby warning strip) ─────────────────────────────────
   useEffect(() => {
-    if (isPublicLeague) {
-      setReadiness(null);
-      return;
-    }
     let cancelled = false;
     getDraftReadiness(contest.id)
       .then((r) => {
@@ -198,7 +190,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [contest.id, isPublicLeague]);
+  }, [contest.id]);
 
   // ── Auction suggested prices ─────────────────────────────────────────────
   useEffect(() => {
@@ -360,17 +352,6 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
       document.title = original;
     };
   }, [titlePrefix]);
-
-  // ── Gate: Public League never drafts ─────────────────────────────────────
-  if (isPublicLeague) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
-        <p className="text-muted font-tight text-[14px]">
-          The Public League doesn&apos;t draft — join or create a private league to run a draft.
-        </p>
-      </div>
-    );
-  }
 
   if (loading) return <RoomSkeleton />;
 

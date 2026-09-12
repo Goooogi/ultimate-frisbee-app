@@ -846,7 +846,6 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
       return ts >= now - 3 * MS_DAY && ts <= now + 30 * MS_DAY;
     })
     .map((ev) => ev.slug);
-  // Distinct: members of one merged series event can share a slug.
   const uniqueSlugs = [...new Set(candidateSlugs)];
   if (uniqueSlugs.length === 0) return [];
 
@@ -854,8 +853,13 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
   const events = await Promise.all(uniqueSlugs.map((slug) => getUsauEvent(slug).catch(() => null)));
 
   const out: FeedGame[] = [];
+  // Member slugs resolve to their merged series event, so two members of one
+  // group (a team cluster whose gender tag is wrong on one entry) load the same
+  // event twice — walk each merged event once or its games tile twice.
+  const seenEvents = new Set<string>();
   for (const ev of events) {
-    if (!ev) continue;
+    if (!ev || seenEvents.has(ev.slug)) continue;
+    seenEvents.add(ev.slug);
     // Game times are true UTC instants; render them in the VENUE's wall clock,
     // not the server's (see whenLabel). Null state → undefined → UTC, which
     // renders the stored clock unshifted, same fallback as formatGameTime.

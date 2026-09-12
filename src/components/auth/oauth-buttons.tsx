@@ -11,7 +11,8 @@ import { useAuth } from '@/lib/auth/auth-provider';
 import { OAUTH_GOOGLE_ENABLED, OAUTH_APPLE_ENABLED } from '@/lib/supabase/env';
 
 interface OAuthButtonsProps {
-  /** Same-origin path to land on after auth (default / — home). */
+  /** Same-origin path to land on after auth (default: the page sign-in
+   *  started from). */
   next?: string;
 }
 
@@ -27,7 +28,11 @@ export function OAuthButtons({ next }: OAuthButtonsProps) {
   async function go(provider: 'google' | 'apple') {
     setError(null);
     setPending(provider);
-    const res = await signInWithOAuth(provider, next);
+    // Land back where sign-in started — a tournament page keeps its ?div tab.
+    // Without this every OAuth sign-in bounced to home (the provider's '/'
+    // default rode the oauth_next cookie through the round trip).
+    const target = next ?? `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const res = await signInWithOAuth(provider, target);
     // On success the browser redirects away; only reached on failure.
     if (res.error) {
       setError('Could not start sign-in. Please try again.');

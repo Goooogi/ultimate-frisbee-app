@@ -1,9 +1,8 @@
 // Multi-league draft + roster operations for CONTEST teams.
 //
-// The Public League's data.ts speaks UFA only (searchDraftablePlayers, saveRoster).
-// This module is the contest-aware generalization: which player pool a contest
-// drafts from, how a roster is composed, and when it locks all come from the
-// ContestView (competition def + frozen settings snapshot).
+// Which player pool a contest drafts from, how a roster is composed, and when
+// it locks all come from the ContestView (competition def + frozen settings
+// snapshot).
 //
 // Player identity per league (fantasy_roster_slots.player_league + player_id):
 //   ufa  → ufa_players.id (stable slug)

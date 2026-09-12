@@ -16,7 +16,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 
 // fantasy_league_* tables aren't in database.types.ts (wul_*/pul_* convention —
-// don't regenerate). Same loosened-.from() cast as src/lib/fantasy/server.ts.
+// don't regenerate), so .from() is loosened with a cast.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyQuery = { from: (table: string) => any };
 
