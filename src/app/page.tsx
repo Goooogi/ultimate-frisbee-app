@@ -54,7 +54,7 @@ import { HeroWfdfSlide } from '@/components/home/hero-wfdf-slide';
 import { getCurrentWfdfEvent } from '@/lib/wfdf/data';
 import { teamMeta, ALL_STAR_TEAM_META } from '@/lib/ufa/teams';
 import { LeaguesStrip } from '@/components/home/leagues-strip';
-import { StandingsStrip } from '@/components/home/standings-strip';
+import { ufaDivisionCards, pulStandingsCard, wulStandingsCard } from '@/components/home/standings-strip';
 import { RankingsCard } from '@/components/home/rankings-card';
 import { UpNextCards } from '@/components/home/up-next-card';
 import { RecentResultsCards } from '@/components/home/recent-results-card';
@@ -315,13 +315,19 @@ export default async function HomePage() {
     (card) => wfdfEventPhase(card, now).phase === 'complete',
   );
 
-  // PUL/WUL standings are read only for a completed season (cached readers),
-  // for the season whose final the playoff pickers resolved.
+  // PUL/WUL standings (cached readers) — for a COMPLETE season, the season
+  // whose final the playoff pickers resolved (the "Season complete" card);
+  // for an IN-SEASON league, the season the games feed is on (the "Top of the
+  // league" card). Dormant → no read.
   const pulSeason = pulRecentFour[0]?.game.season;
   const wulSeason = wulRecentFour[0]?.game.season;
+  const pulStandingsSeason =
+    pulPhase.phase === 'complete' ? pulSeason : pulPhase.phase === 'in-season' ? pulGames[0]?.season : undefined;
+  const wulStandingsSeason =
+    wulPhase.phase === 'complete' ? wulSeason : wulPhase.phase === 'in-season' ? wulGames[0]?.season : undefined;
   const [pulStandings, wulStandings] = await Promise.all([
-    pulPhase.phase === 'complete' && pulSeason ? getPulStandingsCached(pulSeason).catch(() => []) : [],
-    wulPhase.phase === 'complete' && wulSeason ? getWulStandingsCached(wulSeason).catch(() => []) : [],
+    pulStandingsSeason ? getPulStandingsCached(pulStandingsSeason).catch(() => []) : [],
+    wulStandingsSeason ? getWulStandingsCached(wulStandingsSeason).catch(() => []) : [],
   ]);
 
   const ufaSeasonNode =
@@ -367,11 +373,27 @@ export default async function HomePage() {
     wulGames: wulPhase.phase === 'in-season' ? wulRecentFour : [],
   });
 
-  // "Top of the league" — the standings feed carries its own season, so the
-  // eyebrow follows the data (not the calendar year) and a zeroed preseason
-  // table hides rather than showing 0-0 rows.
+  // "Top of the league" — every IN-SEASON league's current table (a finished
+  // league's table lives in its "Season complete" card instead). UFA: one
+  // card per division; PUL/WUL: one card each. The UFA feed carries its own
+  // season, so the eyebrow follows the data (not the calendar year) and a
+  // zeroed preseason table hides rather than showing 0-0 rows.
   const standingsYear = standings.length > 0 ? Math.max(...standings.map((s) => s.year)) : year;
-  const showStandings = standings.some((s) => s.wins + s.losses + s.ties > 0);
+  const showUfaStandings = ufaPhase.phase === 'in-season' && standings.some((s) => s.wins + s.losses + s.ties > 0);
+  const pulTopCard = pulPhase.phase === 'in-season' ? pulStandingsCard(pulStandings) : null;
+  const wulTopCard = wulPhase.phase === 'in-season' ? wulStandingsCard(wulStandings) : null;
+  const topOfLeagueCards = [
+    ...(showUfaStandings ? ufaDivisionCards(standings, teamStats) : []),
+    ...(pulTopCard ? [pulTopCard] : []),
+    ...(wulTopCard ? [wulTopCard] : []),
+  ];
+  const topOfLeagueLeagues = [
+    ...(showUfaStandings ? ['UFA'] : []),
+    ...(pulTopCard ? ['PUL'] : []),
+    ...(wulTopCard ? ['WUL'] : []),
+  ];
+  const topOfLeagueYear = showUfaStandings ? standingsYear : (pulStandingsSeason ?? wulStandingsSeason ?? year);
+  const topOfLeagueHref = showUfaStandings ? '/teams' : pulTopCard ? '/pul/teams' : '/wul/teams';
 
   // ── Build carousel slides (order: UFA → USAU → WFDF → PUL → WUL) ────────
   // Each builder returns null when the league has no current content; null
@@ -515,20 +537,21 @@ export default async function HomePage() {
       {/* 4. LEAGUE STANDINGS group — every league's current standing, together,
              in one vertical stack: UFA divisions → USAU rankings → PUL/WUL. */}
 
-      {/* 4a. "Top of the league" — UFA division cards */}
-      {showStandings && (
+      {/* 4a. "Top of the league" — in-season standings: UFA division cards
+             and/or the PUL and WUL tables. Absent when no league is running. */}
+      {topOfLeagueCards.length > 0 && (
         <div className="px-5 lg:px-10 pt-9 lg:pt-11">
           <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">
             <div>
               <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
-                UFA · {standingsYear}
+                {topOfLeagueLeagues.join(' · ')} · {topOfLeagueYear}
               </span>
               <h2 className="font-display italic font-bold text-[26px] lg:text-[34px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
                 Top of the league
               </h2>
             </div>
             <Link
-              href="/teams"
+              href={topOfLeagueHref}
               className="text-[11px] font-bold tracking-[0.12em] uppercase text-muted no-underline inline-flex items-center gap-1.5 hover:text-accent transition-colors whitespace-nowrap pb-[3px]"
             >
               Standings
@@ -537,7 +560,11 @@ export default async function HomePage() {
               </svg>
             </Link>
           </div>
-          <StandingsStrip standings={standings} teamStats={teamStats} />
+          <StandingsCarousel
+            cards={topOfLeagueCards.map((c) => c.node)}
+            labels={topOfLeagueCards.map((c) => c.label)}
+            ariaLabel="Standings"
+          />
         </div>
       )}
 

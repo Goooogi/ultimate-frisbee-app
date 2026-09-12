@@ -131,7 +131,7 @@ function FooterLink({ href, label }: { href: string; label: string }) {
   );
 }
 
-const rowClass = (i: number) => ['flex items-center gap-3 py-2.5', i === 0 ? '' : 'border-t border-hairline'].join(' ');
+const rowClass = (i: number) => ['flex items-center gap-3 py-2', i === 0 ? '' : 'border-t border-hairline'].join(' ');
 
 /** Round label column for score rows: "Final" / "Semi" / "3rd place". Kept
  *  to 48px — a 308px phone card (or a 3-across lg card with p-6) fits label +
@@ -341,7 +341,15 @@ export function UfaSeasonCompleteSection({ card }: { card: UfaSeasonCompleteCard
   );
 }
 
-// ─── PUL / WUL — playoffs, then the top of the final standings ───────────────
+// ─── PUL / WUL — playoffs, then the rest of the standings ─────────────────────
+// The score rows already show the four championship-weekend teams, so the
+// table below skips them and numbers from 5 (same rule as the UFA card —
+// Hunter, 2026-09-11: don't list a team twice).
+
+/** Team ids on either side of the playoff rows shown above the table. */
+function playoffTeamIds(games: Array<{ game: { away: { teamId: string }; home: { teamId: string } } }>): Set<string> {
+  return new Set(games.flatMap(({ game }) => [game.away.teamId, game.home.teamId]));
+}
 
 const PLAYOFF_LABEL = { final: 'Final', semifinal: 'Semi', third: '3rd place', regular: 'Regular' } as const;
 
@@ -359,8 +367,9 @@ export function PulSeasonCompleteSection({
   standings: PulStandingRow[];
 }) {
   const games = playoffs.filter((p) => p.round !== 'regular');
+  const shown = playoffTeamIds(games);
   // getPulStandings maps EVERY pul_teams row, so folded franchises sit at 0-0.
-  const rows = standings.filter((row) => row.wins + row.losses > 0);
+  const rows = standings.filter((row) => row.wins + row.losses > 0 && !shown.has(row.team.id));
   if (games.length === 0 || rows.length === 0) return null;
   return (
     <SeasonCardShell
@@ -399,7 +408,7 @@ export function PulSeasonCompleteSection({
         <StandingRow
           key={row.team.id}
           i={games.length + i}
-          rank={i + 1}
+          rank={i + 1 + shown.size}
           href={`/pul/teams/${row.team.id}`}
           mark={<PulTeamLogo team={row.team} size={24} />}
           name={row.team.name}
@@ -422,7 +431,9 @@ export function WulSeasonCompleteSection({
   standings: WulStandingRow[];
 }) {
   const games = playoffs.filter((p) => p.round !== 'regular');
-  if (games.length === 0 || standings.length === 0) return null;
+  const shown = playoffTeamIds(games);
+  const rows = standings.filter((row) => !shown.has(row.team.id));
+  if (games.length === 0 || rows.length === 0) return null;
   return (
     <SeasonCardShell
       eyebrow={`WUL · ${season} Season`}
@@ -454,11 +465,11 @@ export function WulSeasonCompleteSection({
           />
         );
       })}
-      {standings.map((row, i) => (
+      {rows.map((row, i) => (
         <StandingRow
           key={row.team.id}
           i={games.length + i}
-          rank={i + 1}
+          rank={i + 1 + shown.size}
           href={`/wul/teams/${row.team.id}`}
           mark={<WulTeamLogo team={row.team} size={24} />}
           name={row.team.name}
@@ -550,7 +561,9 @@ function shortDivisionLabel(name: string): string {
   return name
     .replace(/great grand master(s)?/i, 'GGM')
     .replace(/grand master(s)?/i, 'GM')
-    .replace(/\bmaster(s)?\b/i, 'Masters');
+    .replace(/\bmaster(s)?\b/i, 'Masters')
+    // "9-0 · Masters Women's" wrapped the record line; the possessive adds nothing.
+    .replace(/women's/i, 'Women');
 }
 
 const PODIUM_PILL: Record<2 | 3, string> = { 2: 'Runner-up', 3: '3rd' };
@@ -582,23 +595,39 @@ export function WfdfSeasonCompleteSection({ card }: { card: WfdfSeasonCompleteCa
         )
       }
     >
-      {groups.map((group, k) => (
-        <DivisionGroup key={group.division} i={k} label={shortDivisionLabel(group.division)}>
-          {group.rows.map((row, i) => {
-            const standing = row.finalStanding;
-            return (
-              <PlacementRow
-                key={row.teamId}
-                i={i}
-                mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
-                name={row.name}
-                record={row.record}
-                pill={standing === 1 ? <ChampionPill /> : <MutedPill>{PODIUM_PILL[standing]}</MutedPill>}
-              />
-            );
-          })}
-        </DivisionGroup>
-      ))}
+      {showPodium ? (
+        groups.map((group, k) => (
+          <DivisionGroup key={group.division} i={k} label={shortDivisionLabel(group.division)}>
+            {group.rows.map((row, i) => {
+              const standing = row.finalStanding;
+              return (
+                <PlacementRow
+                  key={row.teamId}
+                  i={i}
+                  mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
+                  name={row.name}
+                  record={row.record}
+                  pill={standing === 1 ? <ChampionPill /> : <MutedPill>{PODIUM_PILL[standing]}</MutedPill>}
+                />
+              );
+            })}
+          </DivisionGroup>
+        ))
+      ) : (
+        // Champions only (4+ divisions): one row per division with the
+        // division on the record line — a caption per single row doubled the
+        // card's height (WMUCC was the tallest card, 2026-09-11).
+        rows.map((row, i) => (
+          <PlacementRow
+            key={row.teamId}
+            i={i}
+            mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
+            name={row.name}
+            record={[row.record, shortDivisionLabel(row.division)].filter(Boolean).join(' · ')}
+            pill={<ChampionPill />}
+          />
+        ))
+      )}
     </SeasonCardShell>
   );
 }
