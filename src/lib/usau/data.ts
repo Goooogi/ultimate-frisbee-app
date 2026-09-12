@@ -1781,6 +1781,10 @@ export interface UsauMajorWithChampions {
      *  "Finalist" row. Absent for pool-record winners. */
     runnerUpName?: string;
     runnerUpId?: string;
+    /** Losers of the championship-bracket semifinals (tied 3rd — USAU plays
+     *  no 3rd-place game). The card's "Semis" row. Absent when no
+     *  championship semis were scraped. */
+    semifinalists?: Array<{ name: string; id: string }>;
   }>;
   /** Divisions whose championship final was cancelled with no champion (2026
    *  Vacationland washout). The card says "Final cancelled" instead of the
@@ -1840,20 +1844,23 @@ export async function recentUsauMajorsWithChampions(
 
   const eventIds = majorEvents.map((e) => e.id);
 
-  // 3. Fetch all round='final' games for these events.
-  const { data: finals } = await db
+  // 3. Fetch every semi + final for these events. Placement brackets carry
+  // round='final' too (13th/17th place at College Nationals), so bracket_name
+  // decides which one is the title game — see the loop below.
+  const { data: bracketGames } = await db
     .from('usau_games')
     .select(
-      'event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+      'event_id, round, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
         'team_a:usau_teams!team_a_id(name, gender_division), ' +
         'team_b:usau_teams!team_b_id(name, gender_division)',
     )
     .in('event_id', eventIds)
-    .eq('round', 'final');
+    .in('round', ['semi', 'final']);
 
   type TeamRef = { name: string; gender_division: string | null } | null;
   type Row = {
     event_id: string;
+    round: string;
     team_a_id: string | null;
     team_b_id: string | null;
     score_a: number | null;
@@ -1864,55 +1871,102 @@ export async function recentUsauMajorsWithChampions(
     team_b: TeamRef;
   };
 
-  // 4. Group champions by event_id.
-  const championsByEvent = new Map<string, UsauMajorWithChampions['champions']>();
-  // `${eventId}|${division}` pairs already settled by a bracket final — used to
-  // skip the pool-record fallback for divisions that DID play a bracket.
-  const decidedKeys = new Set<string>();
-  for (const g of (finals ?? []) as unknown as Row[]) {
-    if (g.score_a == null || g.score_b == null) continue;
-    if (g.team_a_id == null || g.team_b_id == null) continue;
-
-    const aWon = g.score_a > g.score_b;
-    const winnerId = aWon ? g.team_a_id : g.team_b_id;
-    const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
-    const runnerUpId = aWon ? g.team_b_id : g.team_a_id;
-    const runnerUpName = (aWon ? g.team_b?.name : g.team_a?.name) ?? undefined;
-
-    let division = (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
+  // Placement side brackets ("13th Place (tie)", "Fifth Place Bracket",
+  // consolation) also carry round='final'/'semi'. Same reject rule as
+  // recentUsauTournamentPage — without it the College card crowned the 13th-
+  // place winner (2026-09-11).
+  const isPlacementBracket = (name: string | null): boolean => {
+    const b = (name ?? '').toLowerCase();
+    if (/\b\d+(st|nd|rd|th)\b/.test(b) && !b.includes('1st')) return true;
+    if (/\b(third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|thirteenth|fifteenth|seventeenth)\b/.test(b)) return true;
+    return b.includes('consolation') || b.includes('placement');
+  };
+  const divisionOf = (g: Row, preferA: boolean): 'Men' | 'Women' | 'Mixed' | null => {
+    let division =
+      (preferA ? g.team_a?.gender_division : g.team_b?.gender_division) ??
+      g.team_a?.gender_division ??
+      g.team_b?.gender_division ??
+      null;
     if (!division) {
       const b = (g.bracket_name ?? '').toLowerCase();
       if (b.includes('mixed')) division = 'Mixed';
       else if (b.includes('women')) division = 'Women';
       else if (b.includes('men')) division = 'Men';
     }
-    if (!division) continue;
+    return division === 'Men' || division === 'Women' || division === 'Mixed' ? division : null;
+  };
 
-    if (!championsByEvent.has(g.event_id)) championsByEvent.set(g.event_id, []);
-    // Avoid duplicate divisions.
-    const existing = championsByEvent.get(g.event_id)!;
-    if (existing.some((c) => c.division === division)) continue;
-    existing.push({
-      division: division as 'Men' | 'Women' | 'Mixed',
-      teamName: winnerName,
-      teamId: winnerId,
-      runnerUpName,
-      runnerUpId,
-    });
-    decidedKeys.add(`${g.event_id}|${division}`);
+  // 4. Latest-scheduled decided championship final per (event, division) —
+  // the title game — plus the losers of that bracket's semis.
+  type Decided = {
+    teamName: string;
+    teamId: string;
+    runnerUpName?: string;
+    runnerUpId?: string;
+    scheduledAt: string;
+  };
+  const bestByKey = new Map<string, Decided>();
+  const semiLosersByKey = new Map<string, Array<{ name: string; id: string }>>();
+  for (const g of (bracketGames ?? []) as unknown as Row[]) {
+    if (isPlacementBracket(g.bracket_name)) continue;
+    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
+    if (g.team_a_id == null || g.team_b_id == null) continue;
+
+    const aWon = g.score_a > g.score_b;
+    const division = divisionOf(g, aWon);
+    if (!division) continue;
+    const key = `${g.event_id}|${division}`;
+    const loserId = aWon ? g.team_b_id : g.team_a_id;
+    const loserName = (aWon ? g.team_b?.name : g.team_a?.name) ?? undefined;
+
+    if (g.round === 'semi') {
+      if (!semiLosersByKey.has(key)) semiLosersByKey.set(key, []);
+      const losers = semiLosersByKey.get(key)!;
+      if (loserName && !losers.some((l) => l.id === loserId) && losers.length < 2) {
+        losers.push({ name: loserName, id: loserId });
+      }
+      continue;
+    }
+
+    const sched = g.scheduled_at ?? '';
+    const prev = bestByKey.get(key);
+    if (!prev || sched > prev.scheduledAt) {
+      bestByKey.set(key, {
+        teamName: (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown',
+        teamId: aWon ? g.team_a_id : g.team_b_id,
+        runnerUpName: loserName,
+        runnerUpId: loserId,
+        scheduledAt: sched,
+      });
+    }
   }
 
-  // 4b. Pool-record fallback — same rule as the /scores tab. Divisions that
-  // never played a bracket (pool-play-only, e.g. an event whose Women's bracket
-  // isn't scraped yet) get the unique best-pool-record team as de-facto winner,
-  // badged "Pool leader". Skips divisions already decided by a bracket final,
-  // and events that HAVE a championship bracket (its final just isn't decided
-  // or scraped yet) — same gate as recentUsauTournamentPage. Events here are
-  // already end_date < today, so only the bracket half is needed.
-  const eventsWithBracket = await eventsWithChampionshipBracket(db, eventIds);
-  const poolEligibleIds = eventIds.filter((id) => !eventsWithBracket.has(id));
-  const poolWinners =
-    poolEligibleIds.length > 0 ? await bestPoolRecordWinners(db, poolEligibleIds, decidedKeys) : [];
+  const championsByEvent = new Map<string, UsauMajorWithChampions['champions']>();
+  // `${eventId}|${division}` pairs already settled by a bracket final — used to
+  // skip the pool-record fallback for divisions that DID play a bracket.
+  const decidedKeys = new Set<string>();
+  for (const [key, v] of bestByKey) {
+    const [eventId, division] = key.split('|') as [string, 'Men' | 'Women' | 'Mixed'];
+    if (!championsByEvent.has(eventId)) championsByEvent.set(eventId, []);
+    const semis = semiLosersByKey.get(key);
+    championsByEvent.get(eventId)!.push({
+      division,
+      teamName: v.teamName,
+      teamId: v.teamId,
+      runnerUpName: v.runnerUpName,
+      runnerUpId: v.runnerUpId,
+      ...(semis && semis.length > 0 ? { semifinalists: semis } : {}),
+    });
+    decidedKeys.add(key);
+  }
+
+  // 4b. Pool-record fallback — same rule as the /scores tab. Every event here
+  // is officially over (end_date < today), so any division WITHOUT a decided
+  // championship final gets the unique best-pool-record team as its de-facto
+  // winner (Hunter, 2026-09-11) — pool-play-only divisions, and divisions
+  // whose bracket final was never scraped. Divisions decided by a bracket are
+  // skipped via decidedKeys; a tie for first yields nothing.
+  const poolWinners = await bestPoolRecordWinners(db, eventIds, decidedKeys);
   for (const w of poolWinners) {
     if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
     championsByEvent.get(w.eventId)!.push({
@@ -2400,12 +2454,13 @@ export async function recentUsauTournamentPage(
   // leader would misrepresent a bracket that reached its final.
   const decidedKeys = new Set([...best.keys(), ...cancelledKeys]);
 
-  // No "Pool leader" when a championship bracket exists (its final just hasn't
-  // been decided/scraped yet) or the event is still in play — a Saturday pool
-  // leader is not a result.
-  const eventsWithBracket = await eventsWithChampionshipBracket(db, eventIds);
+  // No "Pool leader" while the event is still in play — a Saturday pool leader
+  // is not a result. Once an event is officially over (end_date < today) every
+  // division without a decided championship final gets its pool leader, even
+  // when a bracket exists whose final was never scraped (Hunter, 2026-09-11;
+  // matches the home "Recent results" reader).
   const poolEligibleIds = recent
-    .filter((e) => !eventsWithBracket.has(e.id) && e.end_date != null && e.end_date < today)
+    .filter((e) => e.end_date != null && e.end_date < today)
     .map((e) => e.id);
   const poolWinners =
     poolEligibleIds.length > 0 ? await bestPoolRecordWinners(db, poolEligibleIds, decidedKeys) : [];
@@ -2474,34 +2529,6 @@ export async function recentUsauTournamentPage(
     page: safePage,
     pageCount,
   };
-}
-
-/**
- * Events (of `eventIds`) that have at least one CHAMPIONSHIP-bracket game in
- * a tree round. Paged: bracket rows across a page of events can exceed
- * PostgREST's 1000-row cap. (Ported from mobile — keep in sync.)
- */
-async function eventsWithChampionshipBracket(
-  db: Awaited<ReturnType<typeof supabase>>,
-  eventIds: string[],
-): Promise<Set<string>> {
-  const PAGE = 1000;
-  const out = new Set<string>();
-  for (let from = 0; ; from += PAGE) {
-    const { data: page } = await db
-      .from('usau_games')
-      .select('id, event_id, bracket_name')
-      .in('event_id', eventIds)
-      .in('round', ['prequarter', 'quarter', 'semi', 'final'])
-      .order('id', { ascending: true })
-      .range(from, from + PAGE - 1);
-    const rows = page ?? [];
-    for (const r of rows) {
-      if (isChampionshipBracketName(r.bracket_name)) out.add(r.event_id);
-    }
-    if (rows.length < PAGE) break;
-  }
-  return out;
 }
 
 /**
@@ -3688,6 +3715,10 @@ export interface UsauEventSummary {
   endDate: string | null;
   city: string | null;
   state: string | null;
+  /** IANA zone the scraper resolved for game times (from `state`, or inferred
+   *  from the entrant teams when USAU lists the venue as "TBD"). Pass
+   *  `venueTz ?? state` to the venue-tz formatters. */
+  venueTz: string | null;
   /** Venue name derived from game field names. Null on ~48% of events (games
    *  that store only a bare "Field 3"); the UI renders nothing in that case. */
   venue: string | null;
@@ -3844,7 +3875,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
   const slugPattern = slug.replace(/[%_\\]/g, (c) => `\\${c}`);
   const { data: event, error } = await db
     .from('usau_events')
-    .select('id, usau_slug, name, season, start_date, end_date, city, state, venue, competition_level, url')
+    .select('id, usau_slug, name, season, start_date, end_date, city, state, venue_tz, venue, competition_level, url')
     .ilike('usau_slug', slugPattern)
     .maybeSingle();
   if (error) throw error;
@@ -3917,6 +3948,7 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
     endDate: event.end_date,
     city: event.city,
     state: event.state,
+    venueTz: event.venue_tz ?? null,
     venue: event.venue ?? null,
     competitionLevel: event.competition_level,
     url: event.url ?? null,

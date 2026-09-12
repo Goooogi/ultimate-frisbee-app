@@ -3241,6 +3241,7 @@ export type Database = {
           updated_at: string
           url: string | null
           venue: string | null
+          venue_tz: string | null
           usau_event_id: number | null
           usau_slug: string
         }
@@ -3262,6 +3263,7 @@ export type Database = {
           updated_at?: string
           url?: string | null
           venue?: string | null
+          venue_tz?: string | null
           usau_event_id?: number | null
           usau_slug: string
         }
@@ -3283,6 +3285,7 @@ export type Database = {
           updated_at?: string
           url?: string | null
           venue?: string | null
+          venue_tz?: string | null
           usau_event_id?: number | null
           usau_slug?: string
         }

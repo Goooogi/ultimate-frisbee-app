@@ -40,10 +40,24 @@ const STATE_TO_TZ: Record<string, string> = {
   AK: 'America/Anchorage', HI: 'Pacific/Honolulu',
 };
 
-/** IANA timezone for a US state code, or null when unknown. */
-export function venueTimeZone(state: string | null | undefined): string | null {
-  if (!state) return null;
-  return STATE_TO_TZ[state.trim().toUpperCase()] ?? null;
+/** IANA timezone for a venue key — a US state code, or an IANA zone the
+ *  scraper already resolved (usau_events.venue_tz, inferred from the entrant
+ *  teams when USAU lists the venue as "TBD"). Null when unknown. Callers pass
+ *  `event.venueTz ?? event.state`. */
+export function venueTimeZone(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const k = key.trim();
+  if (k.includes('/')) {
+    // Only the scraper writes venue_tz (from a fixed map), but an unknown
+    // zone would throw RangeError inside a server render — validate first.
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: k });
+      return k;
+    } catch {
+      return null;
+    }
+  }
+  return STATE_TO_TZ[k.toUpperCase()] ?? null;
 }
 
 /** "Sat 8/22" — the date portion only, in the venue's wall clock. For the

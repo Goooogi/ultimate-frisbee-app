@@ -1,15 +1,15 @@
 // "Season complete" cards — one per league whose season-phase is `complete`
 // (see src/lib/home/season-phase.ts). They share ONE shell (h-full flex-col,
-// content top, footer pinned to the bottom) and converge on ROW_BUDGET rows,
-// so the carousel/grid (StandingsCarousel, which stretches items) shows every
-// card at the same height with no ragged whitespace:
+// content top, footer pinned to the bottom); the carousel/grid
+// (StandingsCarousel) stretches every card in a row to the tallest, so each
+// card shows its FULL content rather than trimming to a row budget (Hunter,
+// 2026-09-11 — a trimmed card just read as dead space):
 //
-//   UFA        all playoff games newest first (final → semis → divisional) ≈ 7
-//   PUL / WUL  championship + semifinals, then the top-5 final standings  = 8
-//   USAU       champion + finalist per division (Club Nationals 3×2 = 6;
-//              College D-I/D-III 4×2 = 8)
+//   UFA        championship + semifinals, then every team of the title year
+//   PUL / WUL  championship + semifinals (+ WUL 3rd place), then every team
+//   USAU       champion / finalist / semifinalists per division
 //   WFDF       top-3 per division when ≤ 3 divisions (WUCC/WJUC = 9), else the
-//              champion per division capped at ROW_BUDGET with "+N more"
+//              champion per division capped at WFDF_MAX_CHAMPION_ROWS + "+N more"
 
 import Link from 'next/link';
 import type { PulStandingRow } from '@/lib/pul/data';
@@ -28,12 +28,10 @@ import type {
   WfdfSeasonCompleteCard,
 } from '@/lib/home/season-complete';
 
-/** Rows a card aims for so heights converge across the row/carousel. */
-const ROW_BUDGET = 8;
-/** Standings rows under the three PUL/WUL playoff rows. */
-const STANDINGS_ROWS = ROW_BUDGET - 3;
 /** Above this many divisions a WFDF card shows champions only. */
 const WFDF_TOP3_MAX_DIVISIONS = 3;
+/** Champions-only WFDF cards cap here with a "+N more divisions" footer. */
+const WFDF_MAX_CHAMPION_ROWS = 8;
 
 // ─── Shared chrome ───────────────────────────────────────────────────────────
 
@@ -106,7 +104,7 @@ function SeasonCardShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="h-full flex flex-col bg-surface rounded-card-lg shadow-card p-5 lg:p-7">
+    <div className="h-full flex flex-col bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
       <Link href={href} className="block no-underline group">
         <StandingsCardHeader eyebrow={eyebrow} title="Season Complete" />
         {subtitle && (
@@ -135,10 +133,16 @@ function FooterLink({ href, label }: { href: string; label: string }) {
 
 const rowClass = (i: number) => ['flex items-center gap-3 py-2.5', i === 0 ? '' : 'border-t border-hairline'].join(' ');
 
-/** Label column: "Championship" / "D-I Women" / "GGM Mixed". */
-function RowLabel({ children }: { children: React.ReactNode }) {
+/** Round label column for score rows: "Final" / "Semi" / "3rd place". Kept
+ *  to 48px — a 308px phone card (or a 3-across lg card with p-6) fits label +
+ *  two 22px marks + abbrs + a two-digit score with ~9px to spare, which is also
+ *  why the final's trophy is the label's accent colour rather than a separate
+ *  icon (it overlapped "OAK", 2026-09-11). Measure before widening anything. */
+function RowLabel({ children, accent = false }: { children: React.ReactNode; accent?: boolean }) {
   return (
-    <span className="font-tight text-[9px] font-bold tracking-[0.1em] uppercase text-faint w-[72px] leading-tight flex-shrink-0">
+    <span
+      className={`font-tight text-[9px] font-bold tracking-[0.1em] uppercase w-[48px] leading-tight flex-shrink-0 ${accent ? 'text-accent' : 'text-faint'}`}
+    >
       {children}
     </span>
   );
@@ -173,7 +177,7 @@ function PlayoffScoreRow({
   const side = (win: boolean) => (win ? 'opacity-100' : 'opacity-55');
   return (
     <Link href={href} className={`${rowClass(i)} hover:opacity-80 transition-opacity`}>
-      <RowLabel>{label}</RowLabel>
+      <RowLabel accent={champion}>{label}</RowLabel>
       <div className="flex-1 min-w-0 flex items-center gap-1.5">
         <span className={`inline-flex rounded-full overflow-hidden flex-shrink-0 ${side(awayWin)}`}>{awayMark}</span>
         <span className={`font-sans font-bold text-[13px] text-ink flex-shrink-0 ${side(awayWin)}`}>{awayAbbr}</span>
@@ -181,17 +185,13 @@ function PlayoffScoreRow({
         <span className={`inline-flex rounded-full overflow-hidden flex-shrink-0 ${side(!awayWin)}`}>{homeMark}</span>
         <span className={`font-sans font-bold text-[13px] text-ink flex-shrink-0 ${side(!awayWin)}`}>{homeAbbr}</span>
       </div>
-      {champion ? (
-        <span className="text-accent flex-shrink-0">
-          <TrophyIcon />
-        </span>
-      ) : null}
       <ScoreDuo awayScore={awayScore} homeScore={homeScore} awayWin={awayWin} />
     </Link>
   );
 }
 
-/** Standings row (PUL/WUL top-5): rank, logo, name + record, champion pill. */
+/** Standings row (UFA/PUL/WUL): rank, logo, name + record, champion pill.
+ *  `meta` is an optional trailing note on the record line (UFA division). */
 function StandingRow({
   i,
   rank,
@@ -200,6 +200,7 @@ function StandingRow({
   name,
   record,
   pointDiff,
+  meta,
   champion,
 }: {
   i: number;
@@ -208,7 +209,8 @@ function StandingRow({
   mark: React.ReactNode;
   name: string;
   record: string;
-  pointDiff: number;
+  pointDiff?: number;
+  meta?: string;
   champion: boolean;
 }) {
   return (
@@ -222,12 +224,13 @@ function StandingRow({
           <div className="font-sans font-bold text-[14px] leading-tight text-ink truncate">{name}</div>
           <div className="font-mono text-[10.5px] text-faint mt-0.5 tabular">
             {record}
-            {pointDiff !== 0 && (
+            {pointDiff != null && pointDiff !== 0 && (
               <span className="ml-1">
                 · {pointDiff > 0 ? '+' : ''}
                 {pointDiff}
               </span>
             )}
+            {meta && <span className="ml-1">· {meta}</span>}
           </div>
         </div>
         {champion && <ChampionPill />}
@@ -236,17 +239,27 @@ function StandingRow({
   );
 }
 
-/** Champion/finalist/podium row: label, mark, name + record, pill. */
+/** A division's placement rows under a caption line ("D-I Men", "GGM Mixed").
+ *  A caption instead of a label COLUMN: at phone width the 72px column plus
+ *  the pill left ~50px for the team name ("Mas…"), 2026-09-11. */
+function DivisionGroup({ i, label, children }: { i: number; label: string; children: React.ReactNode }) {
+  return (
+    <div className={i === 0 ? '' : 'border-t border-hairline mt-1'}>
+      <div className="pt-3 pb-0.5 font-tight text-[9px] font-bold tracking-[0.1em] uppercase text-faint">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+/** Champion/finalist/podium row: mark, name + record, pill. */
 function PlacementRow({
   i,
-  label,
   mark,
   name,
   record,
   pill,
 }: {
   i: number;
-  label: React.ReactNode;
   mark: React.ReactNode;
   name: string;
   record: string | null;
@@ -254,7 +267,6 @@ function PlacementRow({
 }) {
   return (
     <div className={rowClass(i)}>
-      <RowLabel>{label}</RowLabel>
       <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">{mark}</span>
       <div className="flex-1 min-w-0">
         <div className="font-sans font-bold text-[14px] leading-tight text-ink truncate">{name}</div>
@@ -265,23 +277,31 @@ function PlacementRow({
   );
 }
 
-// ─── UFA — the full playoff bracket ──────────────────────────────────────────
+// ─── UFA — championship + semis, then the rest of the playoff field ─────────
+// Same shape as PUL/WUL; the table skips the four teams already in the score
+// rows and numbers from 5. Falls back to the full bracket (incl. the
+// divisional round) when the standings feed has already rolled to the next
+// season.
 
 const UFA_ROUND_LABEL: Record<UfaSeasonCompleteCard['playoffGames'][number]['round'], string> = {
-  championship: 'Championship',
-  semifinal: 'Semifinal',
+  championship: 'Final',
+  semifinal: 'Semi',
   divisional: 'Div. round',
 };
 
 export function UfaSeasonCompleteSection({ card }: { card: UfaSeasonCompleteCard | null }) {
   if (!card) return null;
+  const hasStandings = card.standingsRows.length > 0;
+  const games = hasStandings
+    ? card.playoffGames.filter((p) => p.round !== 'divisional')
+    : card.playoffGames;
   return (
     <SeasonCardShell
       eyebrow={`UFA · ${card.year}`}
       href={`/teams/${card.championTeamID}`}
-      footer={<FooterLink href={`/schedule?year=${card.year}`} label="Full schedule" />}
+      footer={<FooterLink href={hasStandings ? '/teams' : `/schedule?year=${card.year}`} label={hasStandings ? 'Full standings' : 'Full schedule'} />}
     >
-      {card.playoffGames.slice(0, ROW_BUDGET).map(({ game, round }, i) => {
+      {games.map(({ game, round }, i) => {
         const away = teamMeta(game.awayTeamID);
         const home = teamMeta(game.homeTeamID);
         return (
@@ -290,13 +310,30 @@ export function UfaSeasonCompleteSection({ card }: { card: UfaSeasonCompleteCard
             i={i}
             label={UFA_ROUND_LABEL[round]}
             href={`/g/${game.gameID}`}
-            awayMark={<TeamLogo team={away} size={24} />}
-            homeMark={<TeamLogo team={home} size={24} />}
+            awayMark={<TeamLogo team={away} size={22} />}
+            homeMark={<TeamLogo team={home} size={22} />}
             awayAbbr={away.abbr}
             homeAbbr={home.abbr}
             awayScore={game.awayScore}
             homeScore={game.homeScore}
             champion={round === 'championship'}
+          />
+        );
+      })}
+      {card.standingsRows.map((row, i) => {
+        const meta = teamMeta(row.teamID);
+        const record = row.ties > 0 ? `${row.wins}-${row.losses}-${row.ties}` : `${row.wins}-${row.losses}`;
+        return (
+          <StandingRow
+            key={row.teamID}
+            i={games.length + i}
+            rank={i + 1 + card.championshipWeekendTeams}
+            href={`/teams/${row.teamID}`}
+            mark={<TeamLogo team={meta} size={24} />}
+            name={meta.name ?? row.teamName.split(' ').slice(-1).join(' ')}
+            record={record}
+            meta={row.divisionName ?? undefined}
+            champion={row.teamID === card.championTeamID}
           />
         );
       })}
@@ -306,7 +343,7 @@ export function UfaSeasonCompleteSection({ card }: { card: UfaSeasonCompleteCard
 
 // ─── PUL / WUL — playoffs, then the top of the final standings ───────────────
 
-const PLAYOFF_LABEL = { final: 'Championship', semifinal: 'Semifinal', regular: 'Regular' } as const;
+const PLAYOFF_LABEL = { final: 'Final', semifinal: 'Semi', third: '3rd place', regular: 'Regular' } as const;
 
 function encodeGameId(id: string): string {
   return id.split('/').map(encodeURIComponent).join('/');
@@ -322,7 +359,9 @@ export function PulSeasonCompleteSection({
   standings: PulStandingRow[];
 }) {
   const games = playoffs.filter((p) => p.round !== 'regular');
-  if (games.length === 0 || standings.length === 0) return null;
+  // getPulStandings maps EVERY pul_teams row, so folded franchises sit at 0-0.
+  const rows = standings.filter((row) => row.wins + row.losses > 0);
+  if (games.length === 0 || rows.length === 0) return null;
   return (
     <SeasonCardShell
       eyebrow={`PUL · ${season} Season`}
@@ -356,7 +395,7 @@ export function PulSeasonCompleteSection({
           />
         );
       })}
-      {standings.slice(0, STANDINGS_ROWS).map((row, i) => (
+      {rows.map((row, i) => (
         <StandingRow
           key={row.team.id}
           i={games.length + i}
@@ -415,7 +454,7 @@ export function WulSeasonCompleteSection({
           />
         );
       })}
-      {standings.slice(0, STANDINGS_ROWS).map((row, i) => (
+      {standings.map((row, i) => (
         <StandingRow
           key={row.team.id}
           i={games.length + i}
@@ -444,7 +483,6 @@ export function UsauSeasonCompleteSection({ card }: { card: UsauSeasonCompleteCa
   const genderOf = (division: string) => division.replace(/^D-I{1,3}\s+/, '');
   const levelOf = (division: string): string =>
     /^D-III\b/.test(division) ? 'COLLEGE_D3' : /^D-I\b/.test(division) ? 'COLLEGE_D1' : 'CLUB';
-  let i = 0;
   return (
     <SeasonCardShell
       eyebrow={`USAU · ${card.season}`}
@@ -452,32 +490,53 @@ export function UsauSeasonCompleteSection({ card }: { card: UsauSeasonCompleteCa
       href={href}
       footer={<FooterLink href={href} label="Full bracket" />}
     >
-      {card.champions.map((row) => {
+      {card.champions.map((row, k) => {
         const gender = genderOf(row.division);
         const level = levelOf(row.division);
-        const champ = (
-          <PlacementRow
-            key={`${row.division}-${row.teamId}`}
-            i={i++}
-            label={row.division}
-            mark={<UsauTeamLogo name={row.teamName} genderDivision={gender} competitionLevel={level} size={22} />}
-            name={row.teamName}
-            record={null}
-            pill={<ChampionPill />}
-          />
+        // USAU plays no 3rd-place game — both semi losers tie for 3rd, so one
+        // row names them both (two overlapping marks).
+        const semis = row.semifinalists ?? [];
+        let i = 0;
+        return (
+          <DivisionGroup key={row.division} i={k} label={row.division}>
+            <PlacementRow
+              key={`${row.division}-${row.teamId}`}
+              i={i++}
+              mark={<UsauTeamLogo name={row.teamName} genderDivision={gender} competitionLevel={level} size={22} />}
+              name={row.teamName}
+              record={null}
+              pill={<ChampionPill />}
+            />
+            {row.runnerUpName && (
+              <PlacementRow
+                key={`${row.division}-${row.runnerUpId ?? row.runnerUpName}`}
+                i={i++}
+                mark={<UsauTeamLogo name={row.runnerUpName} genderDivision={gender} competitionLevel={level} size={22} />}
+                name={row.runnerUpName}
+                record={null}
+                pill={<MutedPill>Finalist</MutedPill>}
+              />
+            )}
+            {semis.length > 0 && (
+              <PlacementRow
+                key={`${row.division}-semis`}
+                i={i++}
+                mark={
+                  <span className="inline-flex items-center">
+                    {semis.map((s, j) => (
+                      <span key={s.id} className={`inline-flex rounded-full overflow-hidden ${j > 0 ? '-ml-2' : ''}`}>
+                        <UsauTeamLogo name={s.name} genderDivision={gender} competitionLevel={level} size={18} />
+                      </span>
+                    ))}
+                  </span>
+                }
+                name={semis.map((s) => s.name).join(' · ')}
+                record={null}
+                pill={<MutedPill>Semis</MutedPill>}
+              />
+            )}
+          </DivisionGroup>
         );
-        const finalist = row.runnerUpName ? (
-          <PlacementRow
-            key={`${row.division}-${row.runnerUpId ?? row.runnerUpName}`}
-            i={i++}
-            label=""
-            mark={<UsauTeamLogo name={row.runnerUpName} genderDivision={gender} competitionLevel={level} size={22} />}
-            name={row.runnerUpName}
-            record={null}
-            pill={<MutedPill>Finalist</MutedPill>}
-          />
-        ) : null;
-        return [champ, finalist];
       })}
     </SeasonCardShell>
   );
@@ -500,8 +559,15 @@ export function WfdfSeasonCompleteSection({ card }: { card: WfdfSeasonCompleteCa
   if (card.champions.length === 0) return null;
   const href = `/wfdf/events/${card.slug}`;
   const showPodium = card.divisionCount <= WFDF_TOP3_MAX_DIVISIONS;
-  const rows = showPodium ? card.placements : card.champions.slice(0, ROW_BUDGET);
+  const rows = showPodium ? card.placements : card.champions.slice(0, WFDF_MAX_CHAMPION_ROWS);
   const overflow = showPodium ? 0 : card.champions.length - rows.length;
+  // Rows arrive division-ordered; bucket consecutive rows of one division.
+  const groups: Array<{ division: string; rows: typeof rows }> = [];
+  for (const row of rows) {
+    const last = groups[groups.length - 1];
+    if (last && last.division === row.division) last.rows.push(row);
+    else groups.push({ division: row.division, rows: [row] });
+  }
 
   return (
     <SeasonCardShell
@@ -516,20 +582,23 @@ export function WfdfSeasonCompleteSection({ card }: { card: WfdfSeasonCompleteCa
         )
       }
     >
-      {rows.map((row, i) => {
-        const standing = row.finalStanding;
-        return (
-          <PlacementRow
-            key={row.teamId}
-            i={i}
-            label={standing === 1 ? shortDivisionLabel(row.division) : ''}
-            mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
-            name={row.name}
-            record={row.record}
-            pill={standing === 1 ? <ChampionPill /> : <MutedPill>{PODIUM_PILL[standing]}</MutedPill>}
-          />
-        );
-      })}
+      {groups.map((group, k) => (
+        <DivisionGroup key={group.division} i={k} label={shortDivisionLabel(group.division)}>
+          {group.rows.map((row, i) => {
+            const standing = row.finalStanding;
+            return (
+              <PlacementRow
+                key={row.teamId}
+                i={i}
+                mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
+                name={row.name}
+                record={row.record}
+                pill={standing === 1 ? <ChampionPill /> : <MutedPill>{PODIUM_PILL[standing]}</MutedPill>}
+              />
+            );
+          })}
+        </DivisionGroup>
+      ))}
     </SeasonCardShell>
   );
 }

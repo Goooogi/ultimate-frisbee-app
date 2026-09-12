@@ -725,7 +725,7 @@ function DivisionContent({
                   competitionLevel={level || event.competitionLevel}
                   records={poolRecords}
                   games={poolGames.get(pool.name) ?? []}
-                  venueState={event.state}
+                  venueState={event.venueTz ?? event.state}
                 />
               ))}
             </div>
@@ -743,7 +743,7 @@ function DivisionContent({
                   key={pool.name}
                   poolName={bracketLabel(pool.name)}
                   games={poolGames.get(pool.name) ?? []}
-                  venueState={event.state}
+                  venueState={event.venueTz ?? event.state}
                 />
               ))}
             </div>
@@ -762,7 +762,7 @@ function DivisionContent({
                   </h2>
                   <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                     {grp.games.map((g) => (
-                      <GameRow key={g.id} game={g} venueState={event.state} />
+                      <GameRow key={g.id} game={g} venueState={event.venueTz ?? event.state} />
                     ))}
                   </ul>
                 </section>
@@ -779,7 +779,7 @@ function DivisionContent({
           teams={teams}
           placementBrackets={placementBrackets}
           bracketLabel={bracketLabel}
-          venueState={event.state}
+          venueState={event.venueTz ?? event.state}
         />
       )}
 
@@ -1381,7 +1381,10 @@ function PoolScheduleTable({
             {games.map((g) => {
               const status = g.status.toLowerCase();
               const isCancelled = status === 'cancelled';
-              const hasScore = g.scoreA != null && g.scoreB != null;
+              // Rows scraped before 2026-09-11 store USAU's unplayed "0 - 0"
+              // placeholder as a real score; a scheduled 0-0 is not a result.
+              const hasScore =
+                g.scoreA != null && g.scoreB != null && !(g.scoreA === 0 && g.scoreB === 0 && status === 'scheduled');
               const isFinal = hasScore || status === 'final';
               const aWon = hasScore && isFinal && (g.scoreA ?? 0) > (g.scoreB ?? 0);
               const bWon = hasScore && isFinal && (g.scoreB ?? 0) > (g.scoreA ?? 0);
@@ -1471,7 +1474,10 @@ function GameRow({
   // Mobile parity (GameCard): a game is FINAL when scores are present or its
   // status is final — not by the raw status string, which can leak values
   // like 'in_progress' straight into the UI.
-  const hasScore = game.scoreA != null && game.scoreB != null;
+  // A scheduled 0-0 is USAU's unplayed placeholder (rows scraped before
+  // 2026-09-11 still carry it), not a result.
+  const hasScore =
+    game.scoreA != null && game.scoreB != null && !(game.scoreA === 0 && game.scoreB === 0 && status === 'scheduled');
   const isFinal = hasScore || status === 'final';
   const aWon = hasScore && isFinal && (game.scoreA ?? 0) > (game.scoreB ?? 0);
   const bWon = hasScore && isFinal && (game.scoreB ?? 0) > (game.scoreA ?? 0);

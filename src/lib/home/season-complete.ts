@@ -143,12 +143,32 @@ export async function getWfdfSeasonCompleteCards(now: Date = new Date()): Promis
 // is decided — ufaPlayoffGames requires a structural bracket, so a
 // regular-season final can never be mistaken for a championship.
 
+export interface UfaStandingsRow {
+  teamID: string;
+  teamName: string;
+  wins: number;
+  losses: number;
+  ties: number;
+  pointDiff: number;
+  divisionName: string | null;
+}
+
 export interface UfaSeasonCompleteCard {
   year: number;
   championTeamID: string;
   runnerUpTeamID: string;
   /** Newest first: championship → semifinals → divisional round. ≤ 7 rows. */
   playoffGames: UfaPlayoffGame[];
+  /** The playoff teams that did NOT reach championship weekend (8 in 2026),
+   *  ranked wins → point diff (the same tiebreak as the "Top of the league"
+   *  strip). The final + semis rows above already show the top four, and the
+   *  whole league (24 rows) made every other card stretch to match (Hunter,
+   *  2026-09-11). Empty once the standings feed has rolled to the next
+   *  season — the card then shows the bracket only. */
+  standingsRows: UfaStandingsRow[];
+  /** Teams in the final + semis rows — the rank numbering below starts after
+   *  them. */
+  championshipWeekendTeams: number;
   recordFor: (teamID: string) => string | null;
 }
 
@@ -171,11 +191,32 @@ export function getUfaSeasonCompleteCard(
     return s.ties > 0 ? `${s.wins}-${s.losses}-${s.ties}` : `${s.wins}-${s.losses}`;
   };
 
+  const playoffTeamIDs = new Set(playoffGames.flatMap((p) => [p.game.awayTeamID, p.game.homeTeamID]));
+  const weekendTeamIDs = new Set(
+    playoffGames
+      .filter((p) => p.round !== 'divisional')
+      .flatMap((p) => [p.game.awayTeamID, p.game.homeTeamID]),
+  );
+  const standingsRows: UfaStandingsRow[] = standings
+    .filter((s) => s.year === year && playoffTeamIDs.has(s.teamID) && !weekendTeamIDs.has(s.teamID))
+    .map((s) => ({
+      teamID: s.teamID,
+      teamName: s.teamName,
+      wins: s.wins,
+      losses: s.losses,
+      ties: s.ties,
+      pointDiff: s.pointDiff,
+      divisionName: s.divisionName ?? null,
+    }))
+    .sort((a, b) => b.wins - a.wins || b.pointDiff - a.pointDiff);
+
   return {
     year,
     championTeamID: championWon ? finalGame.awayTeamID : finalGame.homeTeamID,
     runnerUpTeamID: championWon ? finalGame.homeTeamID : finalGame.awayTeamID,
     playoffGames,
+    standingsRows,
+    championshipWeekendTeams: weekendTeamIDs.size,
     recordFor,
   };
 }
@@ -188,6 +229,9 @@ export interface UsauChampionEntry {
   teamId: string;
   runnerUpName?: string;
   runnerUpId?: string;
+  /** Losers of the championship-bracket semifinals (tied 3rd; USAU plays no
+   *  3rd-place game) — the card's "Semis" row. */
+  semifinalists?: Array<{ name: string; id: string }>;
 }
 
 export interface UsauSeasonCompleteCard {
@@ -217,6 +261,7 @@ export function getUsauSeasonCompleteCard(majors: UsauMajorWithChampions[]): Usa
       teamId: c.teamId,
       runnerUpName: c.runnerUpName,
       runnerUpId: c.runnerUpId,
+      semifinalists: c.semifinalists,
     })),
   };
 }
@@ -247,6 +292,7 @@ export function getUsauCollegeSeasonCompleteCard(
         teamId: c.teamId,
         runnerUpName: c.runnerUpName,
         runnerUpId: c.runnerUpId,
+        semifinalists: c.semifinalists,
         gender: c.division,
       })),
     )
@@ -255,12 +301,13 @@ export function getUsauCollegeSeasonCompleteCard(
         (LEVEL_ORDER[a.level] ?? 9) - (LEVEL_ORDER[b.level] ?? 9) ||
         (DIV_ORDER[a.gender] ?? 9) - (DIV_ORDER[b.gender] ?? 9),
     )
-    .map(({ division, teamName, teamId, runnerUpName, runnerUpId }) => ({
+    .map(({ division, teamName, teamId, runnerUpName, runnerUpId, semifinalists }) => ({
       division,
       teamName,
       teamId,
       runnerUpName,
       runnerUpId,
+      semifinalists,
     }));
 
   const anchor = thisSeason.find((m) => levelOf(m.name) === 'D-I') ?? thisSeason[0];

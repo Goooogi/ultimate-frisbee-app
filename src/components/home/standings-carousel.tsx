@@ -16,6 +16,14 @@
 // scroll/dots chrome is client. Both layouts stretch items, so a card shell
 // with `h-full` fills its row: every card in a row (or in the swipe track) is
 // the same height regardless of its row count.
+//
+// The mobile card wrapper must stay a BLOCK (not `flex`): the card shells
+// carry no width, so as flex children they size to content — short cards
+// shrink to ~55% and long-name cards (WFDF, Recent results) bleed off-screen
+// (2026-09-11). `h-full` on the card still resolves because the wrapper is a
+// stretched flex item of the track. `min-w-0` is required too: a flex item's
+// default min-width is its content's min-content, so a card with long
+// non-wrapping names would widen its wrapper past the 88% basis.
 
 import { useRef, useState, useCallback } from 'react';
 import type { ReactNode } from 'react';
@@ -96,50 +104,57 @@ export function StandingsCarousel({
   return (
     <>
       {/* ── MOBILE: swipeable scroll-snap carousel ── */}
-      <div className="sm:hidden">
-        <div
-          ref={trackRef}
-          onScroll={onScroll}
-          className={[
-            'flex items-stretch gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth no-scrollbar',
-            // Negative margin + padding so the first/last cards can center with
-            // a peek of the neighbour, while the track still bleeds to the
-            // section's edges.
-            '-mx-5 px-5 pb-1',
-          ].join(' ')}
-          style={{ scrollbarWidth: 'none' }}
-        >
-          {cards.map((card, i) => (
-            <div key={i} className="snap-center shrink-0 basis-[88%] flex">
-              {card}
-            </div>
-          ))}
-        </div>
-
-        {/* Dots — one per card, active tracks the swiped-to card. */}
-        {count > 1 && (
-          <div className="mt-3 flex items-center justify-center gap-2" role="tablist" aria-label={ariaLabel}>
-            {labels.map((label, i) => {
-              const on = i === active;
-              return (
-                <button
-                  key={`${label}-${i}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={on}
-                  aria-label={label}
-                  onClick={() => scrollToCard(i)}
-                  className={[
-                    'h-2 rounded-full transition-all duration-200 cursor-pointer',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                    on ? 'w-5 bg-accent' : 'w-2 bg-ink/20 hover:bg-ink/30',
-                  ].join(' ')}
-                />
-              );
-            })}
+      {/* A lone card is not a carousel: render it full width so it lines up
+          with the page's other single cards (Rankings) instead of sitting at
+          the 88% swipe basis, shifted left (Hunter, 2026-09-11). */}
+      {count === 1 ? (
+        <div className="sm:hidden">{cards[0]}</div>
+      ) : (
+        <div className="sm:hidden">
+          <div
+            ref={trackRef}
+            onScroll={onScroll}
+            className={[
+              'flex items-stretch gap-4 overflow-x-auto snap-x snap-mandatory scroll-smooth no-scrollbar',
+              // Negative margin + padding so the first/last cards can center with
+              // a peek of the neighbour, while the track still bleeds to the
+              // section's edges.
+              '-mx-5 px-5 pb-1',
+            ].join(' ')}
+            style={{ scrollbarWidth: 'none' }}
+          >
+            {cards.map((card, i) => (
+              <div key={i} className="snap-center shrink-0 basis-[88%] min-w-0">
+                {card}
+              </div>
+            ))}
           </div>
-        )}
-      </div>
+
+          {/* Dots — one per card, active tracks the swiped-to card. */}
+          {count > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-2" role="tablist" aria-label={ariaLabel}>
+              {labels.map((label, i) => {
+                const on = i === active;
+                return (
+                  <button
+                    key={`${label}-${i}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={on}
+                    aria-label={label}
+                    onClick={() => scrollToCard(i)}
+                    className={[
+                      'h-2 rounded-full transition-all duration-200 cursor-pointer',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                      on ? 'w-5 bg-accent' : 'w-2 bg-ink/20 hover:bg-ink/30',
+                    ].join(' ')}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── DESKTOP (sm+): balanced grid, items stretch to the row height ── */}
       <div className="hidden sm:grid grid-cols-12 gap-4 lg:gap-5">

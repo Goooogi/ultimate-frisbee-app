@@ -857,7 +857,7 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
     // Game times are true UTC instants; render them in the VENUE's wall clock,
     // not the server's (see whenLabel). Null state → undefined → UTC, which
     // renders the stored clock unshifted, same fallback as formatGameTime.
-    const tz = venueTimeZone(ev.state) ?? undefined;
+    const tz = venueTimeZone(ev.venueTz ?? ev.state) ?? undefined;
     // Logos need the team's gender division, which lives on the event's team
     // list rather than the game row — index it once per event.
     const divisionByTeamName = new Map<string, string | null>();

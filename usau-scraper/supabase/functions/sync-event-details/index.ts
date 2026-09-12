@@ -202,6 +202,22 @@ function parseScore(s: string | null): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+/**
+ * USAU renders an UNPLAYED game as "0 - 0" with a blank status. Stored
+ * literally, every app surface read it as a decided 0-0 final (the 2026
+ * Sectionals showed "FINAL 0-0" two days before they started). Store null
+ * instead; a status that says the game is over keeps a literal 0-0 (double
+ * forfeit), and an in-progress 0-0 is a real score.
+ */
+function unplayedScoresToNull(
+  home: number | null,
+  away: number | null,
+  status: GameStatus,
+): [number | null, number | null] {
+  if (home === 0 && away === 0 && status === 'scheduled') return [null, null];
+  return [home, away];
+}
+
 // ── Timezone handling ────────────────────────────────────────────────────────
 // USAU prints all schedule times in the VENUE'S LOCAL zone, with no offset on
 // the page. The runtime is UTC, so naively parsing "9:00 AM" yields 09:00Z =
@@ -491,10 +507,13 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           // Score: "15 - 11" → 15, 11. Empty/blank when not yet played.
           const scoreText = $cells.eq(5).text().trim();
           const scoreMatch = scoreText.match(/^(\d+)\s*[-–]\s*(\d+)$/);
-          const scoreHome = scoreMatch ? parseInt(scoreMatch[1], 10) : null;
-          const scoreAway = scoreMatch ? parseInt(scoreMatch[2], 10) : null;
-
           const rawStatus = $cells.eq(6).text().trim() || null;
+          const status = classifyStatus(rawStatus);
+          const [scoreHome, scoreAway] = unplayedScoresToNull(
+            scoreMatch ? parseInt(scoreMatch[1], 10) : null,
+            scoreMatch ? parseInt(scoreMatch[2], 10) : null,
+            status,
+          );
 
           // Prefer the data-game attribute on the row (numeric internal
           // game id). Fall back to parsing the match-report link's
@@ -520,7 +539,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
             score_away: scoreAway,
             location: fieldText || null,
             scheduled_at,
-            status: classifyStatus(rawStatus),
+            status,
             // Pool rows always have both teams — no placeholder text exists.
             home_placeholder: null,
             away_placeholder: null,
@@ -570,10 +589,14 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         });
       }
 
-      const scoreHome = parseScore($game.find(SELECTORS.schedule.bracketHomeScore).first().text());
-      const scoreAway = parseScore($game.find(SELECTORS.schedule.bracketAwayScore).first().text());
       const location = $game.find(SELECTORS.schedule.bracketLocation).first().text().trim() || null;
       const rawStatus = $game.find(SELECTORS.schedule.bracketStatus).first().text().trim() || null;
+      const status = classifyStatus(rawStatus);
+      const [scoreHome, scoreAway] = unplayedScoresToNull(
+        parseScore($game.find(SELECTORS.schedule.bracketHomeScore).first().text()),
+        parseScore($game.find(SELECTORS.schedule.bracketAwayScore).first().text()),
+        status,
+      );
       const rawDate = $game.find(SELECTORS.schedule.bracketDate).first().text().trim() || null;
 
       // A TBD side has no team link — the span's plain text is USAU's own
@@ -600,7 +623,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         score_away: scoreAway,
         location,
         scheduled_at: parseSchedDate(rawDate, tz),
-        status: classifyStatus(rawStatus),
+        status,
         home_placeholder: homePlaceholder,
         away_placeholder: awayPlaceholder,
       });
@@ -1122,7 +1145,7 @@ async function persistSchedulePage(
   //   - this event + THIS page (source_url is the division scope —
   //     usau_games has no gender column),
   //   - carrying an event-game id the page no longer shows,
-  //   - never touched by a result (scheduled, 0-0) — played/final rows are
+  //   - never touched by a result (scheduled, no score) — played/final rows are
   //     kept, protecting the "USAU hides pool tables once brackets start"
   //     case, where vanishing from the page is normal.
   // The teams.length===0 early-return above means a page that parsed nothing
@@ -1138,8 +1161,9 @@ async function persistSchedulePage(
       .eq('event_id', eventUUID)
       .eq('source_url', url)
       .eq('status', 'scheduled')
-      .eq('score_a', 0)
-      .eq('score_b', 0)
+      // Untouched = null scores (written since 2026-09-11) or the literal
+      // "0 - 0" placeholder older rows still carry.
+      .or('and(score_a.is.null,score_b.is.null),and(score_a.eq.0,score_b.eq.0)')
       .not('usau_event_game_id', 'is', null)
       .not('usau_event_game_id', 'in', inList);
     if (pruneErr) throw new Error(`usau_games stale-generation prune: ${stringifyErr(pruneErr)}`);
@@ -1147,6 +1171,36 @@ async function persistSchedulePage(
   }
 
   return { teams: teams.length, games: games.length, skipped: false };
+}
+
+/**
+ * Majority timezone of the event's entrant teams (usau_teams.state, backfilled
+ * from venue history for ~87% of teams). Null when no entrant has a mappable
+ * state. Votes are counted per ZONE, not per state, so a NY/MA/VT field still
+ * resolves cleanly to Eastern.
+ */
+async function inferTzFromEntrants(db: ReturnType<typeof supabase>, eventUUID: string): Promise<string | null> {
+  const { data: entrants } = await db
+    .from('usau_event_teams')
+    .select('team_id')
+    .eq('event_id', eventUUID);
+  const ids = ((entrants ?? []) as Array<{ team_id: string }>).map((r) => r.team_id);
+  if (ids.length === 0) return null;
+  const { data: teams } = await db.from('usau_teams').select('state').in('id', ids);
+  const votes = new Map<string, number>();
+  for (const t of (teams ?? []) as Array<{ state: string | null }>) {
+    const zone = tzForState(t.state);
+    if (zone) votes.set(zone, (votes.get(zone) ?? 0) + 1);
+  }
+  let best: string | null = null;
+  let bestN = 0;
+  for (const [zone, n] of votes) {
+    if (n > bestN) {
+      best = zone;
+      bestN = n;
+    }
+  }
+  return best;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -1179,9 +1233,15 @@ async function run(body: RequestBody) {
     .eq('id', eventUUID)
     .maybeSingle();
   // Venue timezone (for converting USAU's local schedule times → UTC). Derived
-  // from the event's US state; null when unknown ("TBD"/missing) → times are
-  // stored date-only rather than at a wrong instant.
-  const tz = tzForState(eventRow?.state as string | null | undefined);
+  // from the event's US state; when USAU lists the venue as "TBD" (every 2026
+  // Sectional, 32 events on 2026-09-11) fall back to the zone most of the
+  // entrant teams live in — a Sectional is played where its teams are. Still
+  // null → times are stored date-only rather than at a wrong instant. The
+  // resolved zone is persisted as usau_events.venue_tz so the web/mobile
+  // formatters can render the wall clock without repeating the inference.
+  let tz = tzForState(eventRow?.state as string | null | undefined);
+  if (!tz) tz = await inferTzFromEntrants(db, eventUUID);
+  if (tz) await db.from('usau_events').update({ venue_tz: tz }).eq('id', eventUUID);
   // The event's competition level chooses the schedule URL path family:
   // College → "College", Masters family → the masters segments, everything
   // else → "Club". Previously ALL non-college levels (incl. MASTERS/
@@ -1217,6 +1277,14 @@ async function run(body: RequestBody) {
   // Derive the event's venue from the field names we just wrote. Write-path
   // only — the read path serves the stored column.
   await db.rpc('usau_derive_event_venue', { target_event_id: eventUUID });
+
+  // First scrape of a TBD-venue event: no entrants existed above, so times went
+  // in date-only. Resolve the zone from the teams just written so the read
+  // path has it now; the next live pass (15 min) rewrites the times.
+  if (!tz) {
+    const late = await inferTzFromEntrants(db, eventUUID);
+    if (late) await db.from('usau_events').update({ venue_tz: late }).eq('id', eventUUID);
+  }
 
   // Mark the event as freshly scraped.
   await db

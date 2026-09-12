@@ -10,10 +10,10 @@
 //   4. "Up next" — UFA + USAU cards, side by side on desktop (a lone card
 //      spans the row with two inner columns)
 //   5. LEAGUE STANDINGS group — "Top of the league" (4 UFA division cards),
+//      "Recent results" (one card per IN-SEASON league, swipe row on mobile),
 //      USAU Rankings (full-width 4×4 grid of the top 16), then the "Season
 //      complete" carousel
-//   6. "Recent results" — one card per IN-SEASON league (swipe row on mobile)
-//   7. Footer
+//   6. Footer
 //
 // Which leagues appear where is decided by src/lib/home/season-phase.ts: a
 // league is `in-season` (Recent results), `complete` (Season complete, for six
@@ -541,35 +541,38 @@ export default async function HomePage() {
         </div>
       )}
 
-      {/* 4b. USAU Rankings — full-width 4×4 grid of the top 16, sitting
-             directly below the UFA cards with matching horizontal padding so
-             its outer edges line up with the strip above. */}
-      <div className="px-5 lg:px-10 pt-5 lg:pt-6">
-        <RankingsCard />
-      </div>
-
-      {/* 4c. "Season complete" carousel — one equal-height card per league
-             whose season finished in the last six months (UFA bracket, USAU
-             champions, PUL/WUL playoffs + standings, WFDF podiums): a swipe
-             row on mobile, a balanced grid on desktop. */}
-      {seasonCompleteCards.length > 0 && (
-        <div className="px-5 lg:px-10 pt-5 lg:pt-6">
-          <StandingsCarousel
-            cards={seasonCompleteCards.map((c) => c.node)}
-            labels={seasonCompleteCards.map((c) => c.label)}
-            ariaLabel="Completed seasons"
-          />
-        </div>
-      )}
-
-      {/* 5. "Recent results" — one card per in-season league: a swipe row on
-             mobile, a balanced grid (no lopsided column) on desktop. */}
+      {/* 4b. "Recent results" — one card per in-season league: a swipe row on
+             mobile, a balanced grid (no lopsided column) on desktop. Sits
+             directly under the UFA cards, above the rankings (Hunter, 2026-09-11). */}
       {recentResultCards.length > 0 && (
         <div className="px-5 lg:px-10 pt-9 lg:pt-11">
           <StandingsCarousel
             cards={recentResultCards.map((c) => c.node)}
             labels={recentResultCards.map((c) => c.label)}
             ariaLabel="Recent results"
+          />
+        </div>
+      )}
+
+      {/* 4c. USAU Rankings — full-width 4×4 grid of the top 16, with matching
+             horizontal padding so its outer edges line up with the cards above. */}
+      <div className="px-5 lg:px-10 pt-5 lg:pt-6">
+        <RankingsCard />
+      </div>
+
+      {/* 4d. "Season complete" carousel — one equal-height card per league
+             whose season finished in the last six months (UFA playoffs +
+             standings, USAU podiums, PUL/WUL playoffs + standings, WFDF
+             podiums): a swipe row on mobile, a balanced grid on desktop —
+             3 per row, not 4: four across at 1280px is ~255px per card and
+             the playoff score rows overlap (2026-09-11). */}
+      {seasonCompleteCards.length > 0 && (
+        <div className="px-5 lg:px-10 pt-5 lg:pt-6">
+          <StandingsCarousel
+            cards={seasonCompleteCards.map((c) => c.node)}
+            labels={seasonCompleteCards.map((c) => c.label)}
+            desktopMaxPerRow={3}
+            ariaLabel="Completed seasons"
           />
         </div>
       )}
@@ -683,7 +686,7 @@ function pickPulRecentFour(games: PulGame[]): PulRecentGame[] {
   return out.slice(0, 4);
 }
 
-export type WulRecentRound = 'final' | 'semifinal' | 'regular';
+export type WulRecentRound = 'final' | 'semifinal' | 'third' | 'regular';
 export interface WulRecentGame {
   game: WulGame;
   round: WulRecentRound;
@@ -705,16 +708,20 @@ function pickWulRecentFour(games: WulGame[]): WulRecentGame[] {
 
   const finalGame = seasonFinals.find((g) => rounds.get(g.id) === 'final') ?? null;
   const semis = seasonFinals.filter((g) => rounds.get(g.id) === 'semifinal').sort(byDateDesc);
-  // Everything else: regular season, plus any postseason game deriveWulPostseasonRounds
-  // couldn't classify (e.g. 3rd-place) or left unclassified — treated as filler,
-  // ordered most-recent first, same as regular season.
+  // WUL plays an explicit 3rd-place game on championship day — its own row so
+  // the "Season complete" card shows the whole bracket.
+  const third = seasonFinals.find((g) => rounds.get(g.id) === 'third_place') ?? null;
+  // Everything else: regular season, plus any postseason game
+  // deriveWulPostseasonRounds left unclassified — treated as filler, ordered
+  // most-recent first, same as regular season.
   const filler = seasonFinals
-    .filter((g) => rounds.get(g.id) !== 'final' && rounds.get(g.id) !== 'semifinal')
+    .filter((g) => !rounds.has(g.id))
     .sort(byDateDesc);
 
   const out: WulRecentGame[] = [];
   if (finalGame) out.push({ game: finalGame, round: 'final' });
   for (const g of semis) out.push({ game: g, round: 'semifinal' });
+  if (third) out.push({ game: third, round: 'third' });
   for (const g of filler) {
     if (out.length >= 4) break;
     out.push({ game: g, round: 'regular' });

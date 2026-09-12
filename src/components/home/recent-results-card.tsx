@@ -226,6 +226,7 @@ function wulGameHref(id: string): string {
 function roundLabel(round: PulRecentRound | WulRecentRound): string | null {
   if (round === 'final') return 'Championship';
   if (round === 'semifinal') return 'Semifinal';
+  if (round === 'third') return '3rd place';
   return null;
 }
 
