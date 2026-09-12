@@ -18,6 +18,7 @@ import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 import { isUnhealthyError } from '@/lib/supabase/health';
 import { usauToday } from '@/lib/today';
+import { seriesStageHref, seriesUnitLabel, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
 
 type DB = SupabaseClient<Database>;
 
@@ -741,7 +742,7 @@ export async function getCurrentEvent(opts?: {
   genderDivision?: 'Men' | 'Women' | 'Mixed';
   /** Restrict to ONE competition level (e.g. 'MASTERS'). Default: all flagship levels. */
   competitionLevel?: CompetitionLevel;
-}): Promise<{ slug: string; hasGames: boolean } | null> {
+}): Promise<UsauCurrentPick | null> {
   const db = await supabase();
   const now = new Date();
   const today = usauToday(now);
@@ -769,6 +770,8 @@ export async function getCurrentEvent(opts?: {
   let windowQ = db
     .from('usau_events')
     .select('id, usau_slug, name, start_date, end_date, competition_level')
+    // Series members compete as ONE stage candidate each (added below).
+    .is('series_stage', null)
     .gte('start_date', windowBack)
     .lte('start_date', windowForward)
     .order('start_date', { ascending: true });
@@ -868,6 +871,37 @@ export async function getCurrentEvent(opts?: {
     avgRankByEvent.set(eventId, ranks.reduce((a, b) => a + b, 0) / ranks.length);
   }
 
+  // Series stages ("2026 USAU Sectionals") compete as ONE candidate each,
+  // ranked above every TCT flight and below Nationals/Worlds. Added after the
+  // per-event DB enrichment so their synthetic ids never reach a uuid filter.
+  const stageById = new Map<string, UsauSeriesStageCard>();
+  if (!opts?.genderDivision) {
+    const stages = await fetchSeriesStages(db, {
+      startFrom: windowBack,
+      startTo: windowForward,
+      levels: levelFilter,
+    });
+    const stageGames = await Promise.all(
+      stages.map((s) =>
+        db.from('usau_games').select('id', { count: 'exact', head: true }).in('event_id', s.memberIds),
+      ),
+    );
+    stages.forEach((s, i) => {
+      const id = `series:${s.id}`;
+      stageById.set(id, toStageCard(s));
+      counts.set(id, stageGames[i].count ?? 0);
+      events.push({
+        id,
+        usau_slug: '',
+        name: s.name,
+        start_date: s.startDate,
+        end_date: s.endDate,
+        competition_level: s.level,
+      });
+    });
+  }
+  const rankOf = (e: EventRow) => (stageById.has(e.id) ? SERIES_STAGE_RANK : flightRankForName(e.name));
+
   // Weekend cadence: before Wednesday we look back at last weekend; from
   // Wednesday on we look forward to the next weekend. We use getUTCDay() so the
   // cutover and the past/upcoming date split below share one clock — `today`
@@ -935,7 +969,7 @@ export async function getCurrentEvent(opts?: {
       ? weekendKey(b.start_date).localeCompare(weekendKey(a.start_date))
       : weekendKey(a.start_date).localeCompare(weekendKey(b.start_date));
     if (wCmp !== 0) return wCmp;
-    const fCmp = flightRankForName(b.name) - flightRankForName(a.name);
+    const fCmp = rankOf(b) - rankOf(a);
     if (fCmp !== 0) return fCmp;
     // SIZE FLOOR, before strength of field. An event with a real field always
     // outranks a 2-team scrimmage or a 3-team pre-sectional, regardless of
@@ -1019,19 +1053,20 @@ export async function getCurrentEvent(opts?: {
   // upcoming weekend's brackets aren't scraped yet) fall through to the best
   // gameless pick so the preview still shows "brackets pending"; the DB-wide
   // fallback below then guarantees the page is never truly empty.
+  const pick = (e: EventRow, hasGames: boolean): UsauCurrentPick => {
+    const series = stageById.get(e.id);
+    return series ? { series, hasGames } : { slug: e.usau_slug, hasGames };
+  };
   const withGames = ordered.find((e) => (counts.get(e.id) ?? 0) > 0);
-  if (withGames) {
-    return { slug: withGames.usau_slug, hasGames: true };
-  }
-  if (ordered.length > 0) {
-    return { slug: ordered[0].usau_slug, hasGames: false };
-  }
+  if (withGames) return pick(withGames, true);
+  if (ordered.length > 0) return pick(ordered[0], false);
 
   // Final fallback: most-recent flagship event with games anywhere in DB.
   // Apply the division filter via the team-participation join when set.
   let latestQ = db
     .from('usau_events')
     .select('id, usau_slug, start_date')
+    .is('series_stage', null)
     .order('start_date', { ascending: false, nullsFirst: false })
     .limit(80);
   latestQ =
@@ -1199,17 +1234,28 @@ export async function getNextUpcomingEvent(opts?: {
 }
 
 export interface UpcomingUsauEvent {
-  slug: string;
+  /** Stable row key: the event slug, or the stage id for a series stage. */
+  key: string;
+  /** Event page, or a series stage's list (Schedule until it starts, then Scores). */
+  href: string;
   name: string;
   startDate: string | null;
   endDate: string | null;
   /** TCT flight display label ("Pro Flight", "Select Flight", …) when the event
    *  maps to one; null for pinnacle/Masters/College events (still listed). */
   flightLabel: string | null;
+  /** Series stages only: "27 sections" — shown where an event shows its flight. */
+  seriesLabel: string | null;
   /** usau_events.competition_level ('CLUB', 'COLLEGE_D1', …) — lets the home
-   *  season-phase logic scope "next event" to one level. */
+   *  season-phase logic scope "next event" to one level. A stage carries the
+   *  level its tier rolls up to. */
   competitionLevel: string | null;
 }
+
+/** getCurrentEvent's pick: an event slug, or a whole series stage. */
+export type UsauCurrentPick =
+  | { slug: string; hasGames: boolean }
+  | { series: UsauSeriesStageCard; hasGames: boolean };
 
 /**
  * The next N UPCOMING flighted USAU events — for the home "Up next" card, which
@@ -1226,14 +1272,22 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
   const db = await supabase();
   const today = usauToday();
   const windowForward = new Date(Date.now() + 120 * 86400_000).toISOString().slice(0, 10);
+  // A stage's members start within a few weekends of each other, so members
+  // that started up to 30 days back rebuild any stage still in play.
+  const stageFrom = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
 
-  const { data: rows } = await db
-    .from('usau_events')
-    .select('id, usau_slug, name, start_date, end_date, competition_level')
-    .in('competition_level', FLAGSHIP_LEVELS)
-    .gte('end_date', today)
-    .lte('start_date', windowForward)
-    .order('start_date', { ascending: true });
+  const [{ data: rows }, stages] = await Promise.all([
+    db
+      .from('usau_events')
+      .select('id, usau_slug, name, start_date, end_date, competition_level')
+      .in('competition_level', FLAGSHIP_LEVELS)
+      // Series members roll up into their stage row below.
+      .is('series_stage', null)
+      .gte('end_date', today)
+      .lte('start_date', windowForward)
+      .order('start_date', { ascending: true }),
+    fetchSeriesStages(db, { startFrom: stageFrom, startTo: windowForward, levels: FLAGSHIP_LEVELS }),
+  ]);
 
   type Row = {
     id: string;
@@ -1249,6 +1303,38 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
       : flightForName(e.name) !== null || isPinnacleEventName(e.name),
   );
 
+  type Candidate = UpcomingUsauEvent & { rank: number };
+  const candidates: Candidate[] = [
+    ...events.map((e) => {
+      const flight = flightForName(e.name);
+      return {
+        key: e.usau_slug,
+        href: `/usau/events/${e.usau_slug}`,
+        name: e.name ?? e.usau_slug,
+        startDate: e.start_date,
+        endDate: e.end_date,
+        flightLabel: flight ? FLIGHT_LABELS[flight] : null,
+        seriesLabel: null,
+        competitionLevel: e.competition_level,
+        rank: flightRankForName(e.name),
+      };
+    }),
+    // Same "not yet ended" rule as events, so a stage stays through its last day.
+    ...stages
+      .filter((s) => (s.endDate ?? '') >= today)
+      .map((s) => ({
+        key: s.id,
+        href: seriesStageHref(s, today),
+        name: s.name,
+        startDate: s.startDate,
+        endDate: s.endDate,
+        flightLabel: null,
+        seriesLabel: seriesUnitLabel(s.stage, s.groupCount),
+        competitionLevel: s.level,
+        rank: SERIES_STAGE_RANK,
+      })),
+  ];
+
   // Quantize to the tournament weekend (Saturday of the Fri–Sun span) so a
   // Fri-start flagship and a Sat-start event on the same weekend group together.
   const weekendKey = (d: string | null): string => {
@@ -1260,29 +1346,28 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
     return dt.toISOString().slice(0, 10);
   };
 
-  // Sort: nearest weekend first; within a weekend, highest flight first, then
-  // soonest start, then name for stability.
-  events.sort((a, b) => {
-    const wk = weekendKey(a.start_date).localeCompare(weekendKey(b.start_date));
+  // Sort: nearest weekend first; within a weekend, highest flight first (a
+  // series stage outranks every TCT flight), then soonest start, then name.
+  candidates.sort((a, b) => {
+    const wk = weekendKey(a.startDate).localeCompare(weekendKey(b.startDate));
     if (wk !== 0) return wk;
-    const fl = flightRankForName(b.name) - flightRankForName(a.name);
+    const fl = b.rank - a.rank;
     if (fl !== 0) return fl;
-    const st = (a.start_date ?? '').localeCompare(b.start_date ?? '');
+    const st = (a.startDate ?? '').localeCompare(b.startDate ?? '');
     if (st !== 0) return st;
-    return (a.name ?? '').localeCompare(b.name ?? '');
+    return a.name.localeCompare(b.name);
   });
 
-  return events.slice(0, limit).map((e) => {
-    const flight = flightForName(e.name);
-    return {
-      slug: e.usau_slug,
-      name: e.name ?? e.usau_slug,
-      startDate: e.start_date,
-      endDate: e.end_date,
-      flightLabel: flight ? FLIGHT_LABELS[flight] : null,
-      competitionLevel: e.competition_level,
-    };
-  });
+  return candidates.slice(0, limit).map((c) => ({
+    key: c.key,
+    href: c.href,
+    name: c.name,
+    startDate: c.startDate,
+    endDate: c.endDate,
+    flightLabel: c.flightLabel,
+    seriesLabel: c.seriesLabel,
+    competitionLevel: c.competitionLevel,
+  }));
 }
 
 /**
@@ -1292,7 +1377,7 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
  */
 export async function getCurrentClubEventSlug(): Promise<string | null> {
   const res = await getCurrentEvent();
-  return res?.slug ?? null;
+  return res && 'slug' in res ? res.slug : null;
 }
 
 /**
@@ -2217,7 +2302,7 @@ export async function recentUsauTournamentCards(
   page = 0,
 ): Promise<UsauMajorWithChampions[]> {
   return (await recentUsauTournamentPage(now, limit, competitionLevel, flights, season, page))
-    .cards;
+    .cards.flatMap((c) => (c.kind === 'event' ? [c] : []));
 }
 
 /**
@@ -2238,7 +2323,8 @@ export async function recentUsauTournamentCards(
  * (Ported from mobile's recentUsauTournamentPage — keep in sync.)
  */
 export interface UsauTournamentPage {
-  cards: UsauMajorWithChampions[];
+  /** Tournaments plus series-stage cards, in feed order. */
+  cards: UsauFeedCard[];
   /** Total matching events across all pages — drives "Page N of M". */
   total: number;
   /** Zero-based index of the page returned. */
@@ -2265,32 +2351,45 @@ export async function recentUsauTournamentPage(
   const pageSize = Math.max(1, limit);
   const safePage = Math.max(0, Math.floor(page));
 
-  type EventRow = {
-    id: string;
-    usau_slug: string;
-    name: string;
+  // usau_event_feed = ordinary events plus ONE row per series stage (see the
+  // 20260911230000 migration), so sectionals weekend pages as one "2026 USAU
+  // Sectionals" card instead of 81 per-division rows. has_games replaces the
+  // old usau_games!inner join: result-less shells stay out until they have games.
+  type FeedRow = {
+    kind: 'event' | 'series';
+    key: string;
+    event_id: string | null;
+    name: string | null;
+    season: number;
+    level: UsauLevel;
+    series_stage: UsauSeriesStage | null;
     start_date: string | null;
     end_date: string | null;
+    group_count: number;
   };
 
   const baseQuery = (head: boolean) => {
     let q = db
-      .from('usau_events')
+      .from('usau_event_feed')
       .select(
-        'id, usau_slug, name, start_date, end_date, usau_games!inner(id)',
+        'kind, key, event_id, name, season, level, series_stage, start_date, end_date, group_count',
         head ? { count: 'exact', head: false } : undefined,
       )
-      .eq('competition_level', competitionLevel)
+      .eq('level', competitionLevel)
+      .eq('has_games', true)
       // Completed OR CURRENTLY IN PLAY. Was `.lt('end_date', today)` — strictly
       // completed — which left a tournament that had started but not finished
       // showing in neither place: too late for the future-facing schedule, not
       // yet eligible here. A tournament being played right now is exactly when
-      // its scores matter most, so `start_date <= today` admits it and the
-      // games inner-join still keeps result-less shells out until it has games.
+      // its scores matter most, so `start_date <= today` admits it (a stage from
+      // its first day) and has_games keeps result-less shells out.
       .lte('start_date', today);
     if (season != null) q = q.eq('season', season);
     return q
-      .order('end_date', { ascending: false, nullsFirst: false })
+      // sort_date = end_date for events; a stage's is the Sunday of its first
+      // weekend, and kind_rank 0 puts it ahead of that weekend's events.
+      .order('sort_date', { ascending: false, nullsFirst: false })
+      .order('kind_rank', { ascending: true })
       // Flight breaks the date tie. A busy August weekend ends eight club
       // tournaments on the same day; ordering those by `id` alone meant the top
       // card was chosen by a random UUID, so a 42-game local invite outranked
@@ -2299,20 +2398,19 @@ export async function recentUsauTournamentPage(
       // column mirroring flightForName — see the 20260822120000 migration.
       .order('flight_rank', { ascending: true })
       // Final key so the server-side order is TOTAL. Without it Postgres may
-      // return same-end_date rows in a different order per request, which would
+      // return same-sort_date rows in a different order per request, which would
       // let a card appear on two pages or on none.
-      .order('id', { ascending: true })
-      .limit(1, { foreignTable: 'usau_games' });
+      .order('key', { ascending: true });
   };
 
-  let recent: EventRow[];
+  let recent: FeedRow[];
   let total: number;
 
   if (!flightSet) {
     // Server-side paging — constant cost per page however deep the user goes.
     const from = safePage * pageSize;
     const { data, count } = await baseQuery(true).range(from, from + pageSize - 1);
-    recent = (data ?? []) as EventRow[];
+    recent = (data ?? []) as unknown as FeedRow[];
     total = count ?? recent.length;
   } else {
     // Flight is name-derived, so the matching set has to be materialized in JS
@@ -2320,12 +2418,12 @@ export async function recentUsauTournamentPage(
     // whole table.
     const SCAN_PAGE = 500;
     const FLIGHT_SCAN_CAP = 6; // ≤3000 events — covers every level's history
-    const matched: EventRow[] = [];
+    const matched: FeedRow[] = [];
     let scanned = 0;
     for (let i = 0; i < FLIGHT_SCAN_CAP; i++) {
       const from = i * SCAN_PAGE;
       const { data } = await baseQuery(false).range(from, from + SCAN_PAGE - 1);
-      const rows = (data ?? []) as EventRow[];
+      const rows = (data ?? []) as unknown as FeedRow[];
       scanned += rows.length;
       for (const e of rows) {
         const f = flightForName(e.name);
@@ -2345,7 +2443,109 @@ export async function recentUsauTournamentPage(
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   if (recent.length === 0) return { cards: [], total, page: safePage, pageCount };
 
-  const eventIds = recent.map((e) => e.id);
+  const eventRows = recent.filter((r) => r.kind === 'event' && r.event_id != null);
+  const stageCards = recent
+    .filter((r) => r.kind === 'series' && r.series_stage != null)
+    .map((r) =>
+      seriesStageCard({
+        season: r.season,
+        stage: r.series_stage as UsauSeriesStage,
+        level: r.level,
+        startDate: r.start_date,
+        endDate: r.end_date,
+        groupCount: r.group_count,
+      }),
+    );
+  const eventIds = eventRows.map((e) => e.event_id as string);
+  const { championsByEvent, cancelledKeys } = await championsForEvents(
+    db,
+    eventRows.map((e) => ({ id: e.event_id as string, endDate: e.end_date })),
+    today,
+  );
+
+  // Field strength (avg official rank of entrants) for the events on the
+  // CURRENT page only — the extra rankings queries stay bounded to ≤10 events.
+  const strengthByEvent = await fieldStrengthByEvent(db, eventIds, competitionLevel);
+
+  const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
+  const results: UsauMajorWithChampions[] = [];
+  for (const e of eventRows) {
+    const id = e.event_id as string;
+    // Show every event in the window — including those with no champion yet
+    // (no bracket final and no unique pool leader). Champions may be empty; the
+    // card renders the event header with no winner row in that case.
+    const champions = championsByEvent.get(id) ?? [];
+    const strength = strengthByEvent.get(id);
+    const ranked = strength?.ranked ?? 0;
+    // Cancelled finals with no champion for that division (a later replayed
+    // final that DID decide it clears the flag via the champions check).
+    const cancelledFinals = [...cancelledKeys]
+      .map((k) => k.split('|') as [string, 'Men' | 'Women' | 'Mixed'])
+      .filter(
+        ([eventId, division]) =>
+          eventId === id &&
+          !champions.some((c) => c.division === division && !c.viaPoolRecord),
+      )
+      .map(([, division]) => division)
+      .sort((a, b) => (DIV_ORDER[a] ?? 9) - (DIV_ORDER[b] ?? 9));
+    results.push({
+      slug: e.key,
+      name: e.name ?? e.key,
+      startDate: e.start_date,
+      endDate: e.end_date,
+      flight: flightForName(e.name),
+      fieldStrength:
+        strength && ranked >= MIN_RANKED_ENTRANTS_FOR_STRENGTH ? strength.mean : null,
+      rankedEntrants: ranked,
+      champions: champions.sort((a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9)),
+      ...(cancelledFinals.length > 0 ? { cancelledFinals } : {}),
+    });
+  }
+
+  // Ordering WITHIN the page: WEEKEND first, then field strength as the
+  // tiebreaker. Rows already arrive newest-end_date-first from the server,
+  // which is what defines page membership; re-sorting here can only reorder
+  // inside that page.
+  //
+  // NOTE: the pre-paging version floated marquee (high-flight) events to the
+  // top across the whole result set. That is deliberately gone — with
+  // server-side paging it would hoist a card above events the server placed on
+  // an EARLIER page, so the same tournament could appear twice or vanish
+  // depending on which page you were viewing. Date is the page key, so date
+  // leads here too.
+  return {
+    // Stage cards slot in at the head of their weekend.
+    cards: withSeriesStages(sortTournamentsByStrength(results), stageCards),
+    total,
+    page: safePage,
+    pageCount,
+  };
+}
+
+/**
+ * Per-division champions for a set of events: the latest-scheduled decided
+ * championship final per (event, division), then — once an event is over — the
+ * unique best pool record for any division still without one. Shared by the
+ * results feed and the series stage list.
+ *
+ * `divisionOf` pins every game of an event to one division. Series members are
+ * single-division rows whose teams' own gender tags are null or wrong on ~100
+ * entries, so their division comes from the member row instead.
+ */
+async function championsForEvents(
+  db: Awaited<ReturnType<typeof supabase>>,
+  events: Array<{ id: string; endDate: string | null }>,
+  today: string,
+  divisionOf: Map<string, 'Men' | 'Women' | 'Mixed'> = new Map(),
+): Promise<{
+  championsByEvent: Map<
+    string,
+    Array<{ division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string; viaPoolRecord?: boolean }>
+  >;
+  cancelledKeys: Set<string>;
+}> {
+  const eventIds = events.map((e) => e.id);
+  if (eventIds.length === 0) return { championsByEvent: new Map(), cancelledKeys: new Set() };
 
   type TeamRef = { name: string; gender_division: string | null } | null;
   type Row = {
@@ -2400,8 +2600,8 @@ export async function recentUsauTournamentPage(
     if (/\b\d+(st|nd|rd|th)\b/.test(b) && !b.includes('1st')) continue; // drop 5th/13th/17th…
     if (b.includes('consolation') || b.includes('placement')) continue;
     if (g.status === 'cancelled') {
-      let division =
-        g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
+      let division: string | null =
+        divisionOf.get(g.event_id) ?? g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
       if (!division) {
         if (b.includes('mixed')) division = 'Mixed';
         else if (b.includes('women')) division = 'Women';
@@ -2416,7 +2616,8 @@ export async function recentUsauTournamentPage(
     const aWon = g.score_a > g.score_b;
     const winnerId = aWon ? g.team_a_id : g.team_b_id;
     const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
-    let division = (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
+    let division: string | null =
+      divisionOf.get(g.event_id) ?? (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
     if (!division) {
       if (b.includes('mixed')) division = 'Mixed';
       else if (b.includes('women')) division = 'Women';
@@ -2459,11 +2660,11 @@ export async function recentUsauTournamentPage(
   // division without a decided championship final gets its pool leader, even
   // when a bracket exists whose final was never scraped (Hunter, 2026-09-11;
   // matches the home "Recent results" reader).
-  const poolEligibleIds = recent
-    .filter((e) => e.end_date != null && e.end_date < today)
+  const poolEligibleIds = events
+    .filter((e) => e.endDate != null && e.endDate < today)
     .map((e) => e.id);
   const poolWinners =
-    poolEligibleIds.length > 0 ? await bestPoolRecordWinners(db, poolEligibleIds, decidedKeys) : [];
+    poolEligibleIds.length > 0 ? await bestPoolRecordWinners(db, poolEligibleIds, decidedKeys, divisionOf) : [];
   for (const w of poolWinners) {
     if (!championsByEvent.has(w.eventId)) championsByEvent.set(w.eventId, []);
     championsByEvent.get(w.eventId)!.push({
@@ -2474,61 +2675,7 @@ export async function recentUsauTournamentPage(
     });
   }
 
-  // Field strength (avg official rank of entrants) for the events on the
-  // CURRENT page only — the extra rankings queries stay bounded to ≤10 events.
-  const strengthByEvent = await fieldStrengthByEvent(db, eventIds, competitionLevel);
-
-  const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
-  const results: UsauMajorWithChampions[] = [];
-  for (const e of recent) {
-    // Show every event in the window — including those with no champion yet
-    // (no bracket final and no unique pool leader). Champions may be empty; the
-    // card renders the event header with no winner row in that case.
-    const champions = championsByEvent.get(e.id) ?? [];
-    const strength = strengthByEvent.get(e.id);
-    const ranked = strength?.ranked ?? 0;
-    // Cancelled finals with no champion for that division (a later replayed
-    // final that DID decide it clears the flag via the champions check).
-    const cancelledFinals = [...cancelledKeys]
-      .map((k) => k.split('|') as [string, 'Men' | 'Women' | 'Mixed'])
-      .filter(
-        ([eventId, division]) =>
-          eventId === e.id &&
-          !champions.some((c) => c.division === division && !c.viaPoolRecord),
-      )
-      .map(([, division]) => division)
-      .sort((a, b) => (DIV_ORDER[a] ?? 9) - (DIV_ORDER[b] ?? 9));
-    results.push({
-      slug: e.usau_slug,
-      name: e.name,
-      startDate: e.start_date,
-      endDate: e.end_date,
-      flight: flightForName(e.name),
-      fieldStrength:
-        strength && ranked >= MIN_RANKED_ENTRANTS_FOR_STRENGTH ? strength.mean : null,
-      rankedEntrants: ranked,
-      champions: champions.sort((a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9)),
-      ...(cancelledFinals.length > 0 ? { cancelledFinals } : {}),
-    });
-  }
-
-  // Ordering WITHIN the page: WEEKEND first, then field strength as the
-  // tiebreaker. Rows already arrive newest-end_date-first from the server,
-  // which is what defines page membership; re-sorting here can only reorder
-  // inside that page.
-  //
-  // NOTE: the pre-paging version floated marquee (high-flight) events to the
-  // top across the whole result set. That is deliberately gone — with
-  // server-side paging it would hoist a card above events the server placed on
-  // an EARLIER page, so the same tournament could appear twice or vanish
-  // depending on which page you were viewing. Date is the page key, so date
-  // leads here too.
-  return {
-    cards: sortTournamentsByStrength(results),
-    total,
-    page: safePage,
-    pageCount,
-  };
+  return { championsByEvent, cancelledKeys };
 }
 
 /**
@@ -2542,6 +2689,8 @@ async function bestPoolRecordWinners(
   db: Awaited<ReturnType<typeof supabase>>,
   eventIds: string[],
   decidedKeys: Set<string>,
+  /** Series members' own division (see championsForEvents). */
+  divisionOf: Map<string, 'Men' | 'Women' | 'Mixed'> = new Map(),
 ): Promise<Array<{ eventId: string; division: 'Men' | 'Women' | 'Mixed'; teamName: string; teamId: string }>> {
   type TeamRef = { name: string; gender_division: string | null } | null;
   type Row = {
@@ -2633,7 +2782,7 @@ async function bestPoolRecordWinners(
     if (g.team_a_id == null || g.team_b_id == null) continue;
     // Division comes from the teams (pool games are single-division); require
     // both sides agree, else skip.
-    const div = g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
+    const div = divisionOf.get(g.event_id) ?? g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
     if (div !== 'Men' && div !== 'Women' && div !== 'Mixed') continue;
     const groupKey = `${g.event_id}|${div}`;
     if (decidedKeys.has(groupKey)) continue; // bracket already settled this one
@@ -2919,12 +3068,13 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
   const [teamRes, playerRes, eventRes] = await Promise.all([
     rpc('search_usau_teams_fuzzy', { q, lim: overshoot }),
     rpc('search_usau_players_fuzzy', { q, lim: overshoot }),
-    rpc('search_usau_events_fuzzy', { q, lim: overshoot }),
+    // One row per merged tournament (series divisions collapse to their group).
+    rpc('search_usau_event_groups_fuzzy', { q, lim: overshoot }),
   ]);
 
   type TeamRow = { id: string; name: string; state: string | null; competition_level: string | null; gender_division: string | null };
   type PlayerRow = { id: string; display_name: string };
-  type EventRow = { usau_slug: string; name: string; season: number; start_date: string | null; end_date: string | null };
+  type EventRow = { slug: string; name: string; season: number; start_date: string | null; end_date: string | null; division: string | null };
 
   // ── Dedupe teams by (lower(name), competition_level) ─────────────────
   // RPC returns rows already ranked by score; first occurrence wins.
@@ -2960,16 +3110,18 @@ export async function search(query: string, limit = 8): Promise<SearchResult[]> 
     });
   }
 
-  // ── Tournaments: keyed by usau_slug (unique per event). Hint = season +
-  //    date range; the route uses the slug, not a UUID. ──────────────────────
+  // ── Tournaments: keyed by slug (a merged series event's group key, else
+  //    usau_slug). Hint = season + date range; the route uses the slug, not a
+  //    UUID, plus ?div when one division matched best. ────────────────────────
   const tournamentMap = new Map<string, SearchResult>();
   for (const ev of (eventRes.data ?? []) as EventRow[]) {
-    if (tournamentMap.has(ev.usau_slug)) continue;
+    if (tournamentMap.has(ev.slug)) continue;
     const dates = formatEventDateRange(ev.start_date, ev.end_date);
     const hintParts = [String(ev.season), dates].filter(Boolean) as string[];
-    tournamentMap.set(ev.usau_slug, {
+    tournamentMap.set(ev.slug, {
       kind: 'tournament',
-      id: ev.usau_slug,
+      id: ev.slug,
+      division: ev.division,
       name: ev.name,
       hint: hintParts.join(' · ') || null,
       flight: flightForName(ev.name),
@@ -3706,6 +3858,37 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
   };
 }
 
+/** One per-division USAU row merged into a series event (Sectionals /
+ *  Regionals are published one event per division). */
+export interface UsauEventMember {
+  id: string;
+  slug: string;
+  name: string;
+  url: string | null;
+  division: 'Men' | 'Women' | 'Mixed' | null;
+  startDate: string | null;
+  endDate: string | null;
+  city: string | null;
+  state: string | null;
+  venue: string | null;
+  /** This division's own venue timezone. Divisions of one merged event can
+   *  play in different states, so game times format per member. */
+  venueTz: string | null;
+}
+
+/** Series identity of a merged event (see the 20260911200000 migration). */
+export interface UsauEventSeries {
+  season: number;
+  /** club-sectionals | club-regionals | college-regionals | masters-regionals */
+  stage: string;
+  /** club | d-i | d-iii | dev | masters | grand-masters | great-grand-masters */
+  tier: string;
+  /** usau_competition_level derived from the tier (competition_level itself is
+   *  wrong on GGM rows stored as GRAND_MASTERS). */
+  level: string;
+  groupKey: string;
+}
+
 export interface UsauEventSummary {
   id: string;
   slug: string;
@@ -3727,6 +3910,11 @@ export interface UsauEventSummary {
   url: string | null;
   /** Curated Triple Crown Tour flight (derived from the name), or null. */
   flight: Flight | null;
+  /** The per-division rows merged into this event, Men/Women/Mixed order.
+   *  Empty for ordinary events. */
+  members: UsauEventMember[];
+  /** Series identity for a merged Sectional/Regional, null otherwise. */
+  series: UsauEventSeries | null;
   teams: Array<{
     teamId: string;
     teamName: string;
@@ -3771,6 +3959,12 @@ export interface UsauEventSummary {
      *  2026-08-18. */
     teamAPlaceholder: string | null;
     teamBPlaceholder: string | null;
+    /** Division of the member row this game came from, set only on merged
+     *  series events whose members all carry a division. The event page
+     *  filters on it directly — merged siblings reuse bracket names and USAU
+     *  game-id ranges, so the single-event division heuristics would misfile
+     *  their games. Null everywhere else. */
+    division: string | null;
   }>;
 }
 
@@ -3864,40 +4058,578 @@ function dropUnfedUpstreamRounds(games: EventGameRow[]): EventGameRow[] {
   return dropIds.size === 0 ? games : games.filter((g) => !dropIds.has(g.id));
 }
 
-export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
-  const db = await supabase();
-  // Case-INSENSITIVE slug match. USAU slugs are canonically lowercase, but the
-  // HTML pipeline historically stored some mixed-case (e.g. "Glazed-Daze-2026")
-  // and a later ultirzr re-ingest normalizes them to lowercase — which would
-  // 404 any link built from the old casing. ilike keeps both forms working.
-  // Slugs are unique case-insensitively, so maybeSingle() stays correct.
-  // Escape LIKE metacharacters so a slug can't act as a wildcard pattern.
-  const slugPattern = slug.replace(/[%_\\]/g, (c) => `\\${c}`);
-  const { data: event, error } = await db
+const EVENT_COLUMNS =
+  'id, usau_slug, name, season, start_date, end_date, city, state, venue_tz, venue, competition_level, url, ' +
+  'series_stage, series_tier, series_division, series_group_name, series_group_key';
+
+export interface UsauEventRow {
+  id: string;
+  usau_slug: string;
+  name: string;
+  season: number;
+  start_date: string | null;
+  end_date: string | null;
+  city: string | null;
+  state: string | null;
+  venue_tz: string | null;
+  venue: string | null;
+  competition_level: string;
+  url: string | null;
+  series_stage: string | null;
+  series_tier: string | null;
+  series_division: string | null;
+  series_group_name: string | null;
+  series_group_key: string | null;
+}
+
+/** How an /usau/events/[slug] slug resolved:
+ *  - event:  an ordinary USAU event
+ *  - member: one division's row of a series event — the page redirects it to
+ *            its group slug with ?div= so old per-division links keep working
+ *  - group:  a merged series event, addressed by its series_group_key */
+export type ResolvedUsauEvent =
+  | { kind: 'event'; row: UsauEventRow }
+  | { kind: 'member'; row: UsauEventRow }
+  | { kind: 'group'; rows: UsauEventRow[] };
+
+const SERIES_DIVISION_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
+
+function sortSeriesMembers(rows: UsauEventRow[]): UsauEventRow[] {
+  return rows
+    .slice()
+    .sort(
+      (a, b) =>
+        (SERIES_DIVISION_ORDER[a.series_division ?? ''] ?? 9) -
+          (SERIES_DIVISION_ORDER[b.series_division ?? ''] ?? 9) || a.name.localeCompare(b.name),
+    );
+}
+
+/** series_tier → the usau_competition_level the app filters on. */
+const SERIES_TIER_LEVEL: Record<string, string> = {
+  club: 'CLUB',
+  'd-i': 'COLLEGE_D1',
+  dev: 'COLLEGE_D1',
+  'd-iii': 'COLLEGE_D3',
+  masters: 'MASTERS',
+  'grand-masters': 'GRAND_MASTERS',
+  'great-grand-masters': 'GREAT_GRAND_MASTERS',
+};
+
+// ─── Series stages ─────────────────────────────────────────────────────────
+// One card per (season, series_stage, level) — "2026 USAU Sectionals" — stands
+// in for a stage's per-division member rows on Scores, Schedule and home.
+
+/** Above every TCT flight (≤ 5), below Nationals/Worlds (10). */
+const SERIES_STAGE_RANK = 6;
+
+export interface UsauSeriesStageCard {
+  /** `${stage}:${season}:${level}` — also the usau_event_feed key. */
+  id: string;
+  season: number;
+  stage: UsauSeriesStage;
+  level: UsauLevel;
+  name: string;
+  /** First day of the earliest member tournament → last day of the latest.
+   *  Placeholder-dated members (span > 4 days) are ignored unless every member
+   *  is one — the same rule as the usau_event_feed view. */
+  startDate: string | null;
+  endDate: string | null;
+  /** Merged tournaments in the stage: 27 sections, 8 regions. */
+  groupCount: number;
+}
+
+/** One card on the USAU results feed: a tournament, or a whole series stage. */
+export type UsauFeedCard =
+  | ({ kind: 'event' } & UsauMajorWithChampions)
+  | ({ kind: 'series' } & UsauSeriesStageCard);
+
+const SERIES_STAGE_TITLE: Record<UsauSeriesStage, string> = {
+  'club-sectionals': 'USAU Sectionals',
+  'club-regionals': 'USAU Regionals',
+  'college-regionals': 'College Regionals',
+  'masters-regionals': 'Regionals',
+};
+
+const SERIES_LEVEL_PREFIX: Partial<Record<UsauLevel, string>> = {
+  COLLEGE_D1: 'D-I ',
+  COLLEGE_D3: 'D-III ',
+  MASTERS: 'Masters ',
+  GRAND_MASTERS: 'Grand Masters ',
+  GREAT_GRAND_MASTERS: 'Great Grand Masters ',
+};
+
+function seriesStageCard(s: Omit<UsauSeriesStageCard, 'id' | 'name'>): UsauSeriesStageCard {
+  return {
+    ...s,
+    id: `${s.stage}:${s.season}:${s.level}`,
+    name: `${s.season} ${SERIES_LEVEL_PREFIX[s.level] ?? ''}${SERIES_STAGE_TITLE[s.stage]}`,
+  };
+}
+
+/** Levels → the series tiers that roll up into them (Developmental college
+ *  regionals ride with D-I). */
+function seriesTiersFor(levels: readonly string[]): string[] {
+  return Object.keys(SERIES_TIER_LEVEL).filter((t) => levels.includes(SERIES_TIER_LEVEL[t]));
+}
+
+function daysBetween(from: string, to: string): number {
+  return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000;
+}
+
+type SeriesMemberRow = Pick<
+  UsauEventRow,
+  'id' | 'season' | 'start_date' | 'end_date' | 'series_stage' | 'series_tier' | 'series_group_key'
+>;
+
+interface SeriesStageAgg extends UsauSeriesStageCard {
+  memberIds: string[];
+  /** Latest member start — Schedule keeps a stage until every member has started. */
+  lastStart: string;
+}
+
+function aggregateSeriesStages(rows: SeriesMemberRow[]): SeriesStageAgg[] {
+  const byId = new Map<string, SeriesMemberRow[]>();
+  for (const r of rows) {
+    const level = SERIES_TIER_LEVEL[r.series_tier ?? ''];
+    if (!level || !r.series_stage || !r.start_date) continue;
+    const id = `${r.series_stage}:${r.season}:${level}`;
+    const list = byId.get(id);
+    if (list) list.push(r);
+    else byId.set(id, [r]);
+  }
+  return [...byId.values()].map((members) => {
+    const first = members[0];
+    const real = members.filter(
+      (m) => m.end_date != null && daysBetween(m.start_date as string, m.end_date) <= 4,
+    );
+    const dated = real.length > 0 ? real : members;
+    const starts = dated.map((m) => m.start_date as string).sort();
+    const ends = dated.map((m) => m.end_date ?? (m.start_date as string)).sort();
+    const allStarts = members.map((m) => m.start_date as string).sort();
+    return {
+      ...seriesStageCard({
+        season: first.season,
+        stage: first.series_stage as UsauSeriesStage,
+        level: SERIES_TIER_LEVEL[first.series_tier as string] as UsauLevel,
+        startDate: starts[0],
+        endDate: ends[ends.length - 1],
+        groupCount: new Set(members.map((m) => m.series_group_key)).size,
+      }),
+      memberIds: members.map((m) => m.id),
+      lastStart: allStarts[allStarts.length - 1],
+    };
+  });
+}
+
+function toStageCard(s: SeriesStageAgg): UsauSeriesStageCard {
+  return {
+    id: s.id,
+    season: s.season,
+    stage: s.stage,
+    level: s.level,
+    name: s.name,
+    startDate: s.startDate,
+    endDate: s.endDate,
+    groupCount: s.groupCount,
+  };
+}
+
+/** Series stages built from member rows whose start falls in the given
+ *  window / season. One indexed read on the partial series index. */
+async function fetchSeriesStages(
+  db: DB,
+  opts: { season?: number; startFrom?: string; startTo?: string; levels?: readonly string[] },
+): Promise<SeriesStageAgg[]> {
+  let q = db
     .from('usau_events')
-    .select('id, usau_slug, name, season, start_date, end_date, city, state, venue_tz, venue, competition_level, url')
-    .ilike('usau_slug', slugPattern)
-    .maybeSingle();
+    .select('id, season, start_date, end_date, series_stage, series_tier, series_group_key')
+    .not('series_stage', 'is', null)
+    .not('start_date', 'is', null);
+  if (opts.season != null) q = q.eq('season', opts.season);
+  if (opts.startFrom) q = q.gte('start_date', opts.startFrom);
+  if (opts.startTo) q = q.lte('start_date', opts.startTo);
+  if (opts.levels) q = q.in('series_tier', seriesTiersFor(opts.levels));
+  const { data, error } = await q;
   if (error) throw error;
-  if (!event) return null;
+  return aggregateSeriesStages((data ?? []) as unknown as SeriesMemberRow[]);
+}
+
+/** Series stages whose members start in [startFrom, startTo] — the home
+ *  "Recent results" stage rows. */
+export async function listSeriesStages(opts: {
+  startFrom: string;
+  startTo: string;
+  levels?: UsauLevel[];
+}): Promise<UsauSeriesStageCard[]> {
+  const db = await supabase();
+  return (await fetchSeriesStages(db, opts)).map(toStageCard);
+}
+
+/** Slot each stage card at the head of its weekend — the weekend of its FIRST
+ *  day (Hunter: a sectionals spanning two weekends dates from its earliest
+ *  start), mirroring the feed view's sort_date + kind_rank. */
+function withSeriesStages(
+  events: UsauMajorWithChampions[],
+  stages: UsauSeriesStageCard[],
+): UsauFeedCard[] {
+  const out: UsauFeedCard[] = events.map((e) => ({ kind: 'event' as const, ...e }));
+  const newestFirst = [...stages].sort((a, b) =>
+    weekendKey(b.startDate).localeCompare(weekendKey(a.startDate)),
+  );
+  for (const stage of newestFirst) {
+    const wk = weekendKey(stage.startDate);
+    const at = out.findIndex((c) => c.kind === 'event' && weekendKey(c.endDate) <= wk);
+    out.splice(at === -1 ? out.length : at, 0, { kind: 'series' as const, ...stage });
+  }
+  return out;
+}
+
+export interface UsauSeriesDivisionResult {
+  division: 'Men' | 'Women' | 'Mixed' | null;
+  teamCount: number;
+  startDate: string | null;
+  endDate: string | null;
+  champion: { teamName: string; teamId: string; viaPoolRecord?: boolean } | null;
+  /** The championship final was cancelled with no champion (washout). */
+  cancelled: boolean;
+}
+
+export interface UsauSeriesEventResult {
+  /** series_group_key — the merged event's URL slug. */
+  slug: string;
+  name: string;
+  startDate: string | null;
+  endDate: string | null;
+  /** Only when every division agrees (Capital's divisions play at two sites). */
+  city: string | null;
+  state: string | null;
+  divisions: UsauSeriesDivisionResult[];
+}
+
+export interface UsauSeriesStageEvents {
+  stage: UsauSeriesStageCard;
+  events: UsauSeriesEventResult[];
+}
+
+/**
+ * Every merged tournament in one series stage (a season's sectionals, one
+ * level's regionals), each with its divisions' champion / pool leader /
+ * cancelled final / team count. Backs the ?series= list on Scores and Schedule.
+ * Bounded: one events read (~100 members), paged team counts, and champion
+ * reads only over members that have started.
+ */
+export async function listSeriesStageEvents(
+  today: string,
+  season: number,
+  stage: UsauSeriesStage,
+  level: UsauLevel,
+): Promise<UsauSeriesStageEvents | null> {
+  const db = await supabase();
+  const { data, error } = await db
+    .from('usau_events')
+    .select(EVENT_COLUMNS)
+    .eq('series_stage', stage)
+    .eq('season', season)
+    .in('series_tier', seriesTiersFor([level]))
+    .not('start_date', 'is', null);
+  if (error) throw error;
+  const rows = (data ?? []) as unknown as UsauEventRow[];
+  if (rows.length === 0) return null;
+  const ids = rows.map((r) => r.id);
+
+  // Team counts per member, paged past the 1000-row cap (2026 sectionals
+  // alone field ~540 entries).
+  const teamCounts = new Map<string, number>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: teamsError } = await db
+      .from('usau_event_teams')
+      .select('event_id, team_id')
+      .in('event_id', ids)
+      .order('event_id', { ascending: true })
+      .order('team_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (teamsError) throw teamsError;
+    const pageRows = page ?? [];
+    for (const r of pageRows) teamCounts.set(r.event_id, (teamCounts.get(r.event_id) ?? 0) + 1);
+    if (pageRows.length < PAGE) break;
+  }
+
+  const divisionOf = new Map<string, 'Men' | 'Women' | 'Mixed'>();
+  for (const r of rows) {
+    const d = r.series_division;
+    if (d === 'Men' || d === 'Women' || d === 'Mixed') divisionOf.set(r.id, d);
+  }
+  const started = rows.filter((r) => (r.start_date ?? '') <= today);
+  const { championsByEvent, cancelledKeys } = await championsForEvents(
+    db,
+    started.map((r) => ({ id: r.id, endDate: r.end_date })),
+    today,
+    divisionOf,
+  );
+
+  const groups = new Map<string, UsauEventRow[]>();
+  for (const r of rows) {
+    const key = r.series_group_key as string;
+    const list = groups.get(key);
+    if (list) list.push(r);
+    else groups.set(key, [r]);
+  }
+
+  const events: UsauSeriesEventResult[] = [...groups.entries()].map(([key, members]) => {
+    const sorted = sortSeriesMembers(members);
+    const divisions: UsauSeriesDivisionResult[] = [];
+    for (const m of sorted) {
+      const champs = championsByEvent.get(m.id) ?? [];
+      const base = { teamCount: teamCounts.get(m.id) ?? 0, startDate: m.start_date, endDate: m.end_date };
+      const pinned = divisionOf.get(m.id) ?? null;
+      if (pinned || champs.length === 0) {
+        const c = champs[0];
+        divisions.push({
+          ...base,
+          division: pinned,
+          champion: c ? { teamName: c.teamName, teamId: c.teamId, viaPoolRecord: c.viaPoolRecord } : null,
+          cancelled: !c && pinned != null && cancelledKeys.has(`${m.id}|${pinned}`),
+        });
+      } else {
+        // A gender-less member (2014's combined sectionals) crowns one team per division.
+        for (const c of champs) {
+          divisions.push({
+            ...base,
+            division: c.division,
+            champion: { teamName: c.teamName, teamId: c.teamId, viaPoolRecord: c.viaPoolRecord },
+            cancelled: false,
+          });
+        }
+      }
+    }
+    const starts = sorted.map((m) => m.start_date).filter((d): d is string => !!d).sort();
+    const ends = sorted.map((m) => m.end_date).filter((d): d is string => !!d).sort();
+    return {
+      slug: key,
+      name: sorted[0].series_group_name ?? sorted[0].name,
+      startDate: starts[0] ?? null,
+      endDate: ends[ends.length - 1] ?? null,
+      city: agreedValue(sorted, (r) => r.city),
+      state: agreedValue(sorted, (r) => r.state),
+      divisions,
+    };
+  });
+  events.sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? '') || a.name.localeCompare(b.name));
+
+  return { stage: toStageCard(aggregateSeriesStages(rows)[0]), events };
+}
+
+export type UsauScheduleItem =
+  | { kind: 'event'; event: UsauEventCard }
+  | { kind: 'series'; series: UsauSeriesStageCard };
+
+export interface UsauScheduleUpcoming {
+  items: UsauScheduleItem[];
+  /** Something at this level already started this season — drives the
+   *  "View completed tournaments" link out to /scores. */
+  hasPrior: boolean;
+}
+
+/**
+ * The future-facing USAU calendar for /schedule: this season's events that
+ * haven't started yet, soonest first, with each series stage as ONE card that
+ * stays until its last member tournament has started. Runs server-side so the
+ * Eastern `today` decides "upcoming" (the client compared against the UTC
+ * date, hiding next-day events every evening after 8pm ET), and team counts
+ * page past the 1000-row cap (an unpaged read truncated 2026 Club's 1,879
+ * entries).
+ */
+export async function listUsauScheduleUpcoming(
+  today: string,
+  season: number,
+  level: CompetitionLevel,
+  flights: Flight[] = [],
+): Promise<UsauScheduleUpcoming> {
+  const db = await supabase();
+  const levels = isMastersFamily(level) ? MASTERS_FAMILY : [level];
+
+  const [{ data, error }, stages, { count: priorCount, error: priorError }] = await Promise.all([
+    db
+      .from('usau_events')
+      .select('id, usau_slug, name, season, start_date, end_date, city, state, competition_level, url')
+      .eq('season', season)
+      .in('competition_level', levels)
+      .is('series_stage', null)
+      .or(`start_date.gt.${today},start_date.is.null`)
+      .order('start_date', { ascending: true, nullsFirst: false })
+      .order('name', { ascending: true }),
+    // Flights are a TCT concept; the series has none, so a flight filter hides stages.
+    flights.length > 0 ? Promise.resolve([]) : fetchSeriesStages(db, { season, levels: [level] }),
+    db
+      .from('usau_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('season', season)
+      .in('competition_level', levels)
+      .lte('start_date', today),
+  ]);
+  if (error) throw error;
+  if (priorError) throw priorError;
+  let events = data ?? [];
+
+  // Masters family: a combined championship is ONE row tagged with a sibling
+  // level (see MASTERS_FAMILY) — keep it only when it fields this level.
+  if (isMastersFamily(level)) {
+    const siblingIds = events.filter((e) => e.competition_level !== level).map((e) => e.id);
+    const fielding = await eventIdsWithTeamLevel(db, level, siblingIds);
+    events = events.filter((e) => e.competition_level === level || fielding.has(e.id));
+  }
+  if (flights.length > 0) {
+    const flightSet = new Set(flights);
+    events = events.filter((e) => {
+      const f = flightForName(e.name);
+      return f != null && flightSet.has(f);
+    });
+  }
+
+  const teamCounts = new Map<string, number>();
+  const ids = events.map((e) => e.id);
+  const PAGE = 1000;
+  for (let from = 0; ids.length > 0; from += PAGE) {
+    const { data: page, error: teamsError } = await db
+      .from('usau_event_teams')
+      .select('event_id, team_id')
+      .in('event_id', ids)
+      .order('event_id', { ascending: true })
+      .order('team_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (teamsError) throw teamsError;
+    const pageRows = page ?? [];
+    for (const r of pageRows) teamCounts.set(r.event_id, (teamCounts.get(r.event_id) ?? 0) + 1);
+    if (pageRows.length < PAGE) break;
+  }
+
+  const items: UsauScheduleItem[] = [
+    ...stages
+      .filter((s) => s.lastStart > today)
+      .map((s) => ({ kind: 'series' as const, series: toStageCard(s) })),
+    ...events.map((e) => ({
+      kind: 'event' as const,
+      event: {
+        id: e.id,
+        slug: e.usau_slug,
+        name: e.name,
+        season: e.season,
+        startDate: e.start_date,
+        endDate: e.end_date,
+        city: e.city,
+        state: e.state,
+        competitionLevel: e.competition_level,
+        teamCount: teamCounts.get(e.id) ?? 0,
+        url: e.url ?? null,
+        flight: flightForName(e.name),
+        winner: null,
+      },
+    })),
+  ];
+  // Soonest first, undated last; a stage leads its first day.
+  const dateOf = (i: UsauScheduleItem) =>
+    (i.kind === 'series' ? i.series.startDate : i.event.startDate) ?? '9999-12-31';
+  items.sort(
+    (a, b) =>
+      dateOf(a).localeCompare(dateOf(b)) ||
+      (a.kind === 'series' ? 0 : 1) - (b.kind === 'series' ? 0 : 1),
+  );
+  return { items, hasPrior: (priorCount ?? 0) > 0 };
+}
+
+/**
+ * Resolve an event slug in ONE query. A slug is either a real usau_slug (an
+ * ordinary event or one division's series row) or a merged group's
+ * series_group_key — keys never collide with a usau_slug (checked across
+ * every row when the migration shipped). Case-INSENSITIVE on usau_slug: the
+ * HTML pipeline stored some mixed-case slugs that a later ultirzr re-ingest
+ * lowercases, and old links must keep resolving.
+ */
+export async function resolveUsauEvent(slug: string): Promise<ResolvedUsauEvent | null> {
+  const db = await supabase();
+  const key = slug.toLowerCase();
+  let rows: UsauEventRow[];
+  if (/^[A-Za-z0-9-]+$/.test(slug)) {
+    // Plain slug: safe inside PostgREST's or() syntax, and has no LIKE
+    // metacharacters, so ilike is an exact case-insensitive match.
+    const { data, error } = await db
+      .from('usau_events')
+      .select(EVENT_COLUMNS)
+      .or(`usau_slug.ilike.${slug},series_group_key.eq.${key}`);
+    if (error) throw error;
+    rows = (data ?? []) as unknown as UsauEventRow[];
+  } else {
+    // Anything else can only be a real usau_slug (keys are [a-z0-9-]).
+    const slugPattern = slug.replace(/[%_\\]/g, (c) => `\\${c}`);
+    const { data, error } = await db
+      .from('usau_events')
+      .select(EVENT_COLUMNS)
+      .ilike('usau_slug', slugPattern)
+      .maybeSingle();
+    if (error) throw error;
+    rows = data ? [data as unknown as UsauEventRow] : [];
+  }
+  // Group first: if a USAU slug ever equals its own group key (a name with no
+  // gender word), resolving it as a member would redirect to itself forever.
+  const group = rows.filter((r) => r.series_group_key === key);
+  if (group.length > 0) return { kind: 'group', rows: sortSeriesMembers(group) };
+  const direct = rows.find((r) => r.usau_slug.toLowerCase() === key);
+  if (!direct) return null;
+  return direct.series_group_key ? { kind: 'member', row: direct } : { kind: 'event', row: direct };
+}
+
+/** The one value every member agrees on (nulls and "TBD" ignored), else null. */
+function agreedValue(rows: UsauEventRow[], pick: (r: UsauEventRow) => string | null): string | null {
+  const vals = new Set(rows.map(pick).filter((v): v is string => !!v && v !== 'TBD'));
+  return vals.size === 1 ? [...vals][0] : null;
+}
+
+/**
+ * Load teams + games for a resolved slug. A series member is expanded to its
+ * whole group (one extra indexed query) so non-page callers — starred items,
+ * For You, the home hero — always get the merged event.
+ */
+export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEventSummary> {
+  const db = await supabase();
+  let rows: UsauEventRow[];
+  if (resolved.kind === 'group') {
+    rows = resolved.rows;
+  } else if (resolved.kind === 'member') {
+    const { data, error } = await db
+      .from('usau_events')
+      .select(EVENT_COLUMNS)
+      .eq('series_group_key', resolved.row.series_group_key as string);
+    if (error) throw error;
+    const siblings = (data ?? []) as unknown as UsauEventRow[];
+    rows = siblings.length > 0 ? sortSeriesMembers(siblings) : [resolved.row];
+  } else {
+    rows = [resolved.row];
+  }
+  const isSeries = resolved.kind !== 'event';
+  // Division tags need every member to carry one; 2014 combined sectionals and
+  // gender-less GGM regionals keep the classic team-derived path.
+  const merged = isSeries && rows.every((r) => r.series_division != null);
+  const ids = rows.map((r) => r.id);
+  const divisionOf = new Map(rows.map((r) => [r.id, merged ? r.series_division : null]));
 
   const [partRes, gameRes] = await Promise.all([
     db
       .from('usau_event_teams')
-      .select('team_id, seed, pool, final_placement, usau_teams(name, gender_division, competition_level)')
-      .eq('event_id', event.id),
+      .select('event_id, team_id, seed, pool, final_placement, usau_teams(name, gender_division, competition_level)')
+      .in('event_id', ids),
     db
       .from('usau_games')
       .select(
         // usau_games has two FKs to usau_teams (team_a + team_b), so we
         // hint PostgREST with the !<columnName> syntax to disambiguate.
-        `id, round, bracket_name, team_a_id, team_b_id,
+        `id, event_id, round, bracket_name, team_a_id, team_b_id,
          seed_a, seed_b, score_a, score_b, location, scheduled_at, status,
          usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
          team_a:usau_teams!team_a_id(name),
          team_b:usau_teams!team_b_id(name)`,
       )
-      .eq('event_id', event.id),
+      .in('event_id', ids),
   ]);
 
   const teams = (partRes.data ?? []).map((p) => {
@@ -3908,54 +4640,117 @@ export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
       seed: p.seed,
       pool: p.pool,
       finalPlacement: p.final_placement,
-      genderDivision: t?.gender_division ?? null,
+      // A merged member row is single-division by construction; its division
+      // beats the team's own tag (42 series teams have none, 3 contradict).
+      genderDivision: divisionOf.get(p.event_id) ?? t?.gender_division ?? null,
       competitionLevel: t?.competition_level ?? null,
     };
   });
 
-  const games = dropUnfedUpstreamRounds(dropSupersededGames(
-    (gameRes.data ?? []).map((g) => {
-      const ta = (g as { team_a: { name: string } | null }).team_a;
-      const tb = (g as { team_b: { name: string } | null }).team_b;
-      return {
-        id: g.id,
-        round: g.round,
-        bracketName: g.bracket_name,
-        teamAId: g.team_a_id,
-        teamAName: ta?.name ?? null,
-        teamBId: g.team_b_id,
-        teamBName: tb?.name ?? null,
-        seedA: g.seed_a,
-        seedB: g.seed_b,
-        scoreA: g.score_a,
-        scoreB: g.score_b,
-        location: g.location,
-        scheduledAt: g.scheduled_at,
-        status: g.status,
-        usauGameOrder: parseUsauGameOrder(g.usau_game_id, g.usau_event_game_id),
-        teamAPlaceholder: g.team_a_placeholder ?? null,
-        teamBPlaceholder: g.team_b_placeholder ?? null,
-      };
-    }),
-  ));
+  // Cleanup passes run PER member: siblings can play at different sites
+  // (field + time is not unique across them) and reuse bracket names.
+  const rawByEvent = new Map<string, EventGameRow[]>();
+  for (const g of gameRes.data ?? []) {
+    const ta = (g as { team_a: { name: string } | null }).team_a;
+    const tb = (g as { team_b: { name: string } | null }).team_b;
+    const list = rawByEvent.get(g.event_id) ?? [];
+    list.push({
+      id: g.id,
+      round: g.round,
+      bracketName: g.bracket_name,
+      teamAId: g.team_a_id,
+      teamAName: ta?.name ?? null,
+      teamBId: g.team_b_id,
+      teamBName: tb?.name ?? null,
+      seedA: g.seed_a,
+      seedB: g.seed_b,
+      scoreA: g.score_a,
+      scoreB: g.score_b,
+      location: g.location,
+      scheduledAt: g.scheduled_at,
+      status: g.status,
+      usauGameOrder: parseUsauGameOrder(g.usau_game_id, g.usau_event_game_id),
+      teamAPlaceholder: g.team_a_placeholder ?? null,
+      teamBPlaceholder: g.team_b_placeholder ?? null,
+      division: divisionOf.get(g.event_id) ?? null,
+    });
+    rawByEvent.set(g.event_id, list);
+  }
+  const games = rows.flatMap((r) => dropUnfedUpstreamRounds(dropSupersededGames(rawByEvent.get(r.id) ?? [])));
 
+  const anchor = rows[0];
+  if (!isSeries) {
+    return {
+      id: anchor.id,
+      slug: anchor.usau_slug,
+      name: anchor.name,
+      season: anchor.season,
+      startDate: anchor.start_date,
+      endDate: anchor.end_date,
+      city: anchor.city,
+      state: anchor.state,
+      venueTz: anchor.venue_tz ?? null,
+      venue: anchor.venue ?? null,
+      competitionLevel: anchor.competition_level,
+      url: anchor.url ?? null,
+      flight: flightForName(anchor.name),
+      members: [],
+      series: null,
+      teams,
+      games,
+    };
+  }
+
+  const starts = rows.map((r) => r.start_date).filter((d): d is string => !!d).sort();
+  const ends = rows.map((r) => r.end_date).filter((d): d is string => !!d).sort();
+  const groupName = anchor.series_group_name ?? anchor.name;
+  const tier = anchor.series_tier ?? 'club';
+  const level = SERIES_TIER_LEVEL[tier] ?? anchor.competition_level;
   return {
-    id: event.id,
-    slug: event.usau_slug,
-    name: event.name,
-    season: event.season,
-    startDate: event.start_date,
-    endDate: event.end_date,
-    city: event.city,
-    state: event.state,
-    venueTz: event.venue_tz ?? null,
-    venue: event.venue ?? null,
-    competitionLevel: event.competition_level,
-    url: event.url ?? null,
-    flight: flightForName(event.name),
+    id: anchor.id,
+    slug: anchor.series_group_key as string,
+    name: groupName,
+    season: anchor.season,
+    startDate: starts[0] ?? null,
+    endDate: ends[ends.length - 1] ?? null,
+    city: agreedValue(rows, (r) => r.city),
+    state: agreedValue(rows, (r) => r.state),
+    venueTz: rows.map((r) => r.venue_tz).find((v) => !!v) ?? null,
+    venue: agreedValue(rows, (r) => r.venue),
+    competitionLevel: level,
+    // No single USAU page exists for a merged event; each member keeps its own.
+    url: null,
+    flight: flightForName(groupName),
+    members: rows.map((r) => ({
+      id: r.id,
+      slug: r.usau_slug,
+      name: r.name,
+      url: r.url ?? null,
+      division: (r.series_division as UsauEventMember['division']) ?? null,
+      startDate: r.start_date,
+      endDate: r.end_date,
+      city: r.city,
+      state: r.state,
+      venue: r.venue ?? null,
+      venueTz: r.venue_tz ?? null,
+    })),
+    series: {
+      season: anchor.season,
+      stage: anchor.series_stage as string,
+      tier,
+      level,
+      groupKey: anchor.series_group_key as string,
+    },
     teams,
     games,
   };
+}
+
+/** Event by slug — an ordinary event, a merged series group, or a series
+ *  member (returned as its merged group). */
+export async function getEvent(slug: string): Promise<UsauEventSummary | null> {
+  const resolved = await resolveUsauEvent(slug);
+  return resolved ? loadUsauEvent(resolved) : null;
 }
 
 /** Quick test: is this id a USAU UUID (vs a UFA player slug like "cdykes")? */

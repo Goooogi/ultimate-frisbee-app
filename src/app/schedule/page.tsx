@@ -11,9 +11,12 @@ import type { UfaGame } from '@/lib/ufa/types';
 import { PageShell } from '@/components/page-shell';
 import { GameCard } from '@/components/game-card';
 import { YearSelector } from '@/components/year-selector';
-import { parseLeagueParam, parseLevelParam, levelLabel } from '@/lib/league';
+import { parseLeagueParam, parseLevelParam, parseSeriesParam, levelLabel, buildLeagueQs } from '@/lib/league';
 import { UsauSchedule } from '@/components/usau/usau-schedule';
 import { UsauScheduleControls } from '@/components/usau/usau-schedule-controls';
+import { UsauSeriesStageList } from '@/components/usau/usau-series-cards';
+import { listSeriesStageEventsCached, listUsauSeasonsCached, usauScheduleCached } from '@/lib/cached-readers';
+import { usauToday } from '@/lib/today';
 import { parseFlightsParam, FLIGHT_LABELS } from '@/lib/usau/flights';
 import { PulSchedule } from '@/components/pul/pul-schedule';
 import { getPulCurrentSeason } from '@/lib/pul/data';
@@ -26,7 +29,15 @@ export const metadata: Metadata = {
 };
 
 interface Props {
-  searchParams: { year?: string; season?: string; league?: string; div?: string; level?: string; flight?: string };
+  searchParams: {
+    year?: string;
+    season?: string;
+    league?: string;
+    div?: string;
+    level?: string;
+    flight?: string;
+    series?: string;
+  };
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
@@ -74,13 +85,39 @@ export default async function SchedulePage({ searchParams }: Props) {
       levelLabel(level),
       flights.length === 1 ? FLIGHT_LABELS[flights[0]] : flights.length > 1 ? `${flights.length} flights` : null,
     ].filter(Boolean).join(' · ');
+    // Always the latest season's calendar (season browsing lives on /scores).
+    // Read server-side against the Eastern date.
+    const today = usauToday();
+    const season = (await listUsauSeasonsCached())[0] ?? null;
+    // ?series=sectionals|regionals → that stage's merged tournaments.
+    const seriesStage = parseSeriesParam(searchParams.series, level);
+    const series =
+      seriesStage && season != null
+        ? await listSeriesStageEventsCached(today, season, seriesStage, level)
+        : null;
+    const schedule =
+      series || season == null
+        ? { items: [], hasPrior: false }
+        : await usauScheduleCached(today, season, level, flights).catch((err) => {
+            console.error('Failed to load the USAU schedule:', err);
+            return null;
+          });
     return (
       <PageShell
         title="Schedule"
         eyebrow={eyebrow}
         controls={<UsauScheduleControls level={level} />}
       >
-        <UsauSchedule competitionLevel={level} flights={flights} />
+        {series ? (
+          <UsauSeriesStageList
+            data={series}
+            today={today}
+            backHref={`/schedule${buildLeagueQs('usau', null, level)}`}
+            backLabel="Schedule"
+          />
+        ) : (
+          <UsauSchedule schedule={schedule} competitionLevel={level} />
+        )}
       </PageShell>
     );
   }

@@ -8,12 +8,16 @@
 // schedule page. We don't have W-L records aggregated yet — that's a
 // future enhancement (compute from usau_games rows).
 
-import { Suspense } from 'react';
+import { cache, Suspense } from 'react';
 import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { SourceLink } from '@/components/source-link';
-import { getEvent, type UsauEventSummary } from '@/lib/usau/data';
+import { loadUsauEvent, resolveUsauEvent, type UsauEventSummary } from '@/lib/usau/data';
+import { usauEventHref } from '@/lib/usau/event-href';
+import { usauToday } from '@/lib/today';
+import { UsauMemberSourceLink } from '@/components/usau/usau-member-source-link';
+import { UsauSeriesFavoriteStar } from '@/components/usau/usau-series-favorite-star';
 import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
 import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
@@ -25,8 +29,7 @@ import { USAU_LEVELS, buildLeagueQs, type UsauLevel } from '@/lib/league';
 function isUpcomingOrLive(event: UsauEventSummary): boolean {
   const cutoff = event.endDate ?? event.startDate;
   if (!cutoff) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return cutoff >= today;
+  return cutoff >= usauToday();
 }
 
 export const revalidate = 60;
@@ -42,14 +45,42 @@ interface Props {
   params: { slug: string };
 }
 
+// generateMetadata and the page share one resolve + one load per request
+// (React cache), so a merged series event costs 3 PostgREST calls per render.
+const resolveEventCached = cache(resolveUsauEvent);
+const loadEventCached = cache(async (slug: string) => {
+  const resolved = await resolveEventCached(slug);
+  return resolved ? loadUsauEvent(resolved) : null;
+});
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const event = await getEvent(params.slug).catch(() => null);
-  if (!event) return { title: 'Event not found · The Layout' };
-  return { title: `${event.name} · USAU · The Layout` };
+  const resolved = await resolveEventCached(params.slug).catch(() => null);
+  if (!resolved) return { title: 'Event not found · The Layout' };
+  const row = resolved.kind === 'group' ? resolved.rows[0] : resolved.row;
+  const name = resolved.kind === 'event' ? row.name : row.series_group_name ?? row.name;
+  const canonical = resolved.kind === 'event' ? row.usau_slug : (row.series_group_key as string);
+  return {
+    title: `${name} · USAU · The Layout`,
+    // One URL per tournament: collapses ?div= variants, mixed-case slugs, and
+    // the per-division member URLs that redirect here.
+    alternates: { canonical: `/usau/events/${canonical}` },
+  };
 }
 
 export default async function UsauEventPage({ params }: Props) {
-  const event = await getEvent(params.slug);
+  const resolved = await resolveEventCached(params.slug);
+  if (!resolved) notFound();
+
+  // One division's row of a series event (USAU publishes Sectionals/Regionals
+  // per division) → the merged event, preselecting that division. Decided from
+  // the member row itself, never from searchParams, so the route stays ISR.
+  // 307 for now: switch to permanentRedirect once the group keys have held for
+  // a season (a browser caches a 308 forever).
+  if (resolved.kind === 'member') {
+    redirect(usauEventHref(resolved.row.series_group_key as string, resolved.row.series_division));
+  }
+
+  const event = await loadEventCached(params.slug);
   if (!event) notFound();
 
   // WFDF-hosted events (WUCC/WJUC/WMUCC) leak into usau_events as stubs that
@@ -85,26 +116,59 @@ export default async function UsauEventPage({ params }: Props) {
       // as the WFDF event page — a quiet accent link, not a pill on its own row
       // (Hunter, 2026-08-22).
       controls={
-        event.url || isUpcomingOrLive(event) ? (
+        event.url || event.members.some((m) => m.url) || isUpcomingOrLive(event) ? (
           <div className="flex items-center gap-2">
-            {event.url && (
-              <SourceLink
-                href={event.url}
-                label="USAU site"
-                ariaLabel={`View ${event.name} on USA Ultimate`}
-              />
+            {event.members.length > 0 ? (
+              // A merged event links the USAU page of the division being viewed.
+              <Suspense
+                fallback={
+                  <SourceLink
+                    href={event.members.find((m) => m.url)?.url ?? null}
+                    label="USAU site"
+                    ariaLabel={`View ${event.name} on USA Ultimate`}
+                  />
+                }
+              >
+                <UsauMemberSourceLink members={event.members} eventName={event.name} />
+              </Suspense>
+            ) : (
+              event.url && (
+                <SourceLink
+                  href={event.url}
+                  label="USAU site"
+                  ariaLabel={`View ${event.name} on USA Ultimate`}
+                />
+              )
             )}
-            {isUpcomingOrLive(event) && (
-              <EventFavoriteStar
-                event={{
-                  league: 'usau',
-                  eventId: event.id,
-                  name: event.name,
-                  startDate: event.startDate,
-                  endDate: event.endDate,
-                }}
-              />
-            )}
+            {isUpcomingOrLive(event) &&
+              (event.members.length > 0 ? (
+                // Merged event: the star is stored on the division being viewed
+                // (pushes follow that division, as before the merge) and shows
+                // filled when any division is starred.
+                <Suspense
+                  fallback={
+                    <EventFavoriteStar
+                      event={{ league: 'usau', eventId: event.id, name: event.name, startDate: event.startDate, endDate: event.endDate }}
+                      memberIds={event.members.map((m) => m.id)}
+                    />
+                  }
+                >
+                  <UsauSeriesFavoriteStar
+                    event={{ league: 'usau', eventId: event.id, name: event.name, startDate: event.startDate, endDate: event.endDate }}
+                    members={event.members}
+                  />
+                </Suspense>
+              ) : (
+                <EventFavoriteStar
+                  event={{
+                    league: 'usau',
+                    eventId: event.id,
+                    name: event.name,
+                    startDate: event.startDate,
+                    endDate: event.endDate,
+                  }}
+                />
+              ))}
           </div>
         ) : undefined
       }

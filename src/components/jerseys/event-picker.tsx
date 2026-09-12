@@ -52,18 +52,37 @@ export function EventPicker({
       const today = new Date().toISOString().slice(0, 10);
       const { data } = await db
         .from('usau_events')
-        .select('id, name, start_date')
+        .select('id, name, start_date, series_group_key, series_group_name')
         .gte('end_date', today)
         .ilike('name', `%${needle}%`)
         .order('start_date', { ascending: true })
-        .limit(6);
+        .order('series_division', { ascending: true, nullsFirst: true })
+        .limit(18);
       if (mine !== seq.current) return;
+      // A Sectional/Regional is one USAU row per division — suggest the merged
+      // event once, stored on its first (earliest) row.
+      const seen = new Set<string>();
+      const rows = (data ?? []) as {
+        id: string;
+        name: string;
+        start_date: string | null;
+        series_group_key: string | null;
+        series_group_name: string | null;
+      }[];
       setSuggestions(
-        ((data ?? []) as { id: string; name: string; start_date: string | null }[]).map((e) => ({
-          id: String(e.id),
-          name: String(e.name),
-          startDate: e.start_date ?? null,
-        })),
+        rows
+          .filter((e) => {
+            const key = e.series_group_key ?? e.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .slice(0, 6)
+          .map((e) => ({
+            id: String(e.id),
+            name: String(e.series_group_name ?? e.name),
+            startDate: e.start_date ?? null,
+          })),
       );
     }, 220);
     return () => clearTimeout(t);

@@ -23,8 +23,9 @@ import { getEvent as getWfdfEvent } from '@/lib/wfdf/data';
 import { getEvent as getEufEvent } from '@/lib/euf/data';
 import type { StarredEventItem, StarredGameItem, StarredItems } from '@/lib/favorites/starred-feed';
 
-const EVENT_TABLES: Record<FavoriteEvent['league'], { table: string; slugCol: string }> = {
-  usau: { table: 'usau_events', slugCol: 'usau_slug' },
+const EVENT_TABLES: Record<FavoriteEvent['league'], { table: string; slugCol: string; groupCol?: string }> = {
+  // A starred USAU series member opens — and dedupes as — its merged event.
+  usau: { table: 'usau_events', slugCol: 'usau_slug', groupCol: 'series_group_key' },
   wfdf: { table: 'wfdf_events', slugCol: 'slug' },
   euf: { table: 'euf_events', slugCol: 'slug' },
 };
@@ -34,11 +35,18 @@ export async function resolveEventSlug(
   league: FavoriteEvent['league'],
   eventId: string,
 ): Promise<string | null> {
-  const { table, slugCol } = EVENT_TABLES[league];
+  const { table, slugCol, groupCol } = EVENT_TABLES[league];
   const db = createClient(supabaseUrl(), supabaseAnonKey(), { auth: { persistSession: false } });
-  const { data, error } = await db.from(table).select(slugCol).eq('id', eventId).maybeSingle();
+  const { data, error } = await db
+    .from(table)
+    .select(groupCol ? `${slugCol}, ${groupCol}` : slugCol)
+    .eq('id', eventId)
+    .maybeSingle();
   if (error) throw error;
-  const slug = (data as Record<string, unknown> | null)?.[slugCol];
+  const row = data as Record<string, unknown> | null;
+  const group = groupCol ? row?.[groupCol] : null;
+  if (typeof group === 'string' && group) return group;
+  const slug = row?.[slugCol];
   return typeof slug === 'string' && slug ? slug : null;
 }
 
@@ -75,13 +83,31 @@ export async function getStarredItems(favorites: {
     }),
   );
 
-  const eventItems = await Promise.all(
+  // Resolve first, then dedupe: stars on two divisions of one merged USAU
+  // series event resolve to the same group slug and must render once.
+  const resolvedStars = await Promise.all(
     favorites.events
       .filter((f) => (f.endDate ?? f.startDate ?? '') >= today)
-      .map(async (f): Promise<StarredEventItem | null> => {
+      .map(async (f) => {
         try {
-          const slug = await resolveEventSlug(f.league, f.eventId);
-          if (!slug) return null;
+          return { f, slug: await resolveEventSlug(f.league, f.eventId) };
+        } catch {
+          return { f, slug: null };
+        }
+      }),
+  );
+  const seenStars = new Set<string>();
+  const uniqueStars = resolvedStars.filter((s): s is { f: FavoriteEvent; slug: string } => {
+    if (!s.slug) return false;
+    const key = `${s.f.league}:${s.slug}`;
+    if (seenStars.has(key)) return false;
+    seenStars.add(key);
+    return true;
+  });
+
+  const eventItems = await Promise.all(
+    uniqueStars.map(async ({ f, slug }): Promise<StarredEventItem | null> => {
+        try {
           if (f.league === 'usau') {
             const event = await getUsauEvent(slug);
             return event ? { league: 'usau', event, sortTs: dateTs(event.startDate) } : null;

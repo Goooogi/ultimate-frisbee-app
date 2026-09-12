@@ -3,10 +3,13 @@
 // [1.4fr_1fr] = left meta column / right ring-circle logo.
 //
 // Props come from UsauEventSummary (lib/usau/data) — name, dates, team count.
-// CTA links to /usau/events/{slug}.
+// CTA links to /usau/events/{slug}. A whole series stage ("2026 USAU
+// Sectionals") uses the same frame and opens the stage's tournament list.
 
 import Link from 'next/link';
-import type { UsauEventSummary } from '@/lib/usau/data';
+import type { ReactNode } from 'react';
+import type { UsauEventSummary, UsauSeriesStageCard } from '@/lib/usau/data';
+import { seriesStageHref } from '@/lib/league';
 import { HeroFieldLines } from './field-diagram';
 
 const USAU_BG = '#173A7A';
@@ -25,8 +28,84 @@ export function HeroUsauSlide({ event, pill = 'USAU Tournament' }: HeroUsauSlide
   const dateRange = formatDateRange(event.startDate, event.endDate);
   const location = [event.city, event.state].filter(Boolean).join(', ');
   const levelLabel = formatLevel(event.competitionLevel);
-  const slug = event.slug;
 
+  return (
+    <UsauSlideFrame
+      pill={pill}
+      subline={`${levelLabel}${location ? ` · ${location}` : ''}`}
+      title={event.name}
+      badge={
+        event.flight && (
+          <div
+            className="inline-flex items-center self-start px-2.5 py-1 rounded-full font-mono text-[9px] font-bold tracking-[0.14em] uppercase"
+            style={{ color: '#5A8CF0', background: 'rgba(29,94,204,0.22)' }}
+          >
+            {event.flight.replace('-', ' ')}
+          </div>
+        )
+      }
+      meta={
+        <>
+          {dateRange && <DarkMeta label="Dates" value={dateRange} />}
+          {teamCount > 0 && <DarkMeta label="Teams" value={String(teamCount)} />}
+          {event.season && <DarkMeta label="Season" value={String(event.season)} />}
+        </>
+      }
+      ctaHref={`/usau/events/${event.slug}`}
+      ctaLabel="View tournament →"
+    />
+  );
+}
+
+/** A series stage headlining the hero — the stage's tournaments live behind
+ *  one card, so the CTA opens its list (Schedule until day one, then Scores). */
+export function HeroUsauSeriesSlide({
+  series,
+  today,
+  pill = 'USAU Series',
+}: {
+  series: UsauSeriesStageCard;
+  /** Eastern date (usauToday) — picks Schedule vs Scores for the CTA. */
+  today: string;
+  pill?: string;
+}) {
+  const dateRange = formatDateRange(series.startDate, series.endDate);
+  const unit = series.stage === 'club-sectionals' ? 'Sections' : 'Regions';
+  return (
+    <UsauSlideFrame
+      pill={pill}
+      subline={formatLevel(series.level)}
+      title={series.name}
+      meta={
+        <>
+          {dateRange && <DarkMeta label="Dates" value={dateRange} />}
+          <DarkMeta label={unit} value={String(series.groupCount)} />
+          <DarkMeta label="Season" value={String(series.season)} />
+        </>
+      }
+      ctaHref={seriesStageHref(series, today)}
+      ctaLabel={`View all ${unit.toLowerCase()} →`}
+    />
+  );
+}
+
+function UsauSlideFrame({
+  pill,
+  subline,
+  title,
+  badge,
+  meta,
+  ctaHref,
+  ctaLabel,
+}: {
+  pill: string;
+  subline: string;
+  title: string;
+  badge?: ReactNode;
+  meta: ReactNode;
+  ctaHref: string;
+  ctaLabel: string;
+}) {
   return (
     <article
       className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border"
@@ -53,8 +132,7 @@ export function HeroUsauSlide({ event, pill = 'USAU Tournament' }: HeroUsauSlide
               {pill}
             </span>
             <span className="font-mono text-[12px]" style={{ color: TEXT_MUTED }}>
-              {levelLabel}
-              {location ? ` · ${location}` : ''}
+              {subline}
             </span>
           </div>
 
@@ -64,30 +142,19 @@ export function HeroUsauSlide({ event, pill = 'USAU Tournament' }: HeroUsauSlide
               className="font-display italic font-bold leading-[0.92] tracking-[-0.03em] m-0"
               style={{ fontSize: 'clamp(28px, 5vw, 58px)', color: TEXT }}
             >
-              {event.name}
+              {title}
             </h2>
-            {event.flight && (
-              <div
-                className="inline-flex items-center self-start px-2.5 py-1 rounded-full font-mono text-[9px] font-bold tracking-[0.14em] uppercase"
-                style={{ color: '#5A8CF0', background: 'rgba(29,94,204,0.22)' }}
-              >
-                {event.flight.replace('-', ' ')}
-              </div>
-            )}
+            {badge}
           </div>
 
           {/* Footer: meta trio + CTA */}
           <div className="flex flex-wrap items-end justify-between gap-4 lg:flex-col lg:items-start lg:justify-end">
-            <div className="flex flex-wrap gap-6 sm:gap-8">
-              {dateRange && <DarkMeta label="Dates" value={dateRange} />}
-              {teamCount > 0 && <DarkMeta label="Teams" value={String(teamCount)} />}
-              {event.season && <DarkMeta label="Season" value={String(event.season)} />}
-            </div>
+            <div className="flex flex-wrap gap-6 sm:gap-8">{meta}</div>
             <Link
-              href={`/usau/events/${slug}`}
+              href={ctaHref}
               className="inline-flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 rounded-full font-sans text-[12px] sm:text-[13px] font-bold cursor-pointer whitespace-nowrap transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(74,139,248,0.6)] bg-accent text-accent-ink"
             >
-              View tournament →
+              {ctaLabel}
             </Link>
           </div>
         </div>

@@ -33,7 +33,7 @@ const LISTING_COLS = `
   owner:profiles!jersey_listings_owner_id_fkey(${POSTER_COLS}),
   jersey_photos(id, storage_path, sort_order),
   jersey_listing_events(id, usau_event_id, event_name, event_starts_on,
-                        usau_events(usau_slug, name, start_date))
+                        usau_events(usau_slug, name, start_date, series_group_key, series_group_name))
 `;
 
 const WANT_COLS = `
@@ -42,7 +42,7 @@ const WANT_COLS = `
   city, state, country, status, created_at, updated_at,
   user:profiles!jersey_wants_user_id_fkey(${POSTER_COLS}),
   jersey_listing_events(id, usau_event_id, event_name, event_starts_on,
-                        usau_events(usau_slug, name, start_date))
+                        usau_events(usau_slug, name, start_date, series_group_key, series_group_name))
 `;
 
 function mapPoster(row: any): JerseyPoster | null {
@@ -73,12 +73,13 @@ function mapEvents(rows: any[]): JerseyEventTag[] {
   return (rows ?? [])
     .map((e) => {
       const linked = e.usau_events ?? null;
-      const name = linked?.name ?? e.event_name ?? null;
+      // A Sectional/Regional division row shows (and links) as its merged event.
+      const name = linked?.series_group_name ?? linked?.name ?? e.event_name ?? null;
       if (!name) return null;
       return {
         id: String(e.id),
         usauEventId: e.usau_event_id ? String(e.usau_event_id) : null,
-        usauEventSlug: linked?.usau_slug ?? null,
+        usauEventSlug: linked?.series_group_key ?? linked?.usau_slug ?? null,
         name: String(name),
         startsOn: linked?.start_date ?? e.event_starts_on ?? null,
       };

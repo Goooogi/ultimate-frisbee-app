@@ -16,13 +16,14 @@ import { GameCard } from '@/components/game-card';
 import { FeedHero } from '@/components/feed-hero';
 import { AppShell } from '@/components/page-shell';
 import { UsauMajorGrid } from '@/components/home/multi-league-grid-section';
-import type { UsauTournamentPage } from '@/lib/usau/data';
+import type { UsauSeriesStageEvents, UsauTournamentPage } from '@/lib/usau/data';
 import { useLeague } from '@/lib/use-league';
 import { buildLeagueQs, levelLabel, type UsauLevel } from '@/lib/league';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 import { UsauFlightSelect } from '@/components/usau/usau-flight-select';
 import { UsauSeasonSelect } from '@/components/usau/usau-season-select';
 import { UsauFilterButton, UsauFilterRow } from '@/components/usau/usau-filter-button';
+import { UsauSeriesStageList } from '@/components/usau/usau-series-cards';
 
 interface FeedPageProps {
   games: UfaGame[];
@@ -31,6 +32,10 @@ interface FeedPageProps {
   usauPage: UsauTournamentPage;
   /** Active USAU competition level (cards are pre-filtered server-side). */
   usauLevel: UsauLevel;
+  /** One series stage's merged tournaments (?series=), shown instead of the feed. */
+  usauSeries: UsauSeriesStageEvents | null;
+  /** Eastern date the server rendered with — series rows key their status on it. */
+  usauToday: string;
 }
 
 // Suspense wraps the useLeague() call so Next 14 can statically
@@ -43,7 +48,7 @@ export function FeedPage(props: FeedPageProps) {
   );
 }
 
-function FeedPageInner({ games: initialGames, today, usauPage, usauLevel }: FeedPageProps) {
+function FeedPageInner({ games: initialGames, today, usauPage, usauLevel, usauSeries, usauToday }: FeedPageProps) {
   // League state lives in ?league= — see lib/use-league.ts. We don't pass
   // a topNavSlot so AppShell's default renders: pill tabs on desktop, a
   // dropdown on mobile. Both write to the same useLeague() state via the
@@ -61,7 +66,7 @@ function FeedPageInner({ games: initialGames, today, usauPage, usauLevel }: Feed
         {league === 'ufa' ? (
           <UfaFeed games={games} today={today} counts={counts} />
         ) : league === 'usau' ? (
-          <UsauFeed page={usauPage} level={usauLevel} />
+          <UsauFeed page={usauPage} level={usauLevel} series={usauSeries} today={usauToday} />
         ) : league === 'pul' ? (
           <PulComingSoon page="scores" />
         ) : null}
@@ -110,7 +115,17 @@ function UfaFeed({
 // detail (games/pools/bracket) at /usau/events/[slug]. This "results overview"
 // replaced the old single-auto-picked-tournament view so we can show winners
 // across every division without choosing just one event.
-function UsauFeed({ page, level }: { page: UsauTournamentPage; level: UsauLevel }) {
+function UsauFeed({
+  page,
+  level,
+  series,
+  today,
+}: {
+  page: UsauTournamentPage;
+  level: UsauLevel;
+  series: UsauSeriesStageEvents | null;
+  today: string;
+}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -151,6 +166,18 @@ function UsauFeed({ page, level }: { page: UsauTournamentPage; level: UsauLevel 
   // survives the hop (buildLeagueQs omits the default CLUB for clean URLs;
   // league=usau is always non-default so the qs is never empty).
   const scheduleHref = `/schedule${buildLeagueQs('usau', null, level)}`;
+
+  if (series) {
+    return (
+      <UsauSeriesStageList
+        data={series}
+        today={today}
+        backHref={`/scores${buildLeagueQs('usau', null, level)}`}
+        backLabel="All results"
+        heading="h1"
+      />
+    );
+  }
   return (
     <>
       {/* Stacked header: eyebrow row → title row → filters row. Each on its own

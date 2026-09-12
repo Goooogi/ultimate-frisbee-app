@@ -13,8 +13,9 @@ import type { UfaGame } from '@/lib/ufa/types';
 import type { PulGame } from '@/lib/pul/data';
 import type { WulGame } from '@/lib/wul/data';
 import type { UsauEventSummary } from '@/lib/usau/data';
-import type { UsauMajorWithChampions } from '@/lib/usau/data';
+import type { UsauFeedCard, UsauMajorWithChampions, UsauSeriesStageCard } from '@/lib/usau/data';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
+import { seriesListHref, seriesUnitLabel } from '@/lib/league';
 import { GameTile } from '@/components/home/game-grid-section';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { WulTeamLogo } from '@/components/wul-team-logo';
@@ -330,11 +331,52 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
   );
 }
 
+// ─── USAU series stage card ──────────────────────────────────────────────────
+// One card for a whole stage ("2026 USAU Sectionals") on the results feed, in
+// place of its per-division member events; opens the stage's tournament list.
+
+function UsauSeriesCard({ card }: { card: UsauSeriesStageCard }) {
+  const dateRange = formatDateRange(card.startDate, card.endDate);
+  const inProgress = (card.endDate ?? card.startDate ?? '') >= usauToday();
+  const unit = card.stage === 'club-sectionals' ? 'sections' : 'regions';
+  return (
+    <Link
+      href={seriesListHref('scores', card)}
+      className="group h-full bg-surface rounded-card shadow-card px-4 py-3.5 flex flex-col gap-2.5 no-underline transition-shadow hover:shadow-lift focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+    >
+      <div className="flex flex-col gap-0.5">
+        <div className="flex items-start justify-between gap-2">
+          <span className="font-tight font-semibold text-[13px] text-ink leading-snug line-clamp-2 group-hover:text-accent transition-colors">
+            {card.name}
+          </span>
+          <span className="shrink-0 mt-0.5 text-[8.5px] font-bold tracking-[0.12em] uppercase font-tight text-accent bg-accent/10 rounded-full px-2 py-0.5">
+            Series
+          </span>
+        </div>
+        {dateRange && (
+          <span className="font-mono text-[10px] text-faint tracking-[0.06em]">{dateRange}</span>
+        )}
+      </div>
+      <div className="mt-auto flex items-center justify-between gap-3">
+        <span className="font-mono text-[9.5px] text-faint tracking-[0.1em] uppercase">
+          {seriesUnitLabel(card.stage, card.groupCount)} · {inProgress ? 'In progress' : 'Complete'}
+        </span>
+        <span className="inline-flex items-center gap-1 text-[11px] font-bold tracking-[0.12em] uppercase text-accent flex-shrink-0">
+          All {unit}
+          <svg width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3 8H13M13 8L8.5 3.5M13 8L8.5 12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="square" />
+          </svg>
+        </span>
+      </div>
+    </Link>
+  );
+}
+
 export function UsauMajorGrid({
   majors,
   fill = false,
 }: {
-  majors: UsauMajorWithChampions[];
+  majors: UsauFeedCard[];
   /**
    * `fill` → full-width responsive 2-column grid with equal-height cards
    * (the Scores feed, where the section owns the whole width). Default → fixed
@@ -353,11 +395,10 @@ export function UsauMajorGrid({
   // when its scores matter most (Hunter, 2026-08-22 — the Elite Select
   // Challenge sat below Aug 15–16 events all weekend). There the upstream
   // date-then-flight order stands as-is.
+  const pending = (c: UsauFeedCard) => c.kind === 'event' && c.champions.length === 0;
   const ordered = fill
     ? majors
-    : [...majors].sort(
-        (a, b) => Number(a.champions.length === 0) - Number(b.champions.length === 0),
-      );
+    : [...majors].sort((a, b) => Number(pending(a)) - Number(pending(b)));
 
   if (fill) {
     // One column on mobile, two on desktop; each card fills its column (no
@@ -365,9 +406,13 @@ export function UsauMajorGrid({
     // so rows read as clean, matched pairs. Mirrors the UFA feed's grid.
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
-        {ordered.map((m) => (
-          <UsauMajorCard key={m.slug} major={m} />
-        ))}
+        {ordered.map((m) =>
+          m.kind === 'series' ? (
+            <UsauSeriesCard key={m.id} card={m} />
+          ) : (
+            <UsauMajorCard key={m.slug} major={m} />
+          ),
+        )}
       </div>
     );
   }
@@ -377,8 +422,8 @@ export function UsauMajorGrid({
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
       {ordered.map((m) => (
-        <div key={m.slug} className="w-full">
-          <UsauMajorCard major={m} />
+        <div key={m.kind === 'series' ? m.id : m.slug} className="w-full">
+          {m.kind === 'series' ? <UsauSeriesCard card={m} /> : <UsauMajorCard major={m} />}
         </div>
       ))}
     </div>

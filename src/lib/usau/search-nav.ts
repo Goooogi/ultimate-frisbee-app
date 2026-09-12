@@ -8,6 +8,7 @@
 // lets the nav import them without pulling in the whole USAU data layer.
 
 import type { Flight } from '@/lib/usau/flights';
+import { usauEventHref } from '@/lib/usau/event-href';
 
 export interface SearchResult {
   kind: 'team' | 'player' | 'tournament';
@@ -19,6 +20,9 @@ export interface SearchResult {
   hint: string | null;
   /** For tournaments only: curated Triple Crown Tour flight (or null). */
   flight?: Flight | null;
+  /** USAU tournaments only: the division that matched best when one did
+   *  ("rocky mountain womens") — the link opens that tab. */
+  division?: string | null;
   /** Which league this result belongs to — drives routing (resultHref).
    *  Tournaments are USAU or WFDF. Defaults to 'usau' for legacy USAU rows. */
   league?: 'usau' | 'ufa' | 'pul' | 'wul' | 'wfdf' | 'euf';
@@ -51,7 +55,7 @@ export function resultHref(r: SearchResult): string {
     // Tournaments belong to USAU or WFDF; route by league.
     if (r.league === 'wfdf') return `/wfdf/events/${r.id}`;
     if (r.league === 'euf') return `/euf/events/${r.id}`;
-    return `/usau/events/${r.id}`;
+    return usauEventHref(r.id, r.division);
   }
   if (r.kind === 'player') {
     // WFDF isn't an anchor league — its players have no /players/[id]. Route to

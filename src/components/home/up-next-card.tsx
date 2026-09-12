@@ -97,7 +97,7 @@ export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
       {hasUsau && (
         <CardShell title="Up next" pill="USAU" alone={alone} rows={Math.min(usauEvents.length, rowCount)}>
           {usauEvents.slice(0, rowCount).map((e, i) => (
-            <UsauEventRow key={e.slug} event={e} first={i === 0} secondColumnStart={alone && i === splitAt(Math.min(usauEvents.length, rowCount))} />
+            <UsauEventRow key={e.key} event={e} first={i === 0} secondColumnStart={alone && i === splitAt(Math.min(usauEvents.length, rowCount))} />
           ))}
         </CardShell>
       )}
@@ -237,7 +237,7 @@ function UsauEventRow({
   secondColumnStart: boolean;
 }) {
   const dateRange = formatDateRange(event.startDate, event.endDate);
-  const meta = [dateRange, event.flightLabel].filter(Boolean).join(' · ');
+  const meta = [dateRange, event.flightLabel ?? event.seriesLabel].filter(Boolean).join(' · ');
 
   // Single-line row: tournament name + its date·flight sitting IMMEDIATELY to
   // the right of the name (not pinned to the far edge), with the rest of the row
@@ -245,7 +245,7 @@ function UsauEventRow({
   // visible. Single-line keeps USAU rows the same height as UFA rows.
   return (
     <Link
-      href={`/usau/events/${event.slug}`}
+      href={event.href}
       className={[
         'flex items-baseline gap-3 py-[11px]',
         rowBorder(first, secondColumnStart),

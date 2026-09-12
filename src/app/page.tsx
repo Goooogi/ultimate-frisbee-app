@@ -41,13 +41,20 @@ import {
   isAllStarGame,
 } from '@/lib/ufa/game-of-the-week';
 import type { UfaGame, UfaStanding, UfaTeamStat } from '@/lib/ufa/types';
-import { getCurrentEvent, listNextUpcomingEvents, getEvent, recentUsauMajorsWithChampions } from '@/lib/usau/data';
+import {
+  getCurrentEvent,
+  listNextUpcomingEvents,
+  getEvent,
+  recentUsauMajorsWithChampions,
+  listSeriesStages,
+  type UsauFeedCard,
+} from '@/lib/usau/data';
 import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
 import { listWulGames, getWulCurrentSeason } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
 import { HomeHero, type KeyedSlide } from '@/components/home/home-hero';
-import { HeroUsauSlide } from '@/components/home/hero-usau-slide';
+import { HeroUsauSlide, HeroUsauSeriesSlide } from '@/components/home/hero-usau-slide';
 import { HeroPulSlide } from '@/components/home/hero-pul-slide';
 import { HeroWulSlide } from '@/components/home/hero-wul-slide';
 import { HeroWfdfSlide } from '@/components/home/hero-wfdf-slide';
@@ -86,6 +93,7 @@ import { getPulStandingsCached, getWulStandingsCached } from '@/lib/cached-reade
 import { StandoutsCarousel } from '@/components/home/standouts-carousel';
 import { getStandoutPerformances } from '@/lib/home/standouts';
 import { SiteFooter } from '@/components/site-footer';
+import { usauToday } from '@/lib/today';
 
 // 5 min: home data (standouts/scores blocks) only moves when crons ingest, and
 // at 60s the standouts award scan (a paginated full-season stat read) was
@@ -111,7 +119,7 @@ export default async function HomePage() {
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes, usauCollegeRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes, usauCollegeRes, usauSeriesRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
@@ -120,10 +128,13 @@ export default async function HomePage() {
       getTeamStats({ year }),
       // USAU (hero + recent-results): current tournament via weekend cadence —
       // mirrors scores/page.tsx pattern. Can be LAST weekend's finished event.
+      // A whole series stage can headline instead ("2026 USAU Sectionals").
       (async () => {
         const pick = await getCurrentEvent();
         if (!pick) return null;
-        return await getEvent(pick.slug);
+        if ('series' in pick) return { kind: 'series' as const, series: pick.series };
+        const event = await getEvent(pick.slug);
+        return event ? { kind: 'event' as const, event } : null;
       })(),
       // USAU ("Up next" card): the next several UPCOMING flighted tournaments,
       // always forward-looking (unlike getCurrentEvent, which looks back Sun–Tue).
@@ -159,6 +170,13 @@ export default async function HomePage() {
         competitionLevels: ['COLLEGE_D1', 'COLLEGE_D3'],
         nameFilter: isCollegeChampionshipsName,
       }),
+      // USAU Club series stages (sectionals, regionals) that started in the
+      // last 60 days — a finished stage gets one "Recent results" row.
+      listSeriesStages({
+        startFrom: usauToday(new Date(now.getTime() - 60 * 86400_000)),
+        startTo: usauToday(now),
+        levels: ['CLUB'],
+      }),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -177,7 +195,9 @@ export default async function HomePage() {
     standoutsRes.status === 'fulfilled' ? standoutsRes.value : [];
 
   // ── Cross-league slide data ──────────────────────────────────────────────
-  const usauEvent = usauRes.status === 'fulfilled' ? usauRes.value : null;
+  const usauPick = usauRes.status === 'fulfilled' ? usauRes.value : null;
+  const usauEvent = usauPick?.kind === 'event' ? usauPick.event : null;
+  const usauSeries = usauPick?.kind === 'series' ? usauPick.series : null;
 
   // USAU "Up next" card: a LIST of upcoming flighted tournaments (forward-looking,
   // unlike the hero's getCurrentEvent which looks back Sun–Tue). Listing several
@@ -366,9 +386,26 @@ export default async function HomePage() {
   // ── "Recent results" cards — in-season leagues only ─────────────────────────
   // A finished season lives in the "Season complete" card instead (its playoff
   // rows carry the same results), so no league appears in both sections.
+  // USAU rows: the latest Club majors plus any FINISHED series stage, newest
+  // first — one "2026 USAU Sectionals" row stands in for its 27 sections.
+  const usauTodayIso = usauToday(now);
+  const usauFinishedStages = (usauSeriesRes.status === 'fulfilled' ? usauSeriesRes.value : []).filter(
+    (s) => s.endDate != null && s.endDate < usauTodayIso,
+  );
+  const usauRecentCards: UsauFeedCard[] = [
+    ...usauFinishedStages.map((s) => ({ kind: 'series' as const, ...s })),
+    ...usauMajors.slice(0, 4).map((m) => ({ kind: 'event' as const, ...m })),
+  ]
+    .sort(
+      (a, b) =>
+        (b.endDate ?? '').localeCompare(a.endDate ?? '') ||
+        (a.kind === 'series' ? 0 : 1) - (b.kind === 'series' ? 0 : 1),
+    )
+    .slice(0, 4);
+
   const recentResultCards = RecentResultsCards({
     ufaGames: ufaPhase.phase === 'in-season' ? recent : [],
-    usauMajors: usauPhase.phase === 'in-season' ? usauMajors.slice(0, 4) : [],
+    usauMajors: usauPhase.phase === 'in-season' ? usauRecentCards : [],
     pulGames: pulPhase.phase === 'in-season' ? pulRecentFour : [],
     wulGames: wulPhase.phase === 'in-season' ? wulRecentFour : [],
   });
@@ -440,7 +477,7 @@ export default async function HomePage() {
             />
           ),
         }))
-      : gotwGame || !(allStarGame || usauEvent || wfdfEvent || pulFeatured || wulFeatured)
+      : gotwGame || !(allStarGame || usauEvent || usauSeries || wfdfEvent || pulFeatured || wulFeatured)
         ? [
             {
               key: gotwGame ? `ufa:${gotwGame.gameID}` : 'ufa:empty',
@@ -475,6 +512,12 @@ export default async function HomePage() {
       : null,
     // USAU — tournament card, null when no current event.
     usauEvent ? { key: `usau:${usauEvent.slug}`, node: <HeroUsauSlide key="usau" event={usauEvent} /> } : null,
+    usauSeries
+      ? {
+          key: `usau-series:${usauSeries.id}`,
+          node: <HeroUsauSeriesSlide key="usau-series" series={usauSeries} today={usauToday(now)} />,
+        }
+      : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.
     wfdfEvent ? { key: `wfdf:${wfdfEvent.slug}`, node: <HeroWfdfSlide key="wfdf" event={wfdfEvent} /> } : null,
     // PUL — game card, null when no current/recent game.
@@ -505,10 +548,11 @@ export default async function HomePage() {
       </div>
 
       {/* 3. "Standout performances" — rotating carousel of the best individual
-             stat-lines from recent games (last 4 weeks, strength-gated), with
-             UFA award-watch (MVP/OPOY/DPOY) + Callahan tags. Sits above "Up
-             next" so player highlights lead. Renders only when there are recent
-             lines (currently UFA season). */}
+             stat-lines from recent games across every wired league (UFA, PUL,
+             WUL, USAU Nationals). Each line retires on its own significance
+             (a killer performance lasts ~3 weeks), UFA award-watch tags ride
+             the same clock, and the section is absent once nothing survives.
+             Sits above "Up next" so player highlights lead. */}
       {standouts.length > 0 && (
         <div className="px-5 lg:px-10 pt-9 lg:pt-11">
           <div className="flex items-end justify-between gap-4 mb-4 lg:mb-5">

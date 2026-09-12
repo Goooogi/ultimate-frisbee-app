@@ -76,6 +76,29 @@ function isMatchupRound(g: { round: string; bracketName: string | null }): boole
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
 
+/** A merged series event (USAU publishes Sectionals/Regionals one row per
+ *  division) whose members all carry a division — its games and teams are
+ *  tagged with that division and filtered on it directly. */
+function isMergedSeries(event: UsauEventSummary): boolean {
+  return event.members.length > 0 && event.members.every((m) => m.division != null);
+}
+
+/** Timezone key for a division's game times. A merged event's divisions can
+ *  play in different states (Capital: VA sites; 2024 East Coast: SC/TN), and
+ *  the event-level state is null when they disagree — which would fall back
+ *  to UTC — so use the division's own member. */
+function venueKeyFor(event: UsauEventSummary, division: string): string | null {
+  const member = event.members.find((m) => m.division === division);
+  return member ? (member.venueTz ?? member.state) : (event.venueTz ?? event.state);
+}
+
+/** The real USAU slug behind a division — a merged event's own slug is our
+ *  group key, which USAU's site doesn't know. */
+function usauSlugFor(event: UsauEventSummary, division: string): string {
+  const member = event.members.find((m) => m.division === division) ?? event.members[0];
+  return member?.slug ?? event.slug;
+}
+
 interface Props {
   event: UsauEventSummary;
 }
@@ -86,13 +109,18 @@ export function UsauEventDetail({ event }: Props) {
   // ONE event (each team is tagged per-group). Those must be viewed one
   // level at a time — mixing them would blend two unrelated brackets.
   // Single-level events (all club, all D-I, …) skip this entirely.
+  // A merged series event is single-level by construction (each member is one
+  // division of one tier). Stray CLUB-tagged teams inside Masters/College
+  // members used to flip the Level select to CLUB and hide the real teams.
+  const mergedDivisions = isMergedSeries(event);
   const availableLevels = useMemo(() => {
+    if (mergedDivisions) return [];
     const set = new Set<string>();
     for (const t of event.teams) {
       if (t.competitionLevel) set.add(t.competitionLevel);
     }
     return USAU_LEVELS.filter((l) => set.has(l));
-  }, [event.teams]);
+  }, [event.teams, mergedDivisions]);
 
   const [urlLevel] = useLevel();
   const level: UsauLevel | '' =
@@ -108,12 +136,15 @@ export function UsauEventDetail({ event }: Props) {
 
   // ── Detect available genders (within the active level) ────────────────
   const availableGenders = useMemo(() => {
+    // Merged events: one tab per division USAU published, even before any
+    // team is posted (the empty state explains it), in Men/Women/Mixed order.
+    if (mergedDivisions) return event.members.map((m) => m.division as string);
     const set = new Set<string>();
     for (const t of levelTeams) {
       if (t.genderDivision) set.add(t.genderDivision);
     }
     return Array.from(set);
-  }, [levelTeams]);
+  }, [levelTeams, mergedDivisions, event.members]);
 
   // Source of truth: the global ?div URL param, set by the
   // UsauDivisionSelect dropdown at the top of the page.
@@ -167,7 +198,13 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     : levelTeams;
   let teams: Team[];
   let games: Game[];
-  if (filteredTeams.length === event.teams.length) {
+  if (isMergedSeries(event)) {
+    // Exact source tags. Merged siblings reuse bracket names and USAU game-id
+    // ranges, so the field-cluster / schedule-block heuristics below would
+    // misfile their team-less bracket rows.
+    teams = filteredTeams;
+    games = event.games.filter((g) => g.division === division);
+  } else if (filteredTeams.length === event.teams.length) {
     teams = event.teams;
     games = event.games;
   } else {
@@ -556,6 +593,13 @@ function EventTabsView(props: {
       ? tabRequested
       : defaultTab;
 
+  // A merged event's divisions can play at different sites — show the one
+  // being viewed.
+  // Never borrow a sibling division's venue: a merged event's event-level venue
+  // is only set when every member with a venue agrees.
+  const activeMember = event.members.find((m) => m.division === effectiveDivision);
+  const venue = isMergedSeries(event) ? (activeMember?.venue ?? null) : event.venue;
+
   return (
     <>
       {/* Row 1 — venue (left) + Level select (right). One compact header row
@@ -565,11 +609,11 @@ function EventTabsView(props: {
           pills (DivisionPager), mirroring the mobile app's layout.
           The source link left this row for the page header's controls slot
           (Hunter, 2026-08-22) — see the SourceLink in the route file. */}
-      {(event.venue || availableLevels.length > 1) && (
+      {(venue || availableLevels.length > 1) && (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-          {event.venue ? (
+          {venue ? (
             <div className="flex flex-wrap items-center gap-2">
-              <EventVenue venue={event.venue} />
+              <EventVenue venue={venue} />
             </div>
           ) : (
             <span />
@@ -725,7 +769,7 @@ function DivisionContent({
                   competitionLevel={level || event.competitionLevel}
                   records={poolRecords}
                   games={poolGames.get(pool.name) ?? []}
-                  venueState={event.venueTz ?? event.state}
+                  venueState={venueKeyFor(event, division)}
                 />
               ))}
             </div>
@@ -743,13 +787,13 @@ function DivisionContent({
                   key={pool.name}
                   poolName={bracketLabel(pool.name)}
                   games={poolGames.get(pool.name) ?? []}
-                  venueState={event.venueTz ?? event.state}
+                  venueState={venueKeyFor(event, division)}
                 />
               ))}
             </div>
           )}
 
-          {pools.length > 0 && poolGames.size === 0 && <PoolGamesEmpty slug={event.slug} />}
+          {pools.length > 0 && poolGames.size === 0 && <PoolGamesEmpty slug={usauSlugFor(event, division)} />}
 
           {/* Matchup rounds — pool-less Saturday phases ("Sat Round 1/2/3"),
               folded into Pool Play as generic sections below the pools. */}
@@ -762,7 +806,7 @@ function DivisionContent({
                   </h2>
                   <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                     {grp.games.map((g) => (
-                      <GameRow key={g.id} game={g} venueState={event.venueTz ?? event.state} />
+                      <GameRow key={g.id} game={g} venueState={venueKeyFor(event, division)} />
                     ))}
                   </ul>
                 </section>
@@ -779,7 +823,7 @@ function DivisionContent({
           teams={teams}
           placementBrackets={placementBrackets}
           bracketLabel={bracketLabel}
-          venueState={event.venueTz ?? event.state}
+          venueState={venueKeyFor(event, division)}
         />
       )}
 

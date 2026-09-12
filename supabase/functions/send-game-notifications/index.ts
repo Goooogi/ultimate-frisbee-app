@@ -39,6 +39,9 @@
 //   A starred or team-entered USAU event notifies its own users even when
 //   unflighted — the flighted restriction only narrows the LEAGUE-favorite
 //   leg of the union.
+//   USAU series groups (usau_events.series_group_key): every leg unions across
+//   ALL members of the group — a star or entered team on any division reaches
+//   every group notice, and the league leg applies when ANY member is flighted.
 //
 // TARGETING — player_stats (2026-08-28):
 //   USAU: user_favorite_players rows exactly matching
@@ -61,6 +64,13 @@
 // it on the next cron tick. Event-level rows store the EVENT id in game_id.
 // Player-stat rows store "<gameOrEventId>:<playerId>" in game_id so each
 // player notifies once per game (WFDF) / event (USAU).
+// USAU series groups (one usau_events row per division of one tournament):
+// event_start / event_bracket claim "grp:<series_group_key>:<YYYY-MM-DD>" —
+// one notice per group per day (dated because some groups play divisions on
+// different weekends); event_final stays one per member row (bare event id).
+// A single row hosting several divisions (Club Nationals, Pro Champs) claims
+// event_final as "<eventId>:<winner division>" so every division's champion
+// goes out.
 //
 // WINDOWS: game "starting soon" = start time within [now-10m, now+15m] and
 // still pre-game status. game "final" = status Final/final/completed with a
@@ -82,7 +92,8 @@
 // a favorited TEAM are exempt (send immediately, unchanged).
 //
 // PER-USER DIGEST CAP: within one run, a user due more than one game_final
-// for the SAME (league, event) gets ONE combined push instead of several —
+// for the SAME (league, event — a USAU series group counts as one event) gets
+// ONE combined push instead of several —
 // mitigates USAU's batched-scraper bursts (a round of finals can land at
 // once). Claims stay per-game (each game_final is still claimed and counted
 // individually); only the Expo DELIVERY merges. See assembleFinalDeliveries.
@@ -200,6 +211,29 @@ function usauVenueTz(state: string | null | undefined): string | null {
   return USAU_STATE_TO_TZ[state.trim().toUpperCase()] ?? null;
 }
 
+/** A USAU event's venue zone: usau_events.venue_tz (the scraper's resolved
+ *  zone, set even when USAU lists the venue as TBD) ahead of the state map —
+ *  the web's venueTimeZone(event.venueTz ?? event.state) rule. A zone string
+ *  this runtime doesn't know falls through to the state instead of throwing
+ *  mid-tick for every league. */
+function usauEventTz(ev: { venue_tz: string | null; state: string | null }): string | null {
+  const tz = ev.venue_tz?.trim();
+  if (tz) {
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: tz });
+      return tz;
+    } catch {
+      // unknown zone — use the state
+    }
+  }
+  return usauVenueTz(ev.state);
+}
+
+/** The UTC dates either side of `now`: every venue's local "today" is one of them. */
+function datesAround(now: number): string[] {
+  return [-1, 0, 1].map((d) => new Date(now + d * 86_400_000).toISOString().slice(0, 10));
+}
+
 // WFDF venue TZ — wfdf_teams.country_code is a 3-letter IOC/WFDF code (USA,
 // CAN, GBR, …), NOT ISO 3166-1 (which would be USA/CAN/GBR too for these, but
 // diverges for e.g. Great Britain = GBR in both; verified live: PEO = China,
@@ -312,6 +346,24 @@ function hasRealTime(iso: string | null): boolean {
   return d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0 || d.getUTCSeconds() !== 0;
 }
 
+// Web's division order — Men is the merged event page's default tab.
+const SERIES_DIVISION_ORDER = ['Men', 'Women', 'Mixed'];
+
+/** Series member whose uuid goes in a group notice's payload (mobile routes
+ *  by uuid): the web's default division first. */
+function seriesRep<T extends { series_division: string | null }>(members: T[]): T {
+  const rank = (d: string | null) => {
+    const i = SERIES_DIVISION_ORDER.indexOf(d ?? '');
+    return i < 0 ? SERIES_DIVISION_ORDER.length : i;
+  };
+  return [...members].sort((a, b) => rank(a.series_division) - rank(b.series_division))[0];
+}
+
+/** YYYY-MM-DD of `iso` on the venue-local wall clock (UTC when tz unknown). */
+function localDate(iso: string, tz: string | null): string {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: tz ?? 'UTC' });
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -353,6 +405,10 @@ interface Notice {
   /** event_* only: the event id, for the league-favorite + starred-event +
    *  team-entered audience resolution. */
   eventId?: string;
+  /** USAU series member's series_group_key: event_* audiences union across
+   *  every member of the group, and the game_final digest merges per group
+   *  (eventName is then the group name). */
+  seriesGroupKey?: string;
   /** USAU only (event_* and game_*): whether THIS event is flighted
    *  (template_key IS NOT NULL). Gates the league-favorite leg of the audience
    *  only — team-entered/team-follower and starred followers still get
@@ -481,14 +537,20 @@ async function usauGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
     ...new Set(all.flatMap((g) => [g.team_a_id, g.team_b_id]).filter(Boolean)),
   ] as string[];
 
-  const events = await sb.from('usau_events').select('id, name, template_key').in('id', eventIds);
+  const events = await sb
+    .from('usau_events')
+    .select('id, name, template_key, series_group_key, series_group_name')
+    .in('id', eventIds);
   if (events.error) throw events.error;
   const teams = teamIds.length > 0
     ? await sb.from('usau_teams').select('id, name').in('id', teamIds)
     : { data: [], error: null };
   if (teams.error) throw teams.error;
 
-  const eventById = new Map<string, { id: string; name: string; template_key: string | null }>(
+  const eventById = new Map<
+    string,
+    { id: string; name: string; template_key: string | null; series_group_key: string | null; series_group_name: string | null }
+  >(
     (events.data ?? []).map((e) => [String(e.id), e]),
   );
   const teamName = new Map<string, string>((teams.data ?? []).map((t) => [String(t.id), t.name]));
@@ -528,7 +590,8 @@ async function usauGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
       isFlighted: ev?.template_key != null,
       quietHours: false,
       venueTz: null,
-      eventName: ev?.name,
+      eventName: ev?.series_group_name ?? ev?.name,
+      seriesGroupKey: ev?.series_group_key ?? undefined,
     });
   }
   return notices;
@@ -618,32 +681,64 @@ async function wfdfGameCandidates(sb: SupabaseClient, now: number): Promise<Noti
 // ─── Candidate collection — USAU event milestones ───────────────────────────
 
 async function usauEventStartCandidates(sb: SupabaseClient, now: number): Promise<Notice[]> {
-  // start_date is a DATE, not a timestamp — "today" is evaluated against
-  // wall-clock UTC date, then held to venue-local quiet hours downstream.
-  // Bounded to a single day either side so a backfilled/edited start_date
-  // can't retroactively fire once history rolls past it.
-  const today = new Date(now).toISOString().slice(0, 10);
-  const { data, error } = await sb
+  // start_date is a venue-local DATE, so an event "starts today" when it
+  // matches today on the VENUE's wall clock — the UTC date flips at 5–8pm in
+  // US venues, which sent 2026 sectionals' "starts today" the evening before.
+  // Fetch the UTC dates either side, keep each event only on its own local
+  // today (still bounded, so an edited start_date can't fire once history
+  // rolls past it); quiet hours then hold the notice until 08:00 local.
+  const nowIso = new Date(now).toISOString();
+  const { data: rows, error } = await sb
     .from('usau_events')
-    .select('id, name, start_date, template_key, state')
-    .eq('start_date', today);
+    .select('id, name, start_date, template_key, state, venue_tz, series_group_key, series_group_name, series_division')
+    .in('start_date', datesAround(now));
   if (error) throw error;
-  if (!data || data.length === 0) return [];
+  const data = (rows ?? []).filter((ev) => ev.start_date === localDate(nowIso, usauEventTz(ev)));
+  if (data.length === 0) return [];
 
-  return data.map((ev) => ({
-    league: 'usau' as const,
-    dedupId: String(ev.id),
-    category: 'event_start' as const,
-    title: ev.name,
-    body: `${ev.name} starts today — follow along`,
-    data: { league: 'usau', eventId: String(ev.id), category: 'event_start' },
-    teamIds: [],
-    leagueWide: true,
-    eventId: String(ev.id),
-    isFlighted: ev.template_key != null,
-    quietHours: true,
-    venueTz: usauVenueTz(ev.state),
-  }));
+  const notices: Notice[] = [];
+  const groups = new Map<string, NonNullable<typeof data>>();
+  for (const ev of data) {
+    if (ev.series_group_key) {
+      groups.set(ev.series_group_key, [...(groups.get(ev.series_group_key) ?? []), ev]);
+      continue;
+    }
+    notices.push({
+      league: 'usau',
+      dedupId: String(ev.id),
+      category: 'event_start',
+      title: ev.name,
+      body: `${ev.name} starts today — follow along`,
+      data: { league: 'usau', eventId: String(ev.id), category: 'event_start' },
+      teamIds: [],
+      leagueWide: true,
+      eventId: String(ev.id),
+      isFlighted: ev.template_key != null,
+      quietHours: true,
+      venueTz: usauEventTz(ev),
+    });
+  }
+  // Series members (one row per division) collapse to ONE notice per group
+  // per day.
+  for (const [key, members] of groups) {
+    const rep = seriesRep(members);
+    notices.push({
+      league: 'usau',
+      dedupId: `grp:${key}:${rep.start_date}`,
+      category: 'event_start',
+      title: rep.series_group_name,
+      body: `${rep.series_group_name} starts today — follow along`,
+      data: { league: 'usau', eventId: String(rep.id), category: 'event_start' },
+      teamIds: [],
+      leagueWide: true,
+      eventId: String(rep.id),
+      seriesGroupKey: key,
+      isFlighted: members.some((m) => m.template_key != null),
+      quietHours: true,
+      venueTz: usauEventTz(rep),
+    });
+  }
+  return notices;
 }
 
 async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Promise<Notice[]> {
@@ -678,15 +773,49 @@ async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Prom
   const eventIds = [...firstByEvent.keys()];
   const { data: events, error: evErr } = await sb
     .from('usau_events')
-    .select('id, name, template_key, state')
+    .select('id, name, template_key, state, venue_tz, series_group_key, series_group_name')
     .in('id', eventIds);
   if (evErr) throw evErr;
   const eventById = new Map((events ?? []).map((e) => [String(e.id), e]));
 
+  // Series members claim per-DAY group keys, which would re-fire on every day
+  // with bracket games (the event-id key made it once per event) — so a
+  // member whose bracket already began before this window is dropped. Paged:
+  // a sectionals Sunday can pass PostgREST's 1000-row cap.
+  const seriesIds = (events ?? []).filter((e) => e.series_group_key).map((e) => String(e.id));
+  const begunEarlier = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; seriesIds.length > 0; from += PAGE) {
+    const { data: prior, error: priorErr } = await sb
+      .from('usau_games')
+      .select('id, event_id, round, bracket_name, scheduled_at')
+      .in('event_id', seriesIds)
+      .in('round', ['prequarter', 'quarter', 'semi', 'final', 'other'])
+      .lt('scheduled_at', lo)
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (priorErr) throw priorErr;
+    for (const g of prior ?? []) {
+      if (hasRealTime(g.scheduled_at) && isBracketishRound(g.round, g.bracket_name) && !isPlacementName(g.bracket_name)) {
+        begunEarlier.add(String(g.event_id));
+      }
+    }
+    if ((prior ?? []).length < PAGE) break;
+  }
+
   const notices: Notice[] = [];
-  for (const [eventId] of firstByEvent) {
+  // "grp:<key>:<venue-local date>" -> the member whose bracket starts first
+  const seriesFirst = new Map<string, { ev: NonNullable<typeof events>[number]; at: string }>();
+  for (const [eventId, first] of firstByEvent) {
     const ev = eventById.get(eventId);
     if (!ev) continue;
+    if (ev.series_group_key) {
+      if (begunEarlier.has(eventId)) continue;
+      const dedupId = `grp:${ev.series_group_key}:${localDate(first.scheduled_at, usauEventTz(ev))}`;
+      const prev = seriesFirst.get(dedupId);
+      if (!prev || first.scheduled_at < prev.at) seriesFirst.set(dedupId, { ev, at: first.scheduled_at });
+      continue;
+    }
     notices.push({
       league: 'usau',
       dedupId: eventId,
@@ -699,7 +828,25 @@ async function usauEventBracketCandidates(sb: SupabaseClient, now: number): Prom
       eventId,
       isFlighted: ev.template_key != null,
       quietHours: true,
-      venueTz: usauVenueTz(ev.state),
+      venueTz: usauEventTz(ev),
+    });
+  }
+  for (const [dedupId, { ev }] of seriesFirst) {
+    const eventId = String(ev.id);
+    notices.push({
+      league: 'usau',
+      dedupId,
+      category: 'event_bracket',
+      title: ev.series_group_name,
+      body: `Bracket play begins at ${ev.series_group_name}`,
+      data: { league: 'usau', eventId, category: 'event_bracket' },
+      teamIds: [],
+      leagueWide: true,
+      eventId,
+      seriesGroupKey: ev.series_group_key,
+      isFlighted: ev.template_key != null,
+      quietHours: true,
+      venueTz: usauEventTz(ev),
     });
   }
   return notices;
@@ -732,36 +879,47 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
     const teamIds = [...new Set(champRows.flatMap((g) => [g.team_a_id, g.team_b_id]).filter(Boolean))] as string[];
     const eventIds = [...new Set(champRows.map((g) => String(g.event_id)))];
     const [teams, events] = await Promise.all([
-      teamIds.length > 0 ? sb.from('usau_teams').select('id, name').in('id', teamIds) : Promise.resolve({ data: [], error: null }),
-      sb.from('usau_events').select('id, name, template_key, state').in('id', eventIds),
+      teamIds.length > 0 ? sb.from('usau_teams').select('id, name, gender_division').in('id', teamIds) : Promise.resolve({ data: [], error: null }),
+      sb.from('usau_events').select('id, name, template_key, state, venue_tz, series_group_key, series_group_name, series_division').in('id', eventIds),
     ]);
     if (teams.error) throw teams.error;
     if (events.error) throw events.error;
     const teamName = new Map((teams.data ?? []).map((t) => [String(t.id), t.name]));
+    const teamDivision = new Map((teams.data ?? []).map((t) => [String(t.id), t.gender_division]));
     const eventById = new Map((events.data ?? []).map((e) => [String(e.id), e]));
 
+    const handledKeys = new Set<string>();
     for (const g of champRows) {
       const eventId = String(g.event_id);
-      if (handledEvents.has(eventId)) continue; // one champion notice per event per run
       const ev = eventById.get(eventId);
       if (!ev) continue;
       const winnerId = g.score_a > g.score_b ? g.team_a_id : g.score_b > g.score_a ? g.team_b_id : null;
       if (!winnerId) continue; // tie in a "final" is bad data — no push
+      // One champion per DIVISION. A series member with a division is a
+      // single-division row and keeps the bare event-id key; a row hosting
+      // several divisions (Club Nationals, 2014 combined sectionals) also keys
+      // on the winner's division — the bare key alone let only the first
+      // division's final through.
+      const division: string | null = ev.series_division ? null : teamDivision.get(String(winnerId)) ?? null;
+      const dedupId = division ? `${eventId}:${division}` : eventId;
+      if (handledKeys.has(dedupId)) continue; // one champion notice per division per run
       const winnerName = teamName.get(String(winnerId)) ?? 'The champion';
       handledEvents.add(eventId);
+      handledKeys.add(dedupId);
       notices.push({
         league: 'usau',
-        dedupId: eventId,
+        dedupId,
         category: 'event_final',
-        title: ev.name,
-        body: `Champion crowned: ${winnerName} win ${ev.name}`,
+        title: ev.series_group_name ?? ev.name,
+        body: `Champion crowned: ${winnerName} win ${ev.name}${division ? ` (${division})` : ''}`,
         data: { league: 'usau', eventId, category: 'event_final' },
         teamIds: [],
         leagueWide: true,
         eventId,
+        seriesGroupKey: ev.series_group_key ?? undefined,
         isFlighted: ev.template_key != null,
         quietHours: true,
-        venueTz: usauVenueTz(ev.state),
+        venueTz: usauEventTz(ev),
       });
     }
   }
@@ -803,7 +961,7 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
   const eventIds = candidateEventIds;
   const { data: events, error: evErr } = await sb
     .from('usau_events')
-    .select('id, name, template_key, state')
+    .select('id, name, template_key, state, venue_tz, series_group_key, series_group_name')
     .in('id', eventIds);
   if (evErr) throw evErr;
   const eventById = new Map((events ?? []).map((e) => [String(e.id), e]));
@@ -868,15 +1026,16 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
       league: 'usau',
       dedupId: eventId,
       category: 'event_final',
-      title: ev.name,
+      title: ev.series_group_name ?? ev.name,
       body: `Champion crowned: ${winnerName} win ${ev.name}`,
       data: { league: 'usau', eventId, category: 'event_final' },
       teamIds: [],
       leagueWide: true,
       eventId,
+      seriesGroupKey: ev.series_group_key ?? undefined,
       isFlighted: ev.template_key != null,
       quietHours: true,
-      venueTz: usauVenueTz(ev.state),
+      venueTz: usauEventTz(ev),
     });
   }
 
@@ -886,10 +1045,17 @@ async function usauEventFinalCandidates(sb: SupabaseClient, now: number): Promis
 // ─── Candidate collection — WFDF event milestones ───────────────────────────
 
 async function wfdfEventStartCandidates(sb: SupabaseClient, now: number): Promise<Notice[]> {
-  const today = new Date(now).toISOString().slice(0, 10);
-  const { data, error } = await sb.from('wfdf_events').select('id, name, start_date, location').eq('start_date', today);
+  // Venue-local "today", same rule as usauEventStartCandidates.
+  const nowIso = new Date(now).toISOString();
+  const { data: rows, error } = await sb
+    .from('wfdf_events')
+    .select('id, name, start_date, location')
+    .in('start_date', datesAround(now));
   if (error) throw error;
-  if (!data || data.length === 0) return [];
+  const data = (rows ?? []).filter(
+    (ev) => ev.start_date === localDate(nowIso, wfdfVenueTzFromLocation(ev.location)),
+  );
+  if (data.length === 0) return [];
   return data.map((ev) => ({
     league: 'wfdf' as const,
     dedupId: String(ev.id),
@@ -1377,8 +1543,29 @@ async function resolveAudiences(
   }
 
   // ── event_* audience: league-fav(flighted for USAU) ∪ entered-team-fav ∪ starred ──
+  // Series groups: a member's notice reaches the whole group's audience.
+  const seriesKeys = [...new Set(eventNotices.map((n) => n.seriesGroupKey).filter((x): x is string => !!x))];
+  const seriesMembers = new Map<string, string[]>();
+  const seriesFlighted = new Set<string>();
+  if (seriesKeys.length > 0) {
+    const { data, error } = await sb
+      .from('usau_events')
+      .select('id, series_group_key, template_key')
+      .in('series_group_key', seriesKeys);
+    if (error) throw error;
+    for (const r of data ?? []) {
+      seriesMembers.set(r.series_group_key, [...(seriesMembers.get(r.series_group_key) ?? []), String(r.id)]);
+      if (r.template_key != null) seriesFlighted.add(r.series_group_key);
+    }
+  }
+
   const eventIds = [...new Set(eventNotices.map((n) => n.eventId).filter((x): x is string => !!x))];
-  const usauEventIds = [...new Set(eventNotices.filter((n) => n.league === 'usau').map((n) => n.eventId).filter((x): x is string => !!x))];
+  const usauEventIds = [
+    ...new Set([
+      ...eventNotices.filter((n) => n.league === 'usau').map((n) => n.eventId).filter((x): x is string => !!x),
+      ...[...seriesMembers.values()].flat(),
+    ]),
+  ];
   const wfdfEventIds = [...new Set(eventNotices.filter((n) => n.league === 'wfdf').map((n) => n.eventId).filter((x): x is string => !!x))];
 
   const [usauEnteredAudience, wfdfEnteredAudience] = await Promise.all([
@@ -1444,15 +1631,20 @@ async function resolveAudiences(
   for (const n of eventNotices) {
     const users = new Set<string>();
     if (n.eventId) {
-      const entered = n.league === 'usau' ? usauEnteredAudience.get(n.eventId) : wfdfEnteredAudience.get(n.eventId);
-      for (const u of entered ?? []) users.add(u);
-      for (const u of starredAudience.get(`${n.league}:${n.eventId}`) ?? []) users.add(u);
+      const ids = n.seriesGroupKey ? [n.eventId, ...(seriesMembers.get(n.seriesGroupKey) ?? [])] : [n.eventId];
+      for (const id of ids) {
+        const entered = n.league === 'usau' ? usauEnteredAudience.get(id) : wfdfEnteredAudience.get(id);
+        for (const u of entered ?? []) users.add(u);
+        for (const u of starredAudience.get(`${n.league}:${id}`) ?? []) users.add(u);
+      }
     }
     // League-favorite leg: gated by isFlighted for USAU (WFDF has none, so
-    // isFlighted is always true there). Team-entered and starred legs above
-    // are NOT gated — a starred/entered event notifies its own users
-    // regardless of flightedness (Hunter's spec).
-    if (n.leagueWide && n.isFlighted !== false) {
+    // isFlighted is always true there); a series group qualifies when ANY
+    // member is flighted. Team-entered and starred legs above are NOT gated —
+    // a starred/entered event notifies its own users regardless of
+    // flightedness (Hunter's spec).
+    const flighted = n.seriesGroupKey ? seriesFlighted.has(n.seriesGroupKey) : n.isFlighted !== false;
+    if (n.leagueWide && flighted) {
       const favs = n.league === 'usau' ? usauLeagueFavorites.data : wfdfLeagueFavorites.data;
       for (const r of favs ?? []) users.add(r.user_id);
     }
@@ -1657,7 +1849,7 @@ Deno.serve(async (req) => {
   const finalsByUserEvent = new Map<string, Map<string, Notice[]>>();
   for (const n of finalNotices) {
     const users = audiences.get(n) ?? [];
-    const key = `${n.league}:${n.data.eventId}`;
+    const key = `${n.league}:${n.seriesGroupKey ?? n.data.eventId}`;
     for (const u of users) {
       if (!finalsByUserEvent.has(u)) finalsByUserEvent.set(u, new Map());
       const byEvent = finalsByUserEvent.get(u)!;

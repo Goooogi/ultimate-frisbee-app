@@ -13,7 +13,8 @@
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
-import type { UsauMajorWithChampions } from '@/lib/usau/data';
+import type { UsauFeedCard, UsauMajorWithChampions, UsauSeriesStageCard } from '@/lib/usau/data';
+import { seriesListHref, seriesUnitLabel } from '@/lib/league';
 import type { PulRecentGame, PulRecentRound } from '@/app/page';
 import type { WulRecentGame, WulRecentRound } from '@/app/page';
 import { teamMeta } from '@/lib/ufa/teams';
@@ -24,7 +25,8 @@ import { WulTeamLogo } from '@/components/wul-team-logo';
 
 interface RecentResultsCardsProps {
   ufaGames: UfaGame[];
-  usauMajors: UsauMajorWithChampions[];
+  /** Majors plus finished series stages (one row per stage), newest first. */
+  usauMajors: UsauFeedCard[];
   pulGames: PulRecentGame[];
   wulGames: WulRecentGame[];
 }
@@ -56,9 +58,13 @@ export function RecentResultsCards({
       label: 'USAU',
       node: (
         <CardShell key="usau" pill="USAU">
-          {usauMajors.slice(0, 4).map((m, i) => (
-            <UsauMajorRow key={m.slug} major={m} first={i === 0} />
-          ))}
+          {usauMajors.slice(0, 4).map((m, i) =>
+            m.kind === 'series' ? (
+              <UsauSeriesRow key={m.id} series={m} first={i === 0} />
+            ) : (
+              <UsauMajorRow key={m.slug} major={m} first={i === 0} />
+            ),
+          )}
         </CardShell>
       ),
     });
@@ -208,6 +214,31 @@ function UsauMajorRow({ major, first }: { major: UsauMajorWithChampions; first: 
         <div className="font-mono text-[9.5px] text-faint tracking-[0.06em] truncate flex items-center gap-1">
           {major.champions.length > 0 && <TrophyIcon />}
           {champLine}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+// A finished series stage — "2026 USAU Sectionals · 27 sections" — standing in
+// for its member tournaments; opens the stage's results list.
+function UsauSeriesRow({ series, first }: { series: UsauSeriesStageCard; first: boolean }) {
+  return (
+    <Link
+      href={seriesListHref('scores', series)}
+      className={[
+        'flex items-center gap-2 py-[11px]',
+        first ? '' : 'border-t border-hairline',
+        'hover:opacity-80 transition-opacity',
+      ].join(' ')}
+    >
+      <span className="text-accent flex-shrink-0">
+        <TrophyIcon />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="font-tight font-semibold text-[13px] text-ink truncate leading-tight">{series.name}</div>
+        <div className="font-mono text-[9.5px] text-faint tracking-[0.06em] truncate">
+          {seriesUnitLabel(series.stage, series.groupCount)} · every champion
         </div>
       </div>
     </Link>

@@ -90,6 +90,58 @@ export const USAU_LEVELS: UsauLevel[] = [
   'GREAT_GRAND_MASTERS',
 ];
 
+// ─── USAU series stages ────────────────────────────────────────────────
+// Sectionals / Regionals roll up into ONE card per stage (usau_events.series_*
+// columns). /scores and /schedule address a stage as ?series=sectionals|
+// regionals plus the usual ?level=; the stage follows from the pair.
+
+export type UsauSeriesStage =
+  | 'club-sectionals'
+  | 'club-regionals'
+  | 'college-regionals'
+  | 'masters-regionals';
+
+/** ?series= + level → stage. Null for anything else, including pairs that
+ *  don't exist (college and masters play no sectionals), so callers skip the
+ *  series queries entirely for crawler-invented URLs. */
+export function parseSeriesParam(value: string | null | undefined, level: UsauLevel): UsauSeriesStage | null {
+  if (value === 'sectionals') return level === 'CLUB' ? 'club-sectionals' : null;
+  if (value !== 'regionals') return null;
+  if (level === 'CLUB') return 'club-regionals';
+  if (level === 'COLLEGE_D1' || level === 'COLLEGE_D3') return 'college-regionals';
+  return 'masters-regionals';
+}
+
+/** "27 sections" / "8 regions". */
+export function seriesUnitLabel(stage: UsauSeriesStage, count: number): string {
+  const unit = stage === 'club-sectionals' ? 'section' : 'region';
+  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+}
+
+/** A stage's list of merged tournaments: /scores for results (pinned to the
+ *  stage's season), /schedule for what's coming (always the latest season). */
+export function seriesListHref(
+  surface: 'scores' | 'schedule',
+  stage: { stage: UsauSeriesStage; level: UsauLevel; season: number },
+): string {
+  const params = new URLSearchParams({
+    league: 'usau',
+    series: stage.stage === 'club-sectionals' ? 'sectionals' : 'regionals',
+  });
+  if (stage.level !== DEFAULT_LEVEL) params.set('level', levelToParam(stage.level));
+  if (surface === 'scores') params.set('season', String(stage.season));
+  return `/${surface}?${params.toString()}`;
+}
+
+/** Once a stage's first day arrives its list lives on /scores; until then on
+ *  /schedule. `today` is the Eastern date (usauToday). */
+export function seriesStageHref(
+  stage: { stage: UsauSeriesStage; level: UsauLevel; season: number; startDate: string | null },
+  today: string,
+): string {
+  return seriesListHref(stage.startDate != null && stage.startDate <= today ? 'scores' : 'schedule', stage);
+}
+
 /**
  * Build the league + division (+ competition level) query string, omitting
  * params that match the default so URLs stay clean (`?league=ufa&div=men`

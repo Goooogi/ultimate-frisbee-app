@@ -363,10 +363,12 @@ export async function setFavoriteLeagues(leagues: FavoriteLeague[]): Promise<voi
 
 // ─── Event (starred tournament) writes ───────────────────────────────────────
 
-/** Whether the signed-in user has starred this event. False when signed out. */
-export async function isEventFavorited(
+/** Whether the signed-in user has starred ANY of these events. A merged USAU
+ *  series event spans one row per division and an older star may sit on any
+ *  of them; single events pass one id. False when signed out. */
+export async function isAnyEventFavorited(
   league: FavoriteEvent['league'],
-  eventId: string,
+  eventIds: string[],
 ): Promise<boolean> {
   const supabase = sessionClient();
   const {
@@ -378,10 +380,10 @@ export async function isEventFavorited(
     .select('event_id')
     .eq('user_id', user.id)
     .eq('league', league)
-    .eq('event_id', eventId)
-    .maybeSingle();
+    .in('event_id', eventIds)
+    .limit(1);
   if (error) throw error;
-  return data != null;
+  return (data ?? []).length > 0;
 }
 
 /** Star a tournament. Idempotent (upsert on the (user, league, event) PK).
@@ -408,10 +410,11 @@ export async function addFavoriteEvent(event: FavoriteEvent): Promise<void> {
   if (error) throw error;
 }
 
-/** Unstar a tournament by its (league, eventId). No-op if not favorited. */
-export async function removeFavoriteEvent(
+/** Unstar a tournament — every one of these event ids (all divisions of a
+ *  merged USAU series event). No-op for ids that aren't favorited. */
+export async function removeFavoriteEvents(
   league: FavoriteEvent['league'],
-  eventId: string,
+  eventIds: string[],
 ): Promise<void> {
   const supabase = sessionClient();
   const {
@@ -423,7 +426,7 @@ export async function removeFavoriteEvent(
     .delete()
     .eq('user_id', user.id)
     .eq('league', league)
-    .eq('event_id', eventId);
+    .in('event_id', eventIds);
   if (error) throw error;
 }
 

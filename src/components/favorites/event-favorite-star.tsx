@@ -17,9 +17,9 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import {
   addFavoriteEvent,
   addFavoriteGame,
-  isEventFavorited,
+  isAnyEventFavorited,
   isGameFavorited,
-  removeFavoriteEvent,
+  removeFavoriteEvents,
   removeFavoriteGame,
   type FavoriteEvent,
   type FavoriteGame,
@@ -42,16 +42,20 @@ function StarGlyph({ filled }: { filled: boolean }) {
   );
 }
 
-/** Starred tournament (USAU/WFDF/EUF event pages). */
-export function EventFavoriteStar({ event }: { event: FavoriteEvent }) {
+/** Starred tournament (USAU/WFDF/EUF event pages). `memberIds` = every row of
+ *  a merged USAU series event: the star is stored once on `event.eventId`
+ *  (mobile reads stars by uuid, so one row per division would triple them),
+ *  shows filled when any member is starred, and unstarring clears them all. */
+export function EventFavoriteStar({ event, memberIds }: { event: FavoriteEvent; memberIds?: string[] }) {
+  const ids = memberIds && memberIds.length > 0 ? memberIds : [event.eventId];
   return (
     <FavoriteStar
-      id={`${event.league}:${event.eventId}`}
+      id={`${event.league}:${ids.join(',')}`}
       noun="tournament"
       subhead="Sign in to get notified for tournaments you follow."
-      isFavorited={() => isEventFavorited(event.league, event.eventId)}
+      isFavorited={() => isAnyEventFavorited(event.league, ids)}
       add={() => addFavoriteEvent(event)}
-      remove={() => removeFavoriteEvent(event.league, event.eventId)}
+      remove={() => removeFavoriteEvents(event.league, ids)}
     />
   );
 }

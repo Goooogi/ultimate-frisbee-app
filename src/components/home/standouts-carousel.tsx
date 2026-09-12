@@ -97,6 +97,11 @@ export function StandoutsCarousel({ lines }: { lines: StandoutLine[] }) {
 
   if (count === 0) return null;
 
+  // The per-card league label only earns its place when the rail mixes
+  // leagues (PUL + WUL in May); a single-league rail read as "UFA-branded"
+  // (Hunter, 2026-09-11).
+  const mixedLeagues = new Set(lines.map((l) => l.league)).size > 1;
+
   return (
     <div
       className="relative"
@@ -119,7 +124,7 @@ export function StandoutsCarousel({ lines }: { lines: StandoutLine[] }) {
             // cards on the page — no peeking neighbor). sm+: multi-up with a peek.
             className="snap-center sm:snap-start shrink-0 w-full sm:w-[46%] lg:w-[31%] xl:w-[23.5%]"
           >
-            <StandoutCard line={line} />
+            <StandoutCard line={line} showLeague={mixedLeagues} />
           </div>
         ))}
       </div>
@@ -157,7 +162,7 @@ export function StandoutsCarousel({ lines }: { lines: StandoutLine[] }) {
 
 // ─── Card ───────────────────────────────────────────────────────────────────────
 
-function StandoutCard({ line }: { line: StandoutLine }) {
+function StandoutCard({ line, showLeague }: { line: StandoutLine; showLeague: boolean }) {
   const inner = (
     <>
       {/* Faint accent wash + header: portrait, name, league/date */}
@@ -174,9 +179,11 @@ function StandoutCard({ line }: { line: StandoutLine }) {
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2 flex-wrap">
-            <span className="text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent">
-              {LEAGUE_LABEL[line.league]}
-            </span>
+            {showLeague && (
+              <span className="text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent">
+                {LEAGUE_LABEL[line.league]}
+              </span>
+            )}
             <span className="text-[9px] font-semibold tracking-[0.04em] uppercase font-tight text-faint truncate max-w-[160px]">
               {line.dateLabel}
               {line.opponent && <span className="normal-case tracking-normal"> · vs {line.opponent}</span>}

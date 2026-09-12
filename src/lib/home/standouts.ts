@@ -1,10 +1,12 @@
 // Home-page "Standout Performances" — the best individual player stat-lines
 // from recent games, for the rotating carousel. UFA / PUL / WUL are wired
 // (per-game box scores), plus USAU Club Nationals (event-level G/A totals).
-// Only leagues with a LIVE season contribute: a league's cards ride until
-// POST_SEASON_GRACE_DAYS after its last final game, then retire together —
-// so the rail shows finals lines for ~2 weeks after a season ends, goes quiet,
-// and lights back up when the next wired league (PUL → WUL → UFA) starts.
+// Every wired league contributes whenever it has recent games; a card retires
+// on its own significance — a good line lasts a few days, a killer performance
+// up to WINDOW_DAYS — so after a season ends the rail thins out line by line,
+// goes quiet within three weeks of the final, and lights back up when the
+// next wired league (PUL → WUL → UFA) starts. UFA award cards retire on the
+// same clock (Hunter, 2026-09-11).
 //
 // Data is cheap: we mirror per-game box scores into Supabase
 // (ufa_game_player_stats / pul_game_player_stats / wul_game_player_stats, all
@@ -18,10 +20,12 @@
 // 7-block defender shows up on the blocks weight.
 //
 // SELECTION = strength-gated recency: the most recent weekend's best lines
-// appear easily; an older line must clear a higher perf bar to survive. Age is
-// measured against the LEAGUE'S latest final game (not wall-clock now), so the
-// newest slate always reads as fresh and a finished season's finals lines don't
-// decay during the post-season grace window. See gateThreshold().
+// appear easily; an older line must clear a higher perf bar to survive, and
+// nothing outlives WINDOW_DAYS. Age is wall-clock (now − game time) — the
+// earlier design froze ages at the league's latest final so a finished season
+// held its whole finals slate for a fixed grace window, then dropped it in one
+// step; Hunter wants the lines to fade by how good they were instead. See
+// gateThreshold().
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
@@ -83,14 +87,20 @@ export interface StandoutLine {
 }
 
 const MS_DAY = 86_400_000;
-const WINDOW_DAYS = 28; // fetch window — playoff weeks are sparse, so reach back a month; the age gate decides what survives
+/** Fetch window AND the hard cap on how long the very best line can linger
+ *  ("3-ish weeks" — Hunter, 2026-09-11). gateThreshold() decides what survives
+ *  inside it. */
+const WINDOW_DAYS = 21;
 const MAX_CARDS = 14;
 const PER_GAME_CAP = 1; // at most one standout per game so one blowout doesn't flood
 const PER_PLAYER_CAP = 1; // at most one card per player — their single best recent game
-/** How long a league keeps its cards after its LAST final game. Covers the
- *  "1-2 weeks after the season / Nationals ends" display window; past it the
- *  league's cards (and UFA's award cards) retire together. */
-const POST_SEASON_GRACE_DAYS = 14;
+/** UFA award-watch (MVP/OPOY/DPOY) tags, exemptions and season-total fallback
+ *  cards apply only while the UFA's latest final game is this recent — past
+ *  it the award leaders are ordinary gated lines and fall off with everyone. */
+const AWARD_GRACE_DAYS = 21;
+/** USAU Club Nationals event-total cards (no per-game lines to decay) stay
+ *  this long after the event's end_date. */
+const USAU_EVENT_GRACE_DAYS = 14;
 
 // ─── Perf score ───────────────────────────────────────────────────────────────
 
@@ -131,24 +141,22 @@ function perfScore(l: RawLine): number {
 
 /**
  * Strength-gated recency threshold: how strong a line must be to survive at a
- * given age. `ageDays` is measured against the league's LATEST final game, not
- * wall-clock now — during the season those are near-identical, but once the
- * last game is played the slate stops aging, so finals lines hold their spot
- * through the post-season grace window instead of decaying off one by one.
+ * given wall-clock age. A worthy line makes the rail for a few days; only a
+ * killer performance lasts into the third week; nothing outlives WINDOW_DAYS.
  *
- * The curve is deliberately gentle (a mid-season perf tops ~50-65, and playoff
- * weeks only have a handful of games): a good-not-monster line from 2-3 weeks
- * back should still make the rail while the season is live. Reference: the
- * Jul 24-26 UFA playoff slate peaks at perf 33-40 — at ~2 weeks old those now
- * pass (gate 24) where the old curve (44+) silently emptied the carousel down
- * to just the newest weekend.
+ * Calibrated against real lines (a mid-season perf tops ~50-65; the 2026 UFA
+ * title weekend peaked at 38/37/35 with five more lines at 30-32; the sparse
+ * Jul 24-26 playoff slate peaked at 33-40). So two weeks after the final ~6
+ * title-weekend lines still show, by day 15 only the two monster lines, and on
+ * day 21 the rail goes dark — while a mid-season playoff slate still clears
+ * the two-week bar.
  */
 function gateThreshold(ageDays: number): number {
   if (ageDays <= 3) return 10; // latest slate — easy to appear
-  if (ageDays <= 10) return 18; // ~1 week back — good line
-  if (ageDays <= 17) return 24; // ~2 weeks — solid line
-  if (ageDays <= 21) return 30; // ~3 weeks — strong line
-  return 38; // 3-4 weeks — elite games only (WINDOW_DAYS caps the tail)
+  if (ageDays <= 7) return 18; // ~1 week back — good line
+  if (ageDays <= 14) return 26; // ~2 weeks — solid line
+  if (ageDays <= WINDOW_DAYS) return 36; // ~3 weeks — killer performance only
+  return Infinity;
 }
 
 // ─── UFA ──────────────────────────────────────────────────────────────────────
@@ -591,14 +599,14 @@ const USAU_MIN_GA = 3; // event totals build over the weekend; don't card a 1-go
  * Club Nationals standouts. USAU publishes only per-EVENT goal/assist totals
  * (usau_player_event_stats — no blocks/yards), and Nationals is the one club
  * event with national attention, so: cards show event totals for the top
- * scorers, appear while Nationals runs, and retire POST_SEASON_GRACE_DAYS
+ * scorers, appear while Nationals runs, and retire USAU_EVENT_GRACE_DAYS
  * after end_date. ts = now keeps them exempt from the age gate — the event
  * date-window here is the only on/off switch.
  */
 async function usauStandouts(now: number): Promise<StandoutLine[]> {
   const db = supabase();
   const today = new Date(now).toISOString().slice(0, 10);
-  const graceCutoff = new Date(now - POST_SEASON_GRACE_DAYS * MS_DAY).toISOString().slice(0, 10);
+  const graceCutoff = new Date(now - USAU_EVENT_GRACE_DAYS * MS_DAY).toISOString().slice(0, 10);
   // Naming drifts year to year ("Club Nationals" / "Club Championships") — match both.
   const { data: events } = await db
     .from('usau_events')
@@ -700,28 +708,19 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
     usauStandouts(now).catch(() => [] as StandoutLine[]),
   ]);
 
-  // A league is LIVE while its latest final game is within the post-season
-  // grace window; past that, all its cards retire at once (and, for UFA, the
-  // award cards with them). Line ages are measured against that latest game —
-  // not now — so a finished season's finals slate stays "fresh" for the whole
-  // grace window instead of decaying off card by card.
-  const latestTs = new Map<StandoutLeague, number>();
-  const all: StandoutLine[] = [];
-  for (const lines of perLeague) {
-    if (lines.length === 0) continue;
-    const latest = Math.max(...lines.map((l) => l.ts));
-    if (now - latest > POST_SEASON_GRACE_DAYS * MS_DAY) continue; // season over
-    latestTs.set(lines[0].league, latest);
-    all.push(...lines);
-  }
-  const ufaLive = latestTs.has('ufa');
+  const all = perLeague.flat();
 
-  const clearsGate = (l: StandoutLine) =>
-    l.perf >= gateThreshold(((latestTs.get(l.league) ?? now) - l.ts) / MS_DAY);
+  // UFA award treatment (tags, cap exemptions, season-total fallback cards)
+  // rides only while the UFA's latest final is within AWARD_GRACE_DAYS; after
+  // that the leaders are ordinary lines and retire with everyone else.
+  const ufaLatestTs = Math.max(0, ...all.filter((l) => l.league === 'ufa').map((l) => l.ts));
+  const awardsLive = ufaLatestTs > 0 && now - ufaLatestTs <= AWARD_GRACE_DAYS * MS_DAY;
+  if (!awardsLive) for (const l of all) l.awardWatch = null;
 
-  // Strength-gated recency: keep only lines that cleared the age-scaled bar
-  // (a real standout game). This applies to award lines too — a sub-gate
-  // award line is dropped and replaced by a season card below.
+  // Strength-gated recency on WALL-CLOCK age: keep only lines that cleared
+  // the age-scaled bar (a real standout game). This applies to award lines
+  // too — a sub-gate award line is dropped and replaced by a season card below.
+  const clearsGate = (l: StandoutLine) => l.perf >= gateThreshold((now - l.ts) / MS_DAY);
   const gated = all.filter(clearsGate);
 
   // Cap the field: at most PER_GAME_CAP standouts per game (so one blowout
@@ -760,7 +759,7 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
   for (const l of capped) {
     if (l.awardWatch && l.playerId) awardGameEarners.add(l.playerId);
   }
-  const seasonCards = ufaLive
+  const seasonCards = awardsLive
     ? await ufaAwardSeasonCards(now, awardGameEarners).catch(() => [] as StandoutLine[])
     : [];
   capped.push(...seasonCards);

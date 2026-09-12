@@ -21,6 +21,8 @@ import {
   listOfficialUsauRankings as _listOfficialUsauRankings,
   listUsauPlayers as _listUsauPlayers,
   listSeasons as _listSeasons,
+  listSeriesStageEvents as _listSeriesStageEvents,
+  listUsauScheduleUpcoming as _listUsauScheduleUpcoming,
   type CompetitionLevel,
 } from '@/lib/usau/data';
 import type { Flight } from '@/lib/usau/flights';
@@ -63,6 +65,23 @@ export const recentUsauTournamentPageCached = unstable_cache(
       page,
     ),
   ['usau-recent-tournament-page'],
+  { revalidate: REVALIDATE_SECONDS },
+);
+
+// One series stage's merged tournaments (/scores and /schedule ?series=).
+// `today` is an explicit key arg for the same reason as above: it decides which
+// members have started and so get champions.
+export const listSeriesStageEventsCached = unstable_cache(
+  _listSeriesStageEvents,
+  ['usau-series-stage-events'],
+  { revalidate: REVALIDATE_SECONDS },
+);
+
+// /schedule's upcoming USAU calendar. `today` decides "hasn't started yet",
+// so it's a key arg; flights must be in canonical order (parseFlightsParam).
+export const usauScheduleCached = unstable_cache(
+  _listUsauScheduleUpcoming,
+  ['usau-schedule-upcoming'],
   { revalidate: REVALIDATE_SECONDS },
 );
 

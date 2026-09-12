@@ -3235,6 +3235,11 @@ export type Database = {
           last_scraped_status: string | null
           name: string
           season: number
+          series_division: string | null
+          series_group_key: string | null
+          series_group_name: string | null
+          series_stage: string | null
+          series_tier: string | null
           start_date: string | null
           state: string | null
           template_key: string | null
@@ -4885,6 +4890,25 @@ export type Database = {
           team_abbr: string | null
           team_slug: string | null
           year: number | null
+        }
+        Relationships: []
+      }
+      usau_event_feed: {
+        Row: {
+          end_date: string | null
+          event_id: string | null
+          flight_rank: number | null
+          group_count: number | null
+          has_games: boolean | null
+          key: string | null
+          kind: string | null
+          kind_rank: number | null
+          level: Database["public"]["Enums"]["usau_competition_level"] | null
+          name: string | null
+          season: number | null
+          series_stage: string | null
+          sort_date: string | null
+          start_date: string | null
         }
         Relationships: []
       }

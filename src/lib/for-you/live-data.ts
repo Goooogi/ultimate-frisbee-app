@@ -846,10 +846,12 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
       return ts >= now - 3 * MS_DAY && ts <= now + 30 * MS_DAY;
     })
     .map((ev) => ev.slug);
-  if (candidateSlugs.length === 0) return [];
+  // Distinct: members of one merged series event can share a slug.
+  const uniqueSlugs = [...new Set(candidateSlugs)];
+  if (uniqueSlugs.length === 0) return [];
 
   const teamNameLc = t!.name.toLowerCase();
-  const events = await Promise.all(candidateSlugs.map((slug) => getUsauEvent(slug).catch(() => null)));
+  const events = await Promise.all(uniqueSlugs.map((slug) => getUsauEvent(slug).catch(() => null)));
 
   const out: FeedGame[] = [];
   for (const ev of events) {
@@ -858,6 +860,12 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
     // not the server's (see whenLabel). Null state → undefined → UTC, which
     // renders the stored clock unshifted, same fallback as formatGameTime.
     const tz = venueTimeZone(ev.venueTz ?? ev.state) ?? undefined;
+    // A merged series event's divisions can play in different states — format
+    // each game in its own division's zone.
+    const tzFor = (division: string | null) => {
+      const member = division ? ev.members.find((m) => m.division === division) : undefined;
+      return member ? (venueTimeZone(member.venueTz ?? member.state) ?? undefined) : tz;
+    };
     // Logos need the team's gender division, which lives on the event's team
     // list rather than the game row — index it once per event.
     const divisionByTeamName = new Map<string, string | null>();
@@ -871,6 +879,9 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
       const favIsA = aLc === teamNameLc;
       const favIsB = bLc === teamNameLc;
       if (!favIsA && !favIsB) continue;
+      // A merged series event carries every division; a same-named team in
+      // another division (a college's Men's and Women's teams) isn't this one.
+      if (g.division && t!.genderDivision && g.division !== t!.genderDivision) continue;
       if (g.status !== 'scheduled') continue; // finals handled by the tournament/results path
       const date = g.scheduledAt ? new Date(g.scheduledAt) : null;
       const ts = date ? date.getTime() : now;
@@ -883,7 +894,7 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
         status: 'upcoming',
         away: { name: g.teamAName, teamId: g.teamAId ?? '', score: null, logoUrl: logoFor(g.teamAName) },
         home: { name: g.teamBName, teamId: g.teamBId ?? '', score: null, logoUrl: logoFor(g.teamBName) },
-        when: whenLabel(date, 'upcoming', tz),
+        when: whenLabel(date, 'upcoming', tzFor(g.division)),
         favoriteTeamName: team.name,
         sortTs: ts,
         isPreview: false,

@@ -1,114 +1,66 @@
-'use client';
-
 // USAU schedule view — the FUTURE-FACING events list (mobile parity 2026-08-16).
 //
-// Only "Upcoming" renders: events that haven't started yet, soonest first.
-// Anything started (including in play right now) or finished belongs to
-// /scores — a "View completed tournaments →" link points there when prior
-// events exist. Season browsing also lives on /scores now ("which season's
-// results" is a results question); the schedule always shows the latest
-// season's calendar.
+// Only "Upcoming" renders: events that haven't started yet, soonest first, with
+// each series stage (sectionals, regionals …) as ONE card that opens its list
+// of merged tournaments. Anything started (including in play right now) or
+// finished belongs to /scores — a "View completed tournaments →" link points
+// there when prior events exist. Season browsing also lives on /scores; the
+// schedule always shows the latest season's calendar. Data is read server-side
+// (listUsauScheduleUpcoming) against the Eastern date.
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { listEvents, listSeasons, type UsauEventCard, type CompetitionLevel } from '@/lib/usau/data';
-import { FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
-import { buildLeagueQs, type UsauLevel } from '@/lib/league';
+import type {
+  UsauEventCard,
+  UsauScheduleItem,
+  UsauScheduleUpcoming,
+  UsauSeriesStageCard,
+  CompetitionLevel,
+} from '@/lib/usau/data';
+import { FLIGHT_LABELS } from '@/lib/usau/flights';
+import { buildLeagueQs, seriesListHref, seriesUnitLabel, type UsauLevel } from '@/lib/league';
 
 interface Props {
-  /** Competition level to list (Club, College D-I, etc.). Required so the
-   *  schedule shows the full calendar for that level, not just events that
-   *  happen to have teams scraped. */
-  competitionLevel?: CompetitionLevel;
-  /** Optional curated Triple Crown Tour flight filter (Club only), multi-select.
-   *  Empty ⇒ all flights. */
-  flights?: Flight[];
+  /** Upcoming items + whether anything already started; null when the read failed. */
+  schedule: UsauScheduleUpcoming | null;
+  /** Competition level being listed (Club, College D-I, etc.). */
+  competitionLevel: CompetitionLevel;
 }
 
-// Upcoming events are the HEAD of listEvents' start_date-desc order, so a
-// modest fetch covers the whole future calendar (was 1000 — wasteful).
-const EVENT_FETCH_LIMIT = 200;
-
-export function UsauSchedule({ competitionLevel, flights = [] }: Props = {}) {
-  // Serialize for a stable useEffect dep (array identity changes each render).
-  const flightsKey = flights.join(',');
-  const [seasons, setSeasons] = useState<number[]>([]);
-  const [events, setEvents] = useState<UsauEventCard[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Always the latest season with data — the archive browser moved to /scores.
-  const season = seasons[0] ?? null;
-
-  useEffect(() => {
-    let cancelled = false;
-    listSeasons()
-      .then((s) => {
-        if (cancelled) return;
-        setSeasons(s);
-      })
-      .catch((err) =>
-        !cancelled && setError(err instanceof Error ? err.message : 'Failed to load seasons.'),
-      );
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (season == null) return;
-    setLoading(true);
-    let cancelled = false;
-    // Filter to the selected competition level (default Club) so we show the
-    // FULL calendar for that level — including events whose teams aren't
-    // scraped yet.
-    listEvents({ season, limit: EVENT_FETCH_LIMIT, competitionLevel, flights })
-      .then((e) => !cancelled && setEvents(e))
-      .catch((err) =>
-        !cancelled && setError(err instanceof Error ? err.message : 'Failed to load events.'),
-      )
-      .finally(() => !cancelled && setLoading(false));
-    return () => {
-      cancelled = true;
-    };
-    // flightsKey (serialized) is the stable dep — `flights` array identity changes each render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [season, competitionLevel, flightsKey]);
-
-  const { upcoming, prior } = useMemo(() => partitionByDate(events), [events]);
-
+export function UsauSchedule({ schedule, competitionLevel }: Props) {
   // Prior events aren't listed here — they only decide whether to show the
   // link out to the results feed.
-  const scoresHref = `/scores${buildLeagueQs('usau', null, (competitionLevel ?? 'CLUB') as UsauLevel)}`;
+  const scoresHref = `/scores${buildLeagueQs('usau', null, competitionLevel as UsauLevel)}`;
 
-  if (error) {
+  if (!schedule) {
     return (
       <div className="text-[12px] font-medium font-tight text-live bg-live/10 border border-live/30 rounded px-3 py-2">
-        {error}
+        Failed to load events.
       </div>
     );
   }
 
+  const { items, hasPrior } = schedule;
+  // A stage card stands for every tournament in it.
+  const tournaments = items.reduce((n, i) => n + (i.kind === 'series' ? i.series.groupCount : 1), 0);
+
   return (
     <div className="flex flex-col gap-6">
 
-      {loading && events.length === 0 ? (
-        <div className="text-[12px] text-faint font-tight">Loading events…</div>
-      ) : upcoming.length === 0 ? (
+      {items.length === 0 ? (
         <div className="text-[12px] text-faint font-tight">
           No upcoming events scheduled.
         </div>
       ) : (
         <Section
           eyebrow="Upcoming"
-          count={upcoming.length}
-          events={upcoming}
+          count={tournaments}
+          items={items}
           defaultOpen
           emphasized
         />
       )}
 
-      {prior.length > 0 && (
+      {hasPrior && (
         <div>
           <Link
             href={scoresHref}
@@ -125,13 +77,13 @@ export function UsauSchedule({ competitionLevel, flights = [] }: Props = {}) {
 function Section({
   eyebrow,
   count,
-  events,
+  items,
   defaultOpen,
   emphasized,
 }: {
   eyebrow: string;
   count: number;
-  events: UsauEventCard[];
+  items: UsauScheduleItem[];
   defaultOpen: boolean;
   emphasized?: boolean;
 }) {
@@ -164,9 +116,13 @@ function Section({
         </span>
       </summary>
       <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5 lg:gap-3">
-        {events.map((e) => (
-          <EventCard key={e.id} event={e} />
-        ))}
+        {items.map((i) =>
+          i.kind === 'series' ? (
+            <StageCard key={i.series.id} stage={i.series} />
+          ) : (
+            <EventCard key={i.event.id} event={i.event} />
+          ),
+        )}
       </ul>
     </details>
   );
@@ -260,6 +216,41 @@ function EventCard({ event }: { event: UsauEventCard }) {
   );
 }
 
+// A whole series stage ("2026 USAU Regionals · 8 regions") in the EventCard
+// shell; opens the stage's list of merged tournaments.
+function StageCard({ stage }: { stage: UsauSeriesStageCard }) {
+  const dateRange = formatDates(stage.startDate, stage.endDate);
+  return (
+    <li className="h-full">
+      <Link
+        href={seriesListHref('schedule', stage)}
+        className="group/card flex h-full flex-col bg-surface rounded-card p-4 transition-shadow shadow-card hover:shadow-lift no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">
+              {prettyLevel(stage.level)}
+            </span>
+            <span className="shrink-0 text-[9px] font-bold tracking-[0.14em] uppercase font-tight text-accent bg-accent/10 rounded-full px-2 py-0.5">
+              Series
+            </span>
+          </span>
+          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight whitespace-nowrap">
+            {seriesUnitLabel(stage.stage, stage.groupCount)}
+          </span>
+        </div>
+        <div className="font-display italic font-bold text-[20px] lg:text-[22px] leading-tight tracking-[-0.02em] text-ink mb-2 group-hover/card:text-accent transition-colors">
+          {stage.name}
+        </div>
+        <div className="mt-auto flex items-center justify-between gap-3 text-[11px] font-medium text-muted font-tight">
+          {dateRange && <span className="tabular">{dateRange}</span>}
+          <span className="text-[10px] font-bold tracking-[0.14em] uppercase text-accent">View all →</span>
+        </div>
+      </Link>
+    </li>
+  );
+}
+
 function prettyLevel(level: string): string {
   switch (level) {
     case 'CLUB': return 'Club';
@@ -308,44 +299,6 @@ function Chevron() {
       <path d="M2 4l3 3 3-3" />
     </svg>
   );
-}
-
-function partitionByDate(events: UsauEventCard[]) {
-  const now = Date.now();
-  const today = new Date().toISOString().slice(0, 10);
-  // "Upcoming" = hasn't STARTED yet. An event in play right now (started, not
-  // ended) is prior here — /scores admits it the moment it starts (mobile
-  // parity 2026-08-16), so it no longer pins to the top of the future-facing
-  // tab all weekend.
-  const upcoming: UsauEventCard[] = [];
-  const prior: UsauEventCard[] = [];
-  for (const e of events) {
-    const compareDate = e.endDate ?? e.startDate;
-    if (!compareDate) {
-      upcoming.push(e);
-      continue;
-    }
-    if (e.startDate != null && e.startDate <= today) {
-      prior.push(e);
-      continue;
-    }
-    const t = new Date(compareDate + 'T23:59:59').getTime();
-    if (t >= now) upcoming.push(e);
-    else prior.push(e);
-  }
-  // Upcoming: soonest first.
-  upcoming.sort((a, b) => {
-    const av = a.startDate ? new Date(a.startDate + 'T00:00:00').getTime() : Number.POSITIVE_INFINITY;
-    const bv = b.startDate ? new Date(b.startDate + 'T00:00:00').getTime() : Number.POSITIVE_INFINITY;
-    return av - bv;
-  });
-  // Prior: most recent first.
-  prior.sort((a, b) => {
-    const av = a.startDate ? new Date(a.startDate + 'T00:00:00').getTime() : 0;
-    const bv = b.startDate ? new Date(b.startDate + 'T00:00:00').getTime() : 0;
-    return bv - av;
-  });
-  return { upcoming, prior };
 }
 
 function formatDates(start: string | null, end: string | null): string | null {
