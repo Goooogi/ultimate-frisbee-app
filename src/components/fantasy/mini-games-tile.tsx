@@ -14,22 +14,24 @@ export function MiniGamesTile() {
         Mini Games
       </h2>
 
-      {/* One compact full-width row (not a tall tile) — same row rhythm as
-          Start a League, so the two sections read as one list. */}
-      <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+      {/* Mobile: one compact full-width row — same row rhythm as Start a
+          League, so the two sections read as one list. Desktop: a square tile;
+          the full-width row stretched a single game across the whole page. */}
+      <div className="bg-surface rounded-card-lg shadow-card overflow-hidden lg:w-[240px] lg:aspect-square">
         <Link
           href="/12-0"
           className={[
             'flex items-center gap-3 px-4 py-2.5 min-h-[54px]',
+            'lg:h-full lg:flex-col lg:items-start lg:gap-4 lg:p-5',
             'no-underline transition-colors duration-150 hover:bg-surface-hi',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
           ].join(' ')}
         >
-          <span className="w-[34px] h-[34px] rounded-card-sm bg-accent/10 flex items-center justify-center flex-shrink-0">
+          <span className="w-[34px] h-[34px] lg:w-[44px] lg:h-[44px] rounded-card-sm bg-accent/10 flex items-center justify-center flex-shrink-0">
             <TwelveOhGlyph />
           </span>
-          <span className="min-w-0 flex-1 flex flex-col gap-0.5">
-            <span className="font-display italic text-[17px] font-bold tracking-[-0.02em] leading-[1.05] text-ink truncate">
+          <span className="min-w-0 flex-1 lg:w-full flex flex-col gap-0.5">
+            <span className="font-display italic text-[17px] lg:text-[26px] font-bold tracking-[-0.02em] leading-[1.05] text-ink truncate">
               12-0
             </span>
             <span className="font-tight text-[11.5px] text-muted truncate">

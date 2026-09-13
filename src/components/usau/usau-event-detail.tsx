@@ -940,7 +940,12 @@ function BracketView({
 const CHAIN_ROUNDS_FOR_TREE = ['prequarter', 'quarter', 'semi'];
 
 function isDerivableBracketGroup(label: string, games: Game[]): boolean {
-  if (label.toLowerCase().includes('bracket')) return true;
+  // The tree only builds columns from tree rounds, so a "… Bracket" group made
+  // entirely of round='placement' games (2026 West Plains Men's Second/Fifth
+  // Place Bracket) rendered its heading over an empty tree. Those go flat.
+  if (label.toLowerCase().includes('bracket')) {
+    return games.some((g) => [...CHAIN_ROUNDS_FOR_TREE, 'final'].includes(g.round));
+  }
   const chainRoundsPresent = new Set(
     games.map((g) => g.round).filter((r) => CHAIN_ROUNDS_FOR_TREE.includes(r)),
   );

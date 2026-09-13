@@ -708,6 +708,33 @@ function buildColumns(games: Game[]): RoundColumn[] {
         semiWinners.has(g.teamAId) &&
         semiWinners.has(g.teamBId),
     );
+    // Unplayed semis have no winners to match, and a decider fed from outside
+    // the bracket ("W of 6th Place Semis G1" vs "L of 5th Place G1") never has
+    // two semi winners. Fall back to schedule: a non-tree game strictly after
+    // the last semi is the decider, unless both sides are losers (a 3rd-place
+    // consolation). 2026 West Plains Men's 6th Place dropped its final without it.
+    if (finals.length === 0) {
+      const semiLosers = new Set(
+        semis
+          .map((g) => {
+            const w = treeWinnerId(g);
+            return w ? (w === g.teamAId ? g.teamBId : g.teamAId) : null;
+          })
+          .filter((id): id is string => !!id),
+      );
+      const isLoserSide = (teamId: string | null, placeholder: string | null | undefined) =>
+        teamId ? semiLosers.has(teamId) : /^L(?:oser)?\s+of\b/i.test(placeholder ?? '');
+      const latestSemiAt = semis.reduce(
+        (m, g) => (g.scheduledAt && g.scheduledAt > m ? g.scheduledAt : m),
+        '',
+      );
+      finals = games.filter(
+        (g) =>
+          !TREE_ROUNDS.includes(g.round) &&
+          !!latestSemiAt && !!g.scheduledAt && g.scheduledAt > latestSemiAt &&
+          !(isLoserSide(g.teamAId, g.teamAPlaceholder) && isLoserSide(g.teamBId, g.teamBPlaceholder)),
+      );
+    }
   }
   const claimedFinalIds = new Set(finals.map((g) => g.id));
 

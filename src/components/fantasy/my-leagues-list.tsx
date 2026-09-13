@@ -137,7 +137,7 @@ export function MyLeaguesList() {
                 Create or join a league
               </span>
               <span className="block font-tight text-[11px] text-muted mt-0.5">
-                Start one and invite friends, or use the Play button for an invite code.
+                Start one and invite friends, or join with an invite code.
               </span>
             </span>
             <ChevronGlyph />

@@ -14,7 +14,7 @@ import { joinLeagueByCode, getLeagueContests } from '@/lib/fantasy/leagues';
 
 type Mode = 'menu' | 'join';
 
-function friendlyJoinError(raw: string): string {
+export function friendlyJoinError(raw: string): string {
   const r = raw.toLowerCase();
   if (r.includes('not found') || r.includes('invalid')) {
     return 'That code is invalid or has been rotated by the commissioner.';
@@ -87,8 +87,9 @@ export function PlayMenu() {
         type="button"
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
+        // Desktop only — removed from the mobile hub header (Hunter, 2026-09-12).
         className={[
-          'inline-flex items-center justify-center gap-1.5',
+          'hidden lg:inline-flex items-center justify-center gap-1.5',
           'px-5 py-2.5 rounded-full min-h-[40px]',
           'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.1em] uppercase',
           'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
