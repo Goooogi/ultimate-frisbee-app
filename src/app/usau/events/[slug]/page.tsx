@@ -13,7 +13,7 @@ import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { SourceLink } from '@/components/source-link';
-import { loadUsauEvent, resolveUsauEvent, type UsauEventSummary } from '@/lib/usau/data';
+import { loadUsauEvent, resolveUsauEvent, seriesStageName, type UsauEventSummary } from '@/lib/usau/data';
 import { usauEventHref } from '@/lib/usau/event-href';
 import { usauToday } from '@/lib/today';
 import { UsauMemberSourceLink } from '@/components/usau/usau-member-source-link';
@@ -22,7 +22,7 @@ import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
 import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
-import { USAU_LEVELS, buildLeagueQs, type UsauLevel } from '@/lib/league';
+import { USAU_LEVELS, buildLeagueQs, seriesListHref, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
 
 // Stars only render for events that haven't fully wrapped — a star on a past
 // event can never produce a notification (Push Notifications.md plan rule).
@@ -106,6 +106,20 @@ export default async function UsauEventPage({ params }: Props) {
     ? (event.competitionLevel as UsauLevel)
     : null;
   const gamesHref = `/scores${buildLeagueQs('usau', null, eventLevel)}`;
+  // A series tournament backs out to its stage's list (the "2026 USAU
+  // Sectionals" page it's opened from): Scores once it's underway, Schedule
+  // before. Without this crumb a fresh load backed out to The Games.
+  const series = event.series;
+  const seriesCrumb = series
+    ? {
+        label: seriesStageName(series.stage as UsauSeriesStage, series.level as UsauLevel, series.season),
+        href: seriesListHref(event.startDate != null && event.startDate <= usauToday() ? 'scores' : 'schedule', {
+          stage: series.stage as UsauSeriesStage,
+          level: series.level as UsauLevel,
+          season: series.season,
+        }),
+      }
+    : null;
 
   return (
     <PageShell
@@ -175,6 +189,7 @@ export default async function UsauEventPage({ params }: Props) {
       breadcrumbs={[
         { label: 'Home', href: '/' },
         { label: 'The Games', href: gamesHref },
+        ...(seriesCrumb ? [seriesCrumb] : []),
         { label: event.name },
       ]}
     >

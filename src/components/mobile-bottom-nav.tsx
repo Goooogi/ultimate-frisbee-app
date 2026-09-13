@@ -6,7 +6,7 @@
 // Mobile-parity rewrite (matches altiusapps/mobileapp-thelayout's GlassTabBar):
 // a FIXED 5-tab set of top-level destinations — Home · Leagues · Playbook ·
 // Fantasy · For You — that NEVER swaps by section. Section switching
-// (Scores/Schedule/Teams/Players, Fantasy's Leaderboard/My Team, etc.) is NO
+// (Scores/Schedule/Teams/Players, a fantasy league's tabs, etc.) is NO
 // LONGER here; it moved to the second nav (SectionNav, rendered under the top
 // rail — see section-nav.tsx / games-subnav.tsx's SectionNavForRoute).
 //

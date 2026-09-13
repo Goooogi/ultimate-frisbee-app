@@ -26,7 +26,7 @@ export function LeagueHeader({ contest, league }: Props) {
   const game = getGame(contest.competition);
 
   useEffect(() => {
-    if (!user || !contest.leagueId) {
+    if (!user) {
       setIsCommissioner(false);
       return;
     }

@@ -60,7 +60,7 @@ export function LeagueFeed({ contest }: Props) {
   const { user } = useAuth();
   const [authOpen, setAuthOpen] = useState(false);
 
-  const leagueId = contest.leagueId as string;
+  const leagueId = contest.leagueId;
 
   const [role, setRole] = useState<string | null>(null);
   const isMember = role != null;

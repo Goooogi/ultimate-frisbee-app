@@ -27,16 +27,16 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
           id={headingId}
           className="font-display italic text-[22px] lg:text-[28px] font-bold tracking-[-0.02em] text-ink leading-[0.95] mb-2"
         >
-          Build a seven-player roster.
+          Build your roster.
           <br className="hidden sm:block" /> Compete against your league.
         </h2>
         <p className="text-muted font-tight text-[14px] lg:text-[15px] leading-relaxed max-w-[560px]">
-          Draft 4 offenders and 3 defenders from across the UFA. The role you assign each
+          Fill your lineup from your league&apos;s player pool. The role you assign each
           player skews how their stats score — a defender&apos;s block pays{' '}
           <span className="text-ink font-semibold">{SCORING.defender.block} pts</span> vs{' '}
           <span className="text-ink font-semibold">{SCORING.offender.block} pts</span> as an
-          offender. Your roster locks when the week&apos;s first game starts and reopens
-          Monday, so set your lineup before kickoff.
+          offender. Your lineup locks when each scoring period&apos;s first game starts, so set
+          it before kickoff.
         </p>
       </div>
 
@@ -87,7 +87,7 @@ export function FantasyRulesContent({ headingId }: { headingId?: string }) {
         </div>
         <p className="mt-3 text-[11px] text-faint font-tight">
           Defender column in coral — defenders earn more per block. Points accumulate
-          week-by-week.
+          every scoring period.
         </p>
       </div>
     </>

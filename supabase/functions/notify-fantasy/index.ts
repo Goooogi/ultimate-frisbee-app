@@ -77,14 +77,13 @@ async function contestInfo(sb: SupabaseClient, contestId: string) {
   const lg = (data as Record<string, unknown>).fantasy_leagues as { name?: string } | null;
   return {
     id: data.id as string,
-    leagueId: (data.league_id as string | null) ?? null,
+    leagueId: data.league_id as string,
     name: (lg?.name as string) ?? (data.name as string),
     settings: (data.settings as Record<string, unknown>) ?? {},
   };
 }
 
-async function leagueMemberIds(sb: SupabaseClient, leagueId: string | null): Promise<string[]> {
-  if (!leagueId) return [];
+async function leagueMemberIds(sb: SupabaseClient, leagueId: string): Promise<string[]> {
   const { data } = await sb.from('fantasy_league_members').select('user_id').eq('league_id', leagueId).limit(1000);
   return (data ?? []).map((r: Record<string, unknown>) => r.user_id as string);
 }
@@ -217,7 +216,7 @@ async function draftPushes(sb: SupabaseClient, ev: DraftEvent): Promise<Push[]> 
   const { data: draft } = await sb.from('fantasy_drafts').select('*').eq('id', ev.draftId).maybeSingle();
   if (!draft) return [];
   const contest = await contestInfo(sb, ev.contestId);
-  if (!contest || !contest.leagueId) return []; // Public League never drafts
+  if (!contest) return [];
   const members = await leagueMemberIds(sb, contest.leagueId);
   const draftOrder = (draft.draft_order as string[]) ?? [];
   const draftType = (draft.draft_type as string) ?? 'snake';
@@ -290,7 +289,7 @@ async function reminderPushes(sb: SupabaseClient, now: number): Promise<Push[]> 
       .limit(200);
     for (const d of drafts ?? []) {
       const contest = await contestInfo(sb, d.contest_id as string);
-      if (!contest || !contest.leagueId) continue;
+      if (!contest) continue;
       const members = await leagueMemberIds(sb, contest.leagueId);
       out.push({
         userIds: members,

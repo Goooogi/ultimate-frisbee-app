@@ -173,7 +173,8 @@ export interface FeedTournament {
   /** Final placement at this event, or null if upcoming / unplaced. */
   placement: number | null;
   status: 'upcoming' | 'past';
-  /** Which favorited team surfaced this tournament. */
+  /** Which favorited team(s) surfaced this tournament — several are joined
+   *  with " & ", best-placed first. */
   favoriteTeamName: string;
   sortTs: number;
 }
@@ -775,7 +776,8 @@ async function wfdfTournamentsFor(
     const endTs = ev?.endDate ? new Date(ev.endDate).getTime() + MS_DAY : ts;
     const past = t.finalStanding != null || (startDate != null && endTs < now);
     out.push({
-      id: `wfdf-${t.eventSlug}-${t.id}`,
+      // Event-level id so two followed teams at one event merge into one row.
+      id: `wfdf-${t.eventSlug}`,
       league: 'wfdf',
       name: t.eventName,
       slug: t.eventSlug,
@@ -808,7 +810,8 @@ async function eufTournamentsFor(
       const ts = a.startDate ? new Date(a.startDate).getTime() : now;
       const past = a.finalPlacement != null || (a.startDate != null && ts < now);
       return {
-        id: `euf-${a.eventSlug}-${a.teamId}`,
+        // Event-level id so two followed clubs at one event merge into one row.
+        id: `euf-${a.eventSlug}`,
         league: 'euf' as const,
         name: a.eventName,
         slug: a.eventSlug,
@@ -1451,7 +1454,19 @@ export async function getForYouFeed(
         usauFavTeams.map((t) => usauUpcomingGamesFor(t, now, selectedYear).catch(() => [] as FeedGame[])),
       )
     : [];
-  const usauGames = usauGameLists.flat();
+  // A game between two followed USAU teams comes back once per team — keep one
+  // row naming both.
+  const usauById = new Map<string, FeedGame>();
+  for (const g of usauGameLists.flat()) {
+    const prev = usauById.get(g.id);
+    usauById.set(
+      g.id,
+      prev && prev.favoriteTeamName !== g.favoriteTeamName
+        ? { ...prev, favoriteTeamName: `${prev.favoriteTeamName} & ${g.favoriteTeamName}` }
+        : prev ?? g,
+    );
+  }
+  const usauGames = [...usauById.values()];
 
   // For a past year the games strip + hero are suppressed (live/upcoming/recent
   // results are current-season concepts). We still compute `allGames` for the
@@ -1511,7 +1526,29 @@ export async function getForYouFeed(
     wfdfTournamentsFor(wfdfFavTeams, now, selectedYear).catch(() => [] as FeedTournament[]),
     ...eufFavTeams.map((t) => eufTournamentsFor(t, now, selectedYear).catch(() => [] as FeedTournament[])),
   ]);
-  const tournaments = tournamentLists.flat().sort((a, b) => {
+  // A tournament where the user follows two teams comes back once per team —
+  // keep one row naming both, best-placed team first (unplaced last), carrying
+  // the best placement.
+  const tournamentRowsById = new Map<string, FeedTournament[]>();
+  for (const t of tournamentLists.flat()) {
+    const rows = tournamentRowsById.get(t.id);
+    if (rows) rows.push(t);
+    else tournamentRowsById.set(t.id, [t]);
+  }
+  const mergedTournaments = [...tournamentRowsById.values()].map((rows) => {
+    if (rows.length === 1) return rows[0];
+    const ranked = [...rows].sort(
+      (a, b) => (a.placement ?? Number.MAX_SAFE_INTEGER) - (b.placement ?? Number.MAX_SAFE_INTEGER),
+    );
+    const names = [...new Set(ranked.map((r) => r.favoriteTeamName))];
+    return {
+      ...rows[0],
+      // Played if ANY followed team's row is: the kept placement may come from a
+      // different row than rows[0].
+      status: (rows.some((r) => r.status === 'past') ? 'past' : 'upcoming') as FeedTournament['status'],
+      placement: ranked[0].placement, favoriteTeamName: names.join(' & ') };
+  });
+  const tournaments = mergedTournaments.sort((a, b) => {
     // Upcoming first, then past — latest event leads within BOTH groups
     // (mobile parity, Hunter 2026-08-16).
     const aPast = a.status === 'past';

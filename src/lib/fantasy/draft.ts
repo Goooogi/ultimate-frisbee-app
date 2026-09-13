@@ -10,6 +10,7 @@
 //   wul  → player_name (same)
 //   usau → usau_players.id (uuid — joins usau_player_event_stats for scoring)
 //   wfdf → wfdf_rosters.id (uuid — the roster ROW carries the event stats)
+//   euf  → euf_rosters.id (uuid — same shape as wfdf)
 //
 // Lock enforcement: fantasy_contest_periods is the DB authority (generic
 // trigger). The client check here exists only for a friendly error message.
@@ -148,19 +149,21 @@ export async function searchContestPlayers(
     });
   }
 
-  // wfdf — roster rows ARE the player pool for the event.
+  // wfdf / euf — roster rows ARE the player pool for the event.
   const eventId = contest.settings.mode === 'event' ? contest.settings.eventId : undefined;
   if (!eventId) return [];
+  const table = league === 'euf' ? 'euf_rosters' : 'wfdf_rosters';
+  const teamsRel = league === 'euf' ? 'euf_teams' : 'wfdf_teams';
   const { data, error } = await anon()
-    .from('wfdf_rosters')
-    .select('id, full_name, team_id, wfdf_teams:team_id (name, country_code)')
+    .from(table)
+    .select(`id, full_name, team_id, ${teamsRel}:team_id (name, country_code)`)
     .eq('event_id', eventId)
     .ilike('full_name', pat)
     .order('full_name')
     .limit(limit);
   if (error) throw error;
   return (data ?? []).map((raw: Record<string, unknown>) => {
-    const t = raw.wfdf_teams as { name?: string; country_code?: string } | null;
+    const t = raw[teamsRel] as { name?: string; country_code?: string } | null;
     return {
       playerId: raw.id as string,
       fullName: (raw.full_name as string) ?? 'Unknown',
@@ -252,14 +255,16 @@ export async function getContestTeamRoster(
       }
     }
   } else {
-    // wfdf
+    // wfdf / euf
+    const table = league === 'euf' ? 'euf_rosters' : 'wfdf_rosters';
+    const teamsRel = league === 'euf' ? 'euf_teams' : 'wfdf_teams';
     const { data: rows } = await anon()
-      .from('wfdf_rosters')
-      .select('id, full_name, wfdf_teams:team_id (name, country_code)')
+      .from(table)
+      .select(`id, full_name, ${teamsRel}:team_id (name, country_code)`)
       .in('id', ids);
     for (const raw of rows ?? []) {
       const r = raw as Record<string, unknown>;
-      const t = r.wfdf_teams as { name?: string; country_code?: string } | null;
+      const t = r[teamsRel] as { name?: string; country_code?: string } | null;
       names.set(r.id as string, {
         fullName: (r.full_name as string) ?? 'Unknown',
         teamName: t?.name ?? t?.country_code ?? null,

@@ -97,7 +97,7 @@ export default function PrivacyPage() {
           </li>
           <li>
             <strong className="text-ink">Other users / the public</strong>, for content that is
-            public by design (for example, your Fantasy team name on the leaderboard, or
+            public by design (for example, your Fantasy team name in league standings, or
             approved player media);
           </li>
           <li>

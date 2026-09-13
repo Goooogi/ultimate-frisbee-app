@@ -4,7 +4,7 @@
 //
 // Renders a compact trigger button; clicking it opens a dismissible modal that
 // hosts the shared FantasyRulesContent (rules + scoring table). Used on the
-// leaderboard and My Team so the rules are one tap away without occupying the
+// league, team and settings tabs so the rules are one tap away without occupying the
 // page. Visual language matches AuthModal: portal to <body>, dark scrim,
 // bg-bg card, Esc / backdrop / close-button to dismiss.
 

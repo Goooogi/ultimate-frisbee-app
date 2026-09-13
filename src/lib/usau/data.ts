@@ -149,7 +149,8 @@ export function isChampionshipBracketName(name: string | null | undefined): bool
   if (b === '1st') return true;
   // Reject placement side brackets (any ordinal) + consolation.
   if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
-  if (b.includes('consolation') || b.includes('placement')) return false;
+  // Same rule the champion readers use: second place, game-to-go, etc.
+  if (isPlacementBracketName(b)) return false;
   if (b === 'finals') return true;
   if (/(^|\s)championship(\s+(bracket|final|game))?$/.test(b)) return true;
   if (b === 'bracket' || b === 'bracket play' || b === 'sunday bracket') return true;
@@ -157,6 +158,30 @@ export function isChampionshipBracketName(name: string | null | undefined): bool
   // its "Fiv-als"/"Ninals" placement siblings).
   if (b === 'champs') return true;
   return false;
+}
+
+const WRITTEN_ORDINALS =
+  'second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth';
+
+/** Placement side brackets ("13th Place (tie)", "Fifth Place Bracket",
+ *  "Second Place (Game to Go)", consolation) also carry round='final'/'semi'.
+ *  One rule for the home and /scores champion readers so both crown the same
+ *  team. A blacklist, unlike isChampionshipBracketName: unlabeled finals count. */
+function isPlacementBracketName(name: string | null): boolean {
+  const b = (name ?? '').toLowerCase();
+  // First-place names are the title game, even when they double as the bid
+  // game ("1st Place (Game to Go)") or pair two seeds ("First/Second Place").
+  // \b keeps "21st"/"31st" side brackets out of this carve-out.
+  if (/\b1st\b/.test(b) || /\bfirst\b/.test(b)) return false;
+  if (/\b\d+(st|nd|rd|th)\b/.test(b)) return true;
+  // Written-out places ("Second Place", "Championship Bracket: Third Place")
+  // and a bare ordinal label ("Third"). "Second Place" is the next-bid
+  // game-to-go, usually played AFTER the title game.
+  if (new RegExp(`\\b(${WRITTEN_ORDINALS})\\s+place\\b`).test(b)) return true;
+  if (new RegExp(`^(${WRITTEN_ORDINALS})$`).test(b.replace(/^.*[·:]\s*/, '').trim())) return true;
+  // Next-bid games by another name.
+  if (/backdoor|game[- ]to[- ]go|\bg2g\b/.test(b)) return true;
+  return b.includes('consolation') || b.includes('placement');
 }
 
 /**
@@ -1935,7 +1960,7 @@ export async function recentUsauMajorsWithChampions(
   const { data: bracketGames } = await db
     .from('usau_games')
     .select(
-      'event_id, round, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, ' +
+      'event_id, round, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, status, ' +
         'team_a:usau_teams!team_a_id(name, gender_division), ' +
         'team_b:usau_teams!team_b_id(name, gender_division)',
     )
@@ -1952,20 +1977,11 @@ export async function recentUsauMajorsWithChampions(
     score_b: number | null;
     scheduled_at: string | null;
     bracket_name: string | null;
+    status: string | null;
     team_a: TeamRef;
     team_b: TeamRef;
   };
 
-  // Placement side brackets ("13th Place (tie)", "Fifth Place Bracket",
-  // consolation) also carry round='final'/'semi'. Same reject rule as
-  // recentUsauTournamentPage — without it the College card crowned the 13th-
-  // place winner (2026-09-11).
-  const isPlacementBracket = (name: string | null): boolean => {
-    const b = (name ?? '').toLowerCase();
-    if (/\b\d+(st|nd|rd|th)\b/.test(b) && !b.includes('1st')) return true;
-    if (/\b(third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|thirteenth|fifteenth|seventeenth)\b/.test(b)) return true;
-    return b.includes('consolation') || b.includes('placement');
-  };
   const divisionOf = (g: Row, preferA: boolean): 'Men' | 'Women' | 'Mixed' | null => {
     let division =
       (preferA ? g.team_a?.gender_division : g.team_b?.gender_division) ??
@@ -1992,8 +2008,18 @@ export async function recentUsauMajorsWithChampions(
   };
   const bestByKey = new Map<string, Decided>();
   const semiLosersByKey = new Map<string, Array<{ name: string; id: string }>>();
+  // Cancelled championship finals: no champion, and the pool-record fallback
+  // must not crown a pool leader either (matches championsForEvents / Scores).
+  const cancelledKeys = new Set<string>();
   for (const g of (bracketGames ?? []) as unknown as Row[]) {
-    if (isPlacementBracket(g.bracket_name)) continue;
+    // Without this the College card crowned the 13th-place winner (2026-09-11).
+    if (isPlacementBracketName(g.bracket_name)) continue;
+    // Before the score guard: a cancelled game is stored 0-0.
+    if (g.status === 'cancelled') {
+      const division = g.round === 'final' ? divisionOf(g, true) : null;
+      if (division) cancelledKeys.add(`${g.event_id}|${division}`);
+      continue;
+    }
     if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
 
@@ -2028,8 +2054,9 @@ export async function recentUsauMajorsWithChampions(
 
   const championsByEvent = new Map<string, UsauMajorWithChampions['champions']>();
   // `${eventId}|${division}` pairs already settled by a bracket final — used to
-  // skip the pool-record fallback for divisions that DID play a bracket.
-  const decidedKeys = new Set<string>();
+  // skip the pool-record fallback for divisions that DID play a bracket, plus
+  // cancelled-final divisions.
+  const decidedKeys = new Set<string>(cancelledKeys);
   for (const [key, v] of bestByKey) {
     const [eventId, division] = key.split('|') as [string, 'Men' | 'Women' | 'Mixed'];
     if (!championsByEvent.has(eventId)) championsByEvent.set(eventId, []);
@@ -2062,12 +2089,23 @@ export async function recentUsauMajorsWithChampions(
     });
   }
 
-  // 5. Build results — only events with at least one champion.
+  // 5. Build results — only events with a champion or a cancelled final.
   const DIV_ORDER: Record<string, number> = { Men: 0, Women: 1, Mixed: 2 };
   const results: UsauMajorWithChampions[] = [];
   for (const e of majorEvents) {
-    const champions = championsByEvent.get(e.id);
-    if (!champions || champions.length === 0) continue;
+    const champions = championsByEvent.get(e.id) ?? [];
+    // Same as the Scores path: a later replayed final that DID decide the
+    // division clears the flag via the champions check.
+    const cancelledFinals = [...cancelledKeys]
+      .map((k) => k.split('|') as [string, 'Men' | 'Women' | 'Mixed'])
+      .filter(
+        ([eventId, division]) =>
+          eventId === e.id &&
+          !champions.some((c) => c.division === division && !c.viaPoolRecord),
+      )
+      .map(([, division]) => division)
+      .sort((a, b) => (DIV_ORDER[a] ?? 9) - (DIV_ORDER[b] ?? 9));
+    if (champions.length === 0 && cancelledFinals.length === 0) continue;
     results.push({
       slug: e.usau_slug,
       name: e.name,
@@ -2081,6 +2119,7 @@ export async function recentUsauMajorsWithChampions(
       champions: champions.sort(
         (a, b) => (DIV_ORDER[a.division] ?? 9) - (DIV_ORDER[b.division] ?? 9),
       ),
+      ...(cancelledFinals.length > 0 ? { cancelledFinals } : {}),
     });
     if (results.length >= limit) break;
   }
@@ -2597,8 +2636,7 @@ async function championsForEvents(
   const cancelledKeys = new Set<string>();
   for (const g of finals) {
     const b = (g.bracket_name ?? '').toLowerCase();
-    if (/\b\d+(st|nd|rd|th)\b/.test(b) && !b.includes('1st')) continue; // drop 5th/13th/17th…
-    if (b.includes('consolation') || b.includes('placement')) continue;
+    if (isPlacementBracketName(g.bracket_name)) continue; // drop 5th/13th/17th, Third/Second Place…
     if (g.status === 'cancelled') {
       let division: string | null =
         divisionOf.get(g.event_id) ?? g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
@@ -3037,15 +3075,22 @@ function formatEventDateRange(start: string | null, end: string | null): string 
 }
 
 /** Sort two result names alphabetically, but when they're the SAME event across
- *  different years (identical text apart from a trailing 4-digit year), order the
- *  year descending so the current season surfaces first instead of last. */
+ *  different years (identical text apart from a 4-digit year — leading like
+ *  "2026 Rocky Mountain Sectional Championship" or trailing like
+ *  "Heavyweights 2024"), order the year descending so the current season
+ *  surfaces first instead of last. */
 export function compareByNameThenYearDesc(a: string, b: string): number {
-  const ya = a.match(/^(.*?)[\s·-]*(\d{4})\s*$/);
-  const yb = b.match(/^(.*?)[\s·-]*(\d{4})\s*$/);
-  if (ya && yb && ya[1].trim().toLowerCase() === yb[1].trim().toLowerCase()) {
-    return Number(yb[2]) - Number(ya[2]); // newest year first
-  }
-  return a.localeCompare(b);
+  const ya = splitYear(a);
+  const yb = splitYear(b);
+  if (ya.year != null && yb.year != null && ya.rest === yb.rest) return yb.year - ya.year;
+  return ya.rest.localeCompare(yb.rest) || a.localeCompare(b);
+}
+
+function splitYear(name: string): { rest: string; year: number | null } {
+  const m = name.match(/(^|[\s·(-])((?:19|20)\d{2})(?=$|[\s·)-])/);
+  if (!m || m.index == null) return { rest: name.trim().toLowerCase(), year: null };
+  const rest = `${name.slice(0, m.index)} ${name.slice(m.index + m[0].length)}`;
+  return { rest: rest.replace(/[\s·-]+/g, ' ').trim().toLowerCase(), year: Number(m[2]) };
 }
 
 export async function search(query: string, limit = 8): Promise<SearchResult[]> {
@@ -4158,11 +4203,17 @@ const SERIES_LEVEL_PREFIX: Partial<Record<UsauLevel, string>> = {
   GREAT_GRAND_MASTERS: 'Great Grand Masters ',
 };
 
+/** A series stage's display name ("2026 USAU Sectionals", "2026 D-I College
+ *  Regionals") — the stage card title and the event page's back crumb. */
+export function seriesStageName(stage: UsauSeriesStage, level: UsauLevel, season: number): string {
+  return `${season} ${SERIES_LEVEL_PREFIX[level] ?? ''}${SERIES_STAGE_TITLE[stage]}`;
+}
+
 function seriesStageCard(s: Omit<UsauSeriesStageCard, 'id' | 'name'>): UsauSeriesStageCard {
   return {
     ...s,
     id: `${s.stage}:${s.season}:${s.level}`,
-    name: `${s.season} ${SERIES_LEVEL_PREFIX[s.level] ?? ''}${SERIES_STAGE_TITLE[s.stage]}`,
+    name: seriesStageName(s.stage, s.level, s.season),
   };
 }
 

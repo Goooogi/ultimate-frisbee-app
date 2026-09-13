@@ -82,7 +82,7 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       isH2H ? getH2HStandings(contest.id).catch(() => []) : Promise.resolve([]),
       !isH2H ? getContestStandings(contest.id).catch(() => []) : Promise.resolve([]),
       getMatchups(contest.id).catch(() => []),
-      contest.leagueId ? getLeagueMembers(contest.leagueId).catch(() => []) : Promise.resolve([]),
+      getLeagueMembers(contest.leagueId).catch(() => []),
     ]).then(([periods, h2h, points, m, mem]) => {
       if (cancelled) return;
       setWeeks(isWeekly ? periodsToWeeks(periods) : []);
@@ -98,7 +98,7 @@ export function LeagueView({ contest }: { contest: ContestView }) {
   }, [contest.id, contest.leagueId, isH2H, isWeekly]);
 
   useEffect(() => {
-    if (!user || !contest.leagueId) {
+    if (!user) {
       setIsCommissioner(false);
       return;
     }
@@ -121,7 +121,7 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       <MyContestTeamCta contest={contest} />
 
       {/* ── Draft card ─────────────────────────── */}
-      <DraftCard contest={contest} leagueId={contest.leagueId as string} />
+      <DraftCard contest={contest} leagueId={contest.leagueId} />
 
       {/* ── Recent activity ────────────────────── */}
       <RecentActivityCard contest={contest} />
@@ -242,8 +242,8 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       )}
 
       {/* ── Invite + members ───────────────────── */}
-      <InviteCodeRow leagueId={contest.leagueId as string} canRegenerate={isCommissioner} />
-      <LeagueMembersPanel leagueId={contest.leagueId as string} members={members} onLeaveRedirect="/fantasy" />
+      <InviteCodeRow leagueId={contest.leagueId} canRegenerate={isCommissioner} />
+      <LeagueMembersPanel leagueId={contest.leagueId} members={members} onLeaveRedirect="/fantasy" />
     </div>
   );
 }

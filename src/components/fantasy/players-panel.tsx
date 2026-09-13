@@ -306,7 +306,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
           onClose={() => setTradeTarget(null)}
           onDone={async () => {
             setTradeTarget(null);
-            await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+            await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
           }}
         />
       )}
@@ -320,7 +320,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
           onClose={() => setDropSheetPlayer(null)}
           onDone={async () => {
             setDropSheetPlayer(null);
-            await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+            await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
             const rows = await getTeamPlayers(contest.id, myTeam.id).catch(() => []);
             setMyOwnership(rows.map((r) => ({ playerId: r.playerId, playerName: r.playerName })));
             if (isDrafted) {
@@ -340,7 +340,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
           onClose={() => setClaimPlayer(null)}
           onDone={async () => {
             setClaimPlayer(null);
-            await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+            await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
           }}
         />
       )}

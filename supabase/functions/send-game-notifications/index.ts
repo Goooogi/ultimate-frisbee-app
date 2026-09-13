@@ -149,7 +149,16 @@ function bracketTail(name: string | null | undefined): string {
 function isPlacementName(name: string | null | undefined): boolean {
   const t = bracketTail(name).toLowerCase();
   if (!t) return false;
-  return /placement/.test(t) || /\b\d+(st|nd|rd|th)\s+place\b/.test(t) || /^\s*\d+(st|nd|rd|th)\b/.test(t);
+  return (
+    /placement/.test(t) ||
+    /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||
+    /^\s*\d+(st|nd|rd|th)\b/.test(t) ||
+    // Written-out ordinals: "Second Place" (game-to-go), bare "Third".
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)\s+place\b/.test(t) ||
+    /^(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)$/.test(t.trim()) ||
+    // Next-bid games (Hunter, 2026-09-12: they belong with the placements).
+    /backdoor|game[- ]to[- ]go|\bg2g\b/.test(t)
+  );
 }
 
 /** MIRROR of isCrossoverBracket (usau-event-detail.tsx). */
@@ -170,6 +179,10 @@ function isChampionshipBracketName(bracketName: string | null | undefined, round
   if (/\b1st place\b/.test(tail) || /\bfirst place\b/.test(tail)) return true;
   if (tail === '1st' || tail === 'champs') return true;
   if (/\b\d+(st|nd|rd|th)\b/.test(tail)) return false; // "5th Place Championship" etc — side bracket
+  // Written-out ordinals too: "Second Place" (game-to-go) and "Championship
+  // Bracket: Third Place" are placement games, never the title.
+  if (/\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)\s+place\b/.test(tail)) return false;
+  if (/backdoor|game[- ]to[- ]go|\bg2g\b/.test(tail)) return false;
   if (isCrossoverName(bracketName)) return false;
   return /championship/.test(tail) || tail === 'bracket play' || tail === 'final';
 }

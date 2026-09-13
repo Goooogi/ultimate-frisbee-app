@@ -394,7 +394,7 @@ export function AuthModal({
                       <span className="text-live">Handle contains language that isn&apos;t allowed</span>
                     )}
                     {(handleStatus === 'idle' || handleStatus === 'checking') && (
-                      <span className="text-faint">Shown on the leaderboard as @handle</span>
+                      <span className="text-faint">Your unique @identity across the platform</span>
                     )}
                   </span>
                 </div>

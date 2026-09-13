@@ -205,7 +205,7 @@ export async function isUsernameAvailable(username: string): Promise<boolean> {
 /**
  * Set the signed-in user's public handle. RLS lets a user update only their own
  * profile row (profiles_update_own). Throws on format/profanity/taken. This is
- * the user's unique leaderboard identifier — synced onto their teams by trigger.
+ * the user's unique handle — synced onto their teams by trigger.
  */
 export async function setMyUsername(username: string): Promise<void> {
   const supabase = sessionClient();
@@ -228,8 +228,8 @@ export async function setMyUsername(username: string): Promise<void> {
 }
 
 /**
- * Set the signed-in user's display name — the primary public label on the
- * leaderboard. Not unique. Runs the profanity filter. 1–60 chars. The
+ * Set the signed-in user's display name — the primary label in league
+ * standings. Not unique. Runs the profanity filter. 1–60 chars. The
  * fantasy_resync trigger updates any of the user's teams' denormalized copy.
  */
 export async function setDisplayName(name: string): Promise<void> {

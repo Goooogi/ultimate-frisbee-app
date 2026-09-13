@@ -71,7 +71,7 @@ export function MatchupView({ contest }: { contest: ContestView }) {
       getMatchups(contest.id).catch(() => []),
       getH2HStandings(contest.id).catch(() => []),
       user ? getMyContestTeam(contest.id).catch(() => null) : Promise.resolve(null),
-      contest.leagueId ? getMyLeagueRole(contest.leagueId).catch(() => null) : Promise.resolve(null),
+      getMyLeagueRole(contest.leagueId).catch(() => null),
     ]).then(([periods, m, s, team, role]) => {
       if (cancelled) return;
       setWeeks(periodsToWeeks(periods));
@@ -101,7 +101,7 @@ export function MatchupView({ contest }: { contest: ContestView }) {
     setGenError(null);
     try {
       await generateSchedule(contest.id);
-      await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+      await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
       const [m, s] = await Promise.all([getMatchups(contest.id), getH2HStandings(contest.id)]);
       setMatchups(m);
       setStandings(s);

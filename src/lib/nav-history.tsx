@@ -60,7 +60,11 @@ export function NavHistoryTracker() {
 
   useEffect(() => {
     if (url !== curr) {
-      prev = curr;
+      // A same-path change is a filter/tab switch (router.replace — no new
+      // history entry): update the current page in place so the page before it
+      // stays the back target. Shifting it into `prev` pushed the real
+      // previous page (e.g. the sectionals list) out after one ?div= switch.
+      if (curr == null || curr.split('?')[0] !== pathname) prev = curr;
       curr = url;
     }
     if (popUrl != null && popUrl !== url) popUrl = null;

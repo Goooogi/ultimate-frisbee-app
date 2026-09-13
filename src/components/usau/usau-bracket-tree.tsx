@@ -607,6 +607,10 @@ export function isChampionshipBracket(g: Game): boolean {
   // happen to contain "championship" plus an ordinal place ("5th Place
   // Championship") which signals a side bracket, not the main one.
   if (/\b\d+(st|nd|rd|th)\b/.test(b)) return false;
+  // Written-out ordinals too: "Second Place" (game-to-go) and "Championship
+  // Bracket: Third Place" are placement games, never the title.
+  if (/\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)\s+place\b/.test(b)) return false;
+  if (/backdoor|game[- ]to[- ]go|\bg2g\b/.test(b)) return false;
   // Seeding crossovers are NOT championship-bracket games: they only set
   // seeding for the bracket that follows.
   if (

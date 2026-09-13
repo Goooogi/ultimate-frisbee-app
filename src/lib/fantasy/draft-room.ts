@@ -10,8 +10,7 @@
 // starters 4O/3D + 5 bench for UFA weekly; event games draft their flex count
 // then bench); 60s default pick clock for snake (commissioner-configurable);
 // drafted leagues are owner-exclusive (a player belongs to ONE team per
-// contest, tracked in fantasy_team_players — moves on add/drop); the Public
-// League stays pick-anyone and never drafts.
+// contest, tracked in fantasy_team_players — moves on add/drop).
 //
 // Clock model (snake): NO cron. The server stamps current_started_at per
 // pick; clients render the countdown from it. When expired, ANY league

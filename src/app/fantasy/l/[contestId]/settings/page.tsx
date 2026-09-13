@@ -22,12 +22,10 @@ export default async function FantasyLeagueSettingsPage({
   const contest = await getContest(params.contestId);
   if (!contest) notFound();
 
-  const hasLeague = Boolean(contest.leagueId);
-
   const [league, draft, readiness] = await Promise.all([
-    hasLeague ? getLeague(contest.leagueId!).catch(() => null) : Promise.resolve(null),
-    hasLeague ? getDraft(contest.id).catch(() => null) : Promise.resolve(null),
-    hasLeague ? getDraftReadiness(contest.id).catch(() => null) : Promise.resolve(null),
+    getLeague(contest.leagueId).catch(() => null),
+    getDraft(contest.id).catch(() => null),
+    getDraftReadiness(contest.id).catch(() => null),
   ]);
 
   // Role isn't fetched here — resolved client-side in SettingsContent (same

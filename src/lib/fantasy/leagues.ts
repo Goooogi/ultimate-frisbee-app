@@ -72,7 +72,7 @@ export type ContestStatus = 'open' | 'active' | 'complete';
 
 export interface ContestView {
   id: string;
-  leagueId: string | null;
+  leagueId: string;
   competition: CompetitionId;
   competitionDef: CompetitionDef;
   seasonYear: number;
@@ -97,7 +97,7 @@ function mapContestRow(r: Record<string, unknown>): ContestView | null {
   if (!def) return null; // unknown competition (newer app rows on older code)
   return {
     id: r.id as string,
-    leagueId: (r.league_id as string) ?? null,
+    leagueId: r.league_id as string,
     competition: def.id,
     competitionDef: def,
     seasonYear: r.season_year as number,
@@ -535,6 +535,37 @@ export async function removeLeagueMember(leagueId: string, userId: string): Prom
 /** Leave a league (owner can't leave their own league). */
 export async function leaveLeague(leagueId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_leave_league', { p_league: leagueId });
+  if (error) throw error;
+}
+
+// ─── Account-deletion pre-flight (owner → transfer) ──────────────────────────
+
+export interface BlockingLeague {
+  leagueId: string;
+  leagueName: string;
+  otherMemberCount: number;
+}
+
+/** Leagues the signed-in user owns that still have other members — deleting
+ *  the account would delete these leagues out from under everyone else.
+ *  Called before account deletion; [] means nothing blocks it. */
+export async function getLeaguesBlockingAccountDeletion(): Promise<BlockingLeague[]> {
+  const { data, error } = await sessionClient().rpc('fantasy_leagues_blocking_account_deletion');
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    leagueId: r.league_id as string,
+    leagueName: r.league_name as string,
+    otherMemberCount: r.other_member_count as number,
+  }));
+}
+
+/** Hand league ownership to another member (caller must be the current
+ *  owner; RPC enforces). Used to unblock account deletion. */
+export async function transferLeagueOwnership(leagueId: string, newOwnerId: string): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_transfer_league_ownership', {
+    p_league: leagueId,
+    p_new_owner: newOwnerId,
+  });
   if (error) throw error;
 }
 

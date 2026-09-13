@@ -234,7 +234,7 @@ export function ContestRosterBuilder({ contest, pool }: ContestRosterBuilderProp
         .filter((s) => s.player !== null)
         .map((s) => ({ playerId: s.player!.playerId, role: s.role }));
       await saveContestRoster(contest, myTeam.id, selectedPeriod, rosterSlots);
-      await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+      await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
       setSaveOk(true);
       setTimeout(() => setSaveOk(false), 2500);
     } catch (err) {

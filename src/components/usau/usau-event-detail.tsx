@@ -58,7 +58,16 @@ function isCrossoverBracket(name: string | null | undefined): boolean {
 function isPlacementName(name: string | null | undefined): boolean {
   if (!name) return false;
   const t = bracketTail(name).toLowerCase();
-  return /placement/.test(t) || /\b\d+(st|nd|rd|th)\s+place\b/.test(t) || /^\s*\d+(st|nd|rd|th)\b/.test(t);
+  return (
+    /placement/.test(t) ||
+    /\b\d+(st|nd|rd|th)\s+place\b/.test(t) ||
+    /^\s*\d+(st|nd|rd|th)\b/.test(t) ||
+    // Written-out ordinals: "Second Place" (game-to-go), bare "Third".
+    /\b(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)\s+place\b/.test(t) ||
+    /^(second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)$/.test(t.trim()) ||
+    // Next-bid games (Hunter, 2026-09-12: they belong with the placements).
+    /backdoor|game[- ]to[- ]go|\bg2g\b/.test(t)
+  );
 }
 
 /** Matchup rounds — pool-less Saturday phases like Cooler Classic 37 Men's
@@ -1724,6 +1733,9 @@ export function canonicalPlacement(name: string | null | undefined): PlacementBu
     }
   }
 
+  // Game-to-go / backdoor with no place in the name is the second-place game.
+  if (place == null && /backdoor|game[- ]to[- ]go|\bg2g\b/.test(t)) place = 2;
+
   if (place != null && place >= 2) {
     const suffix = place % 10 === 1 && place % 100 !== 11 ? 'st'
       : place % 10 === 2 && place % 100 !== 12 ? 'nd'
@@ -1739,7 +1751,7 @@ export function canonicalPlacement(name: string | null | undefined): PlacementBu
     return { key: `pool-${pool[1]}`, label: (name ?? '').trim(), order: 500 };
   }
 
-  // Backdoor / consolation / anything unrecognized → an "Other" bucket last.
+  // Consolation / anything unrecognized → an "Other" bucket last.
   return { key: 'other', label: 'Other Brackets', order: 999 };
 }
 

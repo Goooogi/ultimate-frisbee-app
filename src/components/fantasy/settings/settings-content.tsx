@@ -45,11 +45,11 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
   const { user } = useAuth();
 
   const [myRole, setMyRole] = useState<LeagueRole | null>(null);
-  const [roleLoading, setRoleLoading] = useState(Boolean(contest.leagueId));
+  const [roleLoading, setRoleLoading] = useState(true);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
 
   useEffect(() => {
-    if (!contest.leagueId || !user) {
+    if (!user) {
       setMyRole(null);
       setRoleLoading(false);
       return;
@@ -72,11 +72,9 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
   }, [contest.leagueId, user]);
 
   const onSaved = () => {
-    revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+    revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
     router.refresh();
   };
-
-  if (!contest.leagueId) return null;
 
   if (roleLoading) {
     return (

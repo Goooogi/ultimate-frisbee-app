@@ -38,7 +38,7 @@ export default async function LeagueLayout({
     );
   }
 
-  const league = contest.leagueId ? await getLeague(contest.leagueId).catch(() => null) : null;
+  const league = await getLeague(contest.leagueId).catch(() => null);
 
   return (
     <AppShell hideFooterMobile>

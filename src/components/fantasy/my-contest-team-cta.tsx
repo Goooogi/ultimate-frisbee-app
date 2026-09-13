@@ -81,7 +81,7 @@ export function MyContestTeamCta({ contest }: { contest: ContestView }) {
     setError(null);
     try {
       const teamId = await createContestTeam(contest.id, trimmed, contest.seasonYear);
-      await revalidateFantasyLeague(contest.leagueId ?? undefined, contest.id).catch(() => null);
+      await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
       setMyTeam({ id: teamId, teamName: trimmed });
       router.push(
         `/fantasy/l/${contest.id}/team`,

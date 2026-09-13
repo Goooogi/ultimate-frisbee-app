@@ -74,6 +74,13 @@ const MAX_CONCURRENT_CHILDREN = 8;
  */
 const EVENTS_PER_RUN = 16;
 
+/**
+ * Cron cadence of this function (jobs 20 + 21 fire every 3 minutes). The
+ * pre-start throttle and the slice rotation both count firings in this unit —
+ * the rotation must advance once per FIRING or it re-syncs the same slice.
+ */
+const CRON_INTERVAL_MIN = 3;
+
 interface RequestBody {
   dryRun?: boolean;
   divisions?: ('Men' | 'Women' | 'Mixed')[];
@@ -189,7 +196,11 @@ async function run(body: RequestBody) {
     .in('competition_level', FLAGSHIP_LEVELS)
     .lte('start_date', lookahead)
     .gte('end_date', trailing)
-    .order('start_date', { ascending: true });
+    .order('start_date', { ascending: true })
+    // Tiebreak: a Sectionals weekend puts ~80 events on ONE start_date, and
+    // Postgres returns ties in no guaranteed order — the rotating slices
+    // below only partition the list if the order is identical every firing.
+    .order('usau_slug', { ascending: true });
   if (error) throw new Error(`load live events: ${stringifyErr(error)}`);
 
   // ── Pre-start throttle (2026-08-06) ──────────────────────────────────────
@@ -202,7 +213,7 @@ async function run(body: RequestBody) {
   // (pools/seeds post once), so they join only every fifth firing (~15 min).
   // Live and trailing events keep the full cadence — game-day freshness is
   // untouched.
-  const preStartDue = Math.floor(Date.now() / 60_000 / 3) % 5 === 0;
+  const preStartDue = Math.floor(Date.now() / 60_000 / CRON_INTERVAL_MIN) % 5 === 0;
   const eventList = (events ?? []).filter(
     (e) => (e.start_date as string) <= today || preStartDue,
   );
@@ -221,9 +232,13 @@ async function run(body: RequestBody) {
   let offset = 0;
   if (eventList.length > perRun) {
     const slots = Math.ceil(eventList.length / perRun);
-    // One slot per firing; 15-min cron → the tick index rotates every 15 min.
-    // Using epoch-minutes keeps this stateless (no cursor table to maintain).
-    const tick = Math.floor(Date.now() / 60_000 / 15);
+    // One slot per firing. The tick unit must match the cron cadence: it was
+    // still 15 min after the cron moved to every 3 min, so each slice was
+    // re-synced 5 firings in a row and a Sectionals weekend (81 events, 6
+    // slices) walked the list once every 90 min — 2026 West Plains Men sat
+    // ~75 min stale with its afternoon pool results unscraped. Epoch-minutes
+    // keep this stateless (no cursor table to maintain).
+    const tick = Math.floor(Date.now() / 60_000 / CRON_INTERVAL_MIN);
     offset = (tick % slots) * perRun;
     slice = [...eventList.slice(offset), ...eventList.slice(0, offset)].slice(0, perRun);
   }

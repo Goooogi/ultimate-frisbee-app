@@ -235,7 +235,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
 
   // ── Commissioner role (drives the lobby's Start Now button) ─────────────
   useEffect(() => {
-    if (!user || !contest.leagueId) {
+    if (!user) {
       setIsCommissioner(false);
       return;
     }

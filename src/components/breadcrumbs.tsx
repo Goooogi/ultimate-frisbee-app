@@ -45,7 +45,7 @@ export function Breadcrumbs({ crumbs }: Props) {
   if (!href) return null;
 
   const prevUrl = previousUrl(pathname);
-  const cameFromParent = prevUrl != null && prevUrl.split('?')[0] === href.split('?')[0];
+  const cameFromParent = prevUrl != null && sameTarget(prevUrl, href);
   const label = prevUrl == null || cameFromParent ? parent.label : 'Back';
 
   return (
@@ -70,6 +70,20 @@ export function Breadcrumbs({ crumbs }: Props) {
       </Link>
     </nav>
   );
+}
+
+/** Does `url` land on `href`: same path, and every param `href` sets carries
+ *  the same value? (`/scores?league=usau` is not the sectionals list
+ *  `/scores?league=usau&series=sectionals`, so its label mustn't claim to be.) */
+function sameTarget(url: string, href: string): boolean {
+  const [path, qs = ''] = url.split('?');
+  const [hrefPath, hrefQs = ''] = href.split('?');
+  if (path !== hrefPath) return false;
+  const have = new URLSearchParams(qs);
+  const want = new URLSearchParams(hrefQs);
+  for (const [k, v] of want) if (have.get(k) !== v) return false;
+  for (const k of ['series', 'div']) if (have.has(k) && !want.has(k)) return false;
+  return true;
 }
 
 function BackArrow() {

@@ -25,7 +25,7 @@ const PREVIEW_LIMIT = 5;
 
 export function RecentActivityCard({ contest }: { contest: ContestView }) {
   const { user } = useAuth();
-  const leagueId = contest.leagueId as string;
+  const leagueId = contest.leagueId;
 
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [messages, setMessages] = useState<LeagueMessage[]>([]);

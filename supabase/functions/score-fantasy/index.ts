@@ -114,7 +114,7 @@ type Competition =
 
 interface ContestRow {
   id: string;
-  league_id: string | null;
+  league_id: string;
   competition: Competition;
   season_year: number;
   status: string;
@@ -130,7 +130,7 @@ interface PeriodRow {
 
 interface TeamRow {
   id: string;
-  contest_id: string | null;
+  contest_id: string;
 }
 
 interface SlotRow {
@@ -465,7 +465,7 @@ async function run(body: { contest?: string }) {
   );
   const contestOfTeam = new Map<string, string>();
   for (const t of teams) {
-    if (t.contest_id) contestOfTeam.set(t.id, t.contest_id);
+    contestOfTeam.set(t.id, t.contest_id);
   }
 
   // 5. All roster slots, attributed to (contest, period); keep only locked ones.

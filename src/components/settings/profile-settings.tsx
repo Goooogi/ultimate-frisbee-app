@@ -279,7 +279,7 @@ function IdentityFields({
         <FieldLabel
           htmlFor="settings-display-name"
           label="Display name"
-          hint="Shown on the fantasy leaderboard"
+          hint="Shown in your fantasy leagues"
         />
         <input
           id="settings-display-name"
