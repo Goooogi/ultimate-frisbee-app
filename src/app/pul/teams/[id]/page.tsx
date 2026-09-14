@@ -16,12 +16,22 @@ import {
   listPulGames,
   listPulTeams,
   getPulTeamPodiums,
+  getPulCurrentSeason,
+  listPulSeasons,
   type PulTeam,
   type PulPlayer,
   type PulGame,
 } from '@/lib/pul/data';
 
-const PUL_SEASON = 2026;
+// Game log follows the newest season (its schedule included); the roster
+// follows the newest season with player rows, which lags by weeks pre-season.
+async function pageSeasons(): Promise<{ season: number; rosterSeason: number }> {
+  const [season, playerSeasons] = await Promise.all([
+    getPulCurrentSeason(),
+    listPulSeasons().catch((): number[] => []),
+  ]);
+  return { season, rosterSeason: playerSeasons[0] ?? season };
+}
 
 export const revalidate = 3600;
 
@@ -39,18 +49,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const teams = await listPulTeams().catch((): PulTeam[] => []);
   const team = teams.find((t) => t.id === params.id);
   if (!team) return { title: 'Team not found · The Layout' };
+  const { rosterSeason } = await pageSeasons();
   return {
     title: `${team.city} ${team.mascot} · PUL · The Layout`,
-    description: `${team.city} ${team.mascot} roster and stats for the 2026 PUL season.`,
+    description: `${team.city} ${team.mascot} roster and stats for the ${rosterSeason} PUL season.`,
   };
 }
 
 export default async function PulTeamPage({ params }: Props) {
+  const { season, rosterSeason } = await pageSeasons();
   const [teams, roster, podiums, games] = await Promise.all([
     listPulTeams().catch((): PulTeam[] => []),
-    getPulRoster(params.id, PUL_SEASON).catch((): PulPlayer[] => []),
+    getPulRoster(params.id, rosterSeason).catch((): PulPlayer[] => []),
     getPulTeamPodiums(params.id).catch(() => []),
-    listPulGames({ season: PUL_SEASON }).catch((): PulGame[] => []),
+    listPulGames({ season }).catch((): PulGame[] => []),
   ]);
 
   const team = teams.find((t) => t.id === params.id);
@@ -82,7 +94,7 @@ export default async function PulTeamPage({ params }: Props) {
             {team.mascot}
           </h2>
           <div className="text-[12px] text-muted font-tight mt-1.5">
-            {locationLine(team.city, pulTeamState(params.id), proTeamCountry(params.id))} · 2026 Season
+            {locationLine(team.city, pulTeamState(params.id), proTeamCountry(params.id))} · {season} Season
           </div>
         </div>
         {podiums.length > 0 && (
@@ -97,7 +109,7 @@ export default async function PulTeamPage({ params }: Props) {
         <div className="flex items-end justify-between gap-4 mb-4">
           <div>
             <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
-              2026 Season
+              {rosterSeason} Season
             </span>
             <h2 id="roster-heading" className="font-display italic font-bold text-[22px] lg:text-[26px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
               Roster
@@ -131,7 +143,7 @@ export default async function PulTeamPage({ params }: Props) {
       </section>
 
       {/* Season game log — every game the team played this season. */}
-      <ProTeamGameLog teamId={params.id} games={games} league="pul" season={PUL_SEASON} />
+      <ProTeamGameLog teamId={params.id} games={games} league="pul" season={season} />
     </PageShell>
   );
 }

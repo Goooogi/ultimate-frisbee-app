@@ -57,6 +57,23 @@ export interface ContestRosterSlot {
 // ─── Player search per contest ───────────────────────────────────────────────
 
 /** Search the draftable player pool for a contest. */
+/** First season of a PUL/WUL contest's player pool: the pool is its own
+ *  season's players plus the season before's. Season rows only appear with a
+ *  player's first game, so a pre-season league would otherwise find nobody,
+ *  and in-season nobody who hasn't played yet. Same rule as SQL
+ *  public.fantasy_pool_first_season (add/drop, waiver and best-available). */
+async function poolFirstSeason(table: 'pul_players' | 'wul_players', seasonYear: number): Promise<number> {
+  const { data, error } = await anon()
+    .from(table)
+    .select('season')
+    .lt('season', seasonYear)
+    .order('season', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.season as number | undefined) ?? seasonYear;
+}
+
 export async function searchContestPlayers(
   contest: ContestView,
   query: string,
@@ -92,9 +109,11 @@ export async function searchContestPlayers(
     const { data, error } = await anon()
       .from(table)
       .select(`player_name, team_id, ${teamsRel}:team_id (name, city, mascot)`)
-      .eq('season', contest.seasonYear)
+      .gte('season', await poolFirstSeason(table, contest.seasonYear))
+      .lte('season', contest.seasonYear)
       .ilike('player_name', pat)
       .order('player_name')
+      .order('season', { ascending: false }) // dedup below keeps the newest team
       .limit(limit * 2); // room for cross-team dupes before dedup
     if (error) throw error;
     const seen = new Set<string>();
@@ -217,8 +236,10 @@ export async function getContestTeamRoster(
     const { data: rows } = await anon()
       .from(table)
       .select(`player_name, ${teamsRel}:team_id (name, city, mascot)`)
-      .eq('season', contest.seasonYear)
-      .in('player_name', ids);
+      .gte('season', await poolFirstSeason(table, contest.seasonYear))
+      .lte('season', contest.seasonYear)
+      .in('player_name', ids)
+      .order('season'); // the newest season's team is set last
     for (const raw of rows ?? []) {
       const r = raw as Record<string, unknown>;
       const t = r[teamsRel] as { name?: string; city?: string; mascot?: string } | null;

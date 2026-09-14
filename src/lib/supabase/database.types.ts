@@ -3324,6 +3324,11 @@ export type Database = {
           team_a_placeholder: string | null
           team_b_id: string | null
           team_b_placeholder: string | null
+          bracket_stage: string | null
+          bracket_stage_index: number | null
+          bracket_slot: number | null
+          next_usau_game_id: string | null
+          next_slot_side: string | null
           updated_at: string
           usau_event_game_id: string | null
           usau_game_id: string | null
@@ -3347,6 +3352,11 @@ export type Database = {
           team_a_placeholder?: string | null
           team_b_id?: string | null
           team_b_placeholder?: string | null
+          bracket_stage?: string | null
+          bracket_stage_index?: number | null
+          bracket_slot?: number | null
+          next_usau_game_id?: string | null
+          next_slot_side?: string | null
           updated_at?: string
           usau_event_game_id?: string | null
           usau_game_id?: string | null
@@ -3370,6 +3380,11 @@ export type Database = {
           team_a_placeholder?: string | null
           team_b_id?: string | null
           team_b_placeholder?: string | null
+          bracket_stage?: string | null
+          bracket_stage_index?: number | null
+          bracket_slot?: number | null
+          next_usau_game_id?: string | null
+          next_slot_side?: string | null
           updated_at?: string
           usau_event_game_id?: string | null
           usau_game_id?: string | null
@@ -4684,6 +4699,7 @@ export type Database = {
           away_team_id: string
           created_at: string
           game_date: string | null
+          game_time: string | null
           home_abbrev: string
           home_score: number | null
           home_team_id: string
@@ -4699,6 +4715,7 @@ export type Database = {
           away_team_id: string
           created_at?: string
           game_date?: string | null
+          game_time?: string | null
           home_abbrev: string
           home_score?: number | null
           home_team_id: string
@@ -4714,6 +4731,7 @@ export type Database = {
           away_team_id?: string
           created_at?: string
           game_date?: string | null
+          game_time?: string | null
           home_abbrev?: string
           home_score?: number | null
           home_team_id?: string

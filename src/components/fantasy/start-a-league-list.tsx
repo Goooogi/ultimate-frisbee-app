@@ -3,12 +3,11 @@
 // sortGamesBySoonest). Live games link into league creation preseeded with
 // that game; every other row renders dimmed with a disabled Play pill.
 //
-// Playable requires BOTH `status === 'live'` AND a resolved startDate: a live
-// game whose next season/event isn't scheduled yet has nothing to found a
-// league against (the row already prints "Dates TBA"). Effect today — UFA is
-// disabled until the 2027 schedule appears (~April), and WFDF activates on its
-// own once the next un-ended WFDF event is ingested; Club Nationals stays
-// playable.
+// Playable requires BOTH `status === 'live'` AND `startable` (game-dates.ts):
+// the next season/event still has its first lock ahead, so a league founded
+// now has something to play. A tournament that has started or finished is
+// never playable; UFA turns playable once next season's games are in
+// ufa_games, and its row reads just "{season} season".
 
 import Link from 'next/link';
 import Image from 'next/image';
@@ -35,13 +34,15 @@ export function StartALeagueList({ games, starts }: StartALeagueListProps) {
         <ul aria-label="Games">
           {games.map((game, idx) => {
             const start = starts[game.id];
-            const scheduled = !!start?.startDate;
-            // Playable = live AND actually scheduled. A live game with no
-            // resolved start has nothing to found a league against.
-            const playable = game.status === 'live' && scheduled;
+            // Playable = live AND startable: its next season/event still has
+            // its first lock ahead (getGameStartDates — the same rule the
+            // create page's game picker uses).
+            const playable = game.status === 'live' && !!start?.startable;
             const name = game.name.replace(/ Fantasy$/, '');
-            const range = formatStartRange(start?.startDate ?? null, start?.endDate ?? null);
-            const subtitle = start?.label ? `${range} · ${start.label}` : range;
+            // Tournaments print their dates; UFA prints just "{season} season"
+            // (Hunter, 2026-09-13 — its season runs April–August).
+            const range = start?.startDate ? formatStartRange(start.startDate, start.endDate) : null;
+            const subtitle = range && start?.label ? `${range} · ${start.label}` : range ?? start?.label ?? 'Dates TBA';
 
             const row = (
               <div

@@ -14,6 +14,7 @@ import {
   listWulGames,
   listWulTeams,
   getWulCurrentSeason,
+  getWulResultsSeason,
   getWulTeamPodiums,
   type WulTeam,
   type WulPlayer,
@@ -40,18 +41,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const teams = await listWulTeams().catch((): WulTeam[] => []);
   const team = teams.find((t) => t.id === params.id);
   if (!team) return { title: 'Team not found · The Layout' };
-  const season = await getWulCurrentSeason();
+  const rosterSeason = await getWulResultsSeason();
   return {
     title: `${team.city} ${team.mascot} · WUL · The Layout`,
-    description: `${team.city} ${team.mascot} roster and stats for the ${season} WUL season.`,
+    description: `${team.city} ${team.mascot} roster and stats for the ${rosterSeason} WUL season.`,
   };
 }
 
 export default async function WulTeamPage({ params }: Props) {
-  const season = await getWulCurrentSeason();
+  // Game log follows the newest season (its schedule included); the roster
+  // follows the newest season with player rows, which lags by months pre-season.
+  const [season, rosterSeason] = await Promise.all([getWulCurrentSeason(), getWulResultsSeason()]);
   const [teams, roster, podiums, games] = await Promise.all([
     listWulTeams().catch((): WulTeam[] => []),
-    getWulRoster(params.id, season).catch((): WulPlayer[] => []),
+    getWulRoster(params.id, rosterSeason).catch((): WulPlayer[] => []),
     getWulTeamPodiums(params.id).catch(() => []),
     listWulGames({ season }).catch((): WulGame[] => []),
   ]);
@@ -100,7 +103,7 @@ export default async function WulTeamPage({ params }: Props) {
         <div className="flex items-end justify-between gap-4 mb-4">
           <div>
             <span className="block text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-2">
-              {season} Season
+              {rosterSeason} Season
             </span>
             <h2 id="roster-heading" className="font-display italic font-bold text-[22px] lg:text-[26px] leading-[0.95] tracking-[-0.02em] text-ink m-0">
               Roster

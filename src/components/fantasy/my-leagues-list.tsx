@@ -38,10 +38,11 @@ function draftTimeLabel(scheduledAt: string): string {
 
 function contestStatusChip(contest: MyLeagueContestRow): StatusChip {
   const d = contest.draft;
+  // A finished contest reads Final even if its draft never ran.
+  if (contest.status === 'complete') return { label: 'Final', tone: 'neutral' };
   if (d?.status === 'live') return { label: 'Draft live', tone: 'solid' };
   if (d?.status === 'scheduled' && d.scheduledAt) return { label: draftTimeLabel(d.scheduledAt), tone: 'accent' };
   if (d?.status === 'scheduled') return { label: 'Draft pending', tone: 'accent' };
-  if (contest.status === 'complete') return { label: 'Final', tone: 'neutral' };
   if (contest.status === 'active') return { label: 'Live', tone: 'accent' };
   if (d?.status === 'complete') return { label: 'Drafted', tone: 'neutral' };
   return { label: 'Open', tone: 'neutral' };

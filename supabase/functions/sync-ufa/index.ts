@@ -477,7 +477,11 @@ async function pruneOrphans(
 async function run(body: { year?: number; windowDays?: number; maxGames?: number; retryDays?: number; maxPlayerFetches?: number; prune?: boolean }) {
   const supabase = db();
   const now = new Date();
-  const year = body.year ?? (now.getUTCMonth() >= 3 ? now.getUTCFullYear() : now.getUTCFullYear() - 1);
+  // The calendar year: UFA publishes a new season's schedule in winter, and
+  // fantasy weeks are built from ufa_games, so the schedule has to land as soon
+  // as it exists — not in April. Before it's published the fetch returns no
+  // games, and pruneOrphans skips (< MIN_PRUNE_GAMES), so nothing is touched.
+  const year = body.year ?? now.getUTCFullYear();
   const windowDays = body.windowDays ?? DEFAULT_WINDOW_DAYS;
   const maxGames = body.maxGames ?? DEFAULT_MAX_GAMES;
   const retryDays = body.retryDays ?? DEFAULT_RETRY_DAYS;

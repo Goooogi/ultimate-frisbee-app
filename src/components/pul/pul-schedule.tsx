@@ -254,7 +254,10 @@ function formatDateMeta(
 }
 
 function formatTime(time: string): string {
-  // time is 'HH:MM' or 'HH:MM:SS' (24h)
+  // A time that already says AM/PM ('7:30 PM', '4pm PT') is shown as stored —
+  // parsing it as 24h turned '7:30 PM' into '7:30 AM'.
+  if (/\d\s*[ap]\.?m\b/i.test(time)) return time;
+  // Otherwise 'HH:MM' or 'HH:MM:SS' (24h)
   const [hStr, mStr] = time.split(':');
   const h = parseInt(hStr, 10);
   const m = parseInt(mStr, 10);

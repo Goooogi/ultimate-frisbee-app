@@ -22,7 +22,7 @@ import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { useViewParam } from '@/lib/use-view-param';
 import { USAU_LEVELS } from '@/lib/league';
-import { UsauBracketTree, UsauPlacementBracketTree, UsauFlatBracketCards, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder } from './usau-bracket-tree';
+import { UsauBracketTree, UsauPlacementBracketTree, UsauFlatBracketCards, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder, hasBracketStructure, structuredColumnLabel } from './usau-bracket-tree';
 import { formatGameTime, formatGameDate, formatGameClock } from '@/lib/usau/venue-tz';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager } from '@/components/division-pager';
@@ -940,6 +940,12 @@ function BracketView({
 const CHAIN_ROUNDS_FOR_TREE = ['prequarter', 'quarter', 'semi'];
 
 function isDerivableBracketGroup(label: string, games: Game[]): boolean {
+  // Scraped structure (2026-09-13) settles it outright: the group is a tree
+  // when USAU drew it with two or more columns. One column is a lone decider
+  // ("5th Place Game") and stays a flat card.
+  if (hasBracketStructure(games)) {
+    return new Set(games.map((g) => g.bracketStageIndex).filter((i) => i != null)).size >= 2;
+  }
   // The tree only builds columns from tree rounds, so a "… Bracket" group made
   // entirely of round='placement' games (2026 West Plains Men's Second/Fifth
   // Place Bracket) rendered its heading over an empty tree. Those go flat.
@@ -950,9 +956,12 @@ function isDerivableBracketGroup(label: string, games: Game[]): boolean {
     games.map((g) => g.round).filter((r) => CHAIN_ROUNDS_FOR_TREE.includes(r)),
   );
   if (chainRoundsPresent.size < 2) return false;
-  // A deciding game: an explicit final, or an 'other'-tagged game riding
-  // along with the chain rounds (the mislabeled-final recovery case).
-  return games.some((g) => g.round === 'final' || g.round === 'other');
+  // A deciding game: an explicit final, or an 'other'/'placement'-tagged game
+  // riding along with the chain rounds — buildColumns recovers either as the
+  // final. USAU stores a placement bracket's decider as 'placement' ("6th
+  // Place (Game to Go)" under quarters + semis, Rocky Mountain 2026), which
+  // this gate used to reject, flattening the whole bracket.
+  return games.some((g) => g.round === 'final' || g.round === 'other' || g.round === 'placement');
 }
 
 /** Renders one placement group as its own bracket tree, labeled by our own
@@ -1352,15 +1361,25 @@ function BracketBlock({
     return g.round;
   };
 
-  const byRound = new Map<string, Game[]>();
+  // Scraped structure names the column outright ("5th Place Game" → Final);
+  // legacy rows fall back to the coarse round.
+  const structured = hasBracketStructure(bracket.games);
+  const byRound = new Map<string, { label: string; order: number; games: Game[] }>();
   for (const g of bracket.games) {
-    const r = displayRound(g);
-    if (!byRound.has(r)) byRound.set(r, []);
-    byRound.get(r)!.push(g);
+    const key = structured ? `stage:${g.bracketStageIndex ?? 'x'}` : displayRound(g);
+    if (!byRound.has(key)) {
+      byRound.set(key, {
+        label: structured
+          ? structuredColumnLabel(g.bracketStage, g.bracketName, g.bracketStageIndex === 0)
+          : prettyRound(key),
+        // Structured columns run deepest-first (higher index = earlier round).
+        order: structured ? -(g.bracketStageIndex ?? -1) : roundOrder(key),
+        games: [],
+      });
+    }
+    byRound.get(key)!.games.push(g);
   }
-  const rounds = Array.from(byRound.entries()).sort(
-    (a, b) => roundOrder(a[0]) - roundOrder(b[0]),
-  );
+  const rounds = Array.from(byRound.values()).sort((a, b) => a.order - b.order);
 
   return (
     <div>
@@ -1369,15 +1388,15 @@ function BracketBlock({
       </h3>
       {treeSized ? (
         <UsauFlatBracketCards
-          rounds={rounds.map(([round, games]) => ({ label: prettyRound(round), games }))}
+          rounds={rounds.map(({ label, games }) => ({ label, games }))}
           venueState={venueState}
         />
       ) : (
         <div className="flex flex-col gap-4">
-          {rounds.map(([round, games]) => (
-            <div key={round}>
+          {rounds.map(({ label, games }) => (
+            <div key={label}>
               <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight mb-2">
-                {prettyRound(round)}
+                {label}
               </div>
               <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {games.map((g) => (

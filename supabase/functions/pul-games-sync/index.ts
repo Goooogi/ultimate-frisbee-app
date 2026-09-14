@@ -26,9 +26,6 @@ const BASE = 'https://pul-stats-hub.pages.dev';
 const UA = 'Mozilla/5.0 (the-layout/pul-games-sync)';
 const FETCH_DELAY_MS = 300;
 const ALERT_TO = 'huntermay@altiusapps.com';
-// Current PUL season — bump each spring (the source publishes the new season's
-// schedule before games are played; current-season games are always re-checked).
-const CURRENT_SEASON = 2026;
 
 function db(): SupabaseClient {
   const url = Deno.env.get('SUPABASE_URL');
@@ -109,6 +106,9 @@ async function runSync(supabase: SupabaseClient): Promise<SyncResult> {
   //    - any game not in the DB yet (new on /schedule)
   //    - any DB game that's not 'final', or 'final' with a null score
   //    - all current-season games (catch post-game stat corrections)
+  // A PUL season runs inside one calendar year, so "current" is this year —
+  // derived per run, never a constant someone has to bump each spring.
+  const currentSeason = new Date().getUTCFullYear();
   const byId = new Map(scheduleGames.map((g) => [g.id, g]));
   const toFetch: ScheduledGame[] = [];
   let gamesInserted = 0;
@@ -121,7 +121,7 @@ async function runSync(supabase: SupabaseClient): Promise<SyncResult> {
       continue;
     }
     const incomplete = row.status !== 'final' || row.away_score === null || row.home_score === null;
-    if (incomplete || g.season === CURRENT_SEASON) toFetch.push(g);
+    if (incomplete || g.season === currentSeason) toFetch.push(g);
   }
 
   // 4. Fetch + upsert each.

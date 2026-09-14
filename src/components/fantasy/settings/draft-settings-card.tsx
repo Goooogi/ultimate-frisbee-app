@@ -60,6 +60,16 @@ export function DraftSettingsCard({ contest, draft, readiness, loading, onSaved 
     );
   }
 
+  // Finished contest: nothing left to draft (fantasy_schedule_draft refuses a
+  // contest that isn't open), so don't offer the schedule/reschedule forms.
+  if (contest.status === 'complete' && (!draft || draft.status === 'scheduled')) {
+    return (
+      <Card title="Draft">
+        <p className="font-tight text-[13px] text-faint">This season is over — there&apos;s no draft to schedule.</p>
+      </Card>
+    );
+  }
+
   if (!draft) {
     return <ScheduleForm contest={contest} readiness={readiness} onSaved={onSaved} />;
   }

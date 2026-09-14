@@ -33,6 +33,8 @@ NAME_TO_SLUG = {
     'Seattle Tempest': 'tempest',
     'Utah Wild': 'wild',
 }
+# Must match wul_teams.abbr: wul-schedule-sync builds the same game ids from
+# that column, and a mismatch would leave its scheduled row beside the final.
 SLUG_TO_ABBR = {
     'astra':'LA','alpenglow':'COL','falcons':'BAY','sidewinders':'AZ',
     'soar':'OR','onyx':'ORO','superbloom':'SD','tempest':'SEA','wild':'UT',
@@ -181,8 +183,10 @@ def main():
             f"{sql_str(g['id'])},{g['season']},{sql_str(g['week_label'])},{sql_str(g['game_date'])},"
             f"{sql_str(g['away_team_id'])},{sql_str(g['home_team_id'])},{sql_str(g['away_abbrev'])},"
             f"{sql_str(g['home_abbrev'])},{g['away_score']},{g['home_score']},'final') "
+            # status: the row may already exist as 'scheduled' (wul-schedule-sync).
             "on conflict (id) do update set away_score=excluded.away_score,"
-            "home_score=excluded.home_score,week_label=excluded.week_label,updated_at=now();"
+            "home_score=excluded.home_score,week_label=excluded.week_label,"
+            "status=excluded.status,updated_at=now();"
         )
     # season players
     for (name, tslug, season), a in season_players.items():

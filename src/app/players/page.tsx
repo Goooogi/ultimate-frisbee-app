@@ -49,7 +49,7 @@ import {
 import { WulTeamLogo } from '@/components/wul-team-logo';
 import {
   listWulTeams,
-  getWulCurrentSeason,
+  getWulResultsSeason,
   type WulPlayer,
   type WulTeam,
   type WulSortField,
@@ -161,14 +161,19 @@ export default async function PlayersPage({ searchParams }: Props) {
     const rawDir = searchParams.dir ?? '';
     const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
 
-    const currentSeason = await getPulCurrentSeason();
+    // The leaderboard defaults to the newest season WITH player stats, not the
+    // games-based current season: next season's schedule lands weeks before
+    // any player rows, and the games-based default opened this page empty
+    // until opening day.
+    const playerSeasons = await listPulSeasons().catch((): number[] => []);
+    const currentSeason = playerSeasons[0] ?? (await getPulCurrentSeason());
+    const seasons = playerSeasons.length > 0 ? playerSeasons : [currentSeason];
     const rawSeason = parseInt(searchParams.season ?? String(currentSeason), 10);
     const season = isNaN(rawSeason) ? currentSeason : rawSeason;
 
-    const [players, teams, seasons] = await Promise.all([
+    const [players, teams] = await Promise.all([
       listPulPlayersCached({ season, sortBy, limit: 500 }).catch((): PulPlayer[] => []),
       listPulTeams().catch((): PulTeam[] => []),
-      listPulSeasons().catch((): number[] => [currentSeason]),
     ]);
 
     // Client-side asc re-sort (DB always returns desc).
@@ -316,7 +321,10 @@ export default async function PlayersPage({ searchParams }: Props) {
     const rawDir = searchParams.dir ?? '';
     const dir: 'asc' | 'desc' = rawDir === 'asc' ? 'asc' : 'desc';
 
-    const currentSeason = await getWulCurrentSeason();
+    // Same rule as PUL: the newest season with results (player stats land in
+    // the same scrape), not the newest with any game — next season's schedule
+    // is in wul_games months before its first stat line.
+    const currentSeason = await getWulResultsSeason();
     const rawSeason = parseInt(searchParams.season ?? String(currentSeason), 10);
     const season = isNaN(rawSeason) ? currentSeason : rawSeason;
 

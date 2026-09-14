@@ -1,112 +1,169 @@
-// "When does this game start?" — powers the hub's Start a League list, which
-// orders games by their soonest start and prints the date. Two shapes:
-//   • event games (USAU Nationals, WFDF, EUCS) → the resolved event's dates.
-//     If this season's event has already ended, look at next season.
-//   • season games (UFA, PUL, WUL) → the first game that hasn't been played
-//     yet; when the season is over and next season isn't scheduled, TBA.
-// Display-only. Nothing here gates creation — the DB draft window does that.
+// "Can a league start in this game right now — and against which season or
+// event?" ONE function behind the hub's Start a League list AND the
+// create-league page (2026-09-13), so the list, the form's game picker and
+// createContest can never disagree. A game is startable only while its next
+// season/event still has its first lock ahead — never one that has started:
+//   • event games (USAU Nationals, WFDF, EUCS) → resolveEventForCompetition:
+//     the next event whose start_date (its only lock, 00:00 ET) is after today.
+//   • UFA → the earliest ufa_games week whose first game (the lock
+//     fantasy_rebuild_contest_periods builds from that same table) is still
+//     ahead. The row reads just "{season} season", no date (Hunter,
+//     2026-09-13: the season runs April–August).
+//   • PUL / WUL (coming soon, display only) → the next scheduled game.
+// The season always comes from that data, never from the calendar year.
 //
-// Server-side port of the mobile app's game-dates.ts (altiusapps/
-// mobileapp-thelayout · src/lib/fantasy/game-dates.ts): the web hub computes
-// this in a Server Component at request time, so there's no react-query hook
-// here — just the plain async functions.
+// Client-safe (anon reads only): the create form re-checks its game with
+// nextStartForGame at submit time. Pages read it through the cached wrapper
+// in game-dates-cached.ts.
 
-import { getGamesByYears, currentSeasonYear } from '@/lib/ufa/client';
-import { listPulGames, PUL_CURRENT_SEASON } from '@/lib/pul/data';
-import { listWulGames, WUL_CURRENT_SEASON } from '@/lib/wul/data';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { usauToday } from '@/lib/today';
 import type { CompetitionId } from './competitions';
 import { getCompetition } from './competitions';
 import { resolveEventForCompetition } from './leagues';
 import { GAMES } from './games';
 import type { GameDef } from './games';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type AnyClient = SupabaseClient<any>;
+
+let _anon: AnyClient | null = null;
+function anon(): AnyClient {
+  if (_anon) return _anon;
+  _anon = createClient(supabaseUrl(), supabaseAnonKey(), {
+    auth: { persistSession: false },
+  });
+  return _anon;
+}
+
 export interface GameStart {
-  /** 'YYYY-MM-DD' of the first game / event start, or null when unknown. */
+  /** A league founded now has something to play: the season/event below
+   *  still has its first lock ahead. */
+  startable: boolean;
+  /** Season of that upcoming start, from the data. Null when nothing is startable. */
+  seasonYear: number | null;
+  /** 'YYYY-MM-DD' dates the row prints (event dates, next PUL/WUL game). Null
+   *  for UFA (label only) and when nothing is scheduled. */
   startDate: string | null;
-  /** 'YYYY-MM-DD' event end (event games only). */
   endDate: string | null;
-  /** Human label: the event name for tournaments, "2027 season" for leagues. */
+  /** 'YYYY-MM-DD' (ET) of the real next start — orders the hub list. */
+  sortDate: string | null;
+  /** Event name for tournaments, "2027 season" for leagues. */
   label: string | null;
-  seasonYear: number;
 }
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+const UNSCHEDULED: GameStart = {
+  startable: false,
+  seasonYear: null,
+  startDate: null,
+  endDate: null,
+  sortDate: null,
+  label: null,
+};
+
+async function eventStart(competition: CompetitionId): Promise<GameStart> {
+  const ev = await resolveEventForCompetition(competition, null);
+  if (!ev) return UNSCHEDULED;
+  return {
+    startable: true,
+    seasonYear: ev.seasonYear,
+    startDate: ev.startDate,
+    endDate: ev.endDate,
+    sortDate: ev.startDate,
+    label: ev.name,
+  };
 }
 
-async function eventStart(competition: CompetitionId, year: number): Promise<GameStart> {
-  const today = todayIso();
-  for (const y of [year, year + 1]) {
-    const ev = await resolveEventForCompetition(competition, y);
-    if (!ev) continue;
-    const ended = ev.endDate ? ev.endDate < today : ev.startDate ? ev.startDate < today : false;
-    if (ended) continue;
-    return { startDate: ev.startDate, endDate: ev.endDate, label: ev.name, seasonYear: y };
-  }
-  return { startDate: null, endDate: null, label: null, seasonYear: year };
-}
-
+/** Earliest UFA week whose first game — its period lock
+ *  (fantasy_rebuild_contest_periods: lock_at = min(start_timestamp) per week)
+ *  — is still ahead. Read from ufa_games, the table the contest's periods are
+ *  built from, so "startable" always means the contest gets an open week. */
 async function ufaStart(): Promise<GameStart> {
-  const year = currentSeasonYear();
-  const today = todayIso();
-  for (const y of [year, year + 1]) {
-    // One page of 20 is enough: games come back chronologically and we only
-    // need the first not-yet-played one.
-    const games = await getGamesByYears([y], { limit: 20 }).catch(() => []);
-    const upcoming = games
-      .map((g) => g.startTimestamp?.slice(0, 10) ?? null)
-      .filter((d): d is string => Boolean(d) && (d as string) >= today)
-      .sort();
-    if (upcoming.length > 0) {
-      return { startDate: upcoming[0], endDate: null, label: `${y} season`, seasonYear: y };
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+  let afterSeason: number | null = null;
+  // Two passes at most: the season of the next game, then — if that season's
+  // remaining games all sit in weeks that already locked — the following one.
+  for (let pass = 0; pass < 2; pass++) {
+    let q = anon().from('ufa_games').select('year').gt('start_timestamp', nowIso).not('week', 'is', null);
+    if (afterSeason != null) q = q.gt('year', afterSeason);
+    const { data: next, error } = await q.order('start_timestamp', { ascending: true }).limit(1).maybeSingle();
+    if (error) throw error;
+    if (!next) return UNSCHEDULED;
+    const season = next.year as number;
+
+    // One season's schedule (~150 rows, well under the 1000-row response cap).
+    const { data: games, error: gamesError } = await anon()
+      .from('ufa_games')
+      .select('week, start_timestamp')
+      .eq('year', season)
+      .not('week', 'is', null);
+    if (gamesError) throw gamesError;
+    const lockByWeek = new Map<string, number>();
+    for (const g of (games ?? []) as { week: string; start_timestamp: string }[]) {
+      if (g.week.trim() === '') continue;
+      const t = Date.parse(g.start_timestamp);
+      const cur = lockByWeek.get(g.week);
+      if (cur == null || t < cur) lockByWeek.set(g.week, t);
     }
+    const nextLock = [...lockByWeek.values()].filter((t) => t > now).sort((a, b) => a - b)[0];
+    if (nextLock != null) {
+      return {
+        startable: true,
+        seasonYear: season,
+        startDate: null,
+        endDate: null,
+        sortDate: usauToday(new Date(nextLock)),
+        label: `${season} season`,
+      };
+    }
+    afterSeason = season;
   }
-  return { startDate: null, endDate: null, label: null, seasonYear: year + 1 };
+  return UNSCHEDULED;
 }
 
-async function leagueStart(
-  list: (season: number) => Promise<{ gameDate: string | null }[]>,
-  currentSeason: number,
-): Promise<GameStart> {
-  const today = todayIso();
-  for (const y of [currentSeason, currentSeason + 1]) {
-    const games = await list(y).catch(() => []);
-    const upcoming = games
-      .map((g) => g.gameDate)
-      .filter((d): d is string => Boolean(d) && (d as string) >= today)
-      .sort();
-    if (upcoming.length > 0) {
-      return { startDate: upcoming[0], endDate: null, label: `${y} season`, seasonYear: y };
-    }
-  }
-  return { startDate: null, endDate: null, label: null, seasonYear: currentSeason + 1 };
+/** PUL / WUL: the next scheduled game. Games are date-only and lock at 00:00
+ *  ET, so one that's today has already locked. */
+async function leagueStart(table: 'pul_games' | 'wul_games'): Promise<GameStart> {
+  const { data, error } = await anon()
+    .from(table)
+    .select('season, game_date')
+    .gt('game_date', usauToday())
+    .order('game_date', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return UNSCHEDULED;
+  const season = data.season as number;
+  return {
+    startable: true,
+    seasonYear: season,
+    startDate: data.game_date as string,
+    endDate: null,
+    sortDate: data.game_date as string,
+    label: `${season} season`,
+  };
 }
 
 export async function nextStartForGame(competition: CompetitionId): Promise<GameStart> {
   const def = getCompetition(competition);
-  const year = new Date().getFullYear();
-  if (!def) return { startDate: null, endDate: null, label: null, seasonYear: year };
-  if (def.mode === 'event') return eventStart(competition, year);
+  if (!def) return UNSCHEDULED;
+  if (def.mode === 'event') return eventStart(competition);
   if (competition === 'ufa') return ufaStart();
-  if (competition === 'pul') {
-    return leagueStart((s) => listPulGames({ season: s }), PUL_CURRENT_SEASON);
-  }
-  if (competition === 'wul') {
-    return leagueStart((s) => listWulGames({ season: s }), WUL_CURRENT_SEASON);
-  }
-  return { startDate: null, endDate: null, label: null, seasonYear: year };
+  if (competition === 'pul') return leagueStart('pul_games');
+  if (competition === 'wul') return leagueStart('wul_games');
+  return UNSCHEDULED;
 }
 
 export type GameStartMap = Partial<Record<CompetitionId, GameStart>>;
 
-/** Every hub game's next start, resolved in parallel (one failure never hides
+/** Every hub game's start, resolved in parallel (one failure never hides
  *  the rest — a failed lookup reads as "Dates TBA"). */
 export async function getGameStartDates(games: GameDef[] = GAMES): Promise<GameStartMap> {
   const entries = await Promise.all(
     games.map(async (g) => {
-      const start = await nextStartForGame(g.id).catch(
-        (): GameStart => ({ startDate: null, endDate: null, label: null, seasonYear: new Date().getFullYear() }),
-      );
+      const start = await nextStartForGame(g.id).catch((): GameStart => UNSCHEDULED);
       return [g.id, start] as const;
     }),
   );
@@ -115,11 +172,11 @@ export async function getGameStartDates(games: GameDef[] = GAMES): Promise<GameS
   return out;
 }
 
-/** Sort games by soonest known start; unknown dates last, registry order
- *  preserved within each group. */
+/** Sort games by their real next start (sortDate); unknown last, registry
+ *  order preserved within each group. */
 export function sortGamesBySoonest(games: GameDef[], starts: GameStartMap): GameDef[] {
   return games
-    .map((g, idx) => ({ g, idx, date: starts[g.id]?.startDate ?? null }))
+    .map((g, idx) => ({ g, idx, date: starts[g.id]?.sortDate ?? null }))
     .sort((a, b) => {
       if (a.date && b.date) return a.date < b.date ? -1 : a.date > b.date ? 1 : a.idx - b.idx;
       if (a.date) return -1;

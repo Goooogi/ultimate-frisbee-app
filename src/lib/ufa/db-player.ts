@@ -237,20 +237,37 @@ export async function getUfaPlayerFromDb(playerID: string): Promise<DbUfaPlayer 
 
   // ── Champion detection ──────────────────────────────────────────────────
   // Needs EVERY game in each season the player appeared in, not just theirs —
-  // the title game may not involve them. One query covering all those years.
+  // the title game may not involve them. PostgREST clamps every response to
+  // 1000 rows whatever .range() asks for, and a 9-season career spans ~1,400
+  // games, so a single .in('year') query silently dropped the OLDEST seasons
+  // (mjackson's 2016 Roughnecks title never resolved). Query SEASONS_PER_QUERY
+  // seasons at a time: the busiest season has 193 games, so 4 stay under the
+  // cap (772 rows) while a 15-season career costs 4 queries, not 15 — this runs
+  // on a crawler-heavy public route. Raise the cap math before raising this.
+  const SEASONS_PER_QUERY = 4;
   const years = [...new Set(rows.map((r) => r.game.year))].sort((a, b) => b - a);
   const championByYear = new Map<number, string>();
   if (years.length > 0) {
-    const { data: seasonGames } = await db
-      .from('ufa_games')
-      .select('id, year, week, start_timestamp, status, home_team_id, away_team_id, home_score, away_score')
-      .in('year', years)
-      .range(0, 9999);
+    const yearChunks: number[][] = [];
+    for (let i = 0; i < years.length; i += SEASONS_PER_QUERY) {
+      yearChunks.push(years.slice(i, i + SEASONS_PER_QUERY));
+    }
+    const perChunk = await Promise.all(
+      yearChunks.map((chunk) =>
+        db
+          .from('ufa_games')
+          .select('id, year, week, start_timestamp, status, home_team_id, away_team_id, home_score, away_score')
+          .in('year', chunk)
+          .range(0, 999),
+      ),
+    );
     const gamesByYear = new Map<number, GameRow[]>();
-    for (const g of (seasonGames ?? []) as GameRow[]) {
-      const list = gamesByYear.get(g.year) ?? [];
-      list.push(g);
-      gamesByYear.set(g.year, list);
+    for (const res of perChunk) {
+      for (const g of (res.data ?? []) as GameRow[]) {
+        const list = gamesByYear.get(g.year) ?? [];
+        list.push(g);
+        gamesByYear.set(g.year, list);
+      }
     }
     for (const [year, list] of gamesByYear.entries()) {
       // Season-completeness gate: mid-season, the "latest final" is just a

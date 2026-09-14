@@ -52,6 +52,19 @@ export function isLiveStatus(status: string | null | undefined): boolean {
   return !isUpcomingStatus(status) && !isFinalStatus(status) && !isCancelledStatus(status);
 }
 
+/** The game's own season — from the gameID's "YYYY-" prefix, else its start
+ *  timestamp. Era-aware surfaces need it: the API stamps the CURRENT nickname
+ *  on every past game (2016 Dallas reads "Legion"). */
+export function gameYear(game: Pick<UfaGame, 'gameID' | 'startTimestamp'>): number | undefined {
+  const m = /^(\d{4})-/.exec(game.gameID ?? '');
+  if (m) return Number(m[1]);
+  if (game.startTimestamp) {
+    const y = new Date(game.startTimestamp).getFullYear();
+    if (Number.isFinite(y)) return y;
+  }
+  return undefined;
+}
+
 export function gameUiState(game: UfaGame): GameUiState {
   const isCancelled = isCancelledStatus(game.status);
   const isLive = isLiveStatus(game.status);

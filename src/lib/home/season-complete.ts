@@ -21,8 +21,8 @@ import {
   COMPLETE_WINDOW_DAYS,
   isClubNationalsName,
   isCollegeChampionshipsName,
-  isoDay,
 } from '@/lib/home/season-phase';
+import { usauToday } from '@/lib/today';
 
 // Public read-only data — plain anon client, matching wfdf/data.ts (no cookie
 // binding needed, and it stays reusable across requests).
@@ -70,8 +70,8 @@ export interface WfdfSeasonCompleteCard {
  *  (WBUC/PAUC in Nov–Dec) isn't hidden by the next year's first event. */
 export async function getWfdfSeasonCompleteCards(now: Date = new Date()): Promise<WfdfSeasonCompleteCard[]> {
   const events = await listEvents();
-  const today = isoDay(now);
-  const cutoff = isoDay(new Date(now.getTime() - COMPLETE_WINDOW_DAYS * 86400_000));
+  const today = usauToday(now);
+  const cutoff = usauToday(new Date(now.getTime() - COMPLETE_WINDOW_DAYS * 86400_000));
   const completed = events
     .filter((e) => {
       const end = e.endDate ?? e.startDate ?? '';
@@ -138,9 +138,9 @@ export async function getWfdfSeasonCompleteCards(now: Date = new Date()): Promis
 }
 
 // ─── UFA — the full playoff bracket ──────────────────────────────────────────
-// Pure: `games` is the season pool page.tsx already fetched (current year, or
-// the previous year during the Jan–Aug fallback). Null until the title game
-// is decided — ufaPlayoffGames requires a structural bracket, so a
+// Pure: `games` is ONE season — page.tsx passes ufaTitleSeasonGames(pool), the
+// season whose bracket is decided (a two-season pool breaks the week-count
+// bracket detection). Null until the title game is decided — ufaPlayoffGames requires a structural bracket, so a
 // regular-season final can never be mistaken for a championship.
 
 export interface UfaStandingsRow {

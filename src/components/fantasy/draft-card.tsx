@@ -99,6 +99,9 @@ export function DraftCard({ contest, leagueId }: { contest: ContestView; leagueI
     );
   }
   if (!readiness) return null; // signed out
+  // Finished contest (fantasy_rebuild_all_periods marks it complete): nothing
+  // left to set up or wait for — only a completed draft keeps its results link.
+  if (contest.status === 'complete' && draft?.status !== 'complete') return null;
 
   const roomPath = `/fantasy/l/${contest.id}/draft`;
   const settingsPath = `/fantasy/l/${contest.id}/settings`;

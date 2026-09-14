@@ -23,6 +23,7 @@ import type { PulGame } from '@/lib/pul/data';
 import type { WulGame } from '@/lib/wul/data';
 import { deriveWulPostseasonRounds } from '@/lib/wul/data';
 import type { UsauMajorWithChampions, UpcomingUsauEvent } from '@/lib/usau/data';
+import { usauToday } from '@/lib/today';
 
 export type SeasonPhase = 'in-season' | 'complete' | 'dormant';
 
@@ -38,6 +39,8 @@ export interface LeaguePhase {
 export const COMPLETE_WINDOW_DAYS = 183;
 /** How close the next game/event must be to count as in-season. */
 export const UPCOMING_HORIZON_DAYS = 14;
+// The preview window (how far ahead hero slides / Up next look) is
+// SEASON_PREVIEW_DAYS in @/lib/season-windows — wider than this on purpose.
 
 const DAY_MS = 86400_000;
 
@@ -53,12 +56,9 @@ export function homeNow(): Date {
   return new Date();
 }
 
-export function isoDay(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function daysBetween(fromIso: string, to: Date): number {
-  return (to.getTime() - new Date(`${fromIso}T12:00:00Z`).getTime()) / DAY_MS;
+/** Whole days from one yyyy-mm-dd to another (Eastern dates, see usauToday). */
+function daysBetween(fromIso: string, toIso: string): number {
+  return (Date.parse(`${toIso}T00:00:00Z`) - Date.parse(`${fromIso}T00:00:00Z`)) / DAY_MS;
 }
 
 export interface PhaseSignals {
@@ -70,11 +70,12 @@ export interface PhaseSignals {
 
 export function resolvePhase(s: PhaseSignals, now: Date): LeaguePhase {
   const base = { lastFinalDate: s.lastFinalDate, nextDate: s.nextDate };
+  const today = usauToday(now);
   const nextSoon =
-    s.nextDate !== null && -daysBetween(s.nextDate, now) <= UPCOMING_HORIZON_DAYS;
+    s.nextDate !== null && daysBetween(today, s.nextDate) <= UPCOMING_HORIZON_DAYS;
   if (s.hasLive || s.hasResultsAfterFinal || nextSoon) return { phase: 'in-season', ...base };
   if (s.lastFinalDate !== null) {
-    const age = daysBetween(s.lastFinalDate, now);
+    const age = daysBetween(s.lastFinalDate, today);
     if (age >= 0 && age <= COMPLETE_WINDOW_DAYS) return { phase: 'complete', ...base };
   }
   return { phase: 'dormant', ...base };
@@ -84,7 +85,11 @@ export function resolvePhase(s: PhaseSignals, now: Date): LeaguePhase {
 // `games` may span two seasons (current year + previous year during the
 // Jan–Aug fallback): the title game is the newest structural bracket's final.
 
-export function ufaSeasonPhase(games: UfaGame[], now: Date = new Date()): LeaguePhase {
+/** The games of the newest season in `games` (bucketed by UTC year) whose
+ *  bracket is decided; [] when none. The home pool can hold two seasons (the
+ *  previous-year fallback, or next season's published schedule) and
+ *  ufaPlayoffGames' week-count detection only holds within ONE season. */
+export function ufaTitleSeasonGames(games: UfaGame[]): UfaGame[] {
   const byYear = new Map<number, UfaGame[]>();
   for (const g of games) {
     const y = g.startTimestamp ? new Date(g.startTimestamp).getUTCFullYear() : NaN;
@@ -92,14 +97,15 @@ export function ufaSeasonPhase(games: UfaGame[], now: Date = new Date()): League
     if (!byYear.has(y)) byYear.set(y, []);
     byYear.get(y)!.push(g);
   }
-  let lastFinalDate: string | null = null;
   for (const y of [...byYear.keys()].sort((a, b) => b - a)) {
-    const title = ufaPlayoffGames(byYear.get(y)!)[0];
-    if (title?.game.startTimestamp) {
-      lastFinalDate = isoDay(new Date(title.game.startTimestamp));
-      break;
-    }
+    if (ufaPlayoffGames(byYear.get(y)!).length > 0) return byYear.get(y)!;
   }
+  return [];
+}
+
+export function ufaSeasonPhase(games: UfaGame[], now: Date = new Date()): LeaguePhase {
+  const title = ufaPlayoffGames(ufaTitleSeasonGames(games))[0];
+  const lastFinalDate = title?.game.startTimestamp ? usauToday(new Date(title.game.startTimestamp)) : null;
 
   let hasLive = false;
   let hasResultsAfterFinal = false;
@@ -107,7 +113,7 @@ export function ufaSeasonPhase(games: UfaGame[], now: Date = new Date()): League
   for (const g of games) {
     const s = gameUiState(g);
     if (s.isCancelled || !g.startTimestamp) continue;
-    const day = isoDay(new Date(g.startTimestamp));
+    const day = usauToday(new Date(g.startTimestamp));
     if (s.isLive) hasLive = true;
     if (s.isFinal && lastFinalDate !== null && day > lastFinalDate) hasResultsAfterFinal = true;
     if (s.isUpcoming && (nextDate === null || day < nextDate)) nextDate = day;
@@ -135,7 +141,7 @@ function scheduledPhase<T extends DatedGame>(
   }
   let hasResultsAfterFinal = false;
   let nextDate: string | null = null;
-  const today = isoDay(now);
+  const today = usauToday(now);
   for (const g of games) {
     if (!g.gameDate) continue;
     if (g.status === 'final' && lastFinalDate !== null && g.gameDate > lastFinalDate) {
@@ -193,7 +199,11 @@ export function usauClubSeasonPhase(
 
 /** College level. `champs` = the College Championships (D-I + D-III) with
  *  champions, newest first. The college season has no "results after" signal
- *  in that list, so an imminent college event is what flips it in-season. */
+ *  in that list, so an imminent college event is what flips it in-season —
+ *  but only a NEXT-season event, or a Championships still to be played (D-I
+ *  runs the week after D-III, same season). Fall invitationals carry the
+ *  season of the spring whose Championships already finished, and must not
+ *  hide its card. */
 export function usauCollegeSeasonPhase(
   champs: UsauMajorWithChampions[],
   upcoming: UpcomingUsauEvent[],
@@ -201,9 +211,17 @@ export function usauCollegeSeasonPhase(
 ): LeaguePhase {
   const lastFinalDate =
     champs.map((c) => c.endDate ?? '').filter(Boolean).sort().reverse()[0] ?? null;
+  const champSeason = Math.max(0, ...champs.map((c) => c.season ?? 0));
   const nextDate =
     upcoming
-      .filter((e) => e.competitionLevel && COLLEGE_LEVELS.has(e.competitionLevel) && e.startDate)
+      .filter(
+        (e) =>
+          e.competitionLevel &&
+          COLLEGE_LEVELS.has(e.competitionLevel) &&
+          e.startDate &&
+          e.season !== null &&
+          (e.season > champSeason || isCollegeChampionshipsName(e.name)),
+      )
       .map((e) => e.startDate as string)
       .sort()[0] ?? null;
   return resolvePhase({ lastFinalDate, hasLive: false, hasResultsAfterFinal: false, nextDate }, now);
@@ -215,7 +233,7 @@ export function wfdfEventPhase(
   event: { startDate: string | null; endDate: string | null },
   now: Date = new Date(),
 ): LeaguePhase {
-  const today = isoDay(now);
+  const today = usauToday(now);
   const start = event.startDate;
   const end = event.endDate ?? event.startDate;
   if (!end) return { phase: 'dormant', lastFinalDate: null, nextDate: start };

@@ -18,6 +18,7 @@ import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 import { isUnhealthyError } from '@/lib/supabase/health';
 import { usauToday } from '@/lib/today';
+import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
 import { seriesStageHref, seriesUnitLabel, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
 
 type DB = SupabaseClient<Database>;
@@ -525,7 +526,7 @@ export async function listEvents(opts?: {
  *   • Wed / Thu / Fri / Sat → show the UPCOMING weekend's tournament (preview).
  *     By Wednesday attention has shifted to who's playing this weekend.
  *
- * The cutover is Wednesday 00:00 in the server's local time.
+ * The cutover is Wednesday 00:00 Eastern (usauToday).
  *
  * Within whichever side we pick, ties (multiple events the same weekend) break
  * by FLIGHT_RANK — the marquee flight (Pro Elite Challenge) headlines over a
@@ -777,8 +778,8 @@ export async function getCurrentEvent(opts?: {
   // events / 1300+ games, which silently truncates and drops events to "0
   // games"). The DB-wide fallback at the end of this function still covers any
   // gap when nothing falls inside the window.
-  const windowBack = new Date(now.getTime() - 45 * 86400_000).toISOString().slice(0, 10);
-  const windowForward = new Date(now.getTime() + 45 * 86400_000).toISOString().slice(0, 10);
+  const windowBack = usauToday(new Date(now.getTime() - 45 * 86400_000));
+  const windowForward = usauToday(new Date(now.getTime() + 45 * 86400_000));
 
   // One explicit level filters exactly; otherwise any flagship level headlines.
   const levelFilter = opts?.competitionLevel
@@ -928,10 +929,11 @@ export async function getCurrentEvent(opts?: {
   const rankOf = (e: EventRow) => (stageById.has(e.id) ? SERIES_STAGE_RANK : flightRankForName(e.name));
 
   // Weekend cadence: before Wednesday we look back at last weekend; from
-  // Wednesday on we look forward to the next weekend. We use getUTCDay() so the
-  // cutover and the past/upcoming date split below share one clock — `today`
-  // and event start/end dates are all compared as UTC calendar dates.
-  const lookForward = now.getUTCDay() >= 3; // Wed(3) → Sat(6)
+  // Wednesday on we look forward to the next weekend. The weekday comes from
+  // the Eastern `today` so the cutover and the past/upcoming date split below
+  // share one clock — the flip lands at Eastern midnight, not 8 pm ET
+  // (getUTCDay rolled over four hours early).
+  const lookForward = new Date(`${today}T12:00:00Z`).getUTCDay() >= 3; // Wed(3) → Sat(6)
 
   const endOf = (e: EventRow) => e.end_date ?? e.start_date ?? '';
 
@@ -1275,6 +1277,9 @@ export interface UpcomingUsauEvent {
    *  season-phase logic scope "next event" to one level. A stage carries the
    *  level its tier rolls up to. */
   competitionLevel: string | null;
+  /** usau_events.season (a stage's season). The home college phase counts only
+   *  events of a season after the last College Championships. */
+  season: number | null;
 }
 
 /** getCurrentEvent's pick: an event slug, or a whole series stage. */
@@ -1296,15 +1301,15 @@ export type UsauCurrentPick =
 export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEvent[]> {
   const db = await supabase();
   const today = usauToday();
-  const windowForward = new Date(Date.now() + 120 * 86400_000).toISOString().slice(0, 10);
+  const windowForward = usauToday(new Date(Date.now() + SEASON_PREVIEW_DAYS * 86400_000));
   // A stage's members start within a few weekends of each other, so members
   // that started up to 30 days back rebuild any stage still in play.
-  const stageFrom = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const stageFrom = usauToday(new Date(Date.now() - 30 * 86400_000));
 
   const [{ data: rows }, stages] = await Promise.all([
     db
       .from('usau_events')
-      .select('id, usau_slug, name, start_date, end_date, competition_level')
+      .select('id, usau_slug, name, season, start_date, end_date, competition_level')
       .in('competition_level', FLAGSHIP_LEVELS)
       // Series members roll up into their stage row below.
       .is('series_stage', null)
@@ -1318,6 +1323,7 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
     id: string;
     usau_slug: string;
     name: string | null;
+    season: number;
     start_date: string | null;
     end_date: string | null;
     competition_level: string | null;
@@ -1341,6 +1347,7 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
         flightLabel: flight ? FLIGHT_LABELS[flight] : null,
         seriesLabel: null,
         competitionLevel: e.competition_level,
+        season: e.season,
         rank: flightRankForName(e.name),
       };
     }),
@@ -1356,6 +1363,7 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
         flightLabel: null,
         seriesLabel: seriesUnitLabel(s.stage, s.groupCount),
         competitionLevel: s.level,
+        season: s.season,
         rank: SERIES_STAGE_RANK,
       })),
   ];
@@ -1392,6 +1400,7 @@ export async function listNextUpcomingEvents(limit = 5): Promise<UpcomingUsauEve
     flightLabel: c.flightLabel,
     seriesLabel: c.seriesLabel,
     competitionLevel: c.competitionLevel,
+    season: c.season,
   }));
 }
 
@@ -1868,6 +1877,9 @@ export interface UsauMajorWithChampions {
   name: string;
   startDate: string | null;
   endDate: string | null;
+  /** usau_events.season — set by recentUsauMajorsWithChampions (the home college
+   *  phase compares it with upcoming events' seasons). */
+  season?: number;
   flight: Flight | null;
   /** Mean official USAU rank across every ranked entrant, ALL divisions pooled
    *  (division lives on usau_teams, so one tournament spans Men/Women/Mixed and
@@ -1935,7 +1947,7 @@ export async function recentUsauMajorsWithChampions(
   // until this season catches up. Single indexed query; rows are tiny.
   const { data: events } = await db
     .from('usau_events')
-    .select('id, usau_slug, name, start_date, end_date')
+    .select('id, usau_slug, name, season, start_date, end_date')
     .in('competition_level', levels)
     .lt('end_date', today)
     .order('end_date', { ascending: false, nullsFirst: false })
@@ -1946,6 +1958,7 @@ export async function recentUsauMajorsWithChampions(
     id: string;
     usau_slug: string;
     name: string;
+    season: number;
     start_date: string | null;
     end_date: string | null;
   }>).filter((e) => isMajor(e.name));
@@ -2109,6 +2122,7 @@ export async function recentUsauMajorsWithChampions(
     results.push({
       slug: e.usau_slug,
       name: e.name,
+      season: e.season,
       startDate: e.start_date,
       endDate: e.end_date,
       flight: flightForName(e.name),
@@ -4004,6 +4018,21 @@ export interface UsauEventSummary {
      *  2026-08-18. */
     teamAPlaceholder: string | null;
     teamBPlaceholder: string | null;
+    /** Bracket structure captured from USAU's own markup (2026-09-13; see
+     *  migration 20260913170000). Null on pool rows and on rows scraped
+     *  before the columns existed — readers fall back to round heuristics.
+     *  bracketStage: column label verbatim ("6th Place Quarters", "1st Semis").
+     *  bracketStageIndex: 0 = the section's deciding column, 1 feeds it, ….
+     *  bracketSlot: USAU's sheet slot (G<n>); byes leave gaps (G2, G3 only).
+     *  nextUsauGameId / nextSlotSide: the game (usau_game_id) this winner
+     *  feeds and which side of it — HTML rows only, ultirzr has no link. */
+    bracketStage: string | null;
+    bracketStageIndex: number | null;
+    bracketSlot: number | null;
+    nextUsauGameId: string | null;
+    nextSlotSide: 'top' | 'btm' | null;
+    /** USAU's own row id (usau_game_id) — what nextUsauGameId points at. */
+    usauGameId: string | null;
     /** Division of the member row this game came from, set only on merged
      *  series events whose members all carry a division. The event page
      *  filters on it directly — merged siblings reuse bracket names and USAU
@@ -4677,6 +4706,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
         `id, event_id, round, bracket_name, team_a_id, team_b_id,
          seed_a, seed_b, score_a, score_b, location, scheduled_at, status,
          usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
+         bracket_stage, bracket_stage_index, bracket_slot, next_usau_game_id, next_slot_side,
          team_a:usau_teams!team_a_id(name),
          team_b:usau_teams!team_b_id(name)`,
       )
@@ -4723,6 +4753,12 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       usauGameOrder: parseUsauGameOrder(g.usau_game_id, g.usau_event_game_id),
       teamAPlaceholder: g.team_a_placeholder ?? null,
       teamBPlaceholder: g.team_b_placeholder ?? null,
+      bracketStage: g.bracket_stage ?? null,
+      bracketStageIndex: g.bracket_stage_index ?? null,
+      bracketSlot: g.bracket_slot ?? null,
+      nextUsauGameId: g.next_usau_game_id ?? null,
+      nextSlotSide: g.next_slot_side === 'top' || g.next_slot_side === 'btm' ? g.next_slot_side : null,
+      usauGameId: g.usau_game_id ?? null,
       division: divisionOf.get(g.event_id) ?? null,
     });
     rawByEvent.set(g.event_id, list);

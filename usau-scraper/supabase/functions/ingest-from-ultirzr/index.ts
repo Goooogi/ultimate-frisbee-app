@@ -166,6 +166,14 @@ async function fetchUltirzr<T>(path: string): Promise<T> {
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
+/** USAU sheet slot from ultirzr's GameName ("G2" → 2). */
+function parseGameSlot(name: string | undefined): number | null {
+  const m = (name ?? '').trim().match(/^G\s*(\d+)$/i);
+  const n = m ? parseInt(m[1], 10) : null;
+  // smallint column: out-of-range would throw and abort the event's ingest.
+  return n != null && n >= 0 && n <= 32767 ? n : null;
+}
+
 function stringifyErr(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (err && typeof err === 'object') {
@@ -574,7 +582,14 @@ async function ingestEvent(
   // championships hosts up to 7 groups), so teams remember the group they
   // were seen in and bracket names get a group prefix ("GM Women · Pool A")
   // to keep the divisions distinguishable on the event page.
-  type GameWithCtx = { game: UltirzrGame; bracket: string | null; stage: string | null };
+  type GameWithCtx = {
+    game: UltirzrGame;
+    bracket: string | null;
+    stage: string | null;
+    /** Position of the stage within its bracket — ultirzr lists stages
+     *  FINAL-FIRST like USAU's own markup, so 0 is the deciding column. */
+    stageIndex: number | null;
+  };
   const teamSeen = new Map<number, TeamSeenInfo>();
   const gameList: GameWithCtx[] = [];
 
@@ -587,12 +602,12 @@ async function ingestEvent(
         for (const gm of p.Games ?? []) {
           collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen, meta);
           collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen, meta);
-          gameList.push({ game: gm, bracket: `${prefix}${p.Name ?? 'Pool'}`, stage: 'pool' });
+          gameList.push({ game: gm, bracket: `${prefix}${p.Name ?? 'Pool'}`, stage: 'pool', stageIndex: null });
         }
       }
       // Bracket play
       for (const b of r.Brackets ?? []) {
-        for (const st of b.Stage ?? []) {
+        (b.Stage ?? []).forEach((st, stageIndex) => {
           for (const gm of st.Games ?? []) {
             collectTeam(gm.HomeTeamId, gm.HomeTeamName, teamSeen, meta);
             collectTeam(gm.AwayTeamId, gm.AwayTeamName, teamSeen, meta);
@@ -600,9 +615,10 @@ async function ingestEvent(
               game: gm,
               bracket: b.BracketName ? `${prefix}${b.BracketName}` : (prefix ? prefix.replace(/ · $/, '') : null),
               stage: st.StageName ?? null,
+              stageIndex,
             });
           }
-        }
+        });
       }
     }
   }
@@ -689,7 +705,7 @@ async function ingestEvent(
   // renders, but we skip the ones with no resolved teams.
   // Venue timezone for converting ultirzr's local schedule clocks → UTC.
   const venueTz = tzForState(e.State ?? hit.State ?? null);
-  for (const { game: gm, bracket, stage } of gameList) {
+  for (const { game: gm, bracket, stage, stageIndex } of gameList) {
     if (!gm.EventGameId) continue;
     const homeId = gm.HomeTeamId ?? 0;
     const awayId = gm.AwayTeamId ?? 0;
@@ -719,6 +735,13 @@ async function ingestEvent(
       scheduled_at: combineDateTime(gm.StartDate, gm.StartTime, venueTz),
       status: classifyStatus(gm.GameStatus),
       source_url: `https://play.usaultimate.org/events/${slug}/`,
+      // Bracket structure (see migration 20260913170000). ultirzr carries the
+      // column label + order and the sheet slot ("G2"), but no feeder link.
+      bracket_stage: stageIndex == null ? null : stage,
+      bracket_stage_index: stageIndex != null && stageIndex <= 32767 ? stageIndex : null,
+      bracket_slot: stageIndex == null ? null : parseGameSlot(gm.GameName),
+      next_usau_game_id: null,
+      next_slot_side: null,
     };
 
     const { error } = await db

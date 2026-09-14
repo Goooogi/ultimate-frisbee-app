@@ -141,16 +141,23 @@ function mapPlayer(row: DbPlayerRow): PulPlayer {
 export const PUL_CURRENT_SEASON = new Date().getFullYear();
 
 /**
- * The newest PUL season that actually has data, or the calendar year if the
- * table is empty/unreachable. This is the source of truth for "current season"
- * on the visible surfaces (home, standings, default views): it advances on its
- * own the moment the scraper ingests a new season, and never selects an empty
- * one. Cheap — reuses listPulSeasons() (small table).
+ * The newest PUL season in pul_games, or the calendar year if the table is
+ * empty/unreachable. This is the source of truth for "current season" on the
+ * visible surfaces (home, standings, default views). Read from GAMES, like
+ * getWulCurrentSeason: the new season's schedule lands weeks before any of its
+ * player rows, and a players-derived season kept the home page on last season
+ * through the new season's opening weekend. One row.
  */
 export async function getPulCurrentSeason(): Promise<number> {
   try {
-    const seasons = await listPulSeasons();
-    return seasons[0] ?? PUL_CURRENT_SEASON;
+    const { data, error } = await supabase()
+      .from('pul_games')
+      .select('season')
+      .order('season', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as { season: number } | null)?.season ?? PUL_CURRENT_SEASON;
   } catch {
     return PUL_CURRENT_SEASON;
   }
@@ -158,21 +165,24 @@ export async function getPulCurrentSeason(): Promise<number> {
 
 /**
  * Distinct seasons that have player data, newest first. Drives the season
- * switcher on PUL pages. Cheap — pul_players is small (~1,300 rows) so a
- * select+dedupe is fine without an RPC.
+ * switcher on PUL pages. pul_players is past PostgREST's 1000-row response cap,
+ * so it is paged — a single read silently drops rows.
  */
 export async function listPulSeasons(): Promise<number[]> {
   const db = supabase();
-  const { data, error } = await db
-    .from('pul_players')
-    .select('season')
-    .order('season', { ascending: false });
-
-  if (error) throw error;
-
   const seen = new Set<number>();
-  for (const row of (data ?? []) as unknown as { season: number }[]) {
-    seen.add(row.season);
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from('pul_players')
+      .select('season')
+      .order('season', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as unknown as { season: number }[];
+    for (const row of rows) seen.add(row.season);
+    if (rows.length < PAGE) break;
   }
   return [...seen].sort((a, b) => b - a);
 }

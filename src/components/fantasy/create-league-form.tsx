@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
 import { createLeague, createContest, joinLeagueByCode, getLeagueContests } from '@/lib/fantasy/leagues';
+import { nextStartForGame, type GameStartMap } from '@/lib/fantasy/game-dates';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 import { friendlyJoinError } from '@/components/fantasy/play-menu';
 import type { CompetitionId } from '@/lib/fantasy/competitions';
@@ -21,12 +22,15 @@ import { GAMES } from '@/lib/fantasy/games';
 
 interface CreateLeagueFormProps {
   /** Preseeds the game picker (from the hub's ?game= query string). Only
-   *  applied when it's a valid, LIVE game id — an invalid or coming-soon id
-   *  from a malformed query string falls back to the default. */
+   *  applied when that game can start a league right now — otherwise the
+   *  picker starts empty rather than quietly swapping in another game. */
   initialGameId?: CompetitionId;
+  /** Per-game startability + season/event, resolved on the server by the
+   *  same getGameStartDates the hub renders, so the picker and hub agree. */
+  starts: GameStartMap;
 }
 
-export function CreateLeagueForm({ initialGameId }: CreateLeagueFormProps) {
+export function CreateLeagueForm({ initialGameId, starts }: CreateLeagueFormProps) {
   return (
     <AuthGate
       headline="Sign in to create or join a league."
@@ -36,53 +40,68 @@ export function CreateLeagueForm({ initialGameId }: CreateLeagueFormProps) {
           lands on both (it used to offer create only). Spacing is tightened on
           mobile so the pair fits one phone screen without scrolling. */}
       <div className="max-w-[480px] flex flex-col gap-3">
-        <Form initialGameId={initialGameId} />
+        <Form initialGameId={initialGameId} starts={starts} />
         <JoinForm />
       </div>
     </AuthGate>
   );
 }
 
-// Only live games can be created against; the rest render dimmed/disabled so
-// the roadmap is visible without allowing a create that has nowhere to go. No
-// "soon" suffix — unavailability is carried by the disabled state alone
-// (Hunter, 2026-09-08: no "beta"/"coming soon" wording anywhere in Fantasy).
-const GAME_OPTIONS: PillSelectOption<CompetitionId>[] = GAMES.filter((g) => g.status !== 'hidden').map(
-  (g) => ({
-    value: g.id,
-    label: g.name,
-    disabled: g.status !== 'live',
-  }),
-);
+// A game is selectable only when it can start a league NOW: live in the
+// registry AND its next season/event still has its first lock ahead
+// (starts[id].startable — the hub's rule). The rest render disabled so the
+// roadmap stays visible. No "soon" suffix — unavailability is carried by the
+// disabled state alone (Hunter, 2026-09-08: no "beta"/"coming soon" wording).
+type GameChoice = CompetitionId | '';
 
-const LIVE_GAME_IDS = new Set(GAMES.filter((g) => g.status === 'live').map((g) => g.id));
+function isStartable(id: CompetitionId, starts: GameStartMap): boolean {
+  return GAMES.some((g) => g.id === id && g.status === 'live') && !!starts[id]?.startable;
+}
 
-function Form({ initialGameId }: CreateLeagueFormProps) {
+function Form({ initialGameId, starts }: CreateLeagueFormProps) {
   const router = useRouter();
   const [name, setName] = useState('');
-  const [gameId, setGameId] = useState<CompetitionId>(
-    initialGameId && LIVE_GAME_IDS.has(initialGameId) ? initialGameId : 'ufa',
+  const [gameId, setGameId] = useState<GameChoice>(
+    initialGameId && isStartable(initialGameId, starts) ? initialGameId : '',
   );
+  // Set once createLeague succeeds, so a retry after a failed contest step
+  // reuses that league instead of creating a second one.
+  const [leagueId, setLeagueId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const options: PillSelectOption<GameChoice>[] = [
+    { value: '', label: 'Choose a game', disabled: true },
+    ...GAMES.filter((g) => g.status !== 'hidden').map((g) => ({
+      value: g.id,
+      label: g.name,
+      disabled: !isStartable(g.id, starts),
+    })),
+  ];
+
   const trimmed = name.trim();
-  const canSubmit = trimmed.length >= 1 && trimmed.length <= 60 && !saving;
+  const canSubmit = trimmed.length >= 1 && trimmed.length <= 60 && gameId !== '' && !saving;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit) return; // canSubmit implies a game is chosen (narrows gameId)
+    const seasonYear = starts[gameId]?.seasonYear;
+    if (seasonYear == null) return;
     setSaving(true);
     setError(null);
     try {
-      const leagueId = await createLeague(trimmed);
-      // The league exists either way; a contest failure must not strand the
-      // user, so land them in the league and surface the problem there.
-      const contestId = await createContest(leagueId, gameId, new Date().getFullYear()).catch(
-        () => null,
-      );
-      await revalidateFantasyLeague(leagueId, contestId ?? undefined).catch(() => null);
-      router.push(contestId ? `/fantasy/l/${contestId}` : `/fantasy/leagues/${leagueId}`);
+      // Re-check right before anything is created: the page's start data can
+      // be a few minutes old, and a league must never be left without a
+      // contest because its event started in the meantime.
+      const fresh = await nextStartForGame(gameId);
+      if (!fresh.startable || fresh.seasonYear !== seasonYear) {
+        throw new Error('That game just stopped taking new leagues — reload the page to see what can start now.');
+      }
+      const id = leagueId ?? (await createLeague(trimmed));
+      setLeagueId(id);
+      const contestId = await createContest(id, gameId, seasonYear);
+      await revalidateFantasyLeague(id, contestId).catch(() => null);
+      router.push(`/fantasy/l/${contestId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create your league. Please try again.');
       setSaving(false);
@@ -122,7 +141,7 @@ function Form({ initialGameId }: CreateLeagueFormProps) {
             value={gameId}
             onChange={setGameId}
             ariaLabel="Which game is this league for"
-            options={GAME_OPTIONS}
+            options={options}
           />
           <p className="mt-1.5 text-[11px] text-faint font-tight">
             Everyone in this league drafts and scores in this game.

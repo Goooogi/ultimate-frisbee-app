@@ -2,9 +2,9 @@
 
 import Link from 'next/link';
 import { useMemo } from 'react';
-import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
+import { teamMeta, teamMetaForYear, teamNameForYear, type TeamMeta } from '@/lib/ufa/teams';
 import { useLiveGames } from '@/lib/use-live-games';
-import { gameUiState, formatStartCompact, livePhaseLabel } from '@/lib/ufa/format';
+import { gameUiState, gameYear, formatStartCompact, livePhaseLabel } from '@/lib/ufa/format';
 import type { UfaPlayoffRound } from '@/lib/ufa/client';
 import type {
   UfaGame,
@@ -106,8 +106,14 @@ function DetailBody({
   const game =
     useLiveGames(initial, `games?gameID=${encodeURIComponent(initialGame.gameID)}`)[0] ??
     initialGame;
-  const away = teamMeta(game.awayTeamID);
-  const home = teamMeta(game.homeTeamID);
+  // Era name + logo from the game's own season — the API stamps the CURRENT
+  // brand on every past game (2016 Dallas reads "Legion"). `away`/`home` carry
+  // the era logo into every TeamLogo below; city comes historical from the game.
+  const year = gameYear(game);
+  const away = teamMetaForYear(game.awayTeamID, year);
+  const home = teamMetaForYear(game.homeTeamID, year);
+  const awayName = (year != null && teamNameForYear(game.awayTeamID, year)) || game.awayTeamName;
+  const homeName = (year != null && teamNameForYear(game.homeTeamID, year)) || game.homeTeamName;
   const state = gameUiState(game);
   const start = formatStartCompact(game);
   const hasEnrichment = !!(enrichment?.awayStanding || enrichment?.awayTeamStat || enrichment?.homeStanding || enrichment?.homeTeamStat);
@@ -120,9 +126,9 @@ function DetailBody({
         away={away}
         home={home}
         awayCity={game.awayTeamCity}
-        awayName={game.awayTeamName}
+        awayName={awayName}
         homeCity={game.homeTeamCity}
-        homeName={game.homeTeamName}
+        homeName={homeName}
         awayScore={game.awayScore}
         homeScore={game.homeScore}
         awayWin={state.awayWin}
@@ -229,8 +235,8 @@ function DetailBody({
         <FieldGameLeaders
           away={away}
           home={home}
-          awayName={game.awayTeamName}
-          homeName={game.homeTeamName}
+          awayName={awayName}
+          homeName={homeName}
           categories={enrichment!.gameStats!.leaderCategories!}
         />
       )}
@@ -239,8 +245,8 @@ function DetailBody({
         <FieldGameTeamStats
           away={away}
           home={home}
-          awayName={game.awayTeamName}
-          homeName={game.homeTeamName}
+          awayName={awayName}
+          homeName={homeName}
           awayStats={enrichment.gameStats.awayTeamStats}
           homeStats={enrichment.gameStats.homeTeamStats}
         />
@@ -256,8 +262,8 @@ function DetailBody({
             gameID={game.gameID}
             away={away}
             home={home}
-            awayName={game.awayTeamName}
-            homeName={game.homeTeamName}
+            awayName={awayName}
+            homeName={homeName}
           />
         </div>
       )}
@@ -268,9 +274,9 @@ function DetailBody({
           away={away}
           home={home}
           awayCity={game.awayTeamCity}
-          awayName={game.awayTeamName}
+          awayName={awayName}
           homeCity={game.homeTeamCity}
-          homeName={game.homeTeamName}
+          homeName={homeName}
           awayStanding={enrichment.awayStanding}
           homeStanding={enrichment.homeStanding}
           awayStats={enrichment.awayTeamStat}

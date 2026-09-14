@@ -1,8 +1,8 @@
-// WUL Schedule — server component. WUL has no future fixtures (the source is
-// completed-games only), so "schedule" here is the full multi-season history:
-// every season's games grouped by season (newest first), and within a season
-// by phase (Regular Season, then Postseason). This makes it a useful archive
-// distinct from /scores (which shows the current season only).
+// WUL Schedule — server component. Every season's games grouped by season
+// (newest first — the upcoming season once its published schedule is synced),
+// and within a season by phase (Regular Season, then Postseason). Unplayed
+// games render like PUL's: "Scheduled", date + time, no score or winner.
+// Distinct from /scores, which shows one season's finals only.
 
 import Link from 'next/link';
 import {
@@ -209,6 +209,7 @@ function ScheduleCard({ game, champion = false }: { game: WulGame; champion?: bo
         {game.gameDate && (
           <span className="text-[10px] font-bold tracking-[0.12em] uppercase text-faint font-tight tabular">
             {formatDate(game.gameDate)}
+            {!isFinal && game.gameTime ? ` · ${game.gameTime}` : ''}
           </span>
         )}
       </div>

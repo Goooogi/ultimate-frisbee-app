@@ -56,8 +56,8 @@ export default async function SchedulePage({ searchParams }: Props) {
     );
   }
 
-  // WUL has no future fixtures — its "schedule" is the full multi-season game
-  // history (grouped by season). Distinct from /scores (current season only).
+  // WUL's schedule is every season (upcoming fixtures + history) grouped by
+  // season. Distinct from /scores (one season's finals only).
   if (league === 'wul') {
     return (
       <PageShell

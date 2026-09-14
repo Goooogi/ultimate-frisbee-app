@@ -26,23 +26,24 @@
 //    a null headshot falls back to the live watchufa scrape — same order of
 //    preference the fallback assembler uses (stored → live → monogram).
 //
-// ── Known defects in the shared function (verified against live data) ──────
+// ── Payload tripwires (both upstream defects FIXED as of 2026-09-13) ────────
 //
-// Until these are fixed upstream, the guards below detect each one and hand off
-// to the multi-query assembler, so an affected profile is SLOW but never WRONG.
-// Each guard is written to stop firing automatically once the fix lands — no
-// coordinated deploy needed, and no code change here beyond deleting dead code.
+// The shared function once had the two defects below. Both are fixed upstream
+// — verified 2026-09-13: 0 of the 100 most recently built player_profiles trip
+// either guard, so the fast path serves nearly every profile. The guards stay
+// as tripwires: if a regression reintroduces either defect, the profile hands
+// off to the multi-query assembler (SLOW but never WRONG) instead of rendering
+// bad numbers.
 //
-//   a. UFA per-game rows omit `throwaways`/`drops`/`stalls`. The profile's game
-//      log computes +/- as G+A+B−throwaways−drops−stalls; without them every row
-//      would overstate +/-. Guard: ufaGamesArePresentable().
-//   b. USAU `events` is empty for every stint — the event flatten aggregates the
-//      inner array rather than the event object, so the downstream
-//      `ev->>'slug' is not null` filter drops all of them. This zeroes
+//   a. UFA per-game rows omitting `throwaways`/`drops`/`stalls`. The profile's
+//      game log computes +/- as G+A+B−throwaways−drops−stalls; without them every
+//      row would overstate +/-. Guard: ufaGamesArePresentable().
+//   b. USAU `events` empty for every stint (the event flatten aggregated the
+//      inner array rather than the event object). That zeroes
 //      career.usauEventsPlayed and the USAU goals/assists contribution.
 //      Guard: usauEventsArePresentable().
-//   c. UFA stints only cover 2022+ (the extent of `ufa_games`); earlier seasons
-//      live solely in the upstream UFA API. Guard: ufaCoverageIsComplete().
+//   (A third guard, ufaCoverageIsComplete, was retired 2026-09-13 once
+//   `ufa_games` was backfilled to 2012 — see the note above mapRpcProfile.)
 
 import 'server-only';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
@@ -290,47 +291,14 @@ function ufaGamesArePresentable(stints: RpcUfaStint[]): boolean {
 }
 
 /**
- * The first UFA season `ufa_games` covers. The RPC derives UFA stints purely
- * from ufa_game_player_stats ⋈ ufa_games, so a career that began before this
- * year is silently truncated to its post-2022 portion — there is no season-
- * totals table in the DB to fill the gap; the multi-query path gets those years
- * from the live UFA API instead. Verified: Ben Jagt renders 2022-2026 via the
- * RPC vs 2014-2026 via the API (5 seasons and a 2019 championship dropped).
- */
-const UFA_DB_FIRST_SEASON = 2022;
-
-/**
- * Would trusting the RPC's UFA stints truncate a career that predates the
- * game-log era? We can't know the true first season from the payload alone, so
- * we use the one signal we have: a USAU history that starts before UFA game
- * coverage means this player was active earlier, and any UFA seasons from that
- * period would be missing. Conservative — it only rejects when there IS a UFA
- * side to truncate and independent evidence of pre-coverage activity.
- */
-function ufaCoverageIsComplete(
-  ufaStints: RpcUfaStint[],
-  usauStints: RpcUsauStint[],
-): boolean {
-  if (ufaStints.length === 0) return true;
-  const earliestUsau = Math.min(
-    ...usauStints
-      .map((st) => st.season)
-      .filter((s): s is number => typeof s === 'number'),
-  );
-  if (!Number.isFinite(earliestUsau)) return true;
-  return earliestUsau >= UFA_DB_FIRST_SEASON;
-}
-
-/**
  * Does the RPC's USAU payload carry per-stint `events`?
  *
- * As of this writing the shared function returns EVERY stint with `events: []`
- * — its event flatten aggregates the inner array instead of the event object,
- * leaving the value double-nested, so the `ev->>'slug' is not null` filter that
- * follows discards all of them (verified against live data: Ben Jagt, 0 of 32
- * events survive). Those events drive `career.usauEventsPlayed` and the
- * goals/assists that USAU contributes to career totals, so accepting the
- * payload would silently zero out a real chunk of the hero stats.
+ * The shared function once returned EVERY stint with `events: []` (its event
+ * flatten aggregated the inner array instead of the event object) — fixed
+ * upstream, verified 2026-09-13. Those events drive `career.usauEventsPlayed`
+ * and the goals/assists that USAU contributes to career totals, so a
+ * regression would silently zero out a real chunk of the hero stats; this
+ * guard catches it.
  *
  * A player genuinely CAN have a roster spot with no event participation, so an
  * empty array is not by itself proof of the bug. We only reject when EVERY
@@ -447,7 +415,6 @@ export async function mapRpcProfile(
   // faithfully. Better a slower correct page than a fast wrong one.
   if (!ufaGamesArePresentable(rpcUfaStints)) return null;
   if (!usauEventsArePresentable(rpcUsauStints)) return null;
-  if (!ufaCoverageIsComplete(rpcUfaStints, rpcUsauStints)) return null;
 
   // ── UFA attribution gate ────────────────────────────────────────────────
   // Prefer a homeStates the shared function supplies (not emitted today);

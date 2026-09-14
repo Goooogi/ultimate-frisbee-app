@@ -153,6 +153,28 @@ export async function getWulCurrentSeason(): Promise<number> {
   }
 }
 
+/**
+ * The newest WUL season with a completed game — the default for results,
+ * rosters and stats. Differs from getWulCurrentSeason() pre-season: the next
+ * season's schedule lands ~December, months before any of its finals or player
+ * rows exist, and those surfaces would open empty until spring.
+ */
+export async function getWulResultsSeason(): Promise<number> {
+  try {
+    const { data, error } = await supabase()
+      .from('wul_games')
+      .select('season')
+      .eq('status', 'final')
+      .order('season', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return (data as { season: number } | null)?.season ?? WUL_CURRENT_SEASON;
+  } catch {
+    return WUL_CURRENT_SEASON;
+  }
+}
+
 // ─── Teams ───────────────────────────────────────────────────────────────────
 
 export async function listWulTeams(): Promise<WulTeam[]> {
@@ -414,6 +436,7 @@ export interface WulGame {
   season: number;
   weekLabel: string;     // 'regular' | 'post'
   gameDate: string | null;
+  gameTime: string | null; // scheduled rows only, preformatted e.g. '7:30pm PT'
   status: 'scheduled' | 'final';
   away: WulGameTeamSide;
   home: WulGameTeamSide;
@@ -424,6 +447,7 @@ interface DbGameRow {
   season: number;
   week_label: string;
   game_date: string | null;
+  game_time: string | null;
   away_team_id: string;
   home_team_id: string;
   away_abbrev: string;
@@ -434,7 +458,7 @@ interface DbGameRow {
 }
 
 const GAME_COLS =
-  'id, season, week_label, game_date, away_team_id, home_team_id, away_abbrev, home_abbrev, away_score, home_score, status';
+  'id, season, week_label, game_date, game_time, away_team_id, home_team_id, away_abbrev, home_abbrev, away_score, home_score, status';
 
 function buildSide(
   byId: Map<string, WulTeam>,
@@ -460,6 +484,7 @@ function mapGame(r: DbGameRow, byId: Map<string, WulTeam>): WulGame {
     season: r.season,
     weekLabel: r.week_label,
     gameDate: r.game_date,
+    gameTime: r.game_time,
     status: r.status === 'final' ? 'final' : 'scheduled',
     away: buildSide(byId, r.away_team_id, r.away_abbrev, r.away_score),
     home: buildSide(byId, r.home_team_id, r.home_abbrev, r.home_score),

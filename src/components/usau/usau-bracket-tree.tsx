@@ -246,7 +246,12 @@ function BracketTreeGroup({
   // scroller's node columns derive in the same memo, after it. Each node keeps
   // its slot so renderCard can hand MatchCard the real thing.
   const { nodeColumns, positions } = useMemo(() => {
-    const columns = completeBracket(buildColumns(games));
+    // Structure scraped from USAU's own bracket markup wins whenever any row
+    // carries it (2026-09-13); the round-based heuristics below stay for rows
+    // written before the structure columns existed.
+    const columns = hasBracketStructure(games)
+      ? buildStructuredColumns(games)
+      : completeBracket(buildColumns(games));
     const positions = assignPositions(columns);
     const nodeColumns = columns
       .filter((c) => c.slots.length > 0)
@@ -562,11 +567,15 @@ function statusLabel(game: Game): string {
 const TREE_ROUNDS = ['prequarter', 'quarter', 'semi', 'final'];
 
 export function isBracketGame(g: Game): boolean {
+  // A row carrying scraped bracket structure sits in a bracket column by
+  // definition, whatever coarse `round` the label classifier gave it (a
+  // placement bracket's decider stores round='placement').
+  const structured = g.bracketStageIndex != null;
   // 'other' is admitted so buildColumns can recover a round-of-16 / mislabeled
   // final from it (see recoverFeederRound). Games it doesn't claim are simply
   // ignored when the columns are built, so this widening can't leak stray
   // boxes into the tree.
-  if (!TREE_ROUNDS.includes(g.round) && g.round !== 'other') return false;
+  if (!structured && !TREE_ROUNDS.includes(g.round) && g.round !== 'other') return false;
   const raw = (g.bracketName ?? '').trim();
   if (!raw) return true; // untagged but tree-rounded — legacy events
   const lastDot = raw.lastIndexOf('\u00b7');
@@ -1055,6 +1064,13 @@ function dedupeRound(
  *  absent: play-in rounds don't halve. */
 const HALVES_FROM: Record<string, string> = { qf: 'r16', sf: 'qf', final: 'sf' };
 
+/** Smallest power of two ≥ n (n ≥ 1). A bracket round's full sheet width. */
+function nextPow2(n: number): number {
+  let p = 1;
+  while (p < n) p *= 2;
+  return p;
+}
+
 /** Slot for a real row: attach feeders, derive side labels for unknown sides,
  *  and resolve a decided feeder's winner into the open side. */
 function makeRealSlot(
@@ -1196,9 +1212,15 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
     const prev = out[out.length - 1];
     // A round can't hold more games than its feeders supply — cap halving
     // steps so duplicate rows can never widen a column past the bracket's
-    // real shape (4 QFs → 2 semis → 1 final).
+    // real shape (4 QFs → 2 semis → 1 final). Size the cap from the round's
+    // EXPECTED width (next power of two), not the stored count: byes leave
+    // gaps USAU never stores as rows, so 2 stored quarters (Rocky Mountain
+    // Mixed 2026: G2 + G3, seeds 1 and 3 skipped the round) still feed TWO
+    // real semis — a cap of ceil(2/2)=1 deleted one of them.
     const cap =
-      HALVES_FROM[col.key] === prev.key ? Math.max(1, Math.ceil(prev.slots.length / 2)) : null;
+      HALVES_FROM[col.key] === prev.key
+        ? Math.max(1, nextPow2(prev.slots.length) / 2)
+        : null;
     // Sheet-numbering trust (mobile parity, 2026-08-26): scraped "W of
     // <round> G<n>" labels use USAU's SHEET numbering, which can count bye
     // slots we don't store (Fruit Bowl QFs cite Pre-Quarters G2/G4/G6/G8
@@ -1271,6 +1293,259 @@ function completeBracket(cols: RoundColumn[]): SlotColumn[] {
   }
 
   return out;
+}
+
+// ─── Structured brackets (scraped from USAU's own markup, 2026-09-13) ───────
+//
+// play.usaultimate.org's bracket HTML encodes the whole graph and the scraper
+// now stores it on each row: the column label (bracketStage), the column's
+// distance from the section's deciding game (bracketStageIndex, 0 = decider),
+// USAU's sheet slot (bracketSlot — byes leave gaps, so a quarters column can
+// be G2 + G3 only) and, from the HTML pipeline, the game each winner feeds
+// (nextUsauGameId + nextSlotSide). ultirzr rows carry everything but the link.
+//
+// With that, no halving / synthesis / sheet-number guessing is needed: the
+// columns ARE the scraped columns, the numbers ARE USAU's, and connectors
+// follow the scraped relation (falling back to sheet-number pairing for
+// link-less rows). Any bracket shape USAU draws renders as drawn.
+
+/** Does any row in this group carry scraped bracket structure? */
+export function hasBracketStructure(games: Game[]): boolean {
+  return games.some((g) => g.bracketStageIndex != null);
+}
+
+/** Display label for a scraped column: USAU repeats the section's ordinal on
+ *  every column ("6th Place Quarters", "1st Semis", "3rd Finals"), which is
+ *  noise under a heading that already names the bracket, and phrases the
+ *  decider a dozen ways ("1st Place", "5th", "Fival", "6th Place (Game to
+ *  Go)"). Strip the ordinal prefix, unwrap parentheses, and call a bare
+ *  ordinal / "Game" / "Final(s)" decider "Final". Anything else is shown as
+ *  USAU wrote it. */
+export function structuredColumnLabel(
+  stage: string | null,
+  section: string | null,
+  isDecider: boolean,
+): string {
+  const raw = (stage ?? '').trim();
+  if (!raw) return isDecider ? 'Final' : 'Round';
+  let t = raw;
+  const sectionTail = (section ?? '').split('\u00b7').pop()?.trim() ?? '';
+  if (sectionTail && t.toLowerCase().startsWith(sectionTail.toLowerCase())) {
+    t = t.slice(sectionTail.length);
+  } else {
+    t = t.replace(/^\d+(st|nd|rd|th)\s+(place\s+)?/i, '');
+    t = t.replace(
+      /^(first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth)\s+place\s+/i,
+      '',
+    );
+  }
+  t = t.trim().replace(/^[-–—:]\s*/, '').replace(/^\((.*)\)$/, '$1').trim();
+  if (!t || /^(game|finals?|place|place game)$/i.test(t)) return isDecider ? 'Final' : raw;
+  return t;
+}
+
+/** "Quarterfinals" → "Quarters" style compression for "W of … G<n>" labels. */
+function shortColumnLabel(label: string): string {
+  return label.replace(/Quarterfinals?/g, 'Quarters').replace(/Semifinals?/g, 'Semis');
+}
+
+/** Two structured rows are the same game when they occupy the same scraped
+ *  slot or hold the same two teams (dual-pipeline duplicates). The better row
+ *  (rowScore) is kept, but it inherits the other's id/link fields when it has
+ *  none — an ultirzr row that wins on freshness must not cost the slot its
+ *  HTML-only feeder link. */
+function dedupeStructured(games: Game[]): Game[] {
+  const byKey = new Map<string, number>();
+  const kept: Game[] = [];
+  const keysOf = (g: Game): string[] => {
+    const keys: string[] = [];
+    if (g.bracketSlot != null) keys.push(`s:${g.bracketStageIndex}:${g.bracketSlot}`);
+    if (g.teamAId && g.teamBId) keys.push(`t:${[g.teamAId, g.teamBId].sort().join('|')}`);
+    return keys;
+  };
+  const merge = (winner: Game, loser: Game): Game => ({
+    ...winner,
+    usauGameId: winner.usauGameId ?? loser.usauGameId,
+    nextUsauGameId: winner.nextUsauGameId ?? loser.nextUsauGameId,
+    nextSlotSide: winner.nextSlotSide ?? loser.nextSlotSide,
+    bracketSlot: winner.bracketSlot ?? loser.bracketSlot,
+    bracketStage: winner.bracketStage ?? loser.bracketStage,
+    teamAPlaceholder: winner.teamAPlaceholder ?? loser.teamAPlaceholder,
+    teamBPlaceholder: winner.teamBPlaceholder ?? loser.teamBPlaceholder,
+  });
+  for (const g of games) {
+    const keys = keysOf(g);
+    const at = keys.map((k) => byKey.get(k)).find((i) => i != null);
+    if (at == null) {
+      for (const k of keys) byKey.set(k, kept.length);
+      kept.push(g);
+      continue;
+    }
+    kept[at] = rowScore(g, kept[at]) > 0 ? merge(g, kept[at]) : merge(kept[at], g);
+    for (const k of keysOf(kept[at])) byKey.set(k, at);
+  }
+  return kept;
+}
+
+/**
+ * Build slot columns straight from scraped structure.
+ *
+ * Column = distance from the deciding game. When the rows carry feeder links
+ * that distance is walked along the links (so a play-in section whose games
+ * feed another section's quarters lands one column further left, whatever its
+ * own stage index says); rows without links use their scraped stage index.
+ * Slots keep USAU's sheet numbers. Feeders come from the links, else from
+ * sheet-number pairing (slot k ← 2k-1, 2k) when the previous column has no
+ * link data at all. Rows in the group with no structure (a stray from the
+ * other pipeline that no structured row matched) are filed by their coarse
+ * round so nothing silently disappears.
+ */
+export function buildStructuredColumns(games: Game[]): SlotColumn[] {
+  const structured = dedupeStructured(games.filter((g) => g.bracketStageIndex != null));
+  if (structured.length === 0) return [];
+
+  const byUsauId = new Map<string, Game>();
+  for (const g of structured) if (g.usauGameId) byUsauId.set(g.usauGameId, g);
+
+  // Depth: follow winner links to the decider; else the scraped stage index.
+  const depthMemo = new Map<string, number>();
+  const depthOf = (g: Game, seen = new Set<string>()): number => {
+    const memo = depthMemo.get(g.id);
+    if (memo != null) return memo;
+    let d = g.bracketStageIndex ?? 0;
+    const next = g.nextUsauGameId ? byUsauId.get(g.nextUsauGameId) : undefined;
+    if (next && next.id !== g.id && !seen.has(g.id)) {
+      seen.add(g.id);
+      d = depthOf(next, seen) + 1;
+    }
+    depthMemo.set(g.id, d);
+    return d;
+  };
+
+  const byDepth = new Map<number, Game[]>();
+  for (const g of structured) {
+    const d = depthOf(g);
+    if (!byDepth.has(d)) byDepth.set(d, []);
+    byDepth.get(d)!.push(g);
+  }
+
+  // Strays: unstructured rows that no structured row absorbed. Team-pair
+  // matches are duplicates; the rest file into a column by coarse round.
+  const structuredPairs = new Set(
+    structured
+      .filter((g) => g.teamAId && g.teamBId)
+      .map((g) => [g.teamAId, g.teamBId].sort().join('|')),
+  );
+  const strays = games.filter(
+    (g) =>
+      g.bracketStageIndex == null &&
+      !(g.teamAId && g.teamBId && structuredPairs.has([g.teamAId, g.teamBId].sort().join('|'))),
+  );
+
+  const depths = Array.from(byDepth.keys()).sort((a, b) => b - a); // deepest (earliest round) first
+  const labelFor = (rows: Game[], depth: number): string => {
+    const counts = new Map<string, number>();
+    for (const g of rows) {
+      const l = structuredColumnLabel(g.bracketStage, g.bracketName, depth === 0);
+      counts.set(l, (counts.get(l) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? (depth === 0 ? 'Final' : 'Round');
+  };
+  const columnsRaw = depths.map((d) => ({ depth: d, label: labelFor(byDepth.get(d)!, d), games: byDepth.get(d)! }));
+
+  for (const s of strays) {
+    const r = s.round;
+    const match =
+      r === 'prequarter'
+        ? columnsRaw.find((c) => /pre/i.test(c.label))
+        : r === 'quarter'
+          ? columnsRaw.find((c) => /quarter/i.test(c.label) && !/pre/i.test(c.label))
+          : r === 'semi'
+            ? columnsRaw.find((c) => /semi/i.test(c.label))
+            : columnsRaw.find((c) => c.depth === 0);
+    (match ?? columnsRaw[columnsRaw.length - 1]).games.push(s);
+  }
+
+  const bySlot = (a: Game, b: Game) =>
+    (a.bracketSlot ?? Number.MAX_SAFE_INTEGER) - (b.bracketSlot ?? Number.MAX_SAFE_INTEGER) ||
+    (a.usauGameOrder ?? Number.MAX_SAFE_INTEGER) - (b.usauGameOrder ?? Number.MAX_SAFE_INTEGER) ||
+    (a.seedA ?? a.seedB ?? 99) - (b.seedA ?? b.seedB ?? 99);
+
+  const out: SlotColumn[] = [];
+  for (const col of columnsRaw) {
+    const rows = col.games.slice().sort(bySlot);
+    const prev = out[out.length - 1] ?? null;
+    const prevHasLinks = !!prev && prev.slots.some((s) => s.game?.nextUsauGameId);
+    const usedNumbers = new Set<number>();
+    const slots: Slot[] = rows.map((g, i) => {
+      let number = g.bracketSlot ?? i + 1;
+      while (usedNumbers.has(number)) number += 1;
+      usedNumbers.add(number);
+
+      let feeders: Slot[] = [];
+      if (prev) {
+        if (g.usauGameId && prevHasLinks) {
+          feeders = prev.slots.filter((s) => s.game?.nextUsauGameId === g.usauGameId);
+        } else if (!prevHasLinks) {
+          // Link-less pipeline: USAU's sheet pairs slot k with 2k-1 / 2k.
+          feeders = prev.slots.filter((s) => s.number === 2 * number - 1 || s.number === 2 * number);
+        }
+      }
+      return makeStructuredSlot(g, number, feeders, prev?.label ?? '');
+    });
+    out.push({ key: `stage-${col.depth}`, label: col.label, slots });
+  }
+  return out;
+}
+
+/** Slot for a structured row. Sides follow the scraped link side (top → A,
+ *  btm → B) when known, else the team already in the feeder's row, else
+ *  position. Same contradiction guard as makeRealSlot: a decided feeder whose
+ *  winner isn't in this row drops the linkage rather than mislabel. */
+function makeStructuredSlot(g: Game, number: number, feeders: Slot[], prevLabel: string): Slot {
+  const known = [g.teamAId, g.teamBId].filter((id): id is string => !!id);
+  let fs = feeders;
+  if (fs.length > 0 && known.length > 0) {
+    const winners = fs
+      .map((f) => (f.game ? treeWinnerId(f.game) : null))
+      .filter((id): id is string => !!id);
+    const contradicted =
+      known.length === 2
+        ? winners.some((w) => !known.includes(w))
+        : winners.length === fs.length && !winners.includes(known[0]);
+    if (contradicted) fs = [];
+  }
+
+  const inFeeder = (teamId: string | null, f: Slot): boolean =>
+    teamId != null && f.game != null && (f.game.teamAId === teamId || f.game.teamBId === teamId);
+  let aFeeder: Slot | null = null;
+  let bFeeder: Slot | null = null;
+  for (const f of fs) {
+    const side = f.game?.nextSlotSide ?? null;
+    if (side === 'top' && !aFeeder) aFeeder = f;
+    else if (side === 'btm' && !bFeeder) bFeeder = f;
+    else if (inFeeder(g.teamAId, f) && !aFeeder) aFeeder = f;
+    else if (inFeeder(g.teamBId, f) && !bFeeder) bFeeder = f;
+    else if (!aFeeder) aFeeder = f;
+    else if (!bFeeder) bFeeder = f;
+  }
+  // A single link-less feeder (bye opponent already seeded) goes to the open side.
+  if (fs.length === 1 && aFeeder && !fs[0].game?.nextSlotSide && g.teamAId && !g.teamBId) {
+    bFeeder = aFeeder;
+    aFeeder = null;
+  }
+
+  const wOfLabel = (f: Slot) => `W of ${shortColumnLabel(prevLabel) || 'Round'} G${f.number}`;
+  return {
+    id: g.id,
+    game: g,
+    number,
+    sourceIds: fs.map((f) => f.id),
+    aResolved: g.teamAId == null && aFeeder ? resolvedWinner(aFeeder) : null,
+    bResolved: g.teamBId == null && bFeeder ? resolvedWinner(bFeeder) : null,
+    aFallback: g.teamAId ? null : aFeeder ? wOfLabel(aFeeder) : shortPlaceholder(g.teamAPlaceholder),
+    bFallback: g.teamBId ? null : bFeeder ? wOfLabel(bFeeder) : shortPlaceholder(g.teamBPlaceholder),
+  };
 }
 
 /**

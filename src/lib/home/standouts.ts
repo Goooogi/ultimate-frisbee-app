@@ -29,6 +29,7 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
+import { usauToday } from '@/lib/today';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -94,6 +95,8 @@ const WINDOW_DAYS = 21;
 const MAX_CARDS = 14;
 const PER_GAME_CAP = 1; // at most one standout per game so one blowout doesn't flood
 const PER_PLAYER_CAP = 1; // at most one card per player — their single best recent game
+/** PostgREST max-rows: one response never holds more, whatever .range asks. */
+const PAGE = 1000;
 /** UFA award-watch (MVP/OPOY/DPOY) tags, exemptions and season-total fallback
  *  cards apply only while the UFA's latest final game is this recent — past
  *  it the award leaders are ordinary gated lines and fall off with everyone. */
@@ -195,16 +198,22 @@ async function ufaStandouts(now: number): Promise<StandoutLine[]> {
   if (gameMeta.size === 0) return [];
 
   const gameIds = [...gameMeta.keys()];
-  // ~28 players/game × up to 4 weeks of games can exceed PostgREST's default
-  // 1000-row response cap → .range lifts it so no lines are silently dropped.
-  const { data: rows } = await db
-    .from('ufa_game_player_stats')
-    .select(
-      'game_id, player_id, team_id, goals, assists, blocks, callahans, throwaways, drops, stalls, yards_thrown, yards_received, completions, throws_attempted',
-    )
-    .in('game_id', gameIds)
-    .range(0, 4999);
-  const statRows = (rows ?? []) as UfaStatRow[];
+  // ~28 players/game over three weeks runs past the 1000-row cap mid-season
+  // (1,000–1,550 rows), so page it in stable id order.
+  const statRows: UfaStatRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('ufa_game_player_stats')
+      .select(
+        'game_id, player_id, team_id, goals, assists, blocks, callahans, throwaways, drops, stalls, yards_thrown, yards_received, completions, throws_attempted',
+      )
+      .in('game_id', gameIds)
+      .order('id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    const chunk = (page ?? []) as UfaStatRow[];
+    statRows.push(...chunk);
+    if (chunk.length < PAGE) break;
+  }
   if (statRows.length === 0) return [];
 
   // Season award watch (MVP/OPOY/DPOY) keyed by player_id — a tag on whichever
@@ -362,7 +371,6 @@ async function computeUfaAwardData(now: number): Promise<AwardData> {
   // wrong award leaders — e.g. a partial season made Taylor outrank Decraene).
   type StatPick = Pick<UfaStatRow, 'player_id' | 'goals' | 'assists' | 'blocks' | 'callahans' | 'throwaways' | 'drops' | 'stalls' | 'yards_thrown' | 'yards_received'>;
   const statRows: StatPick[] = [];
-  const PAGE = 1000;
   for (let from = 0; ; from += PAGE) {
     const { data: page } = await db
       .from('ufa_game_player_stats')
@@ -509,7 +517,7 @@ interface ProStatRow {
 
 async function proStandouts(league: 'pul' | 'wul', now: number): Promise<StandoutLine[]> {
   const db = supabase();
-  const sinceDate = new Date(now - WINDOW_DAYS * MS_DAY).toISOString().slice(0, 10);
+  const sinceDate = usauToday(new Date(now - WINDOW_DAYS * MS_DAY));
   const gamesTable = league === 'pul' ? 'pul_games' : 'wul_games';
   const statsTable = league === 'pul' ? 'pul_game_player_stats' : 'wul_game_player_stats';
   const teamsTable = league === 'pul' ? 'pul_teams' : 'wul_teams';
@@ -605,8 +613,8 @@ const USAU_MIN_GA = 3; // event totals build over the weekend; don't card a 1-go
  */
 async function usauStandouts(now: number): Promise<StandoutLine[]> {
   const db = supabase();
-  const today = new Date(now).toISOString().slice(0, 10);
-  const graceCutoff = new Date(now - USAU_EVENT_GRACE_DAYS * MS_DAY).toISOString().slice(0, 10);
+  const today = usauToday(new Date(now));
+  const graceCutoff = usauToday(new Date(now - USAU_EVENT_GRACE_DAYS * MS_DAY));
   // Naming drifts year to year ("Club Nationals" / "Club Championships") — match both.
   const { data: events } = await db
     .from('usau_events')
@@ -618,12 +626,23 @@ async function usauStandouts(now: number): Promise<StandoutLine[]> {
   const eventRows = (events ?? []) as { id: string }[];
   if (eventRows.length === 0) return [];
 
-  const { data: stats } = await db
-    .from('usau_player_event_stats')
-    .select('player_id, event_id, team_id, goals, assists')
-    .in('event_id', eventRows.map((e) => e.id))
-    .range(0, 4999);
-  const ranked = ((stats ?? []) as { player_id: string; event_id: string; team_id: string | null; goals: number | null; assists: number | null }[])
+  // A Nationals field is ~1,300 player rows — past the 1000-row cap — so page
+  // it (primary-key order) before ranking.
+  type EventStat = { player_id: string; event_id: string; team_id: string | null; goals: number | null; assists: number | null };
+  const stats: EventStat[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data: page } = await db
+      .from('usau_player_event_stats')
+      .select('player_id, event_id, team_id, goals, assists')
+      .in('event_id', eventRows.map((e) => e.id))
+      .order('player_id', { ascending: true })
+      .order('event_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    const chunk = (page ?? []) as EventStat[];
+    stats.push(...chunk);
+    if (chunk.length < PAGE) break;
+  }
+  const ranked = stats
     .map((r) => ({ ...r, g: r.goals ?? 0, a: r.assists ?? 0 }))
     .filter((r) => r.g + r.a >= USAU_MIN_GA)
     .sort((x, y) => y.g + y.a - (x.g + x.a))

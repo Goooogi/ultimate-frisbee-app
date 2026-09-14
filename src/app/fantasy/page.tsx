@@ -12,12 +12,13 @@ import { MyLeaguesList } from '@/components/fantasy/my-leagues-list';
 import { MiniGamesTile } from '@/components/fantasy/mini-games-tile';
 import { StartALeagueList } from '@/components/fantasy/start-a-league-list';
 import { hubGames } from '@/lib/fantasy/games';
-import { getGameStartDates, sortGamesBySoonest } from '@/lib/fantasy/game-dates';
+import { sortGamesBySoonest } from '@/lib/fantasy/game-dates';
+import { getGameStartDatesCached } from '@/lib/fantasy/game-dates-cached';
 
 export const revalidate = 60;
 
 export default async function FantasyHubPage() {
-  const starts = await getGameStartDates();
+  const starts = await getGameStartDatesCached();
   const orderedGames = sortGamesBySoonest(hubGames(), starts);
 
   return (

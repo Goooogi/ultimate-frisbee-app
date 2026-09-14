@@ -16,6 +16,7 @@ import { createClient as createSessionClient } from '@/lib/supabase/client';
 import { createClient as createAnonClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { moderateName } from '@/lib/moderation';
+import { usauToday } from '@/lib/today';
 import { roundPoints } from './scoring';
 import {
   getCompetition,
@@ -572,101 +573,92 @@ export async function transferLeagueOwnership(leagueId: string, newOwnerId: stri
 // ─── Contest creation ────────────────────────────────────────────────────────
 
 /**
- * Resolve which real EVENT an event-mode contest points at, so the id is
+ * The real EVENT an event-mode contest can still be started against. Its id is
  * frozen into contest settings at creation (no fragile name-matching later).
- * Returns null when the competition/season has no ingested event yet.
+ *
+ * STARTABLE ONLY (Hunter, 2026-09-13): an event qualifies while its start_date
+ * is after today (US Eastern) — i.e. its only period lock, start_date 00:00 ET
+ * (fantasy_rebuild_contest_periods), is still ahead. An event that has started
+ * or finished never resolves, so no league is founded on a tournament that is
+ * already locked. Date-less rows never resolve either (no lock to build).
+ *
+ * `seasonYear` null = the next startable event in ANY season: the hub uses that
+ * to learn the season from the data, and createContest re-resolves with that
+ * season — one function for both, so they always land on the same event.
+ * Returns null when nothing startable is ingested.
  */
 export async function resolveEventForCompetition(
   competition: CompetitionId,
-  seasonYear: number,
-): Promise<{ eventId: string; name: string; startDate: string | null; endDate: string | null } | null> {
+  seasonYear: number | null,
+): Promise<{ eventId: string; name: string; startDate: string; endDate: string | null; seasonYear: number } | null> {
+  const today = usauToday();
   if (competition === 'usau-club-nationals' || competition === 'usau-college-nationals') {
     const level = competition === 'usau-club-nationals' ? 'CLUB' : 'COLLEGE_D1';
     // Name patterns vary by year ("USA Ultimate Club Nationals" vs "National
     // Championships" vs "D-I College Championships") — match broadly within the
-    // level + season, then prefer the latest-starting (Nationals ends a season).
-    const { data, error } = await anon()
+    // level, then prefer the season's latest-starting event (Nationals ends a season).
+    let q = anon()
       .from('usau_events')
-      .select('id, name, start_date, end_date')
-      .eq('season', seasonYear)
+      .select('id, name, season, start_date, end_date')
       .eq('competition_level', level)
-      .or('name.ilike.%nationals%,name.ilike.%national championships%,name.ilike.%college championships%')
-      .order('start_date', { ascending: false })
-      .limit(5);
+      .gt('start_date', today)
+      .or('name.ilike.%nationals%,name.ilike.%national championships%,name.ilike.%college championships%');
+    if (seasonYear != null) q = q.eq('season', seasonYear);
+    const { data, error } = await q.order('start_date', { ascending: true }).limit(20);
     if (error) throw error;
     // Exclude tune-ups/showcases that merely mention "nationals".
-    const hit = (data ?? []).find((r: Record<string, unknown>) => {
+    const hits = (data ?? []).filter((r: Record<string, unknown>) => {
       const n = (r.name as string).toLowerCase();
       return !n.includes('tune up') && !n.includes('tune-up') && !n.includes('showcase') && !n.includes('training');
     });
-    if (!hit) return null;
+    if (hits.length === 0) return null;
+    const season = hits[0].season as number;
+    const hit = hits.filter((r: Record<string, unknown>) => r.season === season).at(-1)!;
     return {
       eventId: hit.id as string,
       name: hit.name as string,
-      startDate: (hit.start_date as string) ?? null,
+      startDate: hit.start_date as string,
       endDate: (hit.end_date as string) ?? null,
+      seasonYear: season,
     };
   }
   if (competition === 'wfdf-wucc') {
-    // ANY WFDF event, not just WUCC: the season's soonest event that hasn't
-    // ended yet (WJUC, WMUCC, WUGC…). Rosters and teams are keyed per event
-    // id, so the draft pool and scoring need no change. The hub's "Play greys
-    // out until a startDate exists" rule then activates WFDF on its own as
-    // soon as an upcoming event is ingested.
-    const today = new Date().toISOString().slice(0, 10);
-    const { data, error } = await anon()
-      .from('wfdf_events')
-      .select('id, name, start_date, end_date')
-      .eq('year', seasonYear)
-      .not('start_date', 'is', null)
-      .or(`end_date.gte.${today},and(end_date.is.null,start_date.gte.${today})`)
-      .order('start_date', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+    // ANY WFDF event, not just WUCC: the soonest one still ahead (WJUC, WMUCC,
+    // WUGC…). Rosters and teams are keyed per event id, so the draft pool and
+    // scoring need no change.
+    let q = anon().from('wfdf_events').select('id, name, year, start_date, end_date').gt('start_date', today);
+    if (seasonYear != null) q = q.eq('year', seasonYear);
+    const { data, error } = await q.order('start_date', { ascending: true }).limit(1).maybeSingle();
     if (error) throw error;
     if (!data) return null;
     return {
       eventId: data.id as string,
       name: data.name as string,
-      startDate: (data.start_date as string) ?? null,
+      startDate: data.start_date as string,
       endDate: (data.end_date as string) ?? null,
+      seasonYear: data.year as number,
     };
   }
   if (competition === 'eucs') {
-    const { data, error } = await anon()
-      .from('euf_events')
-      .select('id, name, start_date, end_date')
-      .eq('year', seasonYear)
-      .eq('kind', 'eucf')
-      .order('start_date', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (error) throw error;
-    if (data) {
-      return {
-        eventId: data.id as string,
-        name: data.name as string,
-        startDate: (data.start_date as string) ?? null,
-        endDate: (data.end_date as string) ?? null,
-      };
+    // The season's championship (kind 'eucf'); older rows can be mis-tagged,
+    // so fall back to a name match.
+    for (const match of ['kind', 'name'] as const) {
+      let q = anon().from('euf_events').select('id, name, year, start_date, end_date').gt('start_date', today);
+      q = match === 'kind' ? q.eq('kind', 'eucf') : q.ilike('name', '%EUCF%');
+      if (seasonYear != null) q = q.eq('year', seasonYear);
+      const { data, error } = await q.order('start_date', { ascending: true }).limit(1).maybeSingle();
+      if (error) throw error;
+      if (data) {
+        return {
+          eventId: data.id as string,
+          name: data.name as string,
+          startDate: data.start_date as string,
+          endDate: (data.end_date as string) ?? null,
+          seasonYear: data.year as number,
+        };
+      }
     }
-    // Fallback: kind may be mis-tagged for older rows — match by name.
-    const fallback = await anon()
-      .from('euf_events')
-      .select('id, name, start_date, end_date')
-      .eq('year', seasonYear)
-      .ilike('name', '%EUCF%')
-      .order('start_date', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (fallback.error) throw fallback.error;
-    if (!fallback.data) return null;
-    return {
-      eventId: fallback.data.id as string,
-      name: fallback.data.name as string,
-      startDate: (fallback.data.start_date as string) ?? null,
-      endDate: (fallback.data.end_date as string) ?? null,
-    };
+    return null;
   }
   return null; // season competitions don't bind to a single event
 }
@@ -693,9 +685,10 @@ export async function createContest(
 
   const settings: Record<string, unknown> = { ...def.defaultSettings };
   if (def.mode === 'event') {
+    // Startable events only — the same resolver the hub and create page use.
     const ev = await resolveEventForCompetition(competition, seasonYear);
     if (!ev) {
-      throw new Error(`${def.label} ${seasonYear} isn't in our database yet — try a different season.`);
+      throw new Error(`${def.label} ${seasonYear} has already started or isn't scheduled yet, so a league can't start on it.`);
     }
     settings.eventId = ev.eventId;
   }

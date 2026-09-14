@@ -12,6 +12,8 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { namesMatch, normalizeName, surnameForPrefilter } from '@/lib/name-match';
+import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
+import { usauToday } from '@/lib/today';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyClient = SupabaseClient<any>;
@@ -215,91 +217,49 @@ export async function listEvents(): Promise<WfdfEventCard[]> {
   }));
 }
 
-/** How recently an event must have ENDED for the Sun–Tue look-back to apply.
- *  16 days covers last weekend or the one before, without reaching back to a
- *  month-old tournament on WFDF's sparse calendar. */
-const RECENT_EVENT_WINDOW_DAYS = 16;
+/** How long a finished event keeps its slide after its last day (the page used
+ *  to enforce 14 on top of a 16-day look-back here — the gap dropped an
+ *  imminent Worlds). */
+const RECENT_EVENT_WINDOW_DAYS = 14;
 
 /**
- * The "current" WFDF event for the home hero — the weekend cadence shared with
- * USAU, but the look-back only applies when there is something recent to look
- * back AT:
- *
- *   - Before Wednesday (UTC day 0–2): look BACK, but ONLY if an event ended
- *     within RECENT_EVENT_WINDOW_DAYS. Otherwise fall through to upcoming.
- *   - From Wednesday on (UTC day ≥ 3): look FORWARD — the next event headlines.
- *
- * Bug the recency window fixes (Hunter): on a Sunday with WUCC 2026 six days
- * out, the pick was WJUC 2026 — which had ended 22 days earlier. The old code
- * bucketed by "ended before today" with no recency bound, so ANY past event
- * outranked an imminent one; WFDF's sparse calendar makes that the common case.
- *
- * EXCEPTION — an event that is IN PROGRESS today (started on/before today AND
- * ends on/after today) always wins, regardless of the weekday cadence. WFDF
- * Worlds run a full week, so a live event routinely straddles the Wed flip; the
- * discrete-weekend cadence would otherwise show last weekend's FINISHED event
- * (WMUCC, ended Jul 4) on Sun/Mon/Tue instead of the ONGOING one (WJUC). A
- * happening-now event is unambiguously "current" — the cadence only decides
- * between a just-past and a not-yet-started event.
- *
- * "Ended" is by end_date so a multi-day event stays "now" through its last day.
- * Prefer an event that actually has games ingested; fall back to the nearest by
- * date, then to the most-recent event overall so the slide is never empty.
+ * The WFDF event for the home hero (and For You's Worlds card), or null when
+ * nothing is current. In order:
+ *   1. an event IN PROGRESS today (most recently started first) — Worlds run a
+ *      full week, so a live event always wins;
+ *   2. else the soonest event starting within SEASON_PREVIEW_DAYS;
+ *   3. else the event that most recently ended, if within
+ *      RECENT_EVENT_WINDOW_DAYS.
+ * So an imminent Worlds is never hidden behind a finished one, and a months-
+ * away (or months-old) one never headlines. "Today" is the Eastern date
+ * (usauToday), the one clock the home page uses; "ended" is by end_date so a
+ * multi-day event stays current through its last day. Undated back-catalogue
+ * rows never qualify.
  */
 export async function getCurrentWfdfEvent(): Promise<WfdfEventCard | null> {
   const events = await listEvents();
-  if (events.length === 0) return null;
-
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const lookBackDay = now.getUTCDay() < 3; // Sun–Tue; Wed(3)+ looks forward
+  const today = usauToday(now);
+  const previewUntil = usauToday(new Date(now.getTime() + SEASON_PREVIEW_DAYS * 86400_000));
+  const recentFrom = usauToday(new Date(now.getTime() - RECENT_EVENT_WINDOW_DAYS * 86400_000));
 
-  const endOf = (e: WfdfEventCard) => e.endDate ?? e.startDate ?? '';
   const startOf = (e: WfdfEventCard) => e.startDate ?? '';
+  const endOf = (e: WfdfEventCard) => e.endDate ?? e.startDate ?? '';
 
-  const recentCutoff = new Date(now.getTime() - RECENT_EVENT_WINDOW_DAYS * 86400_000)
-    .toISOString()
-    .slice(0, 10);
-
-  // Events with NO dates at all are historical back-catalogue rows; endOf()
-  // returns '' for them, which sorts before every real date — they must never
-  // be treated as "recent past" or one would headline over an imminent event.
-  const dated = (e: WfdfEventCard): boolean => endOf(e) !== '';
-
-  // In progress = started on/before today AND not yet ended. These jump the
-  // queue ahead of the past/upcoming cadence split (see EXCEPTION above).
   const inProgress = events
-    .filter((e) => dated(e) && startOf(e) !== '' && startOf(e) <= today && endOf(e) >= today)
-    .sort((a, b) => startOf(b).localeCompare(startOf(a))); // most-recently started first
-  const inProgressIds = new Set(inProgress.map((e) => e.id));
-
-  // Upcoming/now = not yet ended; past = ended before today. Within each bucket,
-  // the nearest weekend wins (by start date), matching the USAU sort. Exclude
-  // in-progress events here so they aren't double-counted below.
+    .filter((e) => startOf(e) !== '' && startOf(e) <= today && endOf(e) >= today)
+    .sort((a, b) => startOf(b).localeCompare(startOf(a)));
   const upcoming = events
-    .filter((e) => dated(e) && endOf(e) >= today && !inProgressIds.has(e.id))
-    .sort((a, b) => startOf(a).localeCompare(startOf(b))); // soonest first
-  const past = events
-    .filter((e) => dated(e) && endOf(e) < today)
-    .sort((a, b) => startOf(b).localeCompare(startOf(a))); // most-recent first
-  const undated = events.filter((e) => !dated(e));
+    .filter((e) => startOf(e) > today && startOf(e) <= previewUntil)
+    .sort((a, b) => startOf(a).localeCompare(startOf(b)));
+  const recent = events
+    .filter((e) => endOf(e) !== '' && endOf(e) < today && endOf(e) >= recentFrom)
+    .sort((a, b) => endOf(b).localeCompare(endOf(a)));
 
-  // The look-back is only honored when a real event ended inside the window.
-  const hasRecentPast = past.some((e) => endOf(e) >= recentCutoff);
-
-  const cadence =
-    lookBackDay && hasRecentPast
-      ? [...past, ...upcoming, ...undated]
-      : [...upcoming, ...past, ...undated];
-  const ordered = [...inProgress, ...cadence];
-
-  // Prefer an event with games; else the nearest by date; else newest overall.
-  return (
-    ordered.find((e) => e.teamCount > 0) ??
-    ordered[0] ??
-    events[0] ??
-    null
-  );
+  // Two live (or two just-finished) events: prefer one with teams ingested over
+  // a stub row. Upcoming stays strictly soonest-first — fields land late.
+  const withTeams = (list: WfdfEventCard[]) => list.find((e) => e.teamCount > 0) ?? list[0];
+  return withTeams(inProgress) ?? upcoming[0] ?? withTeams(recent) ?? null;
 }
 
 export async function getEvent(slug: string): Promise<WfdfEventDetail | null> {

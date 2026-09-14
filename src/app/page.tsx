@@ -50,7 +50,7 @@ import {
   type UsauFeedCard,
 } from '@/lib/usau/data';
 import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
-import { listWulGames, getWulCurrentSeason } from '@/lib/wul/data';
+import { listWulGames, getWulCurrentSeason, getWulResultsSeason } from '@/lib/wul/data';
 import { AppRail } from '@/components/app-rail';
 import { HeroGameCard } from '@/components/home/hero-game-card';
 import { HomeHero, type KeyedSlide } from '@/components/home/home-hero';
@@ -88,7 +88,9 @@ import {
   usauCollegeSeasonPhase,
   wfdfEventPhase,
   isCollegeChampionshipsName,
+  ufaTitleSeasonGames,
 } from '@/lib/home/season-phase';
+import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
 import { getPulStandingsCached, getWulStandingsCached } from '@/lib/cached-readers';
 import { StandoutsCarousel } from '@/components/home/standouts-carousel';
 import { getStandoutPerformances } from '@/lib/home/standouts';
@@ -146,16 +148,22 @@ export default async function HomePage() {
       // PUL: upcoming-this-week else most-recent final. Season resolved from the
       // data (newest present) so it self-advances and never queries an empty year.
       (async () => listPulGames({ season: await getPulCurrentSeason() }))(),
-      // WUL: same rule.
-      (async () => listWulGames({ season: await getWulCurrentSeason() }))(),
+      // WUL: same rule, plus the newest season with results when that's older:
+      // next season's schedule lands ~3 months before its first game, and a
+      // pool of only unplayed games would drop the Season complete card early.
+      (async () => {
+        const [current, results] = await Promise.all([getWulCurrentSeason(), getWulResultsSeason()]);
+        const seasons = current === results ? [current] : [current, results];
+        return (await Promise.all(seasons.map((season) => listWulGames({ season })))).flat();
+      })(),
       // USAU: recent completed CLUB majors (TCT events) with champions — ONE
       // scan shared by "Recent results" (first 4), the Club Nationals "Season
       // complete" card (found by name) and the club season-phase (a major
       // newer than Nationals = next season underway). 12 reaches back through
       // a full club season. `limit` only slices the output; cost is the same.
       recentUsauMajorsWithChampions(12),
-      // WFDF: current Worlds event — same Wed weekend-cadence flip as USAU
-      // (e.g. WMUCC through Tue, then WJUC from Wednesday).
+      // WFDF: the live Worlds, else the next within SEASON_PREVIEW_DAYS, else
+      // one that just finished — or null.
       getCurrentWfdfEvent(),
       // Standout player performances (last 4 weeks, strength-gated recency) for
       // the home carousel. UFA/PUL/WUL wired; only leagues with recent games
@@ -204,26 +212,21 @@ export default async function HomePage() {
   // events keeps the card full even when the nearest one has no games ingested yet.
   const usauUpcomingEvents = usauUpNextRes.status === 'fulfilled' ? usauUpNextRes.value : [];
 
-  // WFDF: current Worlds event (getCurrentWfdfEvent applies the same Wed
-  // weekend-cadence flip as USAU). WFDF events are sparse, so unlike USAU we
-  // only surface it when it's genuinely current — upcoming/in-progress, or it
-  // ended within the last ~2 weeks — otherwise a months-old Worlds would linger
-  // in the loop. (USAU can headline year-round because its calendar is dense.)
-  const wfdfPick = wfdfRes.status === 'fulfilled' ? wfdfRes.value : null;
-  const twoWeeksAgoIso = new Date(now.getTime() - 14 * 86400_000).toISOString().slice(0, 10);
-  const wfdfEvent =
-    wfdfPick && (wfdfPick.endDate ?? wfdfPick.startDate ?? '') >= twoWeeksAgoIso
-      ? wfdfPick
-      : null;
+  // WFDF: events are sparse, so unlike USAU the slide shows only when a Worlds
+  // is genuinely current — live, starting within SEASON_PREVIEW_DAYS, or ended
+  // in the last two weeks (getCurrentWfdfEvent returns null otherwise), so a
+  // months-old or months-away Worlds never lingers in the loop. (USAU can
+  // headline year-round because its calendar is dense.)
+  const wfdfEvent = wfdfRes.status === 'fulfilled' ? wfdfRes.value : null;
 
-  // PUL: prefer upcoming game this week; fall back to most-recent final.
-  // "This week" = gameDate within 7 days of today (server time).
+  // PUL: prefer the next game within SEASON_PREVIEW_DAYS; fall back to a final
+  // from the last 7 days (Eastern dates).
   const pulGames = pulRes.status === 'fulfilled' ? pulRes.value : [];
-  const pulFeatured = pickLeagueGame(pulGames);
+  const pulFeatured = pickLeagueGame(pulGames, now);
 
   // WUL: same rule.
   const wulGames = wulRes.status === 'fulfilled' ? wulRes.value : [];
-  const wulFeatured = pickLeagueGame(wulGames);
+  const wulFeatured = pickLeagueGame(wulGames, now);
 
   // UFA hero games:
   //  - topGame  → LIVE game only (undefined when nothing is on — the slide
@@ -239,9 +242,16 @@ export default async function HomePage() {
   // cancelled/postponed game NOR the all-star exhibition (it has its own
   // slide — no game appears on two cards). Undefined → the UFA slide drops
   // when another league has a slide, else the EmptyHero off-season card.
-  const heroResultCutoff = now.getTime() - HERO_RESULT_WINDOW_DAYS * 86400_000;
-  const heroPool = games.filter((g) => !isAllStarGame(g) && !gameUiState(g).isCancelled);
   const heroTs = (g: UfaGame): number => (g.startTimestamp ? new Date(g.startTimestamp).getTime() : 0);
+  // Both windows count whole Eastern days (usauToday) so neither rolls over at
+  // 8 pm ET.
+  const gameDay = (g: UfaGame): string => (g.startTimestamp ? usauToday(new Date(g.startTimestamp)) : '');
+  const heroResultFrom = usauToday(new Date(now.getTime() - HERO_RESULT_WINDOW_DAYS * 86400_000));
+  // Upcoming games preview only SEASON_PREVIEW_DAYS ahead: a schedule published
+  // in January must not headline April's opener or August's All-Star game.
+  const previewUntil = usauToday(new Date(now.getTime() + SEASON_PREVIEW_DAYS * 86400_000));
+  const inPreview = (g: UfaGame): boolean => !gameUiState(g).isUpcoming || gameDay(g) <= previewUntil;
+  const heroPool = games.filter((g) => !isAllStarGame(g) && !gameUiState(g).isCancelled && inPreview(g));
   const firstShowableGame =
     heroPool
       .filter((g) => {
@@ -250,9 +260,9 @@ export default async function HomePage() {
       })
       .sort((a, b) => heroTs(a) - heroTs(b))[0] ??
     heroPool
-      .filter((g) => gameUiState(g).isFinal && heroTs(g) >= heroResultCutoff)
+      .filter((g) => gameUiState(g).isFinal && gameDay(g) >= heroResultFrom)
       .sort((a, b) => heroTs(b) - heroTs(a))[0];
-  const gotwGame = pickUpcomingGameOfWeek(games, standings) ?? firstShowableGame;
+  const gotwGame = pickUpcomingGameOfWeek(games.filter(inPreview), standings) ?? firstShowableGame;
 
   // Playoff mode: when the soonest active week is a playoff round, EVERY game
   // in it gets its own labeled slide ("Semifinal"/"Championship") — the
@@ -260,8 +270,9 @@ export default async function HomePage() {
   // of record difference (Hunter, 2026-08-26). Empty outside the playoffs.
   const playoffSlate = pickPlayoffSlate(games);
   // Champ-weekend WUL/PUL All-Star exhibition — once-a-year slide; undefined
-  // outside its window (upcoming/live + 3 days after the final).
-  const allStarGame = pickAllStarGame(games);
+  // outside its window (upcoming within SEASON_PREVIEW_DAYS, live, or up to
+  // 3 days after the final).
+  const allStarGame = pickAllStarGame(games.filter(inPreview));
 
   // Records for a game's two teams (from current standings).
   const recordOf = (slug?: string): string | undefined => {
@@ -285,7 +296,7 @@ export default async function HomePage() {
   const upNext = games
     .filter((g) => {
       const s = gameUiState(g);
-      return s.isUpcoming || s.isLive;
+      return (s.isUpcoming || s.isLive) && inPreview(g);
     })
     .sort((a, b) => tsOf(a) - tsOf(b))
     .slice(0, 6);
@@ -309,12 +320,13 @@ export default async function HomePage() {
   const wulRecentFour = pickWulRecentFour(wulGames);
 
   // ── Season phase per league ─────────────────────────────────────────────────
-  // UFA's title game lives in whichever year last ran a bracket: from Jan 1
-  // until the new season's playoffs, that's the PREVIOUS year, so pull it in
-  // (one cached API read, Jan–Aug only) rather than let the champion card
-  // vanish at the year boundary. Sep+ the current year always has it.
+  // UFA's title game lives in whichever season last ran a bracket: until this
+  // year's bracket is decided that's the PREVIOUS season, so pull it in (one
+  // cached API read) rather than let the champion card vanish at the year
+  // boundary. Keyed on the data, not the calendar month: the read stops the
+  // moment the pool holds a decided bracket.
   const prevYearGames: UfaGame[] =
-    now.getUTCMonth() < 8 ? await getAllGamesByYears([year - 1]).catch(() => []) : [];
+    ufaTitleSeasonGames(games).length === 0 ? await getAllGamesByYears([year - 1]).catch(() => []) : [];
   // Dedupe by gameID: the current-week feed keeps serving last season's final
   // weekend into January, and a doubled week-16 reads as a bulk week.
   const ufaPoolByID = new Map<string, UfaGame>();
@@ -352,7 +364,7 @@ export default async function HomePage() {
 
   const ufaSeasonNode =
     ufaPhase.phase === 'complete'
-      ? UfaSeasonCompleteSection({ card: getUfaSeasonCompleteCard(ufaPhasePool, standings) })
+      ? UfaSeasonCompleteSection({ card: getUfaSeasonCompleteCard(ufaTitleSeasonGames(ufaPhasePool), standings) })
       : null;
   const usauSeasonNode =
     usauPhase.phase === 'complete'
@@ -656,9 +668,10 @@ export default async function HomePage() {
 }
 
 // ─── Cross-league game picker ────────────────────────────────────────────────
-// For PUL and WUL: prefer an upcoming game within the next 7 days; if none,
-// fall back to the most recent final. Returns null when the season has no
-// games in either window (e.g. offseason — that's the correct "no slide" case).
+// For PUL and WUL: prefer the next game within SEASON_PREVIEW_DAYS; if none,
+// fall back to a final from the last 7 days. Returns null when the season has
+// no games in either window (e.g. offseason — that's the correct "no slide"
+// case). Dates are Eastern (usauToday), the one clock the home page uses.
 //
 // Works with both PulGame and WulGame since both have the same shape:
 //   { status: 'scheduled'|'final', gameDate: string|null }
@@ -670,21 +683,16 @@ import { deriveWulPostseasonRounds } from '@/lib/wul/data';
 /** Shared minimal shape for both PulGame and WulGame. */
 type LeagueGame = { status: 'scheduled' | 'final'; gameDate: string | null };
 
-function pickLeagueGameGeneric<T extends LeagueGame>(games: T[]): T | null {
+function pickLeagueGameGeneric<T extends LeagueGame>(games: T[], now: Date): T | null {
   if (games.length === 0) return null;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const sevenDaysLater = new Date(today.getTime() + 7 * 86400_000);
+  // yyyy-mm-dd compares as a string, same as gameDate.
+  const today = usauToday(now);
+  const previewUntil = usauToday(new Date(now.getTime() + SEASON_PREVIEW_DAYS * 86400_000));
 
-  // Upcoming within next 7 days (soonest first)
+  // Next game within the preview window (soonest first)
   const upcoming = games
-    .filter((g) => {
-      if (g.status !== 'scheduled' || !g.gameDate) return false;
-      const [y, m, d] = g.gameDate.split('-').map(Number);
-      const gd = new Date(y, m - 1, d);
-      return gd >= today && gd <= sevenDaysLater;
-    })
+    .filter((g) => g.status === 'scheduled' && g.gameDate !== null && g.gameDate >= today && g.gameDate <= previewUntil)
     .sort((a, b) => (a.gameDate ?? '').localeCompare(b.gameDate ?? ''));
 
   if (upcoming.length > 0) return upcoming[0];
@@ -693,31 +701,27 @@ function pickLeagueGameGeneric<T extends LeagueGame>(games: T[]): T | null {
   // keep showing its just-played game for a week, then drops off — so once a
   // season ends, the slide disappears rather than lingering on stale results
   // (PUL/WUL ended ~1–2wk ago and should NOT show until next season's data).
-  const sevenDaysAgo = new Date(today.getTime() - 7 * 86400_000);
+  const sevenDaysAgo = usauToday(new Date(now.getTime() - 7 * 86400_000));
   const recent = games
-    .filter((g) => {
-      if (g.status !== 'final' || !g.gameDate) return false;
-      const [y, m, d] = g.gameDate.split('-').map(Number);
-      const gd = new Date(y, m - 1, d);
-      return gd >= sevenDaysAgo && gd <= today;
-    })
+    .filter((g) => g.status === 'final' && g.gameDate !== null && g.gameDate >= sevenDaysAgo && g.gameDate <= today)
     .sort((a, b) => (b.gameDate ?? '').localeCompare(a.gameDate ?? ''));
 
   return recent.length > 0 ? recent[0] : null;
 }
 
 // Typed wrappers — preserve the concrete return type so JSX props satisfy.
-function pickLeagueGame(games: PulGame[]): PulGame | null;
-function pickLeagueGame(games: WulGame[]): WulGame | null;
-function pickLeagueGame(games: PulGame[] | WulGame[]): PulGame | WulGame | null {
-  return pickLeagueGameGeneric(games as PulGame[]);
+function pickLeagueGame(games: PulGame[], now: Date): PulGame | null;
+function pickLeagueGame(games: WulGame[], now: Date): WulGame | null;
+function pickLeagueGame(games: PulGame[] | WulGame[], now: Date): PulGame | WulGame | null {
+  return pickLeagueGameGeneric(games as PulGame[], now);
 }
 
 // ─── "Recent results" 4-row pickers (PUL / WUL) ──────────────────────────────
 // Neither league has quarterfinals — playoffs are 2 semifinals + 1 final. To
 // fill each league's group to 4 rows (matching UFA's 4-row group), we show
 // the championship weekend (final + both semis) plus the most recent
-// regular-season game from the latest season that has a completed final.
+// regular-season game from the latest season that has a completed final — or,
+// while a season is still being played (no final yet), its latest results.
 // `round` drives each row's label/emphasis; only 'final' gets the trophy
 // treatment, never a bare 'week' game and never a semifinal.
 
@@ -733,10 +737,10 @@ function pickPulRecentFour(games: PulGame[]): PulRecentGame[] {
 
   // Resolve to the latest season that actually has a completed Finals game —
   // guards against a new season's early regular-season games outranking last
-  // season's still-most-recent championship weekend.
+  // season's still-most-recent championship weekend. With no Finals yet, the
+  // season in progress shows its latest results.
   const seasonsWithFinal = [...new Set(finals.filter((g) => g.weekLabel === 'finals').map((g) => g.season))];
-  if (seasonsWithFinal.length === 0) return [];
-  const season = Math.max(...seasonsWithFinal);
+  const season = Math.max(...(seasonsWithFinal.length > 0 ? seasonsWithFinal : finals.map((g) => g.season)));
   const seasonFinals = finals.filter((g) => g.season === season);
 
   const byDateDesc = (a: PulGame, b: PulGame) => (b.gameDate ?? '').localeCompare(a.gameDate ?? '');
@@ -771,8 +775,8 @@ function pickWulRecentFour(games: WulGame[]): WulRecentGame[] {
   const seasonsWithFinal = [
     ...new Set(finals.filter((g) => rounds.get(g.id) === 'final').map((g) => g.season)),
   ];
-  if (seasonsWithFinal.length === 0) return [];
-  const season = Math.max(...seasonsWithFinal);
+  // No final yet → the season in progress shows its latest results.
+  const season = Math.max(...(seasonsWithFinal.length > 0 ? seasonsWithFinal : finals.map((g) => g.season)));
   const seasonFinals = finals.filter((g) => g.season === season);
 
   const byDateDesc = (a: WulGame, b: WulGame) => (b.gameDate ?? '').localeCompare(a.gameDate ?? '');

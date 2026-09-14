@@ -51,11 +51,14 @@ export default async function GamePage({ params }: Props) {
   // The game's OWN season, not the current one — a historical game needs its
   // own season's bracket for ufaPlayoffRound, not this year's.
   const gameSeason = parseInt(game.gameID.slice(0, 4), 10) || year;
+  // Team stats + spotlight are the GAME's season (a 2016 final was comparing
+  // 2026 team stats). Standings are a current-season-only endpoint, so a
+  // historical game gets none rather than this year's table.
   const [standingsRes, teamStatsRes, gameStatsRes, spotlightRes, seasonGamesRes] = await Promise.allSettled([
-    getStandings(),
-    getTeamStats({ year }),
+    gameSeason === year ? getStandings() : Promise.resolve([] as UfaStanding[]),
+    getTeamStats({ year: gameSeason }),
     getGameStats(game.gameID),
-    getUfaSpotlight(game, year),
+    getUfaSpotlight(game, gameSeason),
     getAllGamesByYears([gameSeason]),
   ]);
   const standings: UfaStanding[] = standingsRes.status === 'fulfilled' ? standingsRes.value : [];
@@ -72,7 +75,7 @@ export default async function GamePage({ params }: Props) {
     homeStanding: standings.find((s) => s.teamID === game.homeTeamID) ?? null,
     awayTeamStat: teamStats.find((t) => t.teamID === game.awayTeamID) ?? null,
     homeTeamStat: teamStats.find((t) => t.teamID === game.homeTeamID) ?? null,
-    season: year,
+    season: gameSeason,
     gameStats,
     spotlight,
   };

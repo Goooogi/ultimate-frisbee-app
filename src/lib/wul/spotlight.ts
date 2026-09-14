@@ -5,6 +5,7 @@
 
 import {
   getWulRoster,
+  getWulResultsSeason,
   type WulGame,
   type WulGameBoxscore,
   type WulBoxscoreRow,
@@ -64,9 +65,12 @@ export async function getWulSpotlight(game: WulGame, boxscore: WulGameBoxscore):
   if (game.status === 'final') {
     return { away: boxToPotg(boxscore.away), home: boxToPotg(boxscore.home) };
   }
+  // A next-season game is scheduled months before that season has any player
+  // rows — pick from the newest season that does.
+  const season = Math.min(game.season, await getWulResultsSeason());
   const [awayRoster, homeRoster] = await Promise.all([
-    getWulRoster(game.away.teamId, game.season).catch(() => [] as WulPlayer[]),
-    getWulRoster(game.home.teamId, game.season).catch(() => [] as WulPlayer[]),
+    getWulRoster(game.away.teamId, season).catch(() => [] as WulPlayer[]),
+    getWulRoster(game.home.teamId, season).catch(() => [] as WulPlayer[]),
   ]);
   return { away: rosterToWatch(awayRoster), home: rosterToWatch(homeRoster) };
 }

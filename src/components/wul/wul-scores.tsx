@@ -4,7 +4,7 @@
 //
 // Key WUL differences vs PUL:
 //   • weekLabel is 'regular' | 'post' (not 'week-N' | 'semifinals' | 'finals')
-//   • WulGame has no gameTime or location fields.
+//   • WulGame has no location field.
 //   • WulGameTeamSide carries accentColor directly.
 //   • WulTeamLogo (wul-team-logo.tsx) accepts WulTeam; we build a compatible shape.
 
@@ -212,7 +212,7 @@ function ScoreCard({ game, champion = false }: { game: WulGame; champion?: boole
         </div>
       )}
 
-      {/* Date sub-line (WUL has no location/time in data) */}
+      {/* Date sub-line (WUL has no location in data) */}
       {game.gameDate && (
         <div className="flex items-center gap-2 mb-2.5 text-[10px] font-bold tracking-[0.14em] uppercase text-faint font-tight">
           <span className="tabular">{formatDate(game.gameDate)}</span>

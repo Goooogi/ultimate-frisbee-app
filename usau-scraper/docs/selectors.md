@@ -273,6 +273,47 @@ id for the TBD side; the next scrape after the feeder resolves fills the
 team in via the same `usau_game_id` upsert. Only id-less TBD divs are
 skipped (no safe dedupe key).
 
+**Bracket structure** (verified 2026-09-13, Rocky Mountain Sectionals + Ski
+Town Classic 2026 — 25 sections): the markup encodes the whole bracket graph,
+and `sync-event-details` stores it (`bracket_stage`, `bracket_stage_index`,
+`bracket_slot`, `next_usau_game_id`, `next_slot_side`):
+
+```html
+<h3 class="slide_trigger"><a href="#">6th Place</a></h3>          <!-- section → bracket_name -->
+<div class="bracket_area">
+  <div class="bracket_col">
+    <h4 class="col_title">6th Place (Game to Go)</h4>              <!-- column 0 = the DECIDER -->
+    <div id="game415244" class="bracket_game top_game" data-index="1" data-relation="">…</div>
+  </div>
+  <div class="bracket_col">
+    <h4 class="col_title">6th Place Semis</h4>                     <!-- column 1 feeds column 0 -->
+    <div id="game415243" class="bracket_game top_game has_next" data-index="1" data-relation="game415244">…</div>
+  </div>
+  <div class="bracket_col">
+    <h4 class="col_title">6th Place Quarters</h4>                  <!-- column 2 -->
+    <div id="game415241" class="bracket_game top_game has_next" data-index="1" data-relation="game415243">…</div>
+    <div id="game415242" class="bracket_game btm_game has_next" data-index="2" data-relation="game415243">…</div>
+  </div>
+</div>
+```
+
+- Columns are emitted **final-first**: the first `bracket_col` in a section is
+  its deciding game; each later column feeds the one before it. Stored as
+  `bracket_stage_index` (0 = decider). Held on every section checked, including
+  a Sweet 16 → Quarters → Semis → Finals championship.
+- `data-index` (= the `G<n>` label text) is USAU's **sheet slot**. Byes are
+  simply absent slots — Rocky Mountain Mixed "1st Quarters" holds G2 and G3
+  only (seeds 1 and 3 skipped the round); Ski Town "9th Quarters" holds G2–G4.
+  Never renumber sequentially.
+- `data-relation="game<id>"` is the game this game's **winner** feeds;
+  `top_game` / `btm_game` says which side of it (home / away). Empty on the
+  decider. Loser paths are NOT encoded — they only appear as placeholder text
+  ("L of Semis G1") in the downstream section.
+- Column labels are uncontrolled vocabulary ("Fivals", "Semi Ninals", "Podium
+  Match", "6th Place (Game to Go)", "T 13th Semis", "Round 2"). Keep
+  `classifyRound` for the coarse `round` enum, but build trees from the
+  structure columns, not the labels.
+
 **Placement labels**: USAU mixes numeric and word ordinals for placement
 sections — "3rd Place" but also "Third Place" / "Seventh Place" (PEC West
 2026). `classifyRound` matches both.

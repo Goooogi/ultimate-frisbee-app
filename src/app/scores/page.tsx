@@ -26,7 +26,7 @@ import { PageShell } from '@/components/page-shell';
 import { PulScores } from '@/components/pul/pul-scores';
 import { getPulCurrentSeason } from '@/lib/pul/data';
 import { WulScores } from '@/components/wul/wul-scores';
-import { getWulCurrentSeason } from '@/lib/wul/data';
+import { getWulResultsSeason } from '@/lib/wul/data';
 
 export const revalidate = 30;
 
@@ -70,7 +70,7 @@ export default async function HomePage({ searchParams }: Props) {
   }
   // ── WUL branch ────────────────────────────────────────────────────────────
   if (league === 'wul') {
-    const currentSeason = await getWulCurrentSeason();
+    const currentSeason = await getWulResultsSeason();
     const season = parseInt(searchParams.season ?? String(currentSeason), 10) || currentSeason;
     return (
       <PageShell title="Scores" eyebrow={`WUL · Western Ultimate League · ${season}`}>

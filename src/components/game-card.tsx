@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
-import { gameUiState, metaRight, statusLabel } from '@/lib/ufa/format';
+import { teamMetaForYear, teamNameForYear, type TeamMeta } from '@/lib/ufa/teams';
+import { gameUiState, gameYear, metaRight, statusLabel } from '@/lib/ufa/format';
 import type { UfaGame } from '@/lib/ufa/types';
 import { useTheme } from '@/lib/use-theme';
 import { LiveDot, LiveDotAccent } from '@/components/live-dot';
@@ -21,8 +21,13 @@ export function GameCard({ game }: GameCardProps) {
 // ── Field variant ─────────────────────────────────────────────────────────────
 
 function FieldGameCard({ game }: { game: UfaGame }) {
-  const away = teamMeta(game.awayTeamID);
-  const home = teamMeta(game.homeTeamID);
+  // Era name + logo from the game's own season — the API stamps the CURRENT
+  // brand on every past game. City already comes historical from the game.
+  const year = gameYear(game);
+  const away = teamMetaForYear(game.awayTeamID, year);
+  const home = teamMetaForYear(game.homeTeamID, year);
+  const awayName = (year != null && teamNameForYear(game.awayTeamID, year)) || game.awayTeamName;
+  const homeName = (year != null && teamNameForYear(game.homeTeamID, year)) || game.homeTeamName;
   const state = gameUiState(game);
   const label = statusLabel(state);
   const right = metaRight(game, state);
@@ -57,7 +62,7 @@ function FieldGameCard({ game }: { game: UfaGame }) {
       <FieldTeamRow
         team={away}
         city={game.awayTeamCity}
-        name={game.awayTeamName}
+        name={awayName}
         score={game.awayScore}
         winning={state.awayWin}
         showScore={state.hasScore || state.isLive || state.isFinal}
@@ -68,7 +73,7 @@ function FieldGameCard({ game }: { game: UfaGame }) {
       <FieldTeamRow
         team={home}
         city={game.homeTeamCity}
-        name={game.homeTeamName}
+        name={homeName}
         score={game.homeScore}
         winning={state.homeWin}
         showScore={state.hasScore || state.isLive || state.isFinal}
@@ -139,8 +144,13 @@ function FieldTeamRow({
 // ── Broadcast variant ─────────────────────────────────────────────────────────
 
 function BcastGameCard({ game }: { game: UfaGame }) {
-  const away = teamMeta(game.awayTeamID);
-  const home = teamMeta(game.homeTeamID);
+  // Era name + logo from the game's own season — the API stamps the CURRENT
+  // brand on every past game. City already comes historical from the game.
+  const year = gameYear(game);
+  const away = teamMetaForYear(game.awayTeamID, year);
+  const home = teamMetaForYear(game.homeTeamID, year);
+  const awayName = (year != null && teamNameForYear(game.awayTeamID, year)) || game.awayTeamName;
+  const homeName = (year != null && teamNameForYear(game.homeTeamID, year)) || game.homeTeamName;
   const state = gameUiState(game);
   const label = statusLabel(state);
   const right = metaRight(game, state);
@@ -182,7 +192,7 @@ function BcastGameCard({ game }: { game: UfaGame }) {
       <BcastTeamRow
         team={away}
         city={game.awayTeamCity}
-        name={game.awayTeamName}
+        name={awayName}
         score={game.awayScore}
         win={state.awayWin}
         lose={state.homeWin}
@@ -194,7 +204,7 @@ function BcastGameCard({ game }: { game: UfaGame }) {
       <BcastTeamRow
         team={home}
         city={game.homeTeamCity}
-        name={game.homeTeamName}
+        name={homeName}
         score={game.homeScore}
         win={state.homeWin}
         lose={state.awayWin}

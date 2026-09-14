@@ -20,6 +20,7 @@ import type { WulRecentGame, WulRecentRound } from '@/app/page';
 import { teamMeta } from '@/lib/ufa/teams';
 import { TeamLogo } from '@/components/team-logo';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
+import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { WulTeamLogo } from '@/components/wul-team-logo';
 
@@ -187,7 +188,12 @@ function UsauMajorRow({ major, first }: { major: UsauMajorWithChampions; first: 
     major.champions.length === 0
       ? 'Results pending'
       : major.champions.map((c) => c.teamName).join(' · ');
-  const firstChamp = major.champions[0];
+  // Every champion's real logo, or none (Hunter, 2026-09-13): showing only the
+  // first champion — or a real logo next to an initials fallback — read as
+  // one division's win. Any champion without a logo file → the trophy alone.
+  const showLogos =
+    major.champions.length > 0 &&
+    major.champions.every((c) => usauTeamLogo(c.teamName, c.division) != null);
 
   return (
     <Link
@@ -198,9 +204,16 @@ function UsauMajorRow({ major, first }: { major: UsauMajorWithChampions; first: 
         'hover:opacity-80 transition-opacity',
       ].join(' ')}
     >
-      {firstChamp ? (
-        <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">
-          <UsauTeamLogo name={firstChamp.teamName} genderDivision={firstChamp.division} size={22} />
+      {showLogos ? (
+        <span className="flex -space-x-1.5 flex-shrink-0">
+          {major.champions.map((c) => (
+            <span
+              key={`${c.division}-${c.teamName}`}
+              className="inline-flex rounded-full overflow-hidden ring-2 ring-surface"
+            >
+              <UsauTeamLogo name={c.teamName} genderDivision={c.division} size={22} />
+            </span>
+          ))}
         </span>
       ) : (
         <span className="text-faint flex-shrink-0">

@@ -104,6 +104,14 @@ interface ParsedGame {
    *  scrape clears it as slots fill. */
   home_placeholder: string | null;
   away_placeholder: string | null;
+  /** Bracket structure straight from USAU's markup (null on pool rows and on
+   *  bracket games whose column couldn't be read). See the 20260913170000
+   *  migration for the column semantics. */
+  bracket_stage: string | null;
+  bracket_stage_index: number | null;
+  bracket_slot: number | null;
+  next_usau_game_id: string | null;
+  next_slot_side: 'top' | 'btm' | null;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -200,6 +208,12 @@ function parseScore(s: string | null): number | null {
   if (!s) return null;
   const m = s.trim().match(/^(\d+)$/);
   return m ? parseInt(m[1], 10) : null;
+}
+
+/** Postgres smallint range guard: anything outside it becomes null rather
+ *  than a write error that would abort the whole page's sync. */
+function smallintOrNull(n: number | null): number | null {
+  return n != null && Number.isInteger(n) && n >= -32768 && n <= 32767 ? n : null;
 }
 
 /**
@@ -335,10 +349,16 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
   let currentH3: string | null = null;
   let currentH4: string | null = null;
   let currentSection: string | null = null;
+  // Column position within the current bracket section. USAU emits a
+  // section's `div.bracket_col`s in FINAL-FIRST document order (verified on
+  // 18 sections across Rocky Mountain Sectionals + Ski Town Classic 2026),
+  // so the first column (index 0) is the section's deciding game and each
+  // later column feeds the one before it. -1 = no column seen yet.
+  let currentStageIndex = -1;
 
   // The schedule page mixes pool tables and brackets. Walk the document
   // in document order so we associate each piece with its heading.
-  $('h1, h3, h4, table.global_table, div.bracket_game, div[id^="section_"]').each((_, el) => {
+  $('h1, h3, h4, table.global_table, div.bracket_col, div.bracket_game, div[id^="section_"]').each((_, el) => {
     const $el = $(el);
     const tag = el.type === 'tag' ? (el as { name: string }).name : '';
     const elId = $el.attr('id') ?? '';
@@ -350,12 +370,21 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
       currentSection = (m && sectionLabels.get(m[1])) || null;
       currentH3 = null;
       currentH4 = null;
+      currentStageIndex = -1;
       return;
     }
 
     if (tag === 'h3') {
       currentH3 = $el.text().trim();
       currentH4 = null;
+      currentStageIndex = -1;
+      return;
+    }
+
+    // A bracket column opens: advance the stage index. Its h4 follows in
+    // document order and sets currentH4 as before.
+    if (tag === 'div' && $el.hasClass('bracket_col')) {
+      currentStageIndex += 1;
       return;
     }
     if (tag === 'h4') {
@@ -543,6 +572,11 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
             // Pool rows always have both teams — no placeholder text exists.
             home_placeholder: null,
             away_placeholder: null,
+            bracket_stage: null,
+            bracket_stage_index: null,
+            bracket_slot: null,
+            next_usau_game_id: null,
+            next_slot_side: null,
           });
         });
       }
@@ -610,11 +644,35 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         ? null
         : $game.find('[data-type="game-team-away"]').first().text().trim() || null;
 
+      // Structure. `data-index` is USAU's sheet slot (the "G<n>" label text
+      // is the same number); byes leave gaps, so a quarters column can hold
+      // G2 and G3 only. `data-relation="game<id>"` names the game this one's
+      // winner feeds and the top_game / btm_game class says which side.
+      // Both land in smallint columns; an out-of-range value would throw on
+      // write and abort the whole page's sync, so degrade to "no slot".
+      const slotAttr = parseInt($game.attr('data-index') ?? '', 10);
+      const labelMatch = $matchLink.text().trim().match(/^G\s*(\d+)$/i);
+      const bracketSlot = smallintOrNull(
+        Number.isFinite(slotAttr) ? slotAttr : labelMatch ? parseInt(labelMatch[1], 10) : null,
+      );
+      const relation = ($game.attr('data-relation') ?? '').trim();
+      const nextUsauGameId = relation.startsWith('game') ? relation.slice(4) : relation || null;
+      const nextSlotSide: 'top' | 'btm' | null = $game.hasClass('top_game')
+        ? 'top'
+        : $game.hasClass('btm_game')
+          ? 'btm'
+          : null;
+
       games.push({
         usau_game_id,
         usau_event_game_id,
         round: classifyRound(currentH4, currentH3),
         bracket_name: currentH3,
+        bracket_stage: currentH4,
+        bracket_stage_index: smallintOrNull(currentStageIndex >= 0 ? currentStageIndex : null),
+        bracket_slot: bracketSlot,
+        next_usau_game_id: nextUsauGameId,
+        next_slot_side: nextSlotSide,
         home_event_team_id: homeEventTeamId,
         away_event_team_id: awayEventTeamId,
         home_seed: home.seed,
@@ -1072,6 +1130,13 @@ async function persistSchedulePage(
       source_url: url,
       team_a_placeholder: g.home_placeholder,
       team_b_placeholder: g.away_placeholder,
+      // Written unconditionally so a re-scrape clears stale structure when
+      // USAU redraws a bracket.
+      bracket_stage: g.bracket_stage,
+      bracket_stage_index: g.bracket_stage_index,
+      bracket_slot: g.bracket_slot,
+      next_usau_game_id: g.next_usau_game_id,
+      next_slot_side: g.next_slot_side,
     };
     // Only set an id column when we actually have one, so an UPDATE that
     // reconciled the OTHER pipeline's row doesn't null out its id.

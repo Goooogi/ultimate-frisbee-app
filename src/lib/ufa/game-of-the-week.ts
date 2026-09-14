@@ -212,7 +212,8 @@ export interface UfaPlayoffGame {
  *
  * Same structural playoff detection as pickPlayoffSlate (weeks after the last
  * ≥6-game bulk week holding ≤4 real games), applied to finished games instead
- * of upcoming ones. 2026 shape: week-15 (4 divisional games) + week-16 (2
+ * of upcoming ones. `games` must be ONE season: week-N counts summed across
+ * two seasons read the playoff weeks as bulk weeks (see ufaTitleSeasonGames). 2026 shape: week-15 (4 divisional games) + week-16 (2
  * semis + final) = 7 rows; the all-star exhibition shares week-16 and is
  * excluded. Round labels are positional: the chronologically last bracket game
  * is the title game, the two before it are the semis, anything earlier is the

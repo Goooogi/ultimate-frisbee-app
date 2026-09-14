@@ -3,7 +3,7 @@
 // WUL game-detail component — mirrors pul-game-detail.tsx exactly.
 // Differences from PUL:
 //   • WulGameTeamSide carries accentColor directly — no neutral fallback needed.
-//   • WUL has no venue/time in data — location line is omitted from StatusStrip.
+//   • WUL has no venue in data — location line is omitted from StatusStrip.
 //   • WulBoxscoreRow is richer: adds pointsPlayed, totalYards, completions, throws.
 //     The box score table adds a Pts column (hidden on mobile) for pointsPlayed.
 //   • plusMinus can be fractional (.5) in WUL data — format with up to one decimal.
@@ -181,8 +181,8 @@ function DetailBody({ game, boxscore, spotlight }: WulGameDetailProps) {
 }
 
 // ── Status strip ──────────────────────────────────────────────────────────────
-// WUL data has no venue/time — we only show the date meta on final games.
-// Upcoming games show just the date in the main strip (no location line).
+// WUL data has no venue — we only show the date meta on final games.
+// Upcoming games show date + time in the main strip (no location line).
 
 function StatusStrip({ game, isFinal }: { game: WulGame; isFinal: boolean }) {
   return (
@@ -198,6 +198,7 @@ function StatusStrip({ game, isFinal }: { game: WulGame; isFinal: boolean }) {
         {!isFinal && game.gameDate && (
           <span className="text-[20px] md:text-[28px] font-bold tracking-[-0.03em] text-ink tabular leading-none">
             {formatGameDate(game.gameDate)}
+            {game.gameTime ? ` · ${game.gameTime}` : ''}
           </span>
         )}
       </div>

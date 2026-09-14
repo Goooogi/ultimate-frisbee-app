@@ -160,6 +160,7 @@ const LOGO_HISTORY: Record<string, ReadonlyArray<{ through: number; logo: string
   legion: [{ through: 2021, logo: '/teams/ufa/roughnecks.png' }],
   union: [{ through: 2019, logo: '/teams/ufa/wildfire.png' }],
   cascades: [{ through: 2014, logo: '/teams/ufa/raptors.png' }],
+  apex: [{ through: 2025, logo: '/teams/ufa/summit.png' }], // watchufa logo-team-COL.png via Wayback (2024-07/2025-07)
 };
 
 /** Logo path for a franchise in a given season — the era's own mark for
@@ -170,6 +171,19 @@ export function teamLogoForYear(teamID: string, year: number): string | undefine
     if (year <= e.through) return e.logo;
   }
   return TEAM_META[slug]?.logo;
+}
+
+/** TeamMeta as the franchise looked in `year` — the era's nickname and logo
+ *  (Roughnecks ≤2021, Summit ≤2025, …). City is left alone: game surfaces get
+ *  it historical from the API game. `year` undefined → the current brand. */
+export function teamMetaForYear(teamID: string, year: number | undefined): TeamMeta {
+  const meta = teamMeta(teamID);
+  if (year == null) return meta;
+  return {
+    ...meta,
+    name: teamNameForYear(teamID, year) ?? meta.name,
+    logo: teamLogoForYear(teamID, year) ?? meta.logo,
+  };
 }
 
 export function teamInternalID(slugOrInt: string | number): number | null {
