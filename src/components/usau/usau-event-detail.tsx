@@ -744,6 +744,7 @@ function DivisionContent({
           label={showGroupPrefixes ? label || null : null}
           competitionLevel={level || event.competitionLevel}
           genderDivision={division || null}
+          season={event.season}
         />
       ))}
 
@@ -755,6 +756,7 @@ function DivisionContent({
           wins={poolLeader.wins}
           losses={poolLeader.losses}
           competitionLevel={level || event.competitionLevel}
+          season={event.season}
         />
       )}
 
@@ -779,6 +781,7 @@ function DivisionContent({
                   records={poolRecords}
                   games={poolGames.get(pool.name) ?? []}
                   venueState={venueKeyFor(event, division)}
+                  season={event.season}
                 />
               ))}
             </div>
@@ -797,6 +800,7 @@ function DivisionContent({
                   poolName={bracketLabel(pool.name)}
                   games={poolGames.get(pool.name) ?? []}
                   venueState={venueKeyFor(event, division)}
+                  season={event.season}
                 />
               ))}
             </div>
@@ -815,7 +819,7 @@ function DivisionContent({
                   </h2>
                   <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                     {grp.games.map((g) => (
-                      <GameRow key={g.id} game={g} venueState={venueKeyFor(event, division)} />
+                      <GameRow key={g.id} game={g} venueState={venueKeyFor(event, division)} season={event.season} />
                     ))}
                   </ul>
                 </section>
@@ -833,6 +837,7 @@ function DivisionContent({
           placementBrackets={placementBrackets}
           bracketLabel={bracketLabel}
           venueState={venueKeyFor(event, division)}
+          season={event.season}
         />
       )}
 
@@ -863,12 +868,14 @@ function BracketView({
   placementBrackets,
   bracketLabel,
   venueState,
+  season,
 }: {
   games: Game[];
   teams: Team[];
   placementBrackets: Array<{ name: string; games: Game[] }>;
   bracketLabel: (name: string) => string;
   venueState: string | null;
+  season?: number | null;
 }) {
   const hasTree = games.some((g) => isChampionshipBracket(g));
 
@@ -892,6 +899,7 @@ function BracketView({
             key={bracket.name}
             bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
             venueState={venueState}
+            season={season}
           />
         ))}
       </div>
@@ -900,7 +908,7 @@ function BracketView({
 
   return (
     <div className="flex flex-col gap-9">
-      <UsauBracketTree games={games} teams={teams} venueState={venueState} />
+      <UsauBracketTree games={games} teams={teams} venueState={venueState} season={season} />
 
       {renderGroups.length > 0 && (
         <div className="flex flex-col gap-7">
@@ -911,12 +919,14 @@ function BracketView({
                 label={bracketLabel(bracket.name)}
                 games={bracket.games}
                 venueState={venueState}
+                season={season}
               />
             ) : (
               <BracketBlock
                 key={bracket.name}
                 bracket={{ name: bracketLabel(bracket.name), games: bracket.games }}
                 venueState={venueState}
+                season={season}
                 treeSized
               />
             ),
@@ -971,17 +981,19 @@ function PlacementTree({
   label,
   games,
   venueState,
+  season,
 }: {
   label: string;
   games: Game[];
   venueState: string | null;
+  season?: number | null;
 }) {
   return (
     <div>
       <h3 className="font-display italic font-bold text-[22px] leading-tight tracking-[-0.02em] text-ink mb-3">
         {label}
       </h3>
-      <UsauPlacementBracketTree games={games} venueState={venueState} />
+      <UsauPlacementBracketTree games={games} venueState={venueState} season={season} />
     </div>
   );
 }
@@ -1029,6 +1041,7 @@ function ChampionBanner({
   label,
   competitionLevel,
   genderDivision,
+  season,
 }: {
   game: Game;
   /** Bracket-group qualifier ("GGM Women") when the view holds multiple
@@ -1036,6 +1049,9 @@ function ChampionBanner({
   label?: string | null;
   competitionLevel: string;
   genderDivision: string | null;
+  /** Event season → `?season=` on team links, so a team clicked from a 2014
+   *  tournament opens its 2014 page. See UsauTeamHistory's param read. */
+  season?: number | null;
 }) {
   const aWon = game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
   const winnerName = aWon ? game.teamAName : game.teamBName;
@@ -1075,7 +1091,7 @@ function ChampionBanner({
       <div className="flex items-center justify-between gap-3 px-4 py-4">
         {winnerId ? (
           <Link
-            href={`/usau/teams/${winnerId}`}
+            href={season != null ? `/usau/teams/${winnerId}?season=${season}` : `/usau/teams/${winnerId}`}
             className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
           >
             {WinnerInner}
@@ -1093,11 +1109,13 @@ function PoolLeaderBanner({
   wins,
   losses,
   competitionLevel,
+  season,
 }: {
   team: Team;
   wins: number;
   losses: number;
   competitionLevel: string;
+  season?: number | null;
 }) {
   const Inner = (
     <span className="flex items-center gap-3 min-w-0">
@@ -1131,7 +1149,7 @@ function PoolLeaderBanner({
       </div>
       <div className="flex items-center justify-between gap-3 px-4 py-4">
         <Link
-          href={`/usau/teams/${team.teamId}`}
+          href={season != null ? `/usau/teams/${team.teamId}?season=${season}` : `/usau/teams/${team.teamId}`}
           className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
         >
           {Inner}
@@ -1161,9 +1179,11 @@ function PoolCard({
   records,
   games,
   venueState,
+  season,
 }: {
   pool: { name: string; teams: Team[] };
   competitionLevel: string;
+  season?: number | null;
   records: Map<string, { wins: number; losses: number; diff: number }>;
   /** That pool's games, sorted by scheduled time — rendered in a collapsed-
    *  by-default "Games" disclosure beneath the standings (mobile parity:
@@ -1252,7 +1272,7 @@ function PoolCard({
           return (
             <li key={t.teamId} className="border-t border-hairline">
               <Link
-                href={`/usau/teams/${t.teamId}`}
+                href={season != null ? `/usau/teams/${t.teamId}?season=${season}` : `/usau/teams/${t.teamId}`}
                 className="flex items-center gap-3 px-4 py-2.5 hover:bg-ink/[0.03] transition-colors no-underline"
               >
                 <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
@@ -1305,7 +1325,7 @@ function PoolCard({
           {gamesOpen && (
             <ul id={panelId} className="flex flex-col gap-2 px-3 pb-3">
               {games.map((g) => (
-                <GameRow key={g.id} game={g} venueState={venueState} />
+                <GameRow key={g.id} game={g} venueState={venueState} season={season} />
               ))}
             </ul>
           )}
@@ -1334,9 +1354,11 @@ function BracketBlock({
   bracket,
   venueState,
   treeSized = false,
+  season,
 }: {
   bracket: { name: string; games: Game[] };
   venueState?: string | null;
+  season?: number | null;
   /** Render the games as tree-sized MatchCards (BracketScroller columns)
    *  instead of full-width GameRows — used when the group sits alongside
    *  bracket trees so every card on the tab is the same size. */
@@ -1390,6 +1412,7 @@ function BracketBlock({
         <UsauFlatBracketCards
           rounds={rounds.map(({ label, games }) => ({ label, games }))}
           venueState={venueState}
+          season={season}
         />
       ) : (
         <div className="flex flex-col gap-4">
@@ -1400,7 +1423,7 @@ function BracketBlock({
               </div>
               <ul className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {games.map((g) => (
-                  <GameRow key={g.id} game={g} venueState={venueState} />
+                  <GameRow key={g.id} game={g} venueState={venueState} season={season} />
                 ))}
               </ul>
             </div>
@@ -1423,10 +1446,12 @@ function PoolScheduleTable({
   poolName,
   games,
   venueState,
+  season,
 }: {
   poolName: string;
   games: Game[];
   venueState?: string | null;
+  season?: number | null;
 }) {
   if (games.length === 0) return null;
 
@@ -1478,10 +1503,10 @@ function PoolScheduleTable({
                   <td className="px-4 py-2.5 text-muted whitespace-nowrap tabular">{timeLabel || '—'}</td>
                   <td className="px-4 py-2.5 text-muted whitespace-nowrap tabular">{field}</td>
                   <td className="px-4 py-2.5">
-                    <TeamCell name={g.teamAName} teamId={g.teamAId} won={aWon} />
+                    <TeamCell name={g.teamAName} teamId={g.teamAId} won={aWon} season={season} />
                   </td>
                   <td className="px-4 py-2.5">
-                    <TeamCell name={g.teamBName} teamId={g.teamBId} won={bWon} />
+                    <TeamCell name={g.teamBName} teamId={g.teamBId} won={bWon} season={season} />
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap tabular font-bold">
                     {hasScore ? (
@@ -1514,17 +1539,19 @@ function TeamCell({
   name,
   teamId,
   won,
+  season,
 }: {
   name: string | null;
   teamId: string | null;
   won: boolean;
+  season?: number | null;
 }) {
   const label = name ?? 'TBD';
   const cls = ['truncate', won ? 'font-bold text-ink' : 'font-medium text-muted'].join(' ');
   if (!teamId || !name) return <span className={cls}>{label}</span>;
   return (
     <Link
-      href={`/usau/teams/${teamId}`}
+      href={season != null ? `/usau/teams/${teamId}?season=${season}` : `/usau/teams/${teamId}`}
       className={`${cls} no-underline hover:text-accent transition-colors`}
     >
       {label}
@@ -1537,8 +1564,11 @@ function GameRow({
   showBracket,
   bracketLabel,
   venueState,
+  season,
 }: {
   game: Game;
+  /** Event season → `?season=` on the team links inside this row. */
+  season?: number | null;
   /** Crossovers span several bracket_names in one list — show which one. */
   showBracket?: boolean;
   bracketLabel?: (name: string) => string;
@@ -1602,6 +1632,7 @@ function GameRow({
         score={hasScore ? game.scoreA : null}
         won={aWon}
         lost={bWon}
+        season={season}
       />
       <TeamLine
         name={game.teamBName ?? shortPlaceholder(game.teamBPlaceholder)}
@@ -1610,6 +1641,7 @@ function GameRow({
         score={hasScore ? game.scoreB : null}
         won={bWon}
         lost={aWon}
+        season={season}
       />
     </li>
   );
@@ -1622,6 +1654,7 @@ function TeamLine({
   score,
   won,
   lost,
+  season,
 }: {
   name: string | null;
   seed: number | null;
@@ -1629,6 +1662,7 @@ function TeamLine({
   score: number | null;
   won: boolean;
   lost: boolean;
+  season?: number | null;
 }) {
   const inner = (
     <span
@@ -1650,7 +1684,7 @@ function TeamLine({
     <div className="flex items-center gap-3 py-1">
       {teamId ? (
         <Link
-          href={`/usau/teams/${teamId}`}
+          href={season != null ? `/usau/teams/${teamId}?season=${season}` : `/usau/teams/${teamId}`}
           className="flex-1 min-w-0 hover:text-accent transition-colors no-underline"
         >
           {inner}

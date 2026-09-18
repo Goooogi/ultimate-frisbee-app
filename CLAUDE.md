@@ -40,6 +40,7 @@ Key notes by area:
 | Firewall / bot blocking / efficiency debt | `Ops/Security & Efficiency Backlog.md` |
 | Player profiles, shared RPC, cross-league merge | `Player Identity/Player Profile RPC Migration.md` |
 | USAU ingestion, scrapers, cron | `Pipelines/USAU Scraper Pipeline.md`, `Pipelines/USAU Masters Ingestion Plan.md` |
+| **Backfilling** USAU events / teams / rosters | `Pipelines/USAU Backfill Runbook.md` — START HERE (living runbook, updated in place) |
 | Any other league's ingest | `Pipelines/` — one note per league (EUCS, PUL, WUL, WFDF, UFA) |
 | Mobile parity | `Mobile/Mobile Web Alignment.md` |
 | UTCG card game | `Features/UTCG Card Game.md` |

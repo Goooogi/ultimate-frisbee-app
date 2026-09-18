@@ -71,7 +71,7 @@ function extractEventTeamIdsByName(html: string): Map<string, string> {
 /** Generate plausible slug variants. ultirzr sometimes derives slugs in
  *  ways that don't match USAU's URL (e.g. "Men's" → "men-s" instead of
  *  "mens"). Try the primary first, then fall through alternates. */
-function slugVariants(slug: string, allowYearStrip = false): string[] {
+function slugVariants(slug: string, allowYearStrip = false, season?: number | null): string[] {
   const variants = new Set<string>();
   const forms = [
     slug,
@@ -97,6 +97,25 @@ function slugVariants(slug: string, allowYearStrip = false): string[] {
     const m = f.match(/^(.+-(?:19|20)\d{2})-.+$/);
     if (m) variants.add(m[1]);
   }
+  // The INVERSE of the year-strip below: our slug is year-less but USAU's url
+  // carries a trailing year. Club Series events 2016 and 2018 are stored this
+  // way (ingest took the bare event name), so every fetch 404s and the event
+  // resolves zero team urls — 791 teams in 2018, 57 in 2016.
+  // Verified 2026-09-14: founders-mens-sectional-championship-2018,
+  // northeast-mens-regional-championship-2018, nor-cal-mixed-…-2018,
+  // south-central-mens-regionals-2016 and northwest-plains-mens-sectionals-2016
+  // all 200 under this rule while the stored year-less form 404s.
+  //
+  // Needs no gate: it ADDS the event's own season, so it can never resolve to a
+  // different season's page (the danger the year-strip guards against). Only
+  // applied to a slug that has no year at either end, so a year-leading or
+  // year-trailing slug is left alone.
+  if (season) {
+    for (const f of forms) {
+      if (/^(19|20)\d{2}-/.test(f) || /-(19|20)\d{2}$/.test(f)) continue;
+      variants.add(`${f}-${season}`);
+    }
+  }
   // USAU serves many recurring tournaments at a YEAR-LESS url — our slug
   // carries the year (from ultirzr or a year-disambiguated ingest), so the
   // year-suffixed url 404s and the event resolves zero team urls.
@@ -120,6 +139,7 @@ async function resolveOneEvent(
   slug: string,
   competitionLevel: string | null,
   onlyGender?: RequestBody['gender'],
+  season?: number | null,
 ): Promise<{ resolved: number; skipped: number; error?: string; usedSlug?: string }> {
   // Masters events need masters URL segments, and one combined event (the
   // Masters Championships) hosts Masters + Grand Masters + Great Grand
@@ -245,7 +265,7 @@ async function resolveOneEvent(
 
     for (const seg of levelSegments) {
       let html: string | null = null;
-      outer: for (const candidate of slugVariants(usedSlug ?? slug, allowYearStrip)) {
+      outer: for (const candidate of slugVariants(usedSlug ?? slug, allowYearStrip, season)) {
         for (const url of eventScheduleUrlVariants(candidate, urlGender, seg)) {
           try {
             html = await fetchHtml(url);
@@ -292,7 +312,24 @@ async function resolveOneEvent(
     // our identity. usau_slug is already published in links and favorites, so
     // adopting the shortened form would 404 them.
     const isSuffixTruncated = usedSlug !== slug && slug.startsWith(`${usedSlug}-`);
-    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated) {
+    // Same for the year-APPENDED variant (2016/2018 Club Series): USAU serves
+    // the page at "<our slug>-<season>", but our year-less slug is the published
+    // identity. Fetching from the year-suffixed url is fine; adopting it is not.
+    //
+    // Compare against the year-appended form of EVERY slug form, not just the
+    // raw slug: the winning candidate is usually ALSO `-s-`-collapsed
+    // (founders-men-s-… → founders-mens-…-2018), so a bare
+    // `usedSlug === slug-season` check never matches and the rewrite escapes.
+    const isYearAppended =
+      usedSlug !== slug &&
+      !!season &&
+      [
+        slug,
+        slug.replace(/-s-/g, 's-'),
+        slug.replace(/-s$/, 's'),
+        slug.replace(/-s-/g, 's-').replace(/-s$/, 's'),
+      ].some((f) => usedSlug === `${f}-${season}`);
+    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated && !isYearAppended) {
       const { error: updErr } = await db
         .from('usau_events')
         .update({ usau_slug: usedSlug })
@@ -382,7 +419,7 @@ async function run(body: RequestBody) {
     if (!skipResolved) {
       // future: support force-rerun
     }
-    const result = await resolveOneEvent(db, e.id, e.usau_slug, e.competition_level, body.gender);
+    const result = await resolveOneEvent(db, e.id, e.usau_slug, e.competition_level, body.gender, e.season);
     perEvent.push({
       slug: result.usedSlug ?? e.usau_slug,
       season: e.season,

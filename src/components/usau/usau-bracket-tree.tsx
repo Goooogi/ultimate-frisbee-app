@@ -43,6 +43,12 @@ interface Props {
    *  championship. Off by default: the event page surfaces placement through
    *  its own dropdown filter, and rendering both duplicates every game. */
   includePlacement?: boolean;
+  /** The event's season, appended to team links as `?season=` so clicking a
+   *  team from a 2014 tournament lands on that team's 2014 page instead of its
+   *  most recent one (UsauTeamHistory reads the param and falls back to the
+   *  newest season when the team has no row for it). Optional: omit and links
+   *  keep today's behavior. */
+  season?: number | null;
 }
 
 interface RoundColumn {
@@ -109,11 +115,20 @@ export function bracketGroupPrefix(name: string | null | undefined): string {
 export function UsauPlacementBracketTree({
   games,
   venueState,
+  season,
 }: {
   games: Game[];
   venueState?: string | null;
+  season?: number | null;
 }) {
-  return <BracketTreeGroup games={games} label={null} venueState={venueState ?? null} />;
+  return (
+    <BracketTreeGroup
+      games={games}
+      label={null}
+      venueState={venueState ?? null}
+      season={season ?? null}
+    />
+  );
 }
 
 /**
@@ -127,9 +142,11 @@ export function UsauPlacementBracketTree({
 export function UsauFlatBracketCards({
   rounds,
   venueState,
+  season,
 }: {
   rounds: Array<{ label: string; games: Game[] }>;
   venueState?: string | null;
+  season?: number | null;
 }) {
   const { nodeColumns, positions } = useMemo(() => {
     const columns: SlotColumn[] = rounds.map((r, ci) => ({
@@ -163,12 +180,12 @@ export function UsauFlatBracketCards({
     <BracketScroller
       columns={nodeColumns}
       positions={positions}
-      renderCard={(g) => <MatchCard slot={g.slot} venueState={venueState ?? null} />}
+      renderCard={(g) => <MatchCard slot={g.slot} venueState={venueState ?? null} season={season ?? null} />}
     />
   );
 }
 
-export function UsauBracketTree({ games, venueState, includePlacement = false }: Props) {
+export function UsauBracketTree({ games, venueState, includePlacement = false, season }: Props) {
   // ── Which brackets this tree renders ──────────────────────────────────
   // Tournaments run parallel placement brackets (5th, 9th, 13th …) that decide
   // real finishes, and this component can bucket EVERY bracket game by
@@ -225,6 +242,7 @@ export function UsauBracketTree({ games, venueState, includePlacement = false }:
                 : null
             }
             venueState={venueState ?? null}
+            season={season ?? null}
           />
         ))}
       </div>
@@ -236,10 +254,12 @@ function BracketTreeGroup({
   games,
   label,
   venueState,
+  season,
 }: {
   games: Game[];
   label: string | null;
   venueState: string | null;
+  season?: number | null;
 }) {
   // ── Split into round columns, complete the bracket, assign positions ───
   // assignPositions establishes the vertical slot order (side effect), so the
@@ -283,7 +303,7 @@ function BracketTreeGroup({
       <BracketScroller
         columns={nodeColumns}
         positions={positions}
-        renderCard={(g) => <MatchCard slot={g.slot} venueState={venueState} />}
+        renderCard={(g) => <MatchCard slot={g.slot} venueState={venueState} season={season ?? null} />}
       />
     </div>
   );
@@ -295,10 +315,12 @@ function MatchCard({
   slot,
   venueState,
   compact = false,
+  season,
 }: {
   slot: Slot;
   venueState: string | null;
   compact?: boolean;
+  season?: number | null;
 }) {
   const game = slot.game;
   const tag = `G${slot.number}`;
@@ -320,6 +342,7 @@ function MatchCard({
           won={false}
           lost={false}
           compact={compact}
+          season={season}
         />
         <div className="h-px bg-hairline" />
         <TeamLine
@@ -331,6 +354,7 @@ function MatchCard({
           won={false}
           lost={false}
           compact={compact}
+          season={season}
         />
       </article>
     );
@@ -394,6 +418,7 @@ function MatchCard({
         won={aWon}
         lost={bWon}
         compact={compact}
+        season={season}
       />
       <div className="h-px bg-hairline" />
       <TeamLine
@@ -405,6 +430,7 @@ function MatchCard({
         won={bWon}
         lost={aWon}
         compact={compact}
+        season={season}
       />
     </article>
   );
@@ -419,7 +445,9 @@ function TeamLine({
   won,
   lost,
   compact,
+  season,
 }: {
+  season?: number | null;
   teamId: string | null;
   name: string | null;
   /** Shown in place of "TBD" when the team isn't decided yet but the slot's
@@ -452,7 +480,7 @@ function TeamLine({
     <div className={`flex items-center gap-3 px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       {teamId ? (
         <Link
-          href={`/usau/teams/${teamId}`}
+          href={season != null ? `/usau/teams/${teamId}?season=${season}` : `/usau/teams/${teamId}`}
           className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
         >
           {inner}

@@ -1028,27 +1028,6 @@ export async function getCurrentEvent(opts?: {
       : (a.start_date ?? '').localeCompare(b.start_date ?? '');
   };
 
-  // The preferred bucket differs by direction:
-  //   • Looking BACK (Sun–Tue): events that have STARTED (start_date ≤
-  //     today) — NOT events that have ENDED. "Last weekend's tournament"
-  //     must include one still finishing today: on the Sunday of a Sat–Sun
-  //     flagship, an ended-only bucket ranked a Saturday-only local
-  //     (Pioneer Valley Pool Party, ended 7/11) over the live Pro Elite
-  //     Challenge West (ends 7/12), because flight only breaks ties WITHIN
-  //     a bucket.
-  //   • Looking FORWARD (Wed–Sat): events that haven't finished (end ≥
-  //     today) — keeps a live Saturday tournament ahead of next weekend's
-  //     calendar entries.
-  const preferred = lookForward
-    ? events.filter((e) => endOf(e) >= today).sort(byWeekendThenFlight(false))
-    : events
-        .filter((e) => (e.start_date ?? '') !== '' && (e.start_date ?? '') <= today)
-        .sort(byWeekendThenFlight(true));
-  const preferredIds = new Set(preferred.map((e) => e.id));
-  const rest = events
-    .filter((e) => !preferredIds.has(e.id))
-    .sort(byWeekendThenFlight(!lookForward));
-
   // IN-PROGRESS FIRST. A tournament happening RIGHT NOW (start ≤ today ≤ end)
   // always headlines Scores, ahead of both the weekend rule and flight rank.
   //
@@ -1067,26 +1046,50 @@ export async function getCurrentEvent(opts?: {
   };
   const inProgress = events.filter(isInProgress).sort(byWeekendThenFlight(true));
   const inProgressIds = new Set(inProgress.map((e) => e.id));
+  const notLive = (e: EventRow) => !inProgressIds.has(e.id);
+  const hasGames = (e: EventRow) => (counts.get(e.id) ?? 0) > 0;
+  const startOf = (e: EventRow) => e.start_date ?? '';
 
-  // Preferred side first, then the other side as a graceful fallback (e.g. early
-  // in a season there is no "last weekend"; at season's end no "next weekend").
-  const ordered = [
-    ...inProgress,
-    ...preferred.filter((e) => !inProgressIds.has(e.id)),
-    ...rest.filter((e) => !inProgressIds.has(e.id)),
-  ];
+  // Three buckets behind the live one:
+  //   • UPCOMING — hasn't finished (end ≥ today), nearest weekend first. Games
+  //     are NOT required: a Regionals whose brackets aren't posted yet is still
+  //     the event everyone knows is next, and the slide reads "brackets
+  //     pending". Hunter, 2026-09-17: "when there isn't an upcoming tournament
+  //     we should always default to the next event we know is happening."
+  //   • JUST PLAYED — started within the last 7 days and has results. This is
+  //     "last weekend's tournament", and it must include one still finishing
+  //     today (on the Sunday of a Sat–Sun flagship an ended-only rule once
+  //     ranked a Saturday-only local over the live Pro Elite Challenge West).
+  //   • OLDER — earlier in-window results, most recent first. Last resort.
+  //
+  // Direction only decides whether UPCOMING or JUST PLAYED comes first: from
+  // Wednesday we look forward to the coming weekend, Sun–Tue we look back at
+  // the one that just happened. Older results never beat a known upcoming
+  // event. Before this, a gameless upcoming weekend fell through to ANY
+  // in-window past event with games — and that list was sorted oldest-first
+  // by a flipped comparator — so mid-September (Sectionals done, Regionals
+  // nine days out) the hero showed an August 8 local tournament.
+  const weekAgo = usauToday(new Date(now.getTime() - 7 * 86400_000));
+  const upcoming = events
+    .filter((e) => notLive(e) && endOf(e) >= today)
+    .sort(byWeekendThenFlight(false));
+  const justPlayed = events
+    .filter((e) => notLive(e) && hasGames(e) && startOf(e) >= weekAgo && startOf(e) <= today)
+    .sort(byWeekendThenFlight(true));
+  const older = events
+    .filter((e) => notLive(e) && hasGames(e) && startOf(e) !== '' && startOf(e) < weekAgo)
+    .sort(byWeekendThenFlight(true));
+  const ordered = lookForward
+    ? [...inProgress, ...upcoming, ...justPlayed, ...older]
+    : [...inProgress, ...justPlayed, ...upcoming, ...older];
 
-  // Prefer an in-window event that actually has games. Only if NONE do (e.g. the
-  // upcoming weekend's brackets aren't scraped yet) fall through to the best
-  // gameless pick so the preview still shows "brackets pending"; the DB-wide
-  // fallback below then guarantees the page is never truly empty.
+  // hasGames=false → the preview shows "brackets pending"; the DB-wide
+  // fallback below guarantees the page is never truly empty.
   const pick = (e: EventRow, hasGames: boolean): UsauCurrentPick => {
     const series = stageById.get(e.id);
     return series ? { series, hasGames } : { slug: e.usau_slug, hasGames };
   };
-  const withGames = ordered.find((e) => (counts.get(e.id) ?? 0) > 0);
-  if (withGames) return pick(withGames, true);
-  if (ordered.length > 0) return pick(ordered[0], false);
+  if (ordered.length > 0) return pick(ordered[0], hasGames(ordered[0]));
 
   // Final fallback: most-recent flagship event with games anywhere in DB.
   // Apply the division filter via the team-participation join when set.
@@ -3938,7 +3941,7 @@ export interface UsauEventMember {
 /** Series identity of a merged event (see the 20260911200000 migration). */
 export interface UsauEventSeries {
   season: number;
-  /** club-sectionals | club-regionals | college-regionals | masters-regionals */
+  /** club-sectionals | club-regionals | college-conferences | college-regionals | masters-regionals */
   stage: string;
   /** club | d-i | d-iii | dev | masters | grand-masters | great-grand-masters */
   tier: string;
@@ -4220,6 +4223,7 @@ export type UsauFeedCard =
 const SERIES_STAGE_TITLE: Record<UsauSeriesStage, string> = {
   'club-sectionals': 'USAU Sectionals',
   'club-regionals': 'USAU Regionals',
+  'college-conferences': 'College Conferences',
   'college-regionals': 'College Regionals',
   'masters-regionals': 'Regionals',
 };

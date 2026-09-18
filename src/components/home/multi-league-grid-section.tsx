@@ -15,7 +15,7 @@ import type { WulGame } from '@/lib/wul/data';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import type { UsauFeedCard, UsauMajorWithChampions, UsauSeriesStageCard } from '@/lib/usau/data';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
-import { seriesListHref, seriesUnitLabel } from '@/lib/league';
+import { seriesListHref, seriesUnitLabel, seriesUnitNoun } from '@/lib/league';
 import { GameTile } from '@/components/home/game-grid-section';
 import { PulTeamLogo } from '@/components/pul-team-logo';
 import { WulTeamLogo } from '@/components/wul-team-logo';
@@ -338,7 +338,7 @@ function UsauMajorCard({ major }: { major: UsauMajorWithChampions }) {
 function UsauSeriesCard({ card }: { card: UsauSeriesStageCard }) {
   const dateRange = formatDateRange(card.startDate, card.endDate);
   const inProgress = (card.endDate ?? card.startDate ?? '') >= usauToday();
-  const unit = card.stage === 'club-sectionals' ? 'sections' : 'regions';
+  const unit = `${seriesUnitNoun(card.stage)}s`;
   return (
     <Link
       href={seriesListHref('scores', card)}

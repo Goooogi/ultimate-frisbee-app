@@ -186,7 +186,9 @@ function TrophyIcon() {
 function UsauMajorRow({ major, first }: { major: UsauMajorWithChampions; first: boolean }) {
   const champLine =
     major.champions.length === 0
-      ? 'Results pending'
+      ? major.cancelledFinals?.length
+        ? 'Final cancelled'
+        : 'Results pending'
       : major.champions.map((c) => c.teamName).join(' · ');
   // Every champion's real logo, or none (Hunter, 2026-09-13): showing only the
   // first champion — or a real logo next to an initials fallback — read as

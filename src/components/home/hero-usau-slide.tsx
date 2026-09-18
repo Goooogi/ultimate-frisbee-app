@@ -9,7 +9,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { UsauEventSummary, UsauSeriesStageCard } from '@/lib/usau/data';
-import { seriesStageHref } from '@/lib/league';
+import { seriesStageHref, seriesUnitNoun } from '@/lib/league';
 import { HeroFieldLines } from './field-diagram';
 
 const USAU_BG = '#173A7A';
@@ -70,7 +70,8 @@ export function HeroUsauSeriesSlide({
   pill?: string;
 }) {
   const dateRange = formatDateRange(series.startDate, series.endDate);
-  const unit = series.stage === 'club-sectionals' ? 'Sections' : 'Regions';
+  const noun = seriesUnitNoun(series.stage);
+  const unit = `${noun[0].toUpperCase()}${noun.slice(1)}s`;
   return (
     <UsauSlideFrame
       pill={pill}

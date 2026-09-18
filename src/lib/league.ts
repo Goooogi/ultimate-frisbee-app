@@ -91,31 +91,49 @@ export const USAU_LEVELS: UsauLevel[] = [
 ];
 
 // ─── USAU series stages ────────────────────────────────────────────────
-// Sectionals / Regionals roll up into ONE card per stage (usau_events.series_*
-// columns). /scores and /schedule address a stage as ?series=sectionals|
-// regionals plus the usual ?level=; the stage follows from the pair.
+// Sectionals / Conferences / Regionals roll up into ONE card per stage
+// (usau_events.series_* columns). /scores and /schedule address a stage as
+// ?series=sectionals|conferences|regionals plus the usual ?level=; the stage
+// follows from the pair. College's sectional round is USAU's "Conferences".
 
 export type UsauSeriesStage =
   | 'club-sectionals'
   | 'club-regionals'
+  | 'college-conferences'
   | 'college-regionals'
   | 'masters-regionals';
 
+const SERIES_PARAM: Record<UsauSeriesStage, string> = {
+  'club-sectionals': 'sectionals',
+  'club-regionals': 'regionals',
+  'college-conferences': 'conferences',
+  'college-regionals': 'regionals',
+  'masters-regionals': 'regionals',
+};
+
 /** ?series= + level → stage. Null for anything else, including pairs that
- *  don't exist (college and masters play no sectionals), so callers skip the
- *  series queries entirely for crawler-invented URLs. */
+ *  don't exist (only club plays sectionals, only college plays conferences),
+ *  so callers skip the series queries entirely for crawler-invented URLs. */
 export function parseSeriesParam(value: string | null | undefined, level: UsauLevel): UsauSeriesStage | null {
+  const college = level === 'COLLEGE_D1' || level === 'COLLEGE_D3';
   if (value === 'sectionals') return level === 'CLUB' ? 'club-sectionals' : null;
+  if (value === 'conferences') return college ? 'college-conferences' : null;
   if (value !== 'regionals') return null;
   if (level === 'CLUB') return 'club-regionals';
-  if (level === 'COLLEGE_D1' || level === 'COLLEGE_D3') return 'college-regionals';
+  if (college) return 'college-regionals';
   return 'masters-regionals';
 }
 
-/** "27 sections" / "8 regions". */
+/** section | conference | region — what one merged tournament in the stage is. */
+export function seriesUnitNoun(stage: UsauSeriesStage): string {
+  if (stage === 'club-sectionals') return 'section';
+  if (stage === 'college-conferences') return 'conference';
+  return 'region';
+}
+
+/** "27 sections" / "32 conferences" / "8 regions". */
 export function seriesUnitLabel(stage: UsauSeriesStage, count: number): string {
-  const unit = stage === 'club-sectionals' ? 'section' : 'region';
-  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+  return `${count} ${seriesUnitNoun(stage)}${count === 1 ? '' : 's'}`;
 }
 
 /** A stage's list of merged tournaments: /scores for results (pinned to the
@@ -126,7 +144,7 @@ export function seriesListHref(
 ): string {
   const params = new URLSearchParams({
     league: 'usau',
-    series: stage.stage === 'club-sectionals' ? 'sectionals' : 'regionals',
+    series: SERIES_PARAM[stage.stage],
   });
   if (stage.level !== DEFAULT_LEVEL) params.set('level', levelToParam(stage.level));
   if (surface === 'scores') params.set('season', String(stage.season));
