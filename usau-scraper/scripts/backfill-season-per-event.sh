@@ -64,11 +64,13 @@ PGURL="${PGURL:-}"
 LEVEL="${LEVEL:-CLUB}"
 GAP="${GAP:-20}"
 MAX_CONSEC_FAIL="${MAX_CONSEC_FAIL:-3}"
+MAX_CONSEC_000="${MAX_CONSEC_000:-5}"
 DRY="${DRY:-0}"
 STAGE="${STAGE:-both}"   # both | resolve | rosters
 
 LOG="/tmp/per-event-${LEVEL}-${YEAR}-$(date +%Y%m%d-%H%M%S).log"
 consec_fail=0
+consec_000=0
 resolve_ok=0
 roster_ok=0
 
@@ -111,9 +113,15 @@ call() {
 handle_code() {
   # $1 = http code, $2 = label. Returns 0 to count as success, 1 to skip.
   case "$1" in
-    200) consec_fail=0; return 0 ;;
+    200) consec_fail=0; consec_000=0; return 0 ;;
     403) die "403 on $2 (WAF block)" ;;
-    000) say "   ~ $2 HTTP 000 (client timeout; fn may have committed) — not counted"; return 1 ;;
+    # One 000 is a client timeout the fn may have survived; a RUN of them is
+    # a dead network or a sleeping Mac (2026-09-17: 15 h of 000s, nothing
+    # committed). Stop so the operator rebuilds the worklist and relaunches.
+    000) consec_000=$((consec_000+1))
+         say "   ~ $2 HTTP 000 (client timeout; fn may have committed) — not counted (consec_000=$consec_000)"
+         [ "$consec_000" -ge "$MAX_CONSEC_000" ] && die "$MAX_CONSEC_000 consecutive timeouts — network down or machine asleep"
+         return 1 ;;
     *)   consec_fail=$((consec_fail+1))
          say "   ✗ $2 HTTP $1 (consec_fail=$consec_fail)"
          [ "$consec_fail" -ge "$MAX_CONSEC_FAIL" ] && die "$MAX_CONSEC_FAIL consecutive failures"

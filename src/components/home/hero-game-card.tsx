@@ -11,7 +11,7 @@ import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
 import { teamMeta, type TeamMeta } from '@/lib/ufa/teams';
 import { gameUiState, formatStartCompact } from '@/lib/ufa/format';
-import { HeroFieldLines } from './field-diagram';
+import { HeroFieldLines, HeroGlows } from './field-diagram';
 import { TeamLogo } from '@/components/team-logo';
 
 interface HeroGameCardProps {
@@ -91,26 +91,8 @@ export function HeroGameCard({ game, awayRecord, homeRecord, eyebrow, awayMeta, 
       className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border flex flex-col justify-between"
       style={{ background: BASE, color: TEXT }}
     >
-      {/* Two team-color glows, one per side — real UFA team colors. Each is a
-          wide horizontal (ellipse) gradient that carries its color well past
-          the halfway line and fades out gradually, so the two OVERLAP and
-          cross-blend through the center instead of both dying at ~50% and
-          leaving a hard dark seam down the middle (the old radial-62% pair
-          did exactly that on the narrow mobile card). */}
-      <div
-        className="absolute inset-y-0 -left-[10%] w-[75%] pointer-events-none"
-        style={{
-          background: `radial-gradient(ellipse 90% 120% at 22% 50%, ${awayGlow}88 0%, ${awayGlow}3d 45%, transparent 82%)`,
-        }}
-        aria-hidden="true"
-      />
-      <div
-        className="absolute inset-y-0 -right-[10%] w-[75%] pointer-events-none"
-        style={{
-          background: `radial-gradient(ellipse 90% 120% at 78% 50%, ${homeGlow}88 0%, ${homeGlow}3d 45%, transparent 82%)`,
-        }}
-        aria-hidden="true"
-      />
+      {/* Two team-color glows, one per side — real UFA team colors. */}
+      <HeroGlows id={`ufa-${game.gameID}`} awayColor={awayGlow} homeColor={homeGlow} />
       <HeroFieldLines color="rgba(255,255,255,0.05)" accent={ACCENT} />
 
       <div className="relative flex-1 flex flex-col justify-between gap-4">

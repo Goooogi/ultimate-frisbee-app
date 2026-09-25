@@ -105,6 +105,22 @@ interface RpcUfaStint {
   games?: RpcUfaGame[] | null;
 }
 
+/** Wire shape of one USAU event inside an RpcUsauStint. NOT the same as
+ *  UsauSeasonStint['events'][number] — the RPC's jsonb has no `hasStats` key
+ *  (it doesn't distinguish "no stats row" from "stats row, nulled 0"), so that
+ *  field is derived at map time in mapUsauEvent() instead of trusted off the
+ *  wire. See the comment there for what that costs us. */
+interface RpcUsauEvent {
+  slug?: string | null;
+  name?: string | null;
+  season?: number | null;
+  startDate?: string | null;
+  goals?: number | null;
+  assists?: number | null;
+  seed?: number | null;
+  pool?: string | null;
+}
+
 interface RpcUsauStint {
   season?: number | null;
   teamId?: string | null;
@@ -113,7 +129,7 @@ interface RpcUsauStint {
   competitionLevel?: string | null;
   jerseyNumber?: string | null;
   isChampion?: boolean | null;
-  events?: UsauSeasonStint['events'] | null;
+  events?: RpcUsauEvent[] | null;
 }
 
 interface RpcLeagueBlock<TStint> {
@@ -311,6 +327,34 @@ function usauEventsArePresentable(usauStints: RpcUsauStint[]): boolean {
 }
 
 /**
+ * Map one wire event to the app shape, deriving `hasStats`.
+ *
+ * KNOWN LIMITATION: the RPC's jsonb has no field marking whether USAU
+ * published a stats row for this event — only `goals`/`assists`, which the
+ * shared SQL collapses to null both when there's no row AND when the row's
+ * own goals/assists are null. We treat "either stat is non-null" as
+ * hasStats=true, same signal the pre-existing code already had; this is not a
+ * regression, just not yet the same fidelity as the multi-query assembler
+ * (which reads usau_player_event_stats directly and knows the row's presence
+ * for certain — see getPlayerProfile in usau/data.ts).
+ */
+function mapUsauEvent(ev: RpcUsauEvent): UsauSeasonStint['events'][number] {
+  const goals = ev.goals ?? null;
+  const assists = ev.assists ?? null;
+  return {
+    slug: str(ev.slug),
+    name: str(ev.name),
+    season: ev.season ?? 0,
+    startDate: ev.startDate ?? null,
+    goals,
+    assists,
+    seed: ev.seed ?? null,
+    pool: ev.pool ?? null,
+    hasStats: goals != null || assists != null,
+  };
+}
+
+/**
  * Recover the `homeStates` signal the RPC omits — see note (1) at the top.
  *
  * Derived exactly the way the multi-query path derives it: the union of states
@@ -485,7 +529,7 @@ export async function mapRpcProfile(
       competitionLevel: st.competitionLevel ?? null,
       jerseyNumber: st.jerseyNumber ?? null,
       isChampion: st.isChampion === true,
-      events: st.events ?? [],
+      events: (st.events ?? []).map(mapUsauEvent),
     };
     push(season, stint);
   }
@@ -634,6 +678,9 @@ export async function mapRpcProfile(
     plusMinus: 0,
     completions: 0,
     throwsAttempted: 0,
+    usauGoals: 0,
+    usauAssists: 0,
+    usauEventsWithStats: 0,
   };
   for (const year of years) {
     for (const s of year.stints) {
@@ -646,10 +693,13 @@ export async function mapRpcProfile(
         career.completions += s.totals.completions;
         career.throwsAttempted += s.totals.throwsAttempted;
       } else if (s.league === 'usau') {
+        // USAU goals/assists kept OUT of the shared goals/assists (UFA-only
+        // now) — see the field doc on UnifiedPlayerProfile.career.
         career.usauEventsPlayed += s.events.length;
         for (const ev of s.events) {
-          career.goals += ev.goals ?? 0;
-          career.assists += ev.assists ?? 0;
+          if (ev.hasStats) career.usauEventsWithStats++;
+          career.usauGoals += ev.goals ?? 0;
+          career.usauAssists += ev.assists ?? 0;
         }
       }
     }

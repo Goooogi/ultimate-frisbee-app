@@ -135,7 +135,12 @@ export function LeagueView({ contest }: { contest: ContestView }) {
           >
             Standings
           </h2>
-          <FantasyRulesModal label="How scoring works" autoOpenOnceKey="fantasy_rules_seen_v1" />
+          <FantasyRulesModal
+            label="How scoring works"
+            autoOpenOnceKey="fantasy_rules_seen_v1"
+            mode={contest.settings.mode}
+            playerLeague={contest.competitionDef.playerLeague}
+          />
         </div>
 
         {loading ? (

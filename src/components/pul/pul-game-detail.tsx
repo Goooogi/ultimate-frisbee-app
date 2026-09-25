@@ -134,10 +134,10 @@ function DetailBody({ game, boxscore, spotlight }: PulGameDetailProps) {
         </div>
       </div>
 
-      {/* ── Score card: status strip + score block, one floating unit ──── */}
+      {/* ── Hero card: score block + status/date pill row + player spotlight,
+          one continuous surface card (matches UFA's game-detail structure) ── */}
       <div className="px-5 pb-5 md:px-14 md:pb-8">
-        <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
-          <StatusStrip game={game} isFinal={isFinal} />
+        <div className="bg-surface rounded-card-lg shadow-card flex flex-col overflow-hidden">
           <ScoreBlock
             away={away}
             home={home}
@@ -145,20 +145,19 @@ function DetailBody({ game, boxscore, spotlight }: PulGameDetailProps) {
             homeWin={homeWin}
             showScore={isFinal}
           />
+
+          <StatusPillRow game={game} isFinal={isFinal} />
+
+          {spotlight && (spotlight.away || spotlight.home) && (
+            <PlayerSpotlightSection
+              isFinal={isFinal}
+              showAvatar={false}
+              away={{ abbr: away.abbrev, logo: <PulTeamLogo team={sideToLogoTeam(away)} size={16} />, player: spotlight.away }}
+              home={{ abbr: home.abbrev, logo: <PulTeamLogo team={sideToLogoTeam(home)} size={16} />, player: spotlight.home }}
+            />
+          )}
         </div>
       </div>
-
-      {/* ── Player spotlight: to-watch (upcoming) / player of the game (final) ── */}
-      {spotlight && (spotlight.away || spotlight.home) && (
-        <div className="px-5 pb-5 md:px-14 md:pb-8">
-          <PlayerSpotlightSection
-            variant="bare"
-            isFinal={isFinal}
-            away={{ abbr: away.abbrev, logo: <PulTeamLogo team={sideToLogoTeam(away)} size={16} />, player: spotlight.away }}
-            home={{ abbr: home.abbrev, logo: <PulTeamLogo team={sideToLogoTeam(home)} size={16} />, player: spotlight.home }}
-          />
-        </div>
-      )}
 
       {/* ── Team totals comparison (only when box score data is present) ── */}
       {hasBoxscore && (
@@ -203,29 +202,34 @@ function DetailBody({ game, boxscore, spotlight }: PulGameDetailProps) {
   );
 }
 
-// ── Status strip ──────────────────────────────────────────────────────────────
-// One tight row: status pill on the left, date + location meta on the right.
-// Mirrors the UFA status strip — no giant "FINAL" repeated above the score block.
+// ── Status/meta pill row ──────────────────────────────────────────────────────
+// Ported from UFA's game-detail pill row (status pill on the left, upcoming
+// start time on the right; location line below). PUL has no playoff-round or
+// watch/ticket-link data, so those UFA pieces are simply omitted — status pill
+// + date is the same *information* the old StatusStrip showed, in UFA's layout.
 
-function StatusStrip({ game, isFinal }: { game: PulGame; isFinal: boolean }) {
+function StatusPillRow({ game, isFinal }: { game: PulGame; isFinal: boolean }) {
   return (
-    <div className="px-6 py-4 md:px-10 md:py-5 border-b border-hairline flex-shrink-0">
+    <div className="px-6 py-4 md:px-14 md:py-5 border-t border-hairline flex-shrink-0">
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
-        <span
-          className={`text-[13px] font-bold tracking-[0.18em] uppercase ${
-            isFinal ? 'text-ink' : 'text-accent'
-          }`}
-        >
-          {isFinal ? 'Final' : 'Upcoming'}
-        </span>
+        <div className="inline-flex items-center gap-2">
+          <span
+            className={[
+              'inline-flex items-center text-[11px] font-bold tracking-[0.16em] uppercase rounded-full px-2.5 py-[5px]',
+              isFinal ? 'bg-ink/5 text-ink/80' : 'bg-ink/5 text-muted',
+            ].join(' ')}
+          >
+            {isFinal ? 'Final' : 'Upcoming'}
+          </span>
+        </div>
         {!isFinal && game.gameDate && (
-          <span className="text-[20px] md:text-[28px] font-bold tracking-[-0.03em] text-ink tabular leading-none">
+          <span className="text-[20px] md:text-[28px] font-display italic font-bold tracking-[-0.02em] text-ink tabular leading-none">
             {formatGameDate(game.gameDate)}
             {game.gameTime ? ` · ${game.gameTime}` : ''}
           </span>
         )}
       </div>
-      {(game.location || game.gameDate) && (
+      {(game.location || (isFinal && game.gameDate)) && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 mt-3 text-[11px] font-semibold tracking-[0.06em] text-muted">
           {isFinal && game.gameDate && (
             <span>{formatGameDate(game.gameDate)}</span>
@@ -340,7 +344,7 @@ function ScoreHalf({
               {side.city}
             </div>
           )}
-          <div className="font-display text-[16px] md:text-[44px] font-bold text-ink tracking-[0.01em] leading-[1.05] md:leading-none uppercase truncate">
+          <div className="font-display italic text-[16px] md:text-[44px] font-bold text-ink tracking-[-0.01em] md:tracking-[-0.02em] leading-[1.05] md:leading-[0.95] uppercase truncate pr-[0.14em]">
             {side.mascot ?? side.abbrev}
           </div>
         </div>
@@ -348,7 +352,7 @@ function ScoreHalf({
 
       {/* Big score */}
       <span
-        className="score-value-fs relative font-display font-bold tabular leading-[0.85] tracking-[-0.02em] md:tracking-[-0.04em]"
+        className="score-value-fs relative font-display italic font-bold tabular leading-[0.85] tracking-[-0.02em] md:tracking-[-0.04em]"
         style={{
           color: showScore
             ? win

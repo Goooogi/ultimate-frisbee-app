@@ -10,10 +10,10 @@
 
 import Link from 'next/link';
 import type { WfdfEventCard } from '@/lib/wfdf/data';
-import { HeroFieldLines } from './field-diagram';
+import { HeroCornerGlow, HeroFieldLines } from './field-diagram';
 
 const WFDF_BG = '#0A5486';
-const WFDF_GLOW = 'rgba(70,180,235,0.40)';
+const WFDF_GLOW = '#46B4EB';
 const TEXT = '#FFFFFF';
 const TEXT_MUTED = 'rgba(255,255,255,0.75)';
 
@@ -43,11 +43,7 @@ export function HeroWfdfSlide({ event, pill = 'WFDF Worlds' }: HeroWfdfSlideProp
       className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border"
       style={{ background: WFDF_BG, color: TEXT }}
     >
-      <div
-        className="absolute -top-[40%] -right-[6%] w-[60%] h-[180%] pointer-events-none"
-        style={{ background: `radial-gradient(circle at 60% 50%, ${WFDF_GLOW}, transparent 62%)` }}
-        aria-hidden="true"
-      />
+      <HeroCornerGlow id={`wfdf-${slug}`} color={WFDF_GLOW} />
       <HeroFieldLines color="rgba(255,255,255,0.06)" accent="#4CC3F0" />
 
       <div className="relative h-full grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] items-center gap-6">

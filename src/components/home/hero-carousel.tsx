@@ -1,9 +1,14 @@
 'use client';
 
 // Cross-league hero carousel — wraps any number of slide nodes, rotates
-// every 6 s, pauses on hover/focus, respects prefers-reduced-motion.
+// every 5.2 s, pauses on hover/focus, respects prefers-reduced-motion.
 // Receives slide ReactNodes from the server; only the chrome is a Client
 // Component so no league data is fetched client-side.
+//
+// Slides sit on a native scroll-snap rail so a finger drags them 1:1 like the
+// mobile app's paged rail (the old crossfade ignored touch). Arrows, dots and
+// auto-advance scroll the same rail; active is read back from scrollLeft.
+// A touch/wheel holds auto-advance for a beat so it never fights the gesture.
 //
 // Chrome per the Home v2 design spec: 42px glass arrows side-centered at
 // left-4/right-4 (desktop only — the mobile mockup drops the arrows and
@@ -17,11 +22,19 @@ interface HeroCarouselProps {
   slides: ReactNode[];
 }
 
+// Matches the app's RESUME_DELAY_MS — how long a manual swipe holds auto-advance.
+const RESUME_DELAY_MS = 7000;
+
 export function HeroCarousel({ slides }: HeroCarouselProps) {
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
+  const [held, setHeld] = useState(false);
   const count = slides.length;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const resumeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const activeRef = useRef(0);
+  activeRef.current = active;
 
   // Read prefers-reduced-motion once on mount.
   const prefersReducedRef = useRef(false);
@@ -31,18 +44,43 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }, []);
 
+  const goTo = useCallback((i: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollTo({ left: i * el.clientWidth, behavior: prefersReducedRef.current ? 'auto' : 'smooth' });
+  }, []);
+
   const prev = useCallback(() => {
-    setActive((a) => (a - 1 + count) % count);
-  }, [count]);
+    goTo((activeRef.current - 1 + count) % count);
+  }, [count, goTo]);
 
   const next = useCallback(() => {
-    setActive((a) => (a + 1) % count);
-  }, [count]);
+    goTo((activeRef.current + 1) % count);
+  }, [count, goTo]);
 
-  // Auto-advance — clears / restarts when paused, active index, or count changes.
+  const onScroll = useCallback(() => {
+    const el = trackRef.current;
+    if (!el || el.clientWidth === 0) return;
+    const i = Math.round(el.scrollLeft / el.clientWidth);
+    setActive((a) => (a === i ? a : i));
+  }, []);
+
+  const holdAutoAdvance = useCallback(() => {
+    setHeld(true);
+    if (resumeRef.current) clearTimeout(resumeRef.current);
+    resumeRef.current = setTimeout(() => setHeld(false), RESUME_DELAY_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (resumeRef.current) clearTimeout(resumeRef.current);
+    };
+  }, []);
+
+  // Auto-advance — clears / restarts when paused, held, or count changes.
   useEffect(() => {
     if (count <= 1) return;
-    if (paused || prefersReducedRef.current) {
+    if (paused || held || prefersReducedRef.current) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
@@ -50,12 +88,12 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
       return;
     }
     intervalRef.current = setInterval(() => {
-      setActive((a) => (a + 1) % count);
+      goTo((activeRef.current + 1) % count);
     }, 5200);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [count, paused]);
+  }, [count, paused, held, goTo]);
 
   if (count === 0) return null;
 
@@ -83,8 +121,15 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
       onFocusCapture={() => setPaused(true)}
       onBlurCapture={() => setPaused(false)}
     >
-      {/* Slide track */}
-      <div className="relative h-full">
+      {/* Slide rail — one card-width per slide, snaps a page at a time. No
+          touch-action override, so a vertical drag still scrolls the page. */}
+      <div
+        ref={trackRef}
+        onScroll={onScroll}
+        onTouchStart={holdAutoAdvance}
+        onWheel={holdAutoAdvance}
+        className="flex h-full overflow-x-auto overscroll-x-contain snap-x snap-mandatory no-scrollbar"
+      >
         {slides.map((slide, i) => (
           <div
             key={i}
@@ -92,10 +137,7 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
             aria-roledescription="slide"
             aria-label={`Slide ${i + 1} of ${count}`}
             aria-hidden={i !== active}
-            className={[
-              'absolute inset-0 transition-opacity duration-500',
-              i === active ? 'opacity-100' : 'opacity-0 pointer-events-none',
-            ].join(' ')}
+            className="relative h-full w-full flex-none snap-start snap-always"
           >
             {slide}
           </div>
@@ -112,7 +154,7 @@ export function HeroCarousel({ slides }: HeroCarouselProps) {
 
       {/* Dots — bottom-left, all breakpoints. */}
       <div className="absolute left-4 sm:left-6 lg:left-10 bottom-4 lg:bottom-6 z-10">
-        <CarouselDots slides={slides} active={active} onSelect={setActive} />
+        <CarouselDots slides={slides} active={active} onSelect={goTo} />
       </div>
     </section>
   );

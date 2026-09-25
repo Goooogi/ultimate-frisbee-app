@@ -34,9 +34,14 @@ interface Props {
    *  top hairline + section padding). PUL/WUL wrap it in their own card, so they
    *  pass "bare" to drop the border + outer padding and avoid double chrome. */
   variant?: 'section' | 'bare';
+  /** Whether to render the headshot/monogram avatar circle. Default true (UFA,
+   *  which has real headshots for ~89% of players and a monogram fallback for
+   *  the rest). PUL/WUL have no headshots at all, so they pass false to skip
+   *  the avatar entirely rather than show a meaningless monogram placeholder. */
+  showAvatar?: boolean;
 }
 
-export function PlayerSpotlightSection({ isFinal, away, home, variant = 'section' }: Props) {
+export function PlayerSpotlightSection({ isFinal, away, home, variant = 'section', showAvatar = true }: Props) {
   const headingId = useId();
   // Nothing to show on either side → don't render an empty shell.
   if (!away.player && !home.player) return null;
@@ -70,8 +75,8 @@ export function PlayerSpotlightSection({ isFinal, away, home, variant = 'section
       </h2>
 
       <div className="grid grid-cols-2 gap-2 md:gap-3">
-        <SpotlightCard side={away} label="Away" variant={variant} />
-        <SpotlightCard side={home} label="Home" variant={variant} />
+        <SpotlightCard side={away} label="Away" variant={variant} showAvatar={showAvatar} />
+        <SpotlightCard side={home} label="Home" variant={variant} showAvatar={showAvatar} />
       </div>
     </section>
   );
@@ -81,10 +86,12 @@ function SpotlightCard({
   side,
   label,
   variant,
+  showAvatar,
 }: {
   side: SpotlightSide;
   label: 'Away' | 'Home';
   variant: 'section' | 'bare';
+  showAvatar: boolean;
 }) {
   const p = side.player;
   const bare = variant === 'bare';
@@ -95,22 +102,24 @@ function SpotlightCard({
 
   const inner = (
     <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3.5 min-w-0">
-      <span className="shrink-0 w-9 h-9 md:w-12 md:h-12 rounded-full overflow-hidden bg-ink/5 ring-1 ring-hairline flex items-center justify-center">
-        {showImg ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={p!.headshotUrl!}
-            alt={p!.name}
-            className="w-full h-full object-cover"
-            loading="lazy"
-            onError={() => setImgFailed(true)}
-          />
-        ) : (
-          <span className="font-display italic font-bold text-[12px] md:text-[15px] text-muted" aria-hidden="true">
-            {p ? initials(p.name) : '—'}
-          </span>
-        )}
-      </span>
+      {showAvatar && (
+        <span className="shrink-0 w-9 h-9 md:w-12 md:h-12 rounded-full overflow-hidden bg-ink/5 ring-1 ring-hairline flex items-center justify-center">
+          {showImg ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={p!.headshotUrl!}
+              alt={p!.name}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              onError={() => setImgFailed(true)}
+            />
+          ) : (
+            <span className="font-display italic font-bold text-[12px] md:text-[15px] text-muted" aria-hidden="true">
+              {p ? initials(p.name) : '—'}
+            </span>
+          )}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 min-w-0">
           <span className="inline-flex items-center gap-1.5 shrink-0 min-w-0">

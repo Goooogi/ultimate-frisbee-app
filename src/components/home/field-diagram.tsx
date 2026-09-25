@@ -102,3 +102,72 @@ export function HeroFieldLines({ color, accent }: { color: string; accent: strin
     </svg>
   );
 }
+
+// Hero glows — same geometry as mobile's hero-shared.tsx (react-native-svg
+// RadialGradient with rx/ry). SVG ellipses sized in card fractions, so the
+// falloff scales with the card at every breakpoint instead of a CSS circle
+// in an offset box that sat mid-card on phones. Browsers ignore rx/ry on
+// <radialGradient>, so the ellipse is a unit circle + gradientTransform.
+
+/** Gradient ids are document-global and slide ids can carry slashes (WUL). */
+function glowId(id: string, suffix: string): string {
+  return `${id.replace(/[^A-Za-z0-9_-]/g, '-')}-${suffix}`;
+}
+
+/** Single league-color glow off the top-right corner — tournament slides. */
+export function HeroCornerGlow({ id, color }: { id: string; color: string }) {
+  const gid = glowId(id, 'corner-glow');
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 pointer-events-none"
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id={gid} cx="0" cy="0" r="1" gradientTransform="translate(0.82 0.08) scale(0.65 0.8)">
+          <stop offset="0%" stopColor={color} stopOpacity={0.4} />
+          <stop offset="62%" stopColor={color} stopOpacity={0} />
+        </radialGradient>
+      </defs>
+      <rect width="100" height="100" fill={`url(#${gid})`} />
+    </svg>
+  );
+}
+
+/** Team-color glow per side — wide ellipses that overlap through the center
+ *  so the two colors cross-blend instead of leaving a dark seam. */
+export function HeroGlows({ id, awayColor, homeColor }: { id: string; awayColor: string; homeColor: string }) {
+  const left = glowId(id, 'glow-l');
+  const right = glowId(id, 'glow-r');
+  const stops = (color: string) => (
+    <>
+      <stop offset="0%" stopColor={color} stopOpacity={0.53} />
+      <stop offset="45%" stopColor={color} stopOpacity={0.24} />
+      <stop offset="100%" stopColor={color} stopOpacity={0} />
+    </>
+  );
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="absolute inset-0 pointer-events-none"
+      aria-hidden="true"
+    >
+      <defs>
+        <radialGradient id={left} cx="0" cy="0" r="1" gradientTransform="translate(0.18 0.5) scale(0.62 0.85)">
+          {stops(awayColor)}
+        </radialGradient>
+        <radialGradient id={right} cx="0" cy="0" r="1" gradientTransform="translate(0.82 0.5) scale(0.62 0.85)">
+          {stops(homeColor)}
+        </radialGradient>
+      </defs>
+      <rect width="100" height="100" fill={`url(#${left})`} />
+      <rect width="100" height="100" fill={`url(#${right})`} />
+    </svg>
+  );
+}

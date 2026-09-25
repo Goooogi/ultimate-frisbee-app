@@ -153,7 +153,7 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
 
       {showPrices && draft && <PricesCard contest={contest} draft={draft} onSaved={onSaved} />}
 
-      <ScoringCard />
+      <ScoringCard contests={[contest]} />
 
       <LeagueLogoPicker
         open={logoPickerOpen}

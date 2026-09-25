@@ -1,3 +1,8 @@
+// ⚠️ SYNCED COPY of src/lib/usau/derive-placement.ts — edge functions can't import
+// src/. Don't edit here: change the canonical file, re-copy it below these five
+// lines, then redeploy sync-event-details + ingest-from-ultirzr:
+//   { head -5 usau-scraper/supabase/functions/_shared/derive-placement.ts; cat src/lib/usau/derive-placement.ts; } > /tmp/dp.ts && mv /tmp/dp.ts usau-scraper/supabase/functions/_shared/derive-placement.ts
+// In sync when this prints nothing: diff <(tail -n +6 usau-scraper/supabase/functions/_shared/derive-placement.ts) src/lib/usau/derive-placement.ts
 // Derive each team's FINAL PLACEMENT at a USAU event from its bracket results.
 //
 // USAU never stores a team's finish directly (usau_event_teams.final_placement

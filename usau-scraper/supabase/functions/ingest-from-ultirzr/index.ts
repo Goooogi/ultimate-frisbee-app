@@ -46,6 +46,7 @@
 
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
 import { tzForState, localWallTimeToUtcIso } from '../_shared/tz.ts';
+import { refreshEventPlacements } from '../_shared/event-placements.ts';
 
 interface RequestBody {
   year?: number;
@@ -755,6 +756,10 @@ async function ingestEvent(
   // vote, trailing field designator stripped). Write-path only — the read path
   // serves the stored usau_events.venue column.
   await db.rpc('usau_derive_event_venue', { target_event_id: eventUuid });
+
+  // Final placements from the bracket results, once every bracket game is
+  // played (skipped until then). Write-path only.
+  await refreshEventPlacements(db, eventUuid!);
 }
 
 interface TeamSeenInfo {

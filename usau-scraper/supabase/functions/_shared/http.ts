@@ -32,6 +32,11 @@ export type FetchOptions = {
   gapMs?: number;
 };
 
+/** A response retrying can't change (WAF 403, missing page 404). These are
+ *  thrown inside fetchHtml's try, so without the marker the catch retried
+ *  them 3× with backoff — ~21 s per dead URL, and 3 extra hits on a WAF block. */
+class NonRetryableHttpError extends Error {}
+
 export async function fetchHtml(
   url: string,
   opts: FetchOptions = {}
@@ -59,12 +64,15 @@ export async function fetchHtml(
 
       if (res.status === 403) {
         // Likely WAF block on cloud IPs. Retrying same IP won't help.
-        throw new Error(
+        throw new NonRetryableHttpError(
           `403 Forbidden for ${url} — likely USAU WAF block. See CLAUDE.md.`
         );
       }
       if (res.status === 429 || res.status >= 500) {
         throw new Error(`Retryable HTTP ${res.status} for ${url}`);
+      }
+      if (res.status === 404) {
+        throw new NonRetryableHttpError(`HTTP 404 for ${url}`);
       }
       if (!res.ok) {
         throw new Error(`HTTP ${res.status} for ${url}`);
@@ -73,6 +81,7 @@ export async function fetchHtml(
     } catch (err) {
       clearTimeout(timeout);
       lastErr = err;
+      if (err instanceof NonRetryableHttpError) break;
       attempt++;
       if (attempt > retries) break;
       await new Promise((r) =>

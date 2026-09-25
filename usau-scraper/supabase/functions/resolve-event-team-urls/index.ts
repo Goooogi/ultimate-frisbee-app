@@ -61,7 +61,9 @@ function extractEventTeamIdsByName(html: string): Map<string, string> {
   while ((m = re.exec(html)) !== null) {
     const urlId = decodeURIComponent(m[1]);
     const { name } = extractTeamNameAndSeed(m[2]);
-    const key = name.toLowerCase().trim();
+    // Collapse whitespace like the lookup side does ("Burnside  40" on USAU's
+    // page never matched our "burnside 40" key).
+    const key = name.toLowerCase().replace(/\s+/g, ' ').trim();
     if (!key) continue;
     if (!map.has(key)) map.set(key, urlId);
   }
@@ -140,6 +142,7 @@ async function resolveOneEvent(
   competitionLevel: string | null,
   onlyGender?: RequestBody['gender'],
   season?: number | null,
+  name?: string | null,
 ): Promise<{ resolved: number; skipped: number; error?: string; usedSlug?: string }> {
   // Masters events need masters URL segments, and one combined event (the
   // Masters Championships) hosts Masters + Grand Masters + Great Grand
@@ -191,6 +194,30 @@ async function resolveOneEvent(
     if (!allowYearStrip) {
       const why = holdsBare ? 'another event holds it' : 'other seasons share this base slug';
       console.log(`[resolver] ${slug}: year-strip blocked — "${stripped}": ${why}`);
+    }
+  }
+
+  // USAU builds an event's slug from its NAME: every whitespace char becomes
+  // '-' (runs are NOT collapsed, and a trailing space leaves a trailing '-')
+  // and every other char outside [A-Za-z0-9-] is dropped, so "Great
+  // Lakes/Southeast" → "Great-LakesSoutheast". ingest-from-ultirzr synthesized
+  // the 2022-2025 masters regionals slugs with a different rule (collapse runs,
+  // '/' → '-', trim), so every URL 404'd: 81 events / 472 teams never resolved.
+  // Club/college hit the same thing on punctuated names (TCT "Invite - West"
+  // → "Invite---West", "PB&J" → "PBJ", trailing-space names → trailing '-').
+  // Only when the name carries this event's own season, so the page can't be
+  // another season's; skipped when another event already owns that slug.
+  let nameSlug: string | null = null;
+  if (name && season && new RegExp(`\\b${season}\\b`).test(name)) {
+    const candidate = name.replace(/\s/g, '-').replace(/[^A-Za-z0-9-]/g, '');
+    if (candidate && candidate.toLowerCase() !== slug.toLowerCase()) {
+      const { data: owner, error: ownerErr } = await db
+        .from('usau_events')
+        .select('id')
+        .ilike('usau_slug', candidate)
+        .neq('id', eventUuid)
+        .limit(1);
+      if (!ownerErr && (!owner || owner.length === 0)) nameSlug = candidate;
     }
   }
 
@@ -262,14 +289,47 @@ async function resolveOneEvent(
 
     const byName = new Map<string, string>();
     let usedSlug: string | null = null;
+    // The name-derived slug is a fetch path only — never our identity (see the
+    // persist guard below).
+    let fromName = false;
 
     for (const seg of levelSegments) {
       let html: string | null = null;
-      outer: for (const candidate of slugVariants(usedSlug ?? slug, allowYearStrip, season)) {
+      // Masters: the stored slug is the synthesized one that never matches, so
+      // the name form goes first. Club/college stored slugs usually do match,
+      // so it goes right after the stored slug's exact forms but BEFORE the
+      // truncation / year-append / year-strip guesses: those can land on a
+      // different event's page (a truncated "new-york-warm-up-2018" is the main
+      // NYWU, not its sanctioned side event); nameSlug is owner-checked.
+      const base = usedSlug ?? slug;
+      // The year-strip gate was checked against the stored slug, not nameSlug.
+      const variants = slugVariants(base, fromName ? false : allowYearStrip, season);
+      const exactForms = new Set([
+        base,
+        base.replace(/-s-/g, 's-'),
+        base.replace(/-s$/, 's'),
+        base.replace(/-s-/g, 's-').replace(/-s$/, 's'),
+      ]);
+      const ordered: string[] = [];
+      if (nameSlug && !usedSlug && isMastersEvent) ordered.push(nameSlug);
+      ordered.push(...variants.filter((v) => exactForms.has(v)));
+      if (nameSlug && !usedSlug && !isMastersEvent) ordered.push(nameSlug);
+      ordered.push(...variants.filter((v) => !exactForms.has(v)));
+      // USAU slugs are case-insensitive: "2023-Mens-…" is the same page as an
+      // already-404'd "2023-mens-…" form, so dedupe on the lowercased slug.
+      const seenLower = new Set<string>();
+      const candidates = ordered.filter((c) => {
+        const k = c.toLowerCase();
+        if (seenLower.has(k)) return false;
+        seenLower.add(k);
+        return true;
+      });
+      outer: for (const candidate of candidates) {
         for (const url of eventScheduleUrlVariants(candidate, urlGender, seg)) {
           try {
             html = await fetchHtml(url);
             usedSlug = candidate;
+            if (candidate === nameSlug) fromName = true;
             break outer;
           } catch (err) {
             const msg = stringifyErr(err);
@@ -297,7 +357,6 @@ async function resolveOneEvent(
       totalSkipped += genderParts.length;
       continue;
     }
-    lastUsedSlug = usedSlug;
 
     // Persist the working slug only once if it changed — but NEVER persist a
     // year-stripped one. usau_slug is the public identity (the
@@ -329,13 +388,19 @@ async function resolveOneEvent(
         slug.replace(/-s$/, 's'),
         slug.replace(/-s-/g, 's-').replace(/-s$/, 's'),
       ].some((f) => usedSlug === `${f}-${season}`);
-    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated && !isYearAppended) {
+    // Same for the name-derived slug: usau_slug stays the public route key.
+    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated && !isYearAppended && !fromName) {
       const { error: updErr } = await db
         .from('usau_events')
         .update({ usau_slug: usedSlug })
         .eq('id', eventUuid);
       if (updErr) {
         console.error(`[resolver] failed to update slug ${slug} → ${usedSlug}: ${stringifyErr(updErr)}`);
+      } else {
+        // Report only a slug that became usau_slug: callers (sync-event-everything)
+        // pass perEvent[].slug on to sync-event-rosters, which looks it up by
+        // usau_slug — a fetch-only variant would not be found.
+        lastUsedSlug = usedSlug;
       }
     }
 
@@ -378,7 +443,7 @@ async function run(body: RequestBody) {
   // we touch has real work to do.
   let unresolvedQuery = db
     .from('usau_event_teams')
-    .select('event_id, usau_events!inner(id, usau_slug, season, competition_level, start_date)')
+    .select('event_id, usau_events!inner(id, usau_slug, name, season, competition_level, start_date)')
     .is('usau_event_team_url_id', null);
   if (body.season) unresolvedQuery = unresolvedQuery.eq('usau_events.season', body.season);
   if (body.slug) unresolvedQuery = unresolvedQuery.ilike('usau_events.usau_slug', body.slug);
@@ -388,6 +453,7 @@ async function run(body: RequestBody) {
   type EventRow = {
     id: string;
     usau_slug: string;
+    name: string | null;
     season: number;
     start_date: string | null;
     competition_level: string | null;
@@ -419,7 +485,7 @@ async function run(body: RequestBody) {
     if (!skipResolved) {
       // future: support force-rerun
     }
-    const result = await resolveOneEvent(db, e.id, e.usau_slug, e.competition_level, body.gender, e.season);
+    const result = await resolveOneEvent(db, e.id, e.usau_slug, e.competition_level, body.gender, e.season, e.name);
     perEvent.push({
       slug: result.usedSlug ?? e.usau_slug,
       season: e.season,

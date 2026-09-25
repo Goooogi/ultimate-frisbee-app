@@ -50,7 +50,7 @@ export function LeagueSettingsPanel({ leagueId, leagueName, contests, isCommissi
         <RosterCard key={c.id} leagueId={leagueId} contest={c} />
       ))}
 
-      <ScoringCard />
+      <ScoringCard contests={contests} />
     </section>
   );
 }
@@ -182,7 +182,10 @@ export function RosterCard({ leagueId, contest }: { leagueId: string; contest: C
 
 // ─── Scoring (read-only) ──────────────────────────────────────────────────────
 
-export function ScoringCard() {
+export function ScoringCard({ contests }: { contests: ContestView[] }) {
+  // Season (weekly) and event contests score differently — one rules modal per
+  // kind this league actually plays, labeled only when both appear.
+  const kinds = [...new Map(contests.map((c) => [c.settings.mode, c])).values()];
   return (
     <Card title="Scoring">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -190,7 +193,16 @@ export function ScoringCard() {
           Scoring is the same in every league so teams stay comparable across the
           whole game.
         </p>
-        <FantasyRulesModal label="View scoring" />
+        <div className="flex flex-wrap gap-2">
+          {kinds.map((c) => (
+            <FantasyRulesModal
+              key={c.settings.mode}
+              label={kinds.length > 1 ? `${c.settings.mode === 'event' ? 'Event' : 'Season'} scoring` : 'View scoring'}
+              mode={c.settings.mode}
+              playerLeague={c.competitionDef.playerLeague}
+            />
+          ))}
+        </div>
       </div>
     </Card>
   );

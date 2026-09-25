@@ -41,10 +41,12 @@ YEAR="${YEAR:?set YEAR to a single season, e.g. 2026}"
 WORKLIST_FILE="${WORKLIST_FILE:?set WORKLIST_FILE to a file of event slugs}"
 GAP="${GAP:-20}"
 MAX_CONSEC_FAIL="${MAX_CONSEC_FAIL:-3}"
+MAX_CONSEC_000="${MAX_CONSEC_000:-5}"
 DRY="${DRY:-0}"
 
 LOG="/tmp/per-event-details-COLLEGE-${YEAR}-$(date +%Y%m%d-%H%M%S).log"
 consec_fail=0
+consec_000=0
 total=0
 ok=0
 
@@ -61,6 +63,10 @@ pace() { sleep "$GAP"; }
 WORKLIST=$(mktemp)
 grep -v '^[[:space:]]*$' "$WORKLIST_FILE" > "$WORKLIST"
 COUNT=$(grep -c . "$WORKLIST" || true)
+
+# Slug case varies (college "Big-Sky-D-I-Mens-…", club "2025-capital-mens-…"),
+# so the division case below must match either.
+shopt -s nocasematch
 
 say "=== PER-EVENT details backfill — COLLEGE $YEAR ==="
 say "events=$COUNT gap=${GAP}s max_consec_fail=$MAX_CONSEC_FAIL dry=$DRY"
@@ -92,7 +98,7 @@ while IFS= read -r slug; do
   case "$code" in
     403) die "403 on $slug (WAF block)" ;;
     200)
-      consec_fail=0; ok=$((ok+1))
+      consec_fail=0; consec_000=0; ok=$((ok+1))
       summary=$(echo "$body" | python3 -c '
 import sys, json
 try:
@@ -108,7 +114,13 @@ except Exception:
 ' 2>/dev/null)
       say "   ✓ ($total/$COUNT) $slug → $summary" ;;
     000|504|546)
-      say "   ~ ($total/$COUNT) $slug HTTP $code (timeout; fn may have committed) — not counted" ;;
+      # Not a failure on its own (the fn often commits after the client gives
+      # up) — but a RUN of them means the network is gone or the Mac is asleep:
+      # 2026-09-17 the laptop lid closed and the run spent 15 h returning 000
+      # on every wake-up, committing nothing. Stop so the operator relaunches.
+      consec_000=$((consec_000+1))
+      say "   ~ ($total/$COUNT) $slug HTTP $code (timeout; fn may have committed) — not counted (consec_000=$consec_000)"
+      [ "$consec_000" -ge "$MAX_CONSEC_000" ] && die "$MAX_CONSEC_000 consecutive timeouts — network down or machine asleep; rebuild the worklist and relaunch" ;;
     *)
       consec_fail=$((consec_fail+1))
       say "   ✗ ($total/$COUNT) $slug HTTP $code (consec_fail=$consec_fail): $(echo "$body" | head -c 200)"

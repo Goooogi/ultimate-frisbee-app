@@ -244,27 +244,42 @@ export interface UnifiedPlayerProfile {
   /** Year-by-year, newest first. */
   years: UnifiedYear[];
   /**
-   * Combined hero stats — UFA + USAU feed in additively.
+   * Combined hero stats — UFA ONLY. `goals`/`assists`/`blocks`/etc. here are
+   * UFA per-game totals; USAU's event-level G/A live in the usau* fields
+   * below instead, never mixed into these. USAU only publishes goals/assists
+   * at a handful of flagship events (Nationals, Pro Champs, U.S. Open, college
+   * championships) — folding those into a "UFA Games" cell overstated a
+   * player's per-game production with numbers from a different sport format
+   * (tournament totals, not per-game box scores). The UI renders a separate
+   * "USAU career" block from usauGoals/usauAssists/usauEventsWithStats.
    *
    * PUL is kept as a SEPARATE sub-block (see `pul` field below) rather than
-   * being added into the UFA/USAU career totals. Rationale: PUL is a
-   * women's/open semi-pro league whose seasons overlap USAU Club Nationals;
-   * a player may accumulate goals in both simultaneously. Mixing PUL goals
-   * into the same counter as USAU goals would double-count effort in
-   * overlapping weeks. The UI can render PUL totals from the `pul` block and
-   * keep them visually distinct.
+   * being added into these totals. Rationale: PUL is a women's/open semi-pro
+   * league whose seasons overlap USAU Club Nationals; a player may accumulate
+   * goals in both simultaneously. Mixing PUL goals into the same counter
+   * would double-count effort in overlapping weeks. The UI can render PUL
+   * totals from the `pul` block and keep them visually distinct.
    */
   career: {
     /** UFA games played + USAU events-played (kept separate to avoid
      *  conflating "ultimate game" with "tournament event"). */
     ufaGamesPlayed: number;
     usauEventsPlayed: number;
+    /** UFA-only from here down — see the field doc above. */
     goals: number;
     assists: number;
     blocks: number;
     plusMinus: number;
     completions: number;
     throwsAttempted: number;
+    /** USAU event-level goals/assists, summed across every event with a
+     *  published stats row. Kept separate from `goals`/`assists` (UFA). */
+    usauGoals: number;
+    usauAssists: number;
+    /** Count of USAU events where USAU actually published a stats row (a
+     *  player only gets one if they had ≥1 G or A). Compare against
+     *  `usauEventsPlayed` to know whether coverage is partial. */
+    usauEventsWithStats: number;
   };
   /**
    * PUL career sub-totals. Null when the player has no PUL history.
@@ -660,6 +675,9 @@ async function _getUnifiedPlayerProfile(
     plusMinus: 0,
     completions: 0,
     throwsAttempted: 0,
+    usauGoals: 0,
+    usauAssists: 0,
+    usauEventsWithStats: 0,
   };
 
   for (const year of years) {
@@ -673,10 +691,15 @@ async function _getUnifiedPlayerProfile(
         career.completions += s.totals.completions;
         career.throwsAttempted += s.totals.throwsAttempted;
       } else if (s.league === 'usau') {
+        // USAU goals/assists are kept OUT of the shared `goals`/`assists`
+        // counters — those are UFA-only now — and reported in their own
+        // usau* fields instead (see the `career` field doc on
+        // UnifiedPlayerProfile for why UFA and USAU stats don't mix).
         career.usauEventsPlayed += s.events.length;
         for (const ev of s.events) {
-          career.goals += ev.goals ?? 0;
-          career.assists += ev.assists ?? 0;
+          if (ev.hasStats) career.usauEventsWithStats++;
+          career.usauGoals += ev.goals ?? 0;
+          career.usauAssists += ev.assists ?? 0;
         }
       }
       // PUL and WUL stints intentionally not added to `career` — see their

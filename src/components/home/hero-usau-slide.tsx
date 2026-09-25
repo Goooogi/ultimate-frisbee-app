@@ -10,10 +10,10 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import type { UsauEventSummary, UsauSeriesStageCard } from '@/lib/usau/data';
 import { seriesStageHref, seriesUnitNoun } from '@/lib/league';
-import { HeroFieldLines } from './field-diagram';
+import { HeroCornerGlow, HeroFieldLines } from './field-diagram';
 
 const USAU_BG = '#173A7A';
-const USAU_GLOW = 'rgba(96,150,240,0.40)';
+const USAU_GLOW = '#6096F0';
 const TEXT = '#FFFFFF';
 const TEXT_MUTED = 'rgba(255,255,255,0.75)';
 
@@ -31,6 +31,7 @@ export function HeroUsauSlide({ event, pill = 'USAU Tournament' }: HeroUsauSlide
 
   return (
     <UsauSlideFrame
+      glowId={`usau-${event.slug}`}
       pill={pill}
       subline={`${levelLabel}${location ? ` · ${location}` : ''}`}
       title={event.name}
@@ -74,6 +75,7 @@ export function HeroUsauSeriesSlide({
   const unit = `${noun[0].toUpperCase()}${noun.slice(1)}s`;
   return (
     <UsauSlideFrame
+      glowId={`usau-series-${series.id}`}
       pill={pill}
       subline={formatLevel(series.level)}
       title={series.name}
@@ -91,6 +93,7 @@ export function HeroUsauSeriesSlide({
 }
 
 function UsauSlideFrame({
+  glowId,
   pill,
   subline,
   title,
@@ -99,6 +102,7 @@ function UsauSlideFrame({
   ctaHref,
   ctaLabel,
 }: {
+  glowId: string;
   pill: string;
   subline: string;
   title: string;
@@ -112,11 +116,7 @@ function UsauSlideFrame({
       className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border"
       style={{ background: USAU_BG, color: TEXT }}
     >
-      <div
-        className="absolute -top-[40%] -right-[6%] w-[60%] h-[180%] pointer-events-none"
-        style={{ background: `radial-gradient(circle at 60% 50%, ${USAU_GLOW}, transparent 62%)` }}
-        aria-hidden="true"
-      />
+      <HeroCornerGlow id={glowId} color={USAU_GLOW} />
       <HeroFieldLines color="rgba(255,255,255,0.06)" accent="#5A8CF0" />
 
       <div className="relative h-full grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] items-center gap-6">

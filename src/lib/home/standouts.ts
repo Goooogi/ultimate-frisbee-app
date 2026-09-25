@@ -5,8 +5,9 @@
 // on its own significance — a good line lasts a few days, a killer performance
 // up to WINDOW_DAYS — so after a season ends the rail thins out line by line,
 // goes quiet within three weeks of the final, and lights back up when the
-// next wired league (PUL → WUL → UFA) starts. UFA award cards retire on the
-// same clock (Hunter, 2026-09-11).
+// next wired league (PUL → WUL → UFA) starts. UFA award cards outlast the
+// game lines and close the rail four weeks after the final (Hunter,
+// 2026-09-19).
 //
 // Data is cheap: we mirror per-game box scores into Supabase
 // (ufa_game_player_stats / pul_game_player_stats / wul_game_player_stats, all
@@ -98,9 +99,10 @@ const PER_PLAYER_CAP = 1; // at most one card per player — their single best r
 /** PostgREST max-rows: one response never holds more, whatever .range asks. */
 const PAGE = 1000;
 /** UFA award-watch (MVP/OPOY/DPOY) tags, exemptions and season-total fallback
- *  cards apply only while the UFA's latest final game is this recent — past
- *  it the award leaders are ordinary gated lines and fall off with everyone. */
-const AWARD_GRACE_DAYS = 21;
+ *  cards apply for this long after the UFA's latest final — four weeks, so the
+ *  season's award leaders outlast every game line (gone by WINDOW_DAYS) and
+ *  close out the rail (Hunter, 2026-09-19: "4 weeks max after season ends"). */
+const AWARD_GRACE_DAYS = 28;
 /** USAU Club Nationals event-total cards (no per-game lines to decay) stay
  *  this long after the event's end_date. */
 const USAU_EVENT_GRACE_DAYS = 14;
@@ -615,52 +617,67 @@ async function usauStandouts(now: number): Promise<StandoutLine[]> {
   const db = supabase();
   const today = usauToday(new Date(now));
   const graceCutoff = usauToday(new Date(now - USAU_EVENT_GRACE_DAYS * MS_DAY));
-  // Naming drifts year to year ("Club Nationals" / "Club Championships") — match both.
+  // template_key is the real Nationals signal — name ILIKE also matched U.S.
+  // Open ICC / WUCC events (whose names happen to contain "championships"),
+  // which then rendered mislabeled "Nationals" cards.
   const { data: events } = await db
     .from('usau_events')
     .select('id, name, start_date, end_date')
-    .eq('competition_level', 'CLUB')
-    .or('name.ilike.%club nationals%,name.ilike.%club championships%')
+    .eq('template_key', 'club_nationals')
     .lte('start_date', today)
     .gte('end_date', graceCutoff);
   const eventRows = (events ?? []) as { id: string }[];
   if (eventRows.length === 0) return [];
 
   // A Nationals field is ~1,300 player rows — past the 1000-row cap — so page
-  // it (primary-key order) before ranking.
-  type EventStat = { player_id: string; event_id: string; team_id: string | null; goals: number | null; assists: number | null };
+  // it (primary-key order) before ranking. Embeds the player name and team
+  // directly (usau_players(display_name), usau_teams(name)) instead of a
+  // separate name-lookup query after ranking.
+  type EventStat = {
+    player_id: string;
+    event_id: string;
+    team_id: string | null;
+    goals: number | null;
+    assists: number | null;
+    usau_players: { display_name: string | null } | null;
+    usau_teams: { name: string } | null;
+  };
   const stats: EventStat[] = [];
   for (let from = 0; ; from += PAGE) {
     const { data: page } = await db
       .from('usau_player_event_stats')
-      .select('player_id, event_id, team_id, goals, assists')
+      .select('player_id, event_id, team_id, goals, assists, usau_players(display_name), usau_teams(name)')
       .in('event_id', eventRows.map((e) => e.id))
       .order('player_id', { ascending: true })
       .order('event_id', { ascending: true })
       .range(from, from + PAGE - 1);
-    const chunk = (page ?? []) as EventStat[];
+    const chunk = (page ?? []) as unknown as EventStat[];
     stats.push(...chunk);
     if (chunk.length < PAGE) break;
   }
-  const ranked = stats
-    .map((r) => ({ ...r, g: r.goals ?? 0, a: r.assists ?? 0 }))
+
+  // Dedupe by (event, team, lowercased name) BEFORE ranking — the same human
+  // can have two usau_players ids (one per team-season row), and without this
+  // they'd win two separate cards for the same performance.
+  type Best = EventStat & { g: number; a: number; name: string };
+  const byKey = new Map<string, Best>();
+  for (const r of stats) {
+    const name = r.usau_players?.display_name;
+    if (!name) continue; // no name to dedupe or display on — skip
+    const key = `${r.event_id}|${r.team_id ?? ''}|${name.toLowerCase()}`;
+    const g = r.goals ?? 0;
+    const a = r.assists ?? 0;
+    const existing = byKey.get(key);
+    if (!existing || g + a > existing.g + existing.a) {
+      byKey.set(key, { ...r, g, a, name });
+    }
+  }
+
+  const ranked = Array.from(byKey.values())
     .filter((r) => r.g + r.a >= USAU_MIN_GA)
     .sort((x, y) => y.g + y.a - (x.g + x.a))
     .slice(0, USAU_MAX_CARDS);
   if (ranked.length === 0) return [];
-
-  const playerIds = [...new Set(ranked.map((r) => r.player_id))];
-  const teamIds = [...new Set(ranked.map((r) => r.team_id).filter(Boolean))] as string[];
-  const { data: playersData } = await db.from('usau_players').select('id, display_name').in('id', playerIds);
-  const { data: teamsData } = teamIds.length
-    ? await db.from('usau_teams').select('id, name').in('id', teamIds)
-    : { data: [] as { id: string; name: string }[] };
-  const names = new Map<string, string>();
-  for (const p of (playersData ?? []) as { id: string; display_name: string | null }[]) {
-    if (p.display_name) names.set(p.id, p.display_name);
-  }
-  const teams = new Map<string, string>();
-  for (const t of (teamsData ?? []) as { id: string; name: string }[]) teams.set(t.id, t.name);
 
   return ranked.map((r) => ({
     id: `usau-${r.event_id}-${r.player_id}`,
@@ -669,10 +686,10 @@ async function usauStandouts(now: number): Promise<StandoutLine[]> {
     gameKey: `usau-${r.event_id}-${r.player_id}`,
     league: 'usau' as const,
     playerId: r.player_id,
-    playerName: names.get(r.player_id) ?? r.player_id,
+    playerName: r.name,
     href: `/players/${r.player_id}?from=usau`,
     headshotUrl: null,
-    teamName: r.team_id ? teams.get(r.team_id) ?? null : null,
+    teamName: r.usau_teams?.name ?? null,
     dateLabel: 'Nationals',
     opponent: null,
     seasonMode: true, // event totals, not a single game line
@@ -729,18 +746,20 @@ export async function getStandoutPerformances(): Promise<StandoutLine[]> {
 
   const all = perLeague.flat();
 
-  // UFA award treatment (tags, cap exemptions, season-total fallback cards)
-  // rides only while the UFA's latest final is within AWARD_GRACE_DAYS; after
-  // that the leaders are ordinary lines and retire with everyone else.
-  const ufaLatestTs = Math.max(0, ...all.filter((l) => l.league === 'ufa').map((l) => l.ts));
-  const awardsLive = ufaLatestTs > 0 && now - ufaLatestTs <= AWARD_GRACE_DAYS * MS_DAY;
-  if (!awardsLive) for (const l of all) l.awardWatch = null;
-
   // Strength-gated recency on WALL-CLOCK age: keep only lines that cleared
   // the age-scaled bar (a real standout game). This applies to award lines
   // too — a sub-gate award line is dropped and replaced by a season card below.
   const clearsGate = (l: StandoutLine) => l.perf >= gateThreshold((now - l.ts) / MS_DAY);
   const gated = all.filter(clearsGate);
+
+  // UFA award treatment (tags, cap exemptions, season-total fallback cards)
+  // rides for AWARD_GRACE_DAYS after the UFA's latest final — the season's
+  // MVP/OPOY/DPOY stay on the rail as the wrap-up after every game line has
+  // faded, then the rail goes dark (Hunter, 2026-09-19: "4 weeks max after
+  // season ends"). Past that the leaders are ordinary lines like everyone.
+  const ufaLatestTs = Math.max(0, ...all.filter((l) => l.league === 'ufa').map((l) => l.ts));
+  const awardsLive = ufaLatestTs > 0 && now - ufaLatestTs <= AWARD_GRACE_DAYS * MS_DAY;
+  if (!awardsLive) for (const l of gated) l.awardWatch = null;
 
   // Cap the field: at most PER_GAME_CAP standouts per game (so one blowout
   // doesn't flood the rail) AND at most PER_PLAYER_CAP card per player (so a

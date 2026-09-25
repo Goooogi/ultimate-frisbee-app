@@ -191,7 +191,7 @@ export function UsauEventDetail({ event }: Props) {
   );
 }
 
-type ViewTab = 'pools' | 'bracket';
+type ViewTab = 'pools' | 'bracket' | 'leaders';
 
 /** Everything derived FOR ONE DIVISION — pools, games, brackets, standings,
  *  and which view tabs it can fill. DivisionPager's renderDivision calls this
@@ -546,9 +546,23 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   const hasBracket =
     games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
   const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0;
+
+  // ── Leaders (goals/assists) — this division's slice of event.playerStats,
+  // scoped by team id since stats rows carry a team, not a division. Sorted
+  // G+A desc, then goals, matching the EUCS leaders page. USAU only publishes
+  // these at flagship events, so `leaderRows` is empty for the vast majority
+  // of events — the tab simply doesn't show then.
+  const divisionTeamIds = new Set(teams.map((t) => t.teamId));
+  const leaderRows = event.playerStats
+    .filter((r) => r.teamId != null && divisionTeamIds.has(r.teamId))
+    .map((r) => ({ ...r, teamName: r.teamId ? (teamById(teams, r.teamId)?.teamName ?? null) : null }))
+    .sort((a, b) => (b.goals + b.assists - (a.goals + a.assists)) || (b.goals - a.goals));
+  const hasLeaders = leaderRows.length > 0;
+
   const TABS: Array<{ key: ViewTab; label: string; show: boolean }> = [
     { key: 'pools',      label: 'Pools',      show: hasPools },
     { key: 'bracket',    label: 'Bracket',    show: hasBracket },
+    { key: 'leaders',    label: 'Leaders',    show: hasLeaders },
   ];
   const visibleTabs = TABS.filter((t) => t.show);
   const defaultTab: ViewTab =
@@ -556,9 +570,16 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
 
   return {
     teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
-    roundGroups, poolGames, poolRecords, champFinals, poolLeader,
+    roundGroups, poolGames, poolRecords, champFinals, poolLeader, leaderRows,
     visibleTabs, defaultTab,
   };
+}
+
+/** Small lookup helper — `teams` is a per-division array, not a Map, since
+ *  most callers just iterate it; the leaders table is the one place that
+ *  needs a team name by id. */
+function teamById(teams: Team[], teamId: string): Team | undefined {
+  return teams.find((t) => t.teamId === teamId);
 }
 
 /**
@@ -581,7 +602,8 @@ function EventTabsView(props: {
   // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
   const [tabParam, setTabParam] = useViewParam('tab');
   const [, setDivision] = useDivision();
-  const tabRequested = tabParam === 'pools' || tabParam === 'bracket' ? tabParam : null;
+  const tabRequested =
+    tabParam === 'pools' || tabParam === 'bracket' || tabParam === 'leaders' ? tabParam : null;
 
   const activeGender = eventDivisions.includes(gender as UsauDivision)
     ? (gender as UsauDivision)
@@ -716,7 +738,7 @@ function DivisionContent({
 }) {
   const {
     teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
-    roundGroups, poolGames, poolRecords, champFinals, poolLeader,
+    roundGroups, poolGames, poolRecords, champFinals, poolLeader, leaderRows,
     visibleTabs, defaultTab,
   } = useMemo(
     () => buildDivisionData(event, levelTeams, division),
@@ -841,6 +863,9 @@ function DivisionContent({
         />
       )}
 
+      {/* ── Leaders — goals/assists, published for flagship events only ──── */}
+      {active === 'leaders' && <LeadersTable rows={leaderRows} season={event.season} />}
+
       {visibleTabs.length === 0 && (
         <div className="text-[12px] text-faint font-tight">
           {games.length > 0
@@ -934,6 +959,84 @@ function BracketView({
         </div>
       )}
     </div>
+  );
+}
+
+/** One division's scoring leaders — Player · Team · G · A · Pts, sorted by
+ *  G+A desc then goals (same order buildDivisionData already sorted `rows`
+ *  in, so this just renders). Reuses the column layout of the EUCS leaders
+ *  page (/euf/events/[slug]/leaders); styled to this file's own tokens.
+ *  `overflow-x-auto` keeps a 5-column table off the page's own horizontal
+ *  scroll on a 390px screen — the table scrolls, the page doesn't. */
+function LeadersTable({
+  rows,
+  season,
+}: {
+  rows: Array<{ playerId: string; playerName: string; teamId: string | null; teamName: string | null; goals: number; assists: number }>;
+  season?: number | null;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div className="text-[12px] text-faint font-tight">
+        No player stats published for this division yet.
+      </div>
+    );
+  }
+  const thBase = 'py-2.5 text-[10px] font-bold tracking-[0.12em] uppercase text-muted font-tight whitespace-nowrap';
+  const tdBase = 'py-2.5 text-[13px] font-tight whitespace-nowrap';
+  return (
+    <section aria-labelledby="leaders-heading" className="bg-surface rounded-card shadow-card overflow-hidden">
+      <h2 id="leaders-heading" className="sr-only">Scoring leaders</h2>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[420px] border-collapse">
+          <thead>
+            <tr className="border-b border-hairline">
+              <th scope="col" className={`${thBase} text-left pl-4 pr-2`}>Player</th>
+              <th scope="col" className={`${thBase} text-left px-2`}>Team</th>
+              <th scope="col" className={`${thBase} text-right px-2`}>G</th>
+              <th scope="col" className={`${thBase} text-right px-2`}>A</th>
+              <th scope="col" className={`${thBase} text-right pr-4 pl-2`}>Pts</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr
+                key={`${r.teamId}-${r.playerId}-${i}`}
+                className={i > 0 ? 'border-t border-hairline' : ''}
+              >
+                <td className={`${tdBase} pl-4 pr-2`}>
+                  <Link
+                    href={`/players/${r.playerId}`}
+                    prefetch={false}
+                    className="inline-flex items-center min-h-[44px] text-ink hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
+                  >
+                    {r.playerName}
+                  </Link>
+                </td>
+                <td className={`${tdBase} px-2 text-muted`}>
+                  {r.teamId && r.teamName ? (
+                    <Link
+                      href={season != null ? `/usau/teams/${r.teamId}?season=${season}` : `/usau/teams/${r.teamId}`}
+                      prefetch={false}
+                      className="inline-flex items-center min-h-[44px] text-muted hover:text-accent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded truncate max-w-[220px]"
+                    >
+                      {r.teamName}
+                    </Link>
+                  ) : (
+                    <span className="text-faint">—</span>
+                  )}
+                </td>
+                <td className={`${tdBase} px-2 text-right tabular text-ink`}>{r.goals}</td>
+                <td className={`${tdBase} px-2 text-right tabular text-muted`}>{r.assists}</td>
+                <td className={`${tdBase} pr-4 pl-2 text-right tabular text-ink font-bold`}>
+                  {r.goals + r.assists}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
 

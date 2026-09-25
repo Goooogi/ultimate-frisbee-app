@@ -3241,6 +3241,10 @@ export interface UsauPlayerSummary {
       assists: number | null;
       seed: number | null;
       pool: string | null;
+      /** True when USAU published a stats row for this event (a player only
+       *  gets one if they had ≥1 G or A) — lets the UI show 0 (tracked, no
+       *  score) instead of "—" (USAU never publishes stats here at all). */
+      hasStats: boolean;
     }>;
   }>;
   /** Years this player won the USAU Club National Championship. */
@@ -3665,6 +3669,7 @@ export async function getPlayerProfile(playerId: string): Promise<UsauPlayerSumm
         assists: stats?.assists ?? null,
         seed: p.seed,
         pool: p.pool,
+        hasStats: stats != null,
       });
     }
     events.sort((a, b) => (b.startDate ?? '').localeCompare(a.startDate ?? ''));
@@ -3798,16 +3803,10 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
     .map((t) => t.id);
   if (teamIds.length === 0) teamIds.push(anchor.id);
 
-  const [partRes, rosterRes] = await Promise.all([
-    db
-      .from('usau_event_teams')
-      .select('team_id, event_id, seed, pool, final_placement, usau_events(usau_slug, name, season, start_date)')
-      .in('team_id', teamIds),
-    db
-      .from('usau_rosters')
-      .select('player_id, team_id, season, jersey_number, usau_players(display_name)')
-      .in('team_id', teamIds),
-  ]);
+  const partRes = await db
+    .from('usau_event_teams')
+    .select('team_id, event_id, seed, pool, final_placement, usau_events(usau_slug, name, season, start_date)')
+    .in('team_id', teamIds);
 
   interface PartRow {
     team_id: string;
@@ -3823,6 +3822,27 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
     season: number;
     jersey_number: string | null;
     usau_players: { display_name: string } | null;
+  }
+
+  // Paged: a big club's rows across all seasons pass PostgREST's 1000-row cap
+  // (Johnny Bravo: 1,467), and the unpaged read silently dropped whole seasons.
+  // Ordered by the table's unique key so paged ranges don't skip/overlap.
+  const rosterRows: RosterRow[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: rosterError } = await db
+      .from('usau_rosters')
+      .select('player_id, team_id, season, jersey_number, usau_players(display_name)')
+      .in('team_id', teamIds)
+      .order('team_id', { ascending: true })
+      .order('season', { ascending: true })
+      .order('event_id', { ascending: true })
+      .order('player_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (rosterError) throw rosterError;
+    const rows = (page ?? []) as unknown as RosterRow[];
+    rosterRows.push(...rows);
+    if (rows.length < PAGE) break;
   }
 
   // Group by season.
@@ -3871,7 +3891,7 @@ export async function getTeam(teamId: string): Promise<UsauTeamSummary | null> {
     number,
     Map<string, UsauTeamSummary['seasons'][number]['roster'][number]>
   >();
-  for (const r of (rosterRes.data ?? []) as unknown as RosterRow[]) {
+  for (const r of rosterRows) {
     const player = r.usau_players;
     if (!player) continue;
     const jersey = normalizeJersey(r.jersey_number);
@@ -3977,6 +3997,18 @@ export interface UsauEventSummary {
   members: UsauEventMember[];
   /** Series identity for a merged Sectional/Regional, null otherwise. */
   series: UsauEventSeries | null;
+  /** Per-player goals/assists for this event, when USAU published them
+   *  (flagship events only — Nationals, Pro Champs, U.S. Open, college
+   *  championships). Empty for the vast majority of events. Drives the
+   *  Leaders tab; the team's genderDivision (via `teams`) decides which
+   *  division a row belongs to. */
+  playerStats: Array<{
+    playerId: string;
+    playerName: string;
+    teamId: string | null;
+    goals: number;
+    assists: number;
+  }>;
   teams: Array<{
     teamId: string;
     teamName: string;
@@ -4717,6 +4749,47 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       .in('event_id', ids),
   ]);
 
+  // Per-player goals/assists — published for flagship events only, so this is
+  // usually empty. Paged (primary-key order) the same way every other
+  // multi-hundred-row USAU read in this file is, since a Nationals field
+  // alone is ~1,300 rows — past PostgREST's 1000-row cap.
+  type StatRow = {
+    player_id: string;
+    team_id: string | null;
+    goals: number | null;
+    assists: number | null;
+    usau_players: { display_name: string | null } | null;
+  };
+  const statRows: StatRow[] = [];
+  {
+    const PAGE = 1000;
+    for (let from = 0; ; from += PAGE) {
+      const { data: page, error: statsError } = await db
+        .from('usau_player_event_stats')
+        .select('player_id, team_id, goals, assists, usau_players(display_name)')
+        .in('event_id', ids)
+        // Full PK order: a merged series spans several events, and one player
+        // can hold a row in more than one — player_id alone can tie across a
+        // page boundary and skip/duplicate rows.
+        .order('player_id', { ascending: true })
+        .order('event_id', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (statsError) throw statsError;
+      const chunk = (page ?? []) as unknown as StatRow[];
+      statRows.push(...chunk);
+      if (chunk.length < PAGE) break;
+    }
+  }
+  const playerStats = statRows
+    .filter((r) => r.usau_players?.display_name)
+    .map((r) => ({
+      playerId: r.player_id,
+      playerName: r.usau_players!.display_name!,
+      teamId: r.team_id,
+      goals: r.goals ?? 0,
+      assists: r.assists ?? 0,
+    }));
+
   const teams = (partRes.data ?? []).map((p) => {
     const t = (p as { usau_teams: { name: string; gender_division: string | null; competition_level: string | null } | null }).usau_teams;
     return {
@@ -4787,6 +4860,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       flight: flightForName(anchor.name),
       members: [],
       series: null,
+      playerStats,
       teams,
       games,
     };
@@ -4832,6 +4906,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       level,
       groupKey: anchor.series_group_key as string,
     },
+    playerStats,
     teams,
     games,
   };

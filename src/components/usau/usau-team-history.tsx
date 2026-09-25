@@ -90,7 +90,7 @@ function SeasonHistory({
             <div className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-2">
               Tournaments
             </div>
-            <ul className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            <ul className="grid grid-cols-1 md:grid-cols-2 auto-rows-fr gap-2.5">
               {active.events.map((event) => (
                 <EventCard key={event.slug} event={event} genderDivision={genderDivision} />
               ))}
@@ -222,7 +222,7 @@ function EventCard({
     <li>
       <Link
         href={usauEventHref(event.slug, genderDivision)} prefetch={false}
-        className="group block bg-surface rounded-card shadow-card p-3.5 transition-shadow hover:shadow-lift cursor-pointer no-underline"
+        className="group block h-full bg-surface rounded-card shadow-card p-3.5 transition-shadow hover:shadow-lift cursor-pointer no-underline"
       >
         <div className="flex items-baseline justify-between gap-2 mb-1">
           <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-faint font-tight truncate">

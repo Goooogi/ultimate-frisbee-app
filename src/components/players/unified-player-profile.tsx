@@ -91,8 +91,10 @@ export function UnifiedProfile({ profile, content, connections }: Props) {
         <ChampionBanner years={profile.championYearsUfa} label="UFA Champion" />
       )}
 
-      {/* Career totals — UFA + USAU combined */}
-      {(career.ufaGamesPlayed > 0 || career.usauEventsPlayed > 0) && (
+      {/* Career totals — UFA only. USAU gets its own block below (stats mean
+          something different there: event totals, not per-game box scores —
+          mixing them into one grid overstated a player's per-game output). */}
+      {career.ufaGamesPlayed > 0 && (
         <section className="mb-6" aria-labelledby="career-heading">
           <h2
             id="career-heading"
@@ -101,10 +103,7 @@ export function UnifiedProfile({ profile, content, connections }: Props) {
             Career totals
           </h2>
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 bg-surface rounded-card-lg shadow-card overflow-hidden">
-            <CareerStat
-              label={career.ufaGamesPlayed > 0 ? 'UFA Games' : 'Events'}
-              value={career.ufaGamesPlayed > 0 ? career.ufaGamesPlayed : career.usauEventsPlayed}
-            />
+            <CareerStat label="UFA Games" value={career.ufaGamesPlayed} />
             <CareerStat label="Goals" value={career.goals} />
             <CareerStat label="Assists" value={career.assists} />
             {career.plusMinus !== 0 && <CareerStat label="+/−" value={signed(career.plusMinus)} />}
@@ -116,6 +115,34 @@ export function UnifiedProfile({ profile, content, connections }: Props) {
             )}
             {career.blocks > 0 && <CareerStat label="Blocks" value={career.blocks} />}
           </div>
+        </section>
+      )}
+
+      {/* USAU career sub-block — separate from UFA for the same reason PUL/WUL
+          are separate: USAU only publishes goals/assists at flagship events
+          (Nationals, Pro Champs, U.S. Open, college championships), so these
+          are event totals, not per-game stats. Shown whenever the player has
+          any USAU events, even with zero tracked stats (Events/Scored still
+          tell a story). */}
+      {career.usauEventsPlayed > 0 && (
+        <section className="mb-10" aria-labelledby="usau-career-heading">
+          <h2
+            id="usau-career-heading"
+            className="text-[10.5px] font-bold tracking-[0.18em] uppercase text-accent font-sans mb-4"
+          >
+            USAU career
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 bg-surface rounded-card-lg shadow-card overflow-hidden">
+            <CareerStat label="Events" value={career.usauEventsPlayed} />
+            <CareerStat label="Scored" value={career.usauEventsWithStats} />
+            <CareerStat label="Goals" value={career.usauGoals} />
+            <CareerStat label="Assists" value={career.usauAssists} />
+          </div>
+          {career.usauEventsWithStats > 0 && career.usauEventsWithStats < career.usauEventsPlayed && (
+            <p className="mt-3 text-[10px] font-medium text-faint font-tight">
+              USAU recorded goals or assists for this player at {career.usauEventsWithStats} of {career.usauEventsPlayed} events.
+            </p>
+          )}
         </section>
       )}
 
@@ -384,7 +411,15 @@ function UfaStintRow({ stint, year }: { stint: UfaSeasonStint; year: number }) {
 function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number }) {
   const totalGoals = stint.events.reduce((s, e) => s + (e.goals ?? 0), 0);
   const totalAssists = stint.events.reduce((s, e) => s + (e.assists ?? 0), 0);
-  const hasStats = stint.events.some((e) => e.goals != null || e.assists != null);
+  const scored = stint.events.filter((e) => e.hasStats).length;
+  const hasStats = scored > 0;
+  // Partial coverage: this player has a USAU stats row at SOME but not all of
+  // this season's events. USAU's leaderboards only list players with ≥1 goal
+  // or assist, so a missing row means "event not tracked" OR "tracked, 0/0" —
+  // indistinguishable per player. Swap the EVTS cell for SCORED k/n and say
+  // so in the caption. Summary cells are `hidden sm:flex` (see
+  // YearSummaryCells), so on mobile the caption is the only notice.
+  const partialCoverage = scored > 0 && scored < stint.events.length;
 
   return (
     <details className="group [&[open]>summary]:bg-surface-hi">
@@ -416,7 +451,9 @@ function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number })
         {hasStats ? (
           <YearSummaryCells
             cells={[
-              { label: 'EVTS', value: stint.events.length },
+              partialCoverage
+                ? { label: 'SCORED', value: `${scored}/${stint.events.length}` }
+                : { label: 'EVTS', value: stint.events.length },
               { label: 'G', value: totalGoals },
               { label: 'A', value: totalAssists },
             ]}
@@ -428,6 +465,11 @@ function UsauStintRow({ stint, year }: { stint: UsauSeasonStint; year: number })
         )}
       </summary>
       <div className="px-4 pt-2 pb-4 border-t border-hairline">
+        {partialCoverage && (
+          <p className="mb-2 text-[10px] font-medium text-faint font-tight">
+            USAU recorded goals or assists for this player at {scored} of {stint.events.length} events.
+          </p>
+        )}
         {stint.events.length === 0 ? (
           <div className="py-4 text-[12px] text-faint font-tight">No events recorded.</div>
         ) : (
@@ -481,17 +523,15 @@ function UsauEventRow({
           Seed {event.seed}
         </span>
       )}
-      {(event.goals != null || event.assists != null) && (
+      {event.hasStats ? (
         <span className="flex items-center gap-2 flex-shrink-0">
-          {event.goals != null && (
-            <span className="tabular text-[12px] font-bold text-ink font-tight">{event.goals}G</span>
-          )}
-          {event.assists != null && (
-            <span className="tabular text-[12px] font-bold text-ink font-tight">
-              {event.assists}A
-            </span>
-          )}
+          <span className="tabular text-[12px] font-bold text-ink font-tight">{event.goals ?? 0}G</span>
+          <span className="tabular text-[12px] font-bold text-ink font-tight">{event.assists ?? 0}A</span>
         </span>
+      ) : (
+        // No stats row for this player here (untracked event, or tracked with
+        // no goals/assists) — a dash, not a blank or a misleading 0G 0A.
+        <span className="tabular text-[12px] font-bold text-faint font-tight">—</span>
       )}
     </li>
   );

@@ -19,6 +19,9 @@ mkdir -p "$OUT_DIR"
 ANON=$(grep '^NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=' "$REPO/.env" | cut -d= -f2- | tr -d '"')
 [ -n "$ANON" ] || { echo "no NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY in $REPO/.env"; exit 1; }
 cd "$REPO"
-env ANON="$ANON" "$@" nohup "$SCRIPT" > "$OUT_DIR/$LABEL.out" 2>&1 &
+# caffeinate: no idle sleep while the run lives (-i), and no sleep at all on AC
+# power (-s). A closed lid on battery still sleeps the Mac — and a sleeping Mac
+# turns every call into HTTP 000 (2026-09-17: 15 h lost). Keep the lid open.
+env ANON="$ANON" "$@" nohup caffeinate -i -s "$SCRIPT" > "$OUT_DIR/$LABEL.out" 2>&1 &
 echo $! > "$OUT_DIR/$LABEL.pid"
 echo "launched $LABEL pid=$(cat "$OUT_DIR/$LABEL.pid") log=$OUT_DIR/$LABEL.out"

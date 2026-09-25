@@ -178,17 +178,39 @@ async function syncTeam(
   let withGoals = 0;
   let withAssists = 0;
 
-  // Existing roster on this team this season — used to dedupe by name.
-  const { data: existingRoster } = await db
-    .from('usau_rosters')
-    .select('player_id, usau_players(display_name)')
-    .eq('team_id', teamUUID)
-    .eq('season', season);
+  // Existing roster on this team this season — used to dedupe by name. One name
+  // can carry several player_ids here (legacy season rows, merged team rows, a
+  // fresh id per earlier event scrape) and the last one read used to win, so a
+  // re-scrape could file this event's stats under a second id beside the first
+  // (2,307 duplicate stat rows found 2026-09-22). Prefer, in order: the id on
+  // THIS event's roster, the id already holding this event's stats, an id from
+  // another event's roster, a legacy season row; ties → lowest id.
+  const [rosterRes, statsRes] = await Promise.all([
+    db
+      .from('usau_rosters')
+      .select('player_id, event_id, usau_players(display_name)')
+      .eq('team_id', teamUUID)
+      .eq('season', season),
+    db
+      .from('usau_player_event_stats')
+      .select('player_id')
+      .eq('event_id', eventID)
+      .eq('team_id', teamUUID),
+  ]);
+  if (rosterRes.error) throw new Error(`load team roster: ${stringifyErr(rosterRes.error)}`);
+  if (statsRes.error) throw new Error(`load event stats: ${stringifyErr(statsRes.error)}`);
+
+  const holdsEventStats = new Set((statsRes.data ?? []).map((s) => s.player_id));
+  const rank = (r: { player_id: string; event_id: string | null }) =>
+    r.event_id === eventID ? 0 : holdsEventStats.has(r.player_id) ? 1 : r.event_id ? 2 : 3;
+  const ranked = [...(rosterRes.data ?? [])].sort(
+    (a, b) => rank(a) - rank(b) || (a.player_id < b.player_id ? -1 : a.player_id > b.player_id ? 1 : 0),
+  );
 
   const playerByName = new Map<string, string>();
-  for (const r of existingRoster ?? []) {
+  for (const r of ranked) {
     const dn = (r.usau_players as { display_name: string } | null)?.display_name;
-    if (dn) playerByName.set(dn.toLowerCase(), r.player_id);
+    if (dn && !playerByName.has(dn.toLowerCase())) playerByName.set(dn.toLowerCase(), r.player_id);
   }
 
   for (const p of roster) {

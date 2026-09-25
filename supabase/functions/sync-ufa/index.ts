@@ -36,7 +36,11 @@
 //   { "year": 2026, "windowDays": 14, "maxGames": 12, "retryDays": 5,
 //     "maxPlayerFetches": 120, "prune": true }
 //   (larger for manual repair runs; wall-clock caps ~400)
-// Auth: verify_jwt off (server-to-server; pg_cron passes the service-role key).
+// Auth: deployed with verify_jwt OFF — the cron's key is a new-style sb_secret
+// key, not a JWT, so the gateway check would reject it. Instead the caller's
+// bearer must work as a secret key against the Auth admin API before anything
+// runs; otherwise anyone could trigger a re-scrape (year/windowDays/prune
+// included) against the DB.
 
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2';
 import { Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
@@ -780,7 +784,23 @@ async function run(body: { year?: number; windowDays?: number; maxGames?: number
 // within a single run() (Edge invocations are one-shot).
 const playerLogCache = new Map<string, ApiPlayerGameRow[]>();
 
+/** True when the bearer is a secret/service-role key for this project: only
+ *  those can call the Auth admin API. */
+async function callerHoldsSecretKey(req: Request): Promise<boolean> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = /^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization') ?? '')?.[1];
+  if (!url || !key) return false;
+  const caller = createClient(url, key, { auth: { persistSession: false } });
+  const { error } = await caller.auth.admin.listUsers({ page: 1, perPage: 1 });
+  return !error;
+}
+
 Deno.serve(async (req) => {
+  if (!(await callerHoldsSecretKey(req))) {
+    return new Response(JSON.stringify({ ok: false, error: 'unauthorized' }), {
+      status: 401, headers: { 'Content-Type': 'application/json' },
+    });
+  }
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'POST only' }), {
       status: 405, headers: { 'Content-Type': 'application/json' },

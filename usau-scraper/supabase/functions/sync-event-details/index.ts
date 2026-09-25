@@ -29,6 +29,7 @@ import {
 } from '../_shared/parse.ts';
 import { supabase, withRunLogging } from '../_shared/supabase.ts';
 import { tzForState, localWallTimeToUtcIso, dateOnlyIso } from '../_shared/tz.ts';
+import { refreshEventPlacements } from '../_shared/event-placements.ts';
 
 function stringifyErr(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -1360,9 +1361,14 @@ async function run(body: RequestBody) {
     })
     .eq('id', eventUUID);
 
+  // Final placements from the bracket results, once every bracket game is
+  // played (skipped until then). Write-path only — the read path serves
+  // usau_event_teams.final_placement.
+  const placements = await refreshEventPlacements(db, eventUUID);
+
   return {
     rowsProcessed: totalTeams + totalGames,
-    result: { slug, eventID: eventUUID, perDivision },
+    result: { slug, eventID: eventUUID, perDivision, placements },
   };
 }
 

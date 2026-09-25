@@ -22,14 +22,21 @@ Usage:
   KEY=<publishable key> ./backfill-event-rosters.py               # everything, 2026 -> 2014
   KEY=... YEAR_MIN=2021 ./backfill-event-rosters.py               # 2026 -> 2021 only
   KEY=... DRY=1 ./backfill-event-rosters.py                       # plan only, no writes
+  KEY=... FORCE_SLUGS=a,b GAP=20 ./backfill-event-rosters.py      # re-scrape these events' teams
   (KEY falls back to NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY from ../../.env)
+
+FORCE_SLUGS is the post-event goals/assists pass: rosters are scraped up to a
+week BEFORE an event and the default walk skips any team already rostered, so
+G/A (published after play) never lands. It re-scrapes every team of the named
+events regardless of coverage. Suspend the login LaunchAgent run first
+(kill -STOP) — never two streams against USAU.
 """
 import json
 import os
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 BASE = "https://efjipdmylkqwmupvoxab.supabase.co/functions/v1"
 REST = "https://efjipdmylkqwmupvoxab.supabase.co/rest/v1"
@@ -39,6 +46,7 @@ MAX_CONSEC_FAIL = int(os.environ.get("MAX_CONSEC_FAIL", "3"))
 DRY = os.environ.get("DRY", "0") == "1"
 YEAR_MIN = int(os.environ.get("YEAR_MIN", "2014"))
 YEAR_MAX = int(os.environ.get("YEAR_MAX", "2026"))
+FORCE_SLUGS = [s.strip() for s in os.environ.get("FORCE_SLUGS", "").split(",") if s.strip()]
 
 LOG = f"/tmp/event-roster-backfill-{datetime.now().strftime('%Y%m%d-%H%M%S')}.log"
 
@@ -128,6 +136,15 @@ def bail(msg: str) -> None:
     sys.exit(1)
 
 
+def bail_on_waf(res: dict, what: str) -> None:
+    """sync-event-rosters catches a USAU 403 per team and still answers HTTP
+    200 — the block only shows in perTeam[].error — so check_call's 403 stop
+    never fires on roster calls."""
+    errs = [p.get("error") for p in res.get("perTeam") or [] if p.get("error")]
+    if any("403" in e for e in errs):
+        bail(f"403 inside {what} (WAF block): {errs[0][:160]}")
+
+
 def check_call(name: str, body: dict, what: str, verify=None):
     """Call an edge fn with the 403/consec-fail/000-retry policy. Returns
     parsed JSON on success, None on a skippable failure. On any non-200,
@@ -165,6 +182,45 @@ def check_call(name: str, body: dict, what: str, verify=None):
         return {}
 
 
+if FORCE_SLUGS:
+    if GAP < 12:
+        bail(f"GAP={GAP}s is under the 12s floor for a forced pass")
+    # The teams already have roster rows, so a verify() after an HTTP 000 keys
+    # on the fn's own roster_checked_at stamp from THIS run instead.
+    since = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    say(f"=== forced re-scrape — {', '.join(FORCE_SLUGS)} ===")
+    say(f"gap={GAP}s max_consec_fail={MAX_CONSEC_FAIL} dry={DRY} log={LOG}")
+    for slug in FORCE_SLUGS:
+        ev = rest(f"usau_events?select=id&usau_slug=eq.{slug}")
+        if not ev:
+            bail(f"event {slug} not found")
+        eid = ev[0]["id"]
+        teams = rest(f"usau_event_teams?select=team_id,usau_event_team_url_id&event_id=eq.{eid}")
+        todo = [t for t in teams if t["usau_event_team_url_id"]]
+        totals["events"] += 1
+        say(f"  {slug}: {len(todo)}/{len(teams)} teams have a USAU page")
+        if DRY:
+            continue
+        for t in todo:
+            tid = t["team_id"]
+            res = check_call("sync-event-rosters",
+                             {"slug": slug, "teamId": tid},
+                             f"roster {slug}/{tid[:8]}",
+                             verify=lambda eid=eid, tid=tid: bool(rest(
+                                 f"usau_event_teams?select=team_id&event_id=eq.{eid}&team_id=eq.{tid}"
+                                 f"&roster_checked_at=gte.{since}")))
+            if res is not None:
+                bail_on_waf(res, f"roster {slug}/{tid[:8]}")
+                players = res.get("players", res.get("rosterSize", 0)) or 0
+                totals["teams"] += 1
+                totals["players"] += int(players)
+                say(f"      ✓ {tid[:8]} → {players} players "
+                    f"(teams={totals['teams']} players={totals['players']})")
+            time.sleep(GAP)
+    say(f"=== DONE === {totals}")
+    say(f"log: {LOG}")
+    sys.exit(0)
+
 say(f"=== per-event roster backfill — seasons {YEAR_MAX} -> {YEAR_MIN} ===")
 say(f"gap={GAP}s max_consec_fail={MAX_CONSEC_FAIL} dry={DRY} log={LOG}")
 
@@ -194,22 +250,25 @@ for season in range(YEAR_MAX, YEAR_MIN - 1, -1):
             continue
 
         if any(not t["usau_event_team_url_id"] for t in todo):
-            if "super-regional" in slug:
-                # Synthetic combined-event slugs (masters super-regionals) have
-                # no real USAU page; resolve spins to timeout on every one (37
-                # known as of 2026-08-30). Skip the call; url-less teams skip
-                # quietly below.
-                say("      skip resolve: super-regional slug (known unresolvable)")
-            else:
-                urls_before = sum(1 for t in teams if t["usau_event_team_url_id"])
-                if check_call("resolve-event-team-urls", {"slug": slug}, f"resolve {slug}",
-                              verify=lambda eid=eid, n=urls_before: len(rest(
-                                  f"usau_event_teams?select=team_id&event_id=eq.{eid}"
-                                  f"&usau_event_team_url_id=not.is.null")) > n) is not None:
-                    say("      resolved URLs ok")
-                time.sleep(GAP)
-                teams = rest(f"usau_event_teams?select=team_id,usau_event_team_url_id&event_id=eq.{eid}")
-                todo = [t for t in teams if t["team_id"] not in covered]
+            urls_before = sum(1 for t in teams if t["usau_event_team_url_id"])
+            res = check_call("resolve-event-team-urls", {"slug": slug}, f"resolve {slug}",
+                             verify=lambda eid=eid, n=urls_before: len(rest(
+                                 f"usau_event_teams?select=team_id&event_id=eq.{eid}"
+                                 f"&usau_event_team_url_id=not.is.null")) > n)
+            if res is not None:
+                # The resolver answers HTTP 200 even when USAU 403'd it — the
+                # block only shows in perEvent[].error — so the 403 hard-stop in
+                # check_call can't see it. And "HTTP 200" alone said nothing:
+                # 81 masters events logged "ok" for months while resolving 0.
+                result = res  # flat body: {ok, events, resolvedTotal, perEvent}
+                errors = [p.get("error") for p in result.get("perEvent") or [] if p.get("error")]
+                if any("403" in e for e in errors):
+                    bail(f"403 inside resolve {slug} (WAF block): {errors[0][:160]}")
+                say(f"      resolved {result.get('resolvedTotal', '?')} URLs"
+                    + (f" — error: {errors[0][:160]}" if errors else ""))
+            time.sleep(GAP)
+            teams = rest(f"usau_event_teams?select=team_id,usau_event_team_url_id&event_id=eq.{eid}")
+            todo = [t for t in teams if t["team_id"] not in covered]
 
         for t in todo:
             if not t["usau_event_team_url_id"]:
@@ -225,6 +284,7 @@ for season in range(YEAR_MAX, YEAR_MIN - 1, -1):
                              verify=lambda eid=eid, tid=tid: bool(rest(
                                  f"usau_rosters?select=team_id&event_id=eq.{eid}&team_id=eq.{tid}")))
             if res is not None:
+                bail_on_waf(res, f"roster {slug}/{tid[:8]}")
                 players = res.get("players", res.get("rosterSize", 0)) or 0
                 totals["teams"] += 1
                 totals["players"] += int(players)

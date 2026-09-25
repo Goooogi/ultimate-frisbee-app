@@ -116,6 +116,10 @@ const EVENT_START_WINDOW_MS = 24 * 3600_000; // event's start_date is "today" (v
 const EVENT_BRACKET_LOOKBACK_MS = 3 * 3600_000; // first bracket game entering the game_start window
 const EVENT_FINAL_LOOKBACK_MS = 3 * 3600_000; // championship/last game going final
 const PLAYER_STATS_LOOKBACK_MS = 3 * 3600_000; // stats rows landing (created_at/scraped_at)
+// scraped_at is when WE scraped, not when the event was played — a historical
+// backfill stamps years-old stats "now". Only events that ended this recently
+// may push (a 2017 event's stats pushed on 2026-09-03 before this guard).
+const PLAYER_STATS_EVENT_RECENCY_DAYS = 3;
 
 // Quiet hours for event-level categories, venue-local wall clock.
 const QUIET_HOURS_START = 8; // 08:00
@@ -1387,17 +1391,25 @@ async function usauPlayerStatsCandidates(sb: SupabaseClient, now: number): Promi
   // rows). Never name-fuzzy match here per the plan's identity-sprawl note.
   const favoritedIds = new Set(favorites.map((f) => f.player_id));
 
+  // Filtered to favorites server-side: unfiltered, a backfill burst passes the
+  // 1000-row response cap and silently drops the live rows.
   const { data: stats, error: statsErr } = await sb
     .from('usau_player_event_stats')
     .select('event_id, player_id, goals, assists, scraped_at')
-    .gte('scraped_at', lo);
+    .gte('scraped_at', lo)
+    .in('player_id', [...favoritedIds]);
   if (statsErr) throw statsErr;
 
   const matched = (stats ?? []).filter((s) => favoritedIds.has(String(s.player_id)));
   if (matched.length === 0) return [];
 
   const eventIds = [...new Set(matched.map((s) => String(s.event_id)))];
-  const { data: events, error: evErr } = await sb.from('usau_events').select('id, name').in('id', eventIds);
+  const { data: events, error: evErr } = await sb
+    .from('usau_events')
+    .select('id, name')
+    .in('id', eventIds)
+    .gte('end_date', new Date(now - PLAYER_STATS_EVENT_RECENCY_DAYS * 86_400_000).toISOString().slice(0, 10))
+    .lte('start_date', new Date(now + 86_400_000).toISOString().slice(0, 10));
   if (evErr) throw evErr;
   const eventName = new Map((events ?? []).map((e) => [String(e.id), e.name]));
 
@@ -1410,7 +1422,8 @@ async function usauPlayerStatsCandidates(sb: SupabaseClient, now: number): Promi
     const userId = byUser.get(playerIdText);
     if (!userId) continue;
     const eventId = String(s.event_id);
-    const eName = eventName.get(eventId) ?? 'the event';
+    const eName = eventName.get(eventId);
+    if (!eName) continue; // not a recent event (or undated) — never push
     notices.push({
       league: 'usau',
       dedupId: `${eventId}:${playerIdText}`,

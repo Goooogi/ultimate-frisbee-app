@@ -16,6 +16,12 @@
 //      alert_sent. A single isolated failure does NOT email (one retry already
 //      happened at the fetch level; the next hourly run is the second chance).
 //
+// Auth: deployed with verify_jwt OFF — the cron's key is a new-style sb_secret
+// key, not a JWT, so the gateway check would reject it. Instead the caller's
+// bearer must work as a secret key against the Auth admin API before anything
+// runs, the pul_sync_log insert included; otherwise anyone could trigger a full
+// scrape and write a log row per hit.
+//
 // Secrets (set via supabase secrets): RESEND_API, SEND_EMAIL.
 // Auto-injected by Supabase: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 
@@ -238,7 +244,21 @@ async function sendAlert(errorMessage: string): Promise<boolean> {
   }
 }
 
-Deno.serve(async () => {
+/** True when the bearer is a secret/service-role key for this project: only
+ *  those can call the Auth admin API. */
+async function callerHoldsSecretKey(req: Request): Promise<boolean> {
+  const url = Deno.env.get('SUPABASE_URL');
+  const key = /^Bearer\s+(\S+)$/i.exec(req.headers.get('Authorization') ?? '')?.[1];
+  if (!url || !key) return false;
+  const caller = createClient(url, key, { auth: { persistSession: false } });
+  const { error } = await caller.auth.admin.listUsers({ page: 1, perPage: 1 });
+  return !error;
+}
+
+Deno.serve(async (req) => {
+  if (!(await callerHoldsSecretKey(req))) {
+    return Response.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  }
   const supabase = db();
 
   // Open the log row.

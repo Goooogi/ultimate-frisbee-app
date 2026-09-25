@@ -251,30 +251,44 @@ function DivisionGroup({ i, label, children }: { i: number; label: string; child
   );
 }
 
-/** Champion/finalist/podium row: mark, name + record, pill. */
+/** Champion/finalist/podium row: mark, name + record, pill. With `href` the
+ *  whole row is the team link, like StandingRow (every team on every card is
+ *  clickable — Hunter, 2026-09-19). A row naming several teams (USAU's tied
+ *  semifinalists) passes no href and links each name inside `name` instead:
+ *  nested anchors are invalid HTML. */
 function PlacementRow({
   i,
+  href,
   mark,
   name,
   record,
   pill,
 }: {
   i: number;
+  href?: string;
   mark: React.ReactNode;
-  name: string;
+  name: React.ReactNode;
   record: string | null;
   pill: React.ReactNode;
 }) {
-  return (
-    <div className={rowClass(i)}>
+  const inner = (
+    <>
       <span className="inline-flex rounded-full overflow-hidden flex-shrink-0">{mark}</span>
       <div className="flex-1 min-w-0">
         <div className="font-sans font-bold text-[14px] leading-tight text-ink truncate">{name}</div>
         {record && <div className="font-mono text-[10.5px] text-faint mt-0.5 tabular">{record}</div>}
       </div>
       {pill}
-    </div>
+    </>
   );
+  if (href) {
+    return (
+      <Link href={href} className={`${rowClass(i)} no-underline hover:opacity-80 transition-opacity`}>
+        {inner}
+      </Link>
+    );
+  }
+  return <div className={rowClass(i)}>{inner}</div>;
 }
 
 // ─── UFA — championship + semis, then the rest of the playoff field ─────────
@@ -494,6 +508,9 @@ export function UsauSeasonCompleteSection({ card }: { card: UsauSeasonCompleteCa
   const genderOf = (division: string) => division.replace(/^D-I{1,3}\s+/, '');
   const levelOf = (division: string): string =>
     /^D-III\b/.test(division) ? 'COLLEGE_D3' : /^D-I\b/.test(division) ? 'COLLEGE_D1' : 'CLUB';
+  // Pinned to the card's season so the team page opens on this year's roster
+  // and events, not its most recent season (same rule as the event pages).
+  const teamHref = (id: string) => `/usau/teams/${id}?season=${card.season}`;
   return (
     <SeasonCardShell
       eyebrow={`USAU · ${card.season}`}
@@ -513,6 +530,7 @@ export function UsauSeasonCompleteSection({ card }: { card: UsauSeasonCompleteCa
             <PlacementRow
               key={`${row.division}-${row.teamId}`}
               i={i++}
+              href={teamHref(row.teamId)}
               mark={<UsauTeamLogo name={row.teamName} genderDivision={gender} competitionLevel={level} size={22} />}
               name={row.teamName}
               record={null}
@@ -522,6 +540,7 @@ export function UsauSeasonCompleteSection({ card }: { card: UsauSeasonCompleteCa
               <PlacementRow
                 key={`${row.division}-${row.runnerUpId ?? row.runnerUpName}`}
                 i={i++}
+                href={row.runnerUpId ? teamHref(row.runnerUpId) : undefined}
                 mark={<UsauTeamLogo name={row.runnerUpName} genderDivision={gender} competitionLevel={level} size={22} />}
                 name={row.runnerUpName}
                 record={null}
@@ -541,7 +560,14 @@ export function UsauSeasonCompleteSection({ card }: { card: UsauSeasonCompleteCa
                     ))}
                   </span>
                 }
-                name={semis.map((s) => s.name).join(' · ')}
+                name={semis.map((s, j) => (
+                  <span key={s.id}>
+                    {j > 0 && ' · '}
+                    <Link href={teamHref(s.id)} className="no-underline text-ink hover:text-accent transition-colors">
+                      {s.name}
+                    </Link>
+                  </span>
+                ))}
                 record={null}
                 pill={<MutedPill>Semis</MutedPill>}
               />
@@ -604,6 +630,7 @@ export function WfdfSeasonCompleteSection({ card }: { card: WfdfSeasonCompleteCa
                 <PlacementRow
                   key={row.teamId}
                   i={i}
+                  href={`/wfdf/teams/${row.teamId}`}
                   mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
                   name={row.name}
                   record={row.record}
@@ -621,6 +648,7 @@ export function WfdfSeasonCompleteSection({ card }: { card: WfdfSeasonCompleteCa
           <PlacementRow
             key={row.teamId}
             i={i}
+            href={`/wfdf/teams/${row.teamId}`}
             mark={<WfdfFlag countryCode={row.countryCode} size={18} />}
             name={row.name}
             record={[row.record, shortDivisionLabel(row.division)].filter(Boolean).join(' · ')}

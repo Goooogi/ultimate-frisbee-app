@@ -6,7 +6,7 @@
 import Link from 'next/link';
 import type { WulGame, WulGameTeamSide } from '@/lib/wul/data';
 import { WulTeamLogo } from '@/components/wul-team-logo';
-import { HeroFieldLines } from './field-diagram';
+import { HeroFieldLines, HeroGlows } from './field-diagram';
 
 const BASE = '#0E1622';
 const TEXT = '#FFFFFF';
@@ -43,16 +43,7 @@ export function HeroWulSlide({ game, eyebrow }: HeroWulSlideProps) {
       className="relative h-full overflow-hidden px-5 sm:px-10 pt-[26px] sm:pt-[34px] pb-10 sm:pb-14 box-border flex flex-col justify-between"
       style={{ background: BASE, color: TEXT }}
     >
-      <div
-        className="absolute -top-[30%] -left-[8%] w-[55%] h-[150%] pointer-events-none"
-        style={{ background: `radial-gradient(circle at 40% 50%, ${awayGlow}88, transparent 62%)` }}
-        aria-hidden="true"
-      />
-      <div
-        className="absolute -top-[30%] -right-[8%] w-[55%] h-[150%] pointer-events-none"
-        style={{ background: `radial-gradient(circle at 60% 50%, ${homeGlow}88, transparent 62%)` }}
-        aria-hidden="true"
-      />
+      <HeroGlows id={`wul-${game.id}`} awayColor={awayGlow} homeColor={homeGlow} />
       <HeroFieldLines color="rgba(255,255,255,0.05)" accent={WUL_ACCENT} />
 
       <div className="relative flex-1 flex flex-col justify-between gap-4">
