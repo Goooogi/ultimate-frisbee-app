@@ -33,8 +33,14 @@
 // trees) is left alone — swiping over a bracket pans the bracket.
 //
 // With 0–1 divisions it renders the single division bare: no tabs, no swipe.
+//
+// EACH DIVISION IS ITS OWN PAGE (Hunter, 2026-09-26): the active layer is
+// keyed by division so a switch mounts the incoming division fresh — pool
+// disclosures opened in Men don't arrive pre-opened in Women (same component
+// tree + same "Pool A" keys otherwise carried the useState across) — and the
+// scroll pane resets to the top, the same as loading the division's URL cold.
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 
 export interface DivisionPagerOption<V extends string> {
   value: V;
@@ -123,12 +129,17 @@ export function DivisionPager<V extends string>({
   const count = divisions.length;
   const activeValue = divisions[activeIndex]?.value ?? active;
 
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const commitChange = (v: V) => {
     setPending(v);
     onChange(v);
+    // The app scrolls in PageShell's nested overflow-y-auto pane, not the
+    // body (router.replace's scroll option can't reach it) — find this
+    // instance's own pane, same lookup as PageShell's StickyName.
+    const pane = containerRef.current?.closest('.overflow-y-auto');
+    if (pane) pane.scrollTop = 0;
   };
-
-  const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const prevRef = useRef<HTMLDivElement>(null);
   const parkedPrevRef = useRef<HTMLDivElement>(null);
@@ -484,7 +495,11 @@ export function DivisionPager<V extends string>({
         onTouchCancel={onTouchCancel}
       >
         <div ref={contentRef} className={['will-change-transform', contentClassName ?? ''].join(' ')}>
-          {activeValue != null ? renderRef.current(activeValue) : null}
+          {/* Keyed by division so a switch remounts the content fresh (see
+              header note) — the wrapper div above stays put for contentRef. */}
+          {activeValue != null ? (
+            <Fragment key={String(activeValue)}>{renderRef.current(activeValue)}</Fragment>
+          ) : null}
         </div>
 
         {/* Outgoing division during the commit slide — LIVE render, not a
