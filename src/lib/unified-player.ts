@@ -57,6 +57,7 @@ import {
 } from '@/lib/wul/data';
 import { getWfdfPlayerStints, type WfdfPlayerStint } from '@/lib/wfdf/data';
 import { namesMatch } from '@/lib/name-match';
+import { loadNameAliases } from '@/lib/name-aliases';
 import type { PlayerKind } from '@/lib/player-content/types';
 // RPC fast path. This module imports our TYPES only (`import type`), so the
 // cycle is erased at compile time and there's no runtime init-order hazard.
@@ -836,12 +837,13 @@ export const getUnifiedPlayerProfile = cache(_getProfilePreferRpc);
  * for 1h upstream so the cost is amortized across requests.
  */
 async function findUfaSlugByName(name: string): Promise<string | null> {
+  const aliases = await loadNameAliases();
   // DB first — one surname-narrowed query against ufa_players (all 3.6k players,
   // all seasons) instead of walking up to 3 full API leaderboards. Also strictly
   // better coverage: the API walk only saw the last 3 seasons, so a player who
   // retired before then was invisible to it.
   try {
-    const hit = await findUfaSlugByNameFromDb(name, namesMatch);
+    const hit = await findUfaSlugByNameFromDb(name, (a, b) => namesMatch(a, b, aliases));
     if (hit) return hit;
   } catch {
     // fall through to the API walk
@@ -851,7 +853,7 @@ async function findUfaSlugByName(name: string): Promise<string | null> {
   for (const year of years) {
     try {
       const all = await getAllPlayerStats({ year, per: 'total' });
-      const hit = all.find((p) => namesMatch(name, p.name));
+      const hit = all.find((p) => namesMatch(name, p.name, aliases));
       if (hit) return hit.playerID;
     } catch {
       // try next year

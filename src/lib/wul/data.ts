@@ -412,9 +412,13 @@ export async function findWulPlayerNameByName(candidate: string): Promise<string
     .ilike('player_name', `%${surname}%`);
   if (error) throw error;
   const names = [...new Set(((data ?? []) as unknown as { player_name: string }[]).map((r) => r.player_name))];
-  const { namesMatch } = await import('@/lib/name-match');
+  const [{ namesMatch }, { loadNameAliases }] = await Promise.all([
+    import('@/lib/name-match'),
+    import('@/lib/name-aliases'),
+  ]);
+  const aliases = await loadNameAliases();
   for (const name of names) {
-    if (namesMatch(candidate, name)) return name;
+    if (namesMatch(candidate, name, aliases)) return name;
   }
   return null;
 }

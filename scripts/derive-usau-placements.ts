@@ -134,6 +134,7 @@ interface GameRow {
   team_b_id: string | null;
   score_a: number | null;
   score_b: number | null;
+  winner_team_id: string | null;
   round: string;
   bracket_name: string | null;
   scheduled_at: string | null;
@@ -180,6 +181,7 @@ const toInput = (g: GameRow): DerivePlacementGame => ({
   teamBId: g.team_b_id,
   scoreA: g.score_a,
   scoreB: g.score_b,
+  winnerTeamId: g.winner_team_id,
   round: g.round,
   bracketName: g.bracket_name,
   division: gameDivision(g.team_a, g.team_b),
@@ -329,7 +331,7 @@ async function main() {
       db
         .from('usau_games')
         .select(
-          'id, event_id, team_a_id, team_b_id, score_a, score_b, round, bracket_name, scheduled_at, ' +
+          'id, event_id, team_a_id, team_b_id, score_a, score_b, winner_team_id, round, bracket_name, scheduled_at, ' +
             'team_a:usau_teams!team_a_id(gender_division, competition_level), ' +
             'team_b:usau_teams!team_b_id(gender_division, competition_level)',
         )

@@ -50,6 +50,9 @@ export interface DerivePlacementGame {
   teamBId: string | null;
   scoreA: number | null;
   scoreB: number | null;
+  /** Forfeit winner (usau_games.winner_team_id): set only when USAU printed
+   *  W/F letters instead of scores. Decides the game when both scores are null. */
+  winnerTeamId?: string | null;
   round: string; // pool|prequarter|quarter|semi|final|placement|consolation|other
   bracketName: string | null;
   /** Gender division of the game (teams never cross divisions). */
@@ -151,17 +154,24 @@ export function bracketBasePlace(name: string | null | undefined): number | null
   return words.length > 0 ? Math.min(...words) : null; // no placement signal ("Consolation", "Elite")
 }
 
-function decided(g: DerivePlacementGame): boolean {
-  return (
-    g.scoreA != null &&
-    g.scoreB != null &&
-    g.scoreA !== g.scoreB &&
-    g.teamAId != null &&
-    g.teamBId != null
-  );
+/** A forfeit: no scores, and USAU's W/F letters named one of the two teams.
+ *  Inlined (not imported from game-winner.ts) so the edge-function copy of
+ *  this file stays self-contained. */
+function forfeitWinner(g: DerivePlacementGame): string | null {
+  if (g.scoreA != null || g.scoreB != null || !g.winnerTeamId) return null;
+  return g.winnerTeamId === g.teamAId || g.winnerTeamId === g.teamBId ? g.winnerTeamId : null;
 }
-const winner = (g: DerivePlacementGame) => (g.scoreA! > g.scoreB! ? g.teamAId! : g.teamBId!);
-const loser = (g: DerivePlacementGame) => (g.scoreA! > g.scoreB! ? g.teamBId! : g.teamAId!);
+function decided(g: DerivePlacementGame): boolean {
+  if (g.teamAId == null || g.teamBId == null) return false;
+  if (forfeitWinner(g)) return true;
+  return g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
+}
+const aWins = (g: DerivePlacementGame) => {
+  const f = forfeitWinner(g);
+  return f ? f === g.teamAId : g.scoreA! > g.scoreB!;
+};
+const winner = (g: DerivePlacementGame) => (aWins(g) ? g.teamAId! : g.teamBId!);
+const loser = (g: DerivePlacementGame) => (aWins(g) ? g.teamBId! : g.teamAId!);
 const involves = (g: DerivePlacementGame, t: string) => g.teamAId === t || g.teamBId === t;
 const pairs = (g: DerivePlacementGame, a: string, b: string) =>
   (g.teamAId === a && g.teamBId === b) || (g.teamAId === b && g.teamBId === a);

@@ -19,6 +19,7 @@
 
 import { fetchHtml } from '../_shared/http.ts';
 import {
+  BASE_URL,
   eventScheduleUrlVariants,
   extractTeamNameAndSeed,
   type ScheduleUrlLevel,
@@ -68,6 +69,37 @@ function extractEventTeamIdsByName(html: string): Map<string, string> {
     if (!map.has(key)) map.set(key, urlId);
   }
   return map;
+}
+
+/** Team name → the seed printed beside it ("North Carolina (1)"), same keys as
+ *  extractEventTeamIdsByName. First seeded occurrence wins. */
+function extractSeedsByName(html: string): Map<string, number> {
+  const map = new Map<string, number>();
+  const re = /<a[^>]*href="[^"]*EventTeamId=[^"&]+[^"]*"[^>]*>([^<]+)<\/a>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const { name, seed } = extractTeamNameAndSeed(m[1]);
+    const key = name.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (key && seed != null && !map.has(key)) map.set(key, seed);
+  }
+  return map;
+}
+
+/** A year-less page can hold any season of a recurring tournament; accept it
+ *  only when the seeds it prints agree with this event's stored seeds. Seeds
+ *  reshuffle every season (2014 vs 2015 Atlantic Coast D-I men: 13 of 16 moved),
+ *  so ≥4 comparable teams at ≥80% agreement is a season fingerprint. */
+function seedsAgree(pageSeeds: Map<string, number>, ours: Array<{ key: string; seed: number | null }>): { ok: boolean; compared: number; agreed: number } {
+  let compared = 0;
+  let agreed = 0;
+  for (const o of ours) {
+    if (o.seed == null) continue;
+    const s = pageSeeds.get(o.key);
+    if (s == null) continue;
+    compared++;
+    if (s === o.seed) agreed++;
+  }
+  return { ok: compared >= 4 && agreed / compared >= 0.8, compared, agreed };
 }
 
 /** Generate plausible slug variants. ultirzr sometimes derives slugs in
@@ -169,10 +201,13 @@ async function resolveOneEvent(
   //       exists for 2014/15/16/17/18/21, and USAU serves ONE page for that
   //       name. No row holds the bare slug, so check (a) passes, but the page
   //       can only be one of those seasons. This is the year-less collision
-  //       that merged 5 Nationals + 740 games into one event; never strip when
-  //       more than one season shares the base.
+  //       that merged 5 Nationals + 740 games into one event. A stripped page
+  //       with siblings is only accepted when its seeds match this event's
+  //       (seedsAgree) — USAU keeps the FIRST edition at the bare url, e.g.
+  //       atlantic-coast-d-i-college-mens-regionals = 2014 (verified 09-29).
   const stripped = slug.replace(/-(19|20)\d{2}$/, '');
   let allowYearStrip = false;
+  let hasSibling = false;
   if (stripped !== slug) {
     const { data: twin } = await db
       .from('usau_events')
@@ -188,14 +223,23 @@ async function resolveOneEvent(
       .ilike('usau_slug', `${stripped}-%`)
       .neq('id', eventUuid)
       .limit(1);
-    const hasSibling = !!siblings && siblings.length > 0;
+    hasSibling = !!siblings && siblings.length > 0;
 
-    allowYearStrip = !holdsBare && !hasSibling;
+    allowYearStrip = !holdsBare;
     if (!allowYearStrip) {
-      const why = holdsBare ? 'another event holds it' : 'other seasons share this base slug';
-      console.log(`[resolver] ${slug}: year-strip blocked — "${stripped}": ${why}`);
+      console.log(`[resolver] ${slug}: year-strip blocked — "${stripped}": another event holds it`);
     }
   }
+
+  // National championships were "USA Ultimate D-I College Championships" on
+  // USAU while ultirzr dropped the prefix ("d-i-college-championships-2014"),
+  // so every fetch 404'd; the 2014 editions live at the prefixed, year-less
+  // url. Fetch-only, and year-less forms still go through seedsAgree.
+  const tryUsauPrefix =
+    !!name &&
+    /(college|club|national|masters) championships/i.test(name) &&
+    !/regional|sectional|conference/i.test(name) &&
+    !/^usa-ultimate-/i.test(slug);
 
   // USAU builds an event's slug from its NAME: every whitespace char becomes
   // '-' (runs are NOT collapsed, and a trailing space leaves a trailing '-')
@@ -236,7 +280,7 @@ async function resolveOneEvent(
   // each gender's schedule URL separately.
   const { data: parts, error: loadErr } = await db
     .from('usau_event_teams')
-    .select('team_id, usau_teams(name, gender_division)')
+    .select('team_id, seed, usau_teams(name, gender_division)')
     .eq('event_id', eventUuid)
     .is('usau_event_team_url_id', null);
   if (loadErr) {
@@ -245,6 +289,7 @@ async function resolveOneEvent(
 
   type Part = {
     team_id: string;
+    seed: number | null;
     usau_teams: { name: string; gender_division: string | null } | null;
   };
   const partsByGender = new Map<string, Part[]>();
@@ -315,6 +360,10 @@ async function resolveOneEvent(
       ordered.push(...variants.filter((v) => exactForms.has(v)));
       if (nameSlug && !usedSlug && !isMastersEvent) ordered.push(nameSlug);
       ordered.push(...variants.filter((v) => !exactForms.has(v)));
+      if (tryUsauPrefix && !usedSlug) {
+        ordered.push(`usa-ultimate-${slug}`);
+        if (allowYearStrip && stripped !== slug) ordered.push(`usa-ultimate-${stripped}`);
+      }
       // USAU slugs are case-insensitive: "2023-Mens-…" is the same page as an
       // already-404'd "2023-mens-…" form, so dedupe on the lowercased slug.
       const seenLower = new Set<string>();
@@ -337,6 +386,46 @@ async function resolveOneEvent(
             // one level segment; the wrong-level candidates just miss.
             if (/HTTP 404/.test(msg) || /404 /.test(msg)) continue;
             // Non-404 = real error; bubble out
+            return { resolved: totalResolved, skipped: totalSkipped, error: msg };
+          }
+        }
+      }
+      // A page that drops our season's year must prove it's this season.
+      if (html && usedSlug && /-(19|20)\d{2}$/.test(slug) && !/(19|20)\d{2}/.test(usedSlug)) {
+        const { data: owner } = await db
+          .from('usau_events')
+          .select('id')
+          .ilike('usau_slug', usedSlug)
+          .neq('id', eventUuid)
+          .limit(1);
+        let why: string | null = owner && owner.length > 0 ? 'another event holds it' : null;
+        if (!why && (hasSibling || usedSlug.toLowerCase() !== stripped.toLowerCase())) {
+          const ours = genderParts.map((p) => ({
+            key: (p.usau_teams?.name ?? '').toLowerCase().replace(/\s+/g, ' ').trim(),
+            seed: p.seed,
+          }));
+          const v = seedsAgree(extractSeedsByName(html), ours);
+          if (!v.ok) why = `seeds ${v.agreed}/${v.compared} match`;
+        }
+        if (why) {
+          console.log(`[resolver] ${slug} ${gender}: rejected year-less page "${usedSlug}" — ${why}`);
+          html = null;
+          usedSlug = null;
+        }
+      }
+      // 2021 College Championships nests each division one level deeper
+      // (/schedule/men/collegemen/d_i_men/), so every standard url 404s.
+      if (!html && seg === 'College') {
+        for (const sub of ['d_i', 'd_iii']) {
+          const g = urlGender.toLowerCase();
+          const url = `${BASE_URL}/events/${slug}/schedule/${g}/college${g}/${sub}_${g}/`;
+          try {
+            html = await fetchHtml(url);
+            usedSlug = slug;
+            break;
+          } catch (err) {
+            const msg = stringifyErr(err);
+            if (/HTTP 404/.test(msg) || /404 /.test(msg)) continue;
             return { resolved: totalResolved, skipped: totalSkipped, error: msg };
           }
         }
@@ -389,7 +478,11 @@ async function resolveOneEvent(
         slug.replace(/-s-/g, 's-').replace(/-s$/, 's'),
       ].some((f) => usedSlug === `${f}-${season}`);
     // Same for the name-derived slug: usau_slug stays the public route key.
-    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated && !isYearAppended && !fromName) {
+    // And for any page that dropped our year or borrowed the usa-ultimate-
+    // prefix: seed-verified fetch paths, not identities.
+    const isYearDropped = /-(19|20)\d{2}$/.test(slug) && !/(19|20)\d{2}/.test(usedSlug);
+    const isPrefixed = /^usa-ultimate-/i.test(usedSlug) && !/^usa-ultimate-/i.test(slug);
+    if (usedSlug !== slug && !isYearStripped && !isSuffixTruncated && !isYearAppended && !fromName && !isYearDropped && !isPrefixed) {
       const { error: updErr } = await db
         .from('usau_events')
         .update({ usau_slug: usedSlug })

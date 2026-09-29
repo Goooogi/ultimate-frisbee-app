@@ -54,6 +54,16 @@ export interface EufEventCard {
   sourceOrigin: string | null;
   /** The source's season key (?season=), needed to deep-link back to this event. */
   seasonId: string | null;
+  /** Per-division champions (final_placement = 1), newest-division-first isn't
+   *  meaningful here — order follows EUF_DIVISIONS. Empty on pool-only events
+   *  or events with no bracket result yet (derive_euf_placements never ran). */
+  champions: EufEventChampion[];
+}
+
+export interface EufEventChampion {
+  division: EufDivision;
+  teamName: string;
+  countryName: string | null;
 }
 
 export interface EufStandingRow {
@@ -134,6 +144,23 @@ export interface EufLeaderRow {
 
 // ─── Events ──────────────────────────────────────────────────────────────────
 
+/** Fetch every row of a query via .range() paging — PostgREST caps a single
+ *  response at 1000 rows, and euf_teams (578+ rows today, growing every
+ *  season) will cross that line eventually. `pageSize` matches the cap. */
+async function fetchAllRows(
+  build: (from: number, to: number) => PromiseLike<{ data: Row[] | null; error: unknown }>,
+  pageSize = 1000,
+): Promise<Row[]> {
+  const all: Row[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build(from, from + pageSize - 1);
+    if (error || !data) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+  }
+  return all;
+}
+
 export async function listEvents(): Promise<EufEventCard[]> {
   const { data, error } = await supabase()
     .from('euf_events')
@@ -145,19 +172,45 @@ export async function listEvents(): Promise<EufEventCard[]> {
   const ids = (data as Row[]).map((e) => e.id as string);
   if (!ids.length) return [];
 
-  // One extra round-trip for team counts + division sets beats N per-event reads.
-  const { data: teams } = await supabase()
-    .from('euf_teams')
-    .select('event_id, division')
-    .in('event_id', ids);
+  // Two extra round-trips (paginated) beat N per-event reads: one for team
+  // counts + division sets, one narrowed to champions only (final_placement=1)
+  // so we don't drag every team row twice.
+  const [teams, champTeams] = await Promise.all([
+    fetchAllRows((from, to) =>
+      supabase().from('euf_teams').select('event_id, division').in('event_id', ids).range(from, to),
+    ),
+    fetchAllRows((from, to) =>
+      supabase()
+        .from('euf_teams')
+        .select('event_id, division, name, country_name')
+        .in('event_id', ids)
+        .eq('final_placement', 1)
+        .range(from, to),
+    ),
+  ]);
 
   const counts = new Map<string, number>();
   const divs = new Map<string, Set<string>>();
-  for (const t of (teams ?? []) as Row[]) {
+  for (const t of teams) {
     const k = t.event_id as string;
     counts.set(k, (counts.get(k) ?? 0) + 1);
     if (!divs.has(k)) divs.set(k, new Set());
     divs.get(k)!.add(t.division as string);
+  }
+
+  const champions = new Map<string, EufEventChampion[]>();
+  for (const t of champTeams) {
+    const k = t.event_id as string;
+    if (!champions.has(k)) champions.set(k, []);
+    champions.get(k)!.push({
+      division: t.division as EufDivision,
+      teamName: t.name as string,
+      countryName: (t.country_name as string) ?? null,
+    });
+  }
+  // Stable division order (Open, Women's, Mixed) regardless of query order.
+  for (const list of champions.values()) {
+    list.sort((a, b) => EUF_DIVISIONS.indexOf(a.division) - EUF_DIVISIONS.indexOf(b.division));
   }
 
   return (data as Row[]).map((e) => ({
@@ -173,6 +226,7 @@ export async function listEvents(): Promise<EufEventCard[]> {
     divisions: EUF_DIVISIONS.filter((d) => divs.get(e.id as string)?.has(d)),
     sourceOrigin: (e.source_origin as string) ?? null,
     seasonId: (e.season_id as string) ?? null,
+    champions: champions.get(e.id as string) ?? [],
   }));
 }
 
@@ -186,10 +240,19 @@ export async function getEvent(slug: string): Promise<EufEventCard | null> {
 
   const { data: teams } = await supabase()
     .from('euf_teams')
-    .select('division')
+    .select('division, name, country_name, final_placement')
     .eq('event_id', (data as Row).id);
 
-  const seen = new Set(((teams ?? []) as Row[]).map((t) => t.division as string));
+  const teamRows = (teams ?? []) as Row[];
+  const seen = new Set(teamRows.map((t) => t.division as string));
+  const champions: EufEventChampion[] = teamRows
+    .filter((t) => t.final_placement === 1)
+    .map((t) => ({
+      division: t.division as EufDivision,
+      teamName: t.name as string,
+      countryName: (t.country_name as string) ?? null,
+    }))
+    .sort((a, b) => EUF_DIVISIONS.indexOf(a.division) - EUF_DIVISIONS.indexOf(b.division));
   const e = data as Row;
   return {
     id: e.id as string,
@@ -200,10 +263,11 @@ export async function getEvent(slug: string): Promise<EufEventCard | null> {
     location: (e.location as string) ?? null,
     startDate: (e.start_date as string) ?? null,
     endDate: (e.end_date as string) ?? null,
-    teamCount: (teams ?? []).length,
+    teamCount: teamRows.length,
     divisions: EUF_DIVISIONS.filter((d) => seen.has(d)),
     sourceOrigin: (e.source_origin as string) ?? null,
     seasonId: (e.season_id as string) ?? null,
+    champions,
   };
 }
 

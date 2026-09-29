@@ -12,12 +12,14 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Database } from '@/lib/supabase/database.types';
 import { namesMatch, surnameForPrefilter } from '@/lib/name-match';
+import { loadNameAliases } from '@/lib/name-aliases';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { flightForName, FLIGHT_LABELS, type Flight } from '@/lib/usau/flights';
 import { usauTeamLogo } from '@/lib/usau/team-logo';
 import { statesForEventName } from '@/lib/usau/regions';
 import { isUnhealthyError } from '@/lib/supabase/health';
 import { usauToday } from '@/lib/today';
+import { gameWinnerId } from '@/lib/usau/game-winner';
 import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
 import { seriesStageHref, seriesUnitLabel, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
 
@@ -161,6 +163,27 @@ export function isChampionshipBracketName(name: string | null | undefined): bool
   return false;
 }
 
+/** A championship bracket's deciding game the scraper filed under another
+ *  round: USAU structure column 0 ("the decider") labeled "Finals" / "The
+ *  Championship" — 2026 NW Men "Finals" and SC Mixed (a lone-game section,
+ *  no semis) came in as 'placement', NE Mixed "The Championship" as 'other'.
+ *  The guards matter: older rows carry index-0 "Quarterfinals"/"Crossovers"
+ *  columns inside championship-named sections. Mirrors mobile's
+ *  isStructuredTitleDecider and usau-event-detail's client twin. */
+export function isStructuredTitleDecider(g: {
+  round: string;
+  bracketName: string | null;
+  bracketStage: string | null;
+  bracketStageIndex: number | null;
+}): boolean {
+  if (g.bracketStageIndex !== 0) return false;
+  if (g.round === 'prequarter' || g.round === 'quarter' || g.round === 'semi') return false;
+  if (!isChampionshipBracketName(g.bracketName)) return false;
+  const stage = (g.bracketStage ?? '').trim().toLowerCase();
+  if (!stage || isPlacementBracketName(stage) || /quarter|semi|cross/.test(stage)) return false;
+  return /\bfinals?\b|\bchampionship\b|\bchamps?\b|\b1st\b|\bfirst\b/.test(stage);
+}
+
 const WRITTEN_ORDINALS =
   'second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|thirteenth|fourteenth|fifteenth|sixteenth|seventeenth|eighteenth|nineteenth|twentieth';
 
@@ -241,8 +264,8 @@ async function resolveEventWinners(
 
   const finals = await fetchGamesByEvent(
     eventIds,
-    'event_id, bracket_name, round, scheduled_at, score_a, score_b, ' +
-      'team_a_id, team_b_id, ' +
+    'event_id, bracket_name, round, bracket_stage, bracket_stage_index, scheduled_at, score_a, score_b, ' +
+      'winner_team_id, team_a_id, team_b_id, ' +
       'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
       'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
     ['final', 'semi', 'placement', 'other'],
@@ -252,16 +275,26 @@ async function resolveEventWinners(
     event_id: string;
     bracket_name: string | null;
     round: string;
+    bracket_stage: string | null;
+    bracket_stage_index: number | null;
     scheduled_at: string | null;
     score_a: number | null;
     score_b: number | null;
+    winner_team_id: string | null;
     team_a_id: string | null;
     team_b_id: string | null;
     team_a: { name: string } | null;
     team_b: { name: string } | null;
   };
-  const decided = (r: FinalRow) =>
-    r.score_a != null && r.score_b != null && r.score_a !== r.score_b;
+  const winnerIdOf = (r: FinalRow) =>
+    gameWinnerId({
+      teamAId: r.team_a_id,
+      teamBId: r.team_b_id,
+      scoreA: r.score_a,
+      scoreB: r.score_b,
+      winnerTeamId: r.winner_team_id,
+    });
+  const decided = (r: FinalRow) => winnerIdOf(r) != null;
 
   // Group championship-bracket games per (event, bracket) — a combined masters
   // event has one championship bracket per division ("GM Women · Championship").
@@ -276,7 +309,7 @@ async function resolveEventWinners(
 
   const bestFinalAt = new Map<string, string>();
   const consider = (r: FinalRow): void => {
-    const winnerName = (r.score_a! > r.score_b! ? r.team_a?.name : r.team_b?.name) ?? null;
+    const winnerName = (winnerIdOf(r) === r.team_a_id ? r.team_a?.name : r.team_b?.name) ?? null;
     if (!winnerName) return;
     // Keep the LATEST final per event (a combined event has one per division;
     // one line on the card — detail page shows all).
@@ -293,11 +326,27 @@ async function resolveEventWinners(
       for (const g of tagged) consider(g);
       continue;
     }
+    // A structural decider next — it needs no semis, so it also covers a
+    // lone-game "Finals" section (2026 SC Mixed) the recovery below can't.
+    const structural = games.filter(
+      (g) =>
+        decided(g) &&
+        isStructuredTitleDecider({
+          round: g.round,
+          bracketName: g.bracket_name,
+          bracketStage: g.bracket_stage,
+          bracketStageIndex: g.bracket_stage_index,
+        }),
+    );
+    if (structural.length > 0) {
+      for (const g of structural) consider(g);
+      continue;
+    }
     // Recovery: both teams of the candidate must have WON a semi in this group.
     const semiWinners = new Set(
       games
         .filter((g) => g.round === 'semi' && decided(g))
-        .map((g) => (g.score_a! > g.score_b! ? g.team_a_id : g.team_b_id))
+        .map((g) => winnerIdOf(g))
         .filter(Boolean),
     );
     if (semiWinners.size < 2) continue;
@@ -318,7 +367,7 @@ async function resolveEventWinners(
   if (poolOnly.length > 0) {
     const poolRows = await fetchGamesByEvent(
       poolOnly,
-      'event_id, bracket_name, round, score_a, score_b, status, ' +
+      'event_id, bracket_name, round, score_a, score_b, winner_team_id, team_a_id, team_b_id, status, ' +
         'team_a:usau_teams!usau_games_team_a_id_fkey(name), ' +
         'team_b:usau_teams!usau_games_team_b_id_fkey(name)',
     );
@@ -329,25 +378,28 @@ async function resolveEventWinners(
       round: string;
       score_a: number | null;
       score_b: number | null;
+      winner_team_id: string | null;
+      team_a_id: string | null;
+      team_b_id: string | null;
       team_a: { name: string } | null;
       team_b: { name: string } | null;
     };
     type Tally = { rec: Map<string, { name: string; w: number; l: number }>; seen: Set<string> };
+    // `result` is the dedupe key's result part: the sorted scores, or the
+    // forfeit winner (a forfeit counts as a W/L).
     const tallyGame = (
       t: Tally,
       an: string,
       bn: string,
-      scoreA: number,
-      scoreB: number,
+      aWon: boolean,
+      result: string,
     ): void => {
       const ka = an.toLowerCase();
       const kb = bn.toLowerCase();
       const pair = [ka, kb].sort();
-      const sc = [scoreA, scoreB].sort((x, y) => x - y);
-      const gkey = `${pair[0]}|${pair[1]}|${sc[0]}|${sc[1]}`;
+      const gkey = `${pair[0]}|${pair[1]}|${result}`;
       if (t.seen.has(gkey)) return;
       t.seen.add(gkey);
-      const aWon = scoreA > scoreB;
       const wk = aWon ? ka : kb;
       const lk = aWon ? kb : ka;
       const wn = aWon ? an : bn;
@@ -377,12 +429,24 @@ async function resolveEventWinners(
       const tail = bracketTailLower(r.bracket_name);
       const isPool = tail.startsWith('pool') && !tail.includes('crossover');
       if (isPool || TREE_STRUCTURE_ROUNDS.includes(r.round)) e.structured = true;
-      if (r.score_a == null || r.score_b == null || r.score_a === r.score_b) continue;
+      const winnerId = gameWinnerId({
+        teamAId: r.team_a_id,
+        teamBId: r.team_b_id,
+        scoreA: r.score_a,
+        scoreB: r.score_b,
+        winnerTeamId: r.winner_team_id,
+      });
+      if (!winnerId) continue;
       const an = r.team_a?.name?.trim();
       const bn = r.team_b?.name?.trim();
       if (!an || !bn) continue;
-      tallyGame(e.all, an, bn, r.score_a, r.score_b);
-      if (isPool) tallyGame(e.pool, an, bn, r.score_a, r.score_b);
+      const aWon = winnerId === r.team_a_id;
+      const result =
+        r.score_a != null && r.score_b != null
+          ? [r.score_a, r.score_b].sort((x, y) => x - y).join('|')
+          : `F|${(aWon ? an : bn).toLowerCase()}`;
+      tallyGame(e.all, an, bn, aWon, result);
+      if (isPool) tallyGame(e.pool, an, bn, aWon, result);
     }
     for (const [eventId, { pool, all, structured }] of perEvent) {
       const standings = Array.from(pool.rec.values()).sort((a, b) => b.w - a.w || a.l - b.l);
@@ -1465,7 +1529,8 @@ export async function findUsauPlayerByName(name: string): Promise<string | null>
     .select('id, display_name')
     .ilike('display_name', `%${surname}%`)
     .limit(500);
-  const candidates = (matches ?? []).filter((m) => namesMatch(name, m.display_name));
+  const aliases = await loadNameAliases();
+  const candidates = (matches ?? []).filter((m) => namesMatch(name, m.display_name, aliases));
   if (candidates.length === 0) return null;
   if (candidates.length === 1) return candidates[0].id;
   // Multiple candidate IDs — pick the one with the most DISTINCT (team, season)
@@ -2610,15 +2675,21 @@ async function championsForEvents(
     team_b_id: string | null;
     score_a: number | null;
     score_b: number | null;
+    winner_team_id: string | null;
     scheduled_at: string | null;
     bracket_name: string | null;
     status: string | null;
+    round: string;
+    bracket_stage: string | null;
+    bracket_stage_index: number | null;
     team_a: TeamRef;
     team_b: TeamRef;
   };
 
-  // round='final' games for all these events, with scheduling to break the
-  // semi-vs-final ambiguity, and bracket_name to drop placement brackets. Now
+  // round='final' games (plus every structure-column-0 game, for the
+  // structural title deciders — see isStructuredTitleDecider) for all these
+  // events, with scheduling to break the semi-vs-final ambiguity, and
+  // bracket_name to drop placement brackets. Now
   // that we include EVERY club event in the window (not just flagships), page
   // through — a busy 2-weekend window can exceed PostgREST's 1000-row cap and
   // would otherwise silently drop finals.
@@ -2628,12 +2699,13 @@ async function championsForEvents(
     const { data: page } = await db
       .from('usau_games')
       .select(
-        'id, event_id, team_a_id, team_b_id, score_a, score_b, scheduled_at, bracket_name, status, ' +
+        'id, event_id, team_a_id, team_b_id, score_a, score_b, winner_team_id, scheduled_at, bracket_name, status, ' +
+          'round, bracket_stage, bracket_stage_index, ' +
           'team_a:usau_teams!team_a_id(name, gender_division), ' +
           'team_b:usau_teams!team_b_id(name, gender_division)',
       )
       .in('event_id', eventIds)
-      .eq('round', 'final')
+      .or('round.eq.final,bracket_stage_index.eq.0')
       .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
       .range(from, from + PAGE - 1);
     const rows = (page ?? []) as unknown as Row[];
@@ -2643,9 +2715,11 @@ async function championsForEvents(
 
   // Keep the latest-scheduled decided final per (event, division), skipping
   // placement brackets (13th/17th place etc. also carry round='final').
+  // tier 0 = a tagged final, 1 = a structural decider; a tagged final always
+  // outranks a structural one, whatever the times.
   const best = new Map<
     string,
-    { teamName: string; teamId: string; scheduledAt: string }
+    { teamName: string; teamId: string; scheduledAt: string; tier: number }
   >();
   // `${eventId}|${division}` championship finals USAU cancelled — no champion
   // exists AND the pool-record fallback must not crown a Saturday pool leader
@@ -2653,6 +2727,18 @@ async function championsForEvents(
   const cancelledKeys = new Set<string>();
   for (const g of finals) {
     const b = (g.bracket_name ?? '').toLowerCase();
+    const tier = g.round === 'final' ? 0 : 1;
+    if (
+      tier === 1 &&
+      !isStructuredTitleDecider({
+        round: g.round,
+        bracketName: g.bracket_name,
+        bracketStage: g.bracket_stage,
+        bracketStageIndex: g.bracket_stage_index,
+      })
+    ) {
+      continue;
+    }
     if (isPlacementBracketName(g.bracket_name)) continue; // drop 5th/13th/17th, Third/Second Place…
     if (g.status === 'cancelled') {
       let division: string | null =
@@ -2665,11 +2751,18 @@ async function championsForEvents(
       if (division) cancelledKeys.add(`${g.event_id}|${division}`);
       continue;
     }
-    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
+    // Scores, else a forfeit winner (USAU W/F letters).
+    const winnerId = gameWinnerId({
+      teamAId: g.team_a_id,
+      teamBId: g.team_b_id,
+      scoreA: g.score_a,
+      scoreB: g.score_b,
+      winnerTeamId: g.winner_team_id,
+    });
+    if (!winnerId) continue;
 
-    const aWon = g.score_a > g.score_b;
-    const winnerId = aWon ? g.team_a_id : g.team_b_id;
+    const aWon = winnerId === g.team_a_id;
     const winnerName = (aWon ? g.team_a?.name : g.team_b?.name) ?? 'Unknown';
     let division: string | null =
       divisionOf.get(g.event_id) ?? (aWon ? g.team_a?.gender_division : g.team_b?.gender_division) ?? null;
@@ -2683,8 +2776,8 @@ async function championsForEvents(
     const key = `${g.event_id}|${division}`;
     const sched = g.scheduled_at ?? '';
     const prev = best.get(key);
-    if (!prev || sched > prev.scheduledAt) {
-      best.set(key, { teamName: winnerName, teamId: winnerId, scheduledAt: sched });
+    if (!prev || tier < prev.tier || (tier === prev.tier && sched > prev.scheduledAt)) {
+      best.set(key, { teamName: winnerName, teamId: winnerId, scheduledAt: sched, tier });
     }
   }
 
@@ -2754,6 +2847,7 @@ async function bestPoolRecordWinners(
     team_b_id: string | null;
     score_a: number | null;
     score_b: number | null;
+    winner_team_id: string | null;
     bracket_name: string | null;
     team_a: TeamRef;
     team_b: TeamRef;
@@ -2784,7 +2878,7 @@ async function bestPoolRecordWinners(
     const { data: page } = await db
       .from('usau_games')
       .select(
-        'id, event_id, team_a_id, team_b_id, score_a, score_b, bracket_name, ' +
+        'id, event_id, team_a_id, team_b_id, score_a, score_b, winner_team_id, bracket_name, ' +
           'team_a:usau_teams!team_a_id(name, gender_division), ' +
           'team_b:usau_teams!team_b_id(name, gender_division)',
       )
@@ -2833,8 +2927,16 @@ async function bestPoolRecordWinners(
       return (i >= 0 ? n.slice(i + 1) : n).trim().toLowerCase();
     })();
     if (!tail.startsWith('pool') || tail.includes('crossover')) continue;
-    if (g.score_a == null || g.score_b == null || g.score_a === g.score_b) continue;
     if (g.team_a_id == null || g.team_b_id == null) continue;
+    // Scores, else a forfeit winner (a forfeit counts as a W/L).
+    const winnerId = gameWinnerId({
+      teamAId: g.team_a_id,
+      teamBId: g.team_b_id,
+      scoreA: g.score_a,
+      scoreB: g.score_b,
+      winnerTeamId: g.winner_team_id,
+    });
+    if (!winnerId) continue;
     // Division comes from the teams (pool games are single-division); require
     // both sides agree, else skip.
     const div = divisionOf.get(g.event_id) ?? g.team_a?.gender_division ?? g.team_b?.gender_division ?? null;
@@ -2848,12 +2950,15 @@ async function bestPoolRecordWinners(
     const nb = norm(g.team_b?.name);
     if (!na || !nb) continue;
     const pair = [na, nb].sort();
-    const scores = [g.score_a, g.score_b].sort((x, y) => x - y);
-    const gkey = `${groupKey}|${pair[0]}|${pair[1]}|${scores[0]}|${scores[1]}`;
+    const aWon = winnerId === g.team_a_id;
+    const result =
+      g.score_a != null && g.score_b != null
+        ? [g.score_a, g.score_b].sort((x, y) => x - y).join('|')
+        : `F|${aWon ? na : nb}`;
+    const gkey = `${groupKey}|${pair[0]}|${pair[1]}|${result}`;
     if (seenGameKeys.has(gkey)) continue;
     seenGameKeys.add(gkey);
 
-    const aWon = g.score_a > g.score_b;
     bump(groupKey, g.team_a_id, g.team_a?.name ?? 'Unknown', aWon);
     bump(groupKey, g.team_b_id, g.team_b?.name ?? 'Unknown', !aWon);
   }
@@ -4036,6 +4141,9 @@ export interface UsauEventSummary {
     seedB: number | null;
     scoreA: number | null;
     scoreB: number | null;
+    /** Forfeit winner (usau_games.winner_team_id): set only when USAU reports
+     *  the result as W/F letters, so both scores are null. Use gameWinnerId(). */
+    winnerTeamId: string | null;
     location: string | null;
     scheduledAt: string | null;
     status: string;
@@ -4740,7 +4848,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
         // usau_games has two FKs to usau_teams (team_a + team_b), so we
         // hint PostgREST with the !<columnName> syntax to disambiguate.
         `id, event_id, round, bracket_name, team_a_id, team_b_id,
-         seed_a, seed_b, score_a, score_b, location, scheduled_at, status,
+         seed_a, seed_b, score_a, score_b, winner_team_id, location, scheduled_at, status,
          usau_game_id, usau_event_game_id, team_a_placeholder, team_b_placeholder,
          bracket_stage, bracket_stage_index, bracket_slot, next_usau_game_id, next_slot_side,
          team_a:usau_teams!team_a_id(name),
@@ -4824,6 +4932,7 @@ export async function loadUsauEvent(resolved: ResolvedUsauEvent): Promise<UsauEv
       seedB: g.seed_b,
       scoreA: g.score_a,
       scoreB: g.score_b,
+      winnerTeamId: g.winner_team_id ?? null,
       location: g.location,
       scheduledAt: g.scheduled_at,
       status: g.status,

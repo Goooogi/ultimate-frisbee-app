@@ -24,6 +24,7 @@ import { useViewParam } from '@/lib/use-view-param';
 import { USAU_LEVELS } from '@/lib/league';
 import { UsauBracketTree, UsauPlacementBracketTree, UsauFlatBracketCards, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder, hasBracketStructure, structuredColumnLabel } from './usau-bracket-tree';
 import { formatGameTime, formatGameDate, formatGameClock } from '@/lib/usau/venue-tz';
+import { gameWinnerId, isForfeit } from '@/lib/usau/game-winner';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager } from '@/components/division-pager';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
@@ -68,6 +69,21 @@ function isPlacementName(name: string | null | undefined): boolean {
     // Next-bid games (Hunter, 2026-09-12: they belong with the placements).
     /backdoor|game[- ]to[- ]go|\bg2g\b/.test(t)
   );
+}
+
+/** A championship bracket's deciding game stored under another round (USAU
+ *  structure column 0 labeled "Finals" / "The Championship", typed 'placement'
+ *  or 'other'). Client twin of data.ts isStructuredTitleDecider — keep in
+ *  sync. "1st"/"first" stages skip the placement reject, as the server's
+ *  isPlacementBracketName carve-out does. */
+function isStructuredTitleDecider(g: Game): boolean {
+  if (g.bracketStageIndex !== 0) return false;
+  if (g.round === 'prequarter' || g.round === 'quarter' || g.round === 'semi') return false;
+  if (!isChampionshipBracket(g)) return false;
+  const stage = (g.bracketStage ?? '').trim().toLowerCase();
+  if (!stage || /quarter|semi|cross/.test(stage)) return false;
+  if (!/\b1st\b|\bfirst\b/.test(stage) && isPlacementName(stage)) return false;
+  return /\bfinals?\b|\bchampionship\b|\bchamps?\b|\b1st\b|\bfirst\b/.test(stage);
 }
 
 /** Matchup rounds — pool-less Saturday phases like Cooler Classic 37 Men's
@@ -369,8 +385,9 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   for (const g of games) {
     if (!isChampionshipBracket(g)) continue;
     if (g.round === 'final') continue; // final's loser is 2nd — no placement game
-    if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) continue;
-    const loser = g.scoreA > g.scoreB ? g.teamBId : g.teamAId;
+    const winner = gameWinnerId(g);
+    if (!winner) continue;
+    const loser = winner === g.teamAId ? g.teamBId : g.teamAId;
     if (loser) champLossRound.set(loser, g.round);
   }
   const EXIT_START: Record<string, number> = { semi: 3, quarter: 5, prequarter: 9 };
@@ -430,22 +447,24 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   for (const gs of poolGames.values()) {
     for (const g of gs) {
       if (g.status !== 'final') continue;
-      if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) continue;
+      const winner = gameWinnerId(g);
+      if (!winner) continue;
       const na = normName(g.teamAName);
       const nb = normName(g.teamBName);
       if (!na || !nb) continue;
+      const aWon = winner === g.teamAId;
       const pair = [na, nb].sort();
-      const scores = [g.scoreA, g.scoreB].sort((x, y) => x - y);
+      const scores = isForfeit(g) ? ['F', aWon ? na : nb] : [g.scoreA!, g.scoreB!].sort((x, y) => x - y);
       const gkey = `${pair[0]}|${pair[1]}|${scores[0]}|${scores[1]}`;
       if (seenGameKeys.has(gkey)) continue;
       seenGameKeys.add(gkey);
 
-      const aWon = g.scoreA > g.scoreB;
       const winName = aWon ? na : nb;
       const loseName = aWon ? nb : na;
       const winDisplay = aWon ? (g.teamAName ?? '') : (g.teamBName ?? '');
       const loseDisplay = aWon ? (g.teamBName ?? '') : (g.teamAName ?? '');
-      const margin = Math.abs(g.scoreA - g.scoreB);
+      // A forfeit is a W/L with 0 point diff — USAU's own tiebreak math.
+      const margin = isForfeit(g) ? 0 : Math.abs(g.scoreA! - g.scoreB!);
       const rw = nameRecords.get(winName) ?? { wins: 0, losses: 0, diff: 0, name: winDisplay };
       rw.wins += 1;
       rw.diff += margin;
@@ -468,10 +487,19 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     const status = g.status.toLowerCase();
     if (status === 'forfeit') return true;
     if (status !== 'final') return false;
-    return g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
+    return gameWinnerId(g) != null;
   };
 
   const explicitFinals = championshipGames.filter((g) => g.round === 'final' && isDecided(g));
+  // Groups with no tagged final: a structural decider (needs no semis, so it
+  // also covers a lone-game "Finals" section like 2026 SC Mixed).
+  const structuralFinals = championshipGames.filter(
+    (g) =>
+      g.round !== 'final' &&
+      isStructuredTitleDecider(g) &&
+      isDecided(g) &&
+      !explicitFinals.some((f) => bracketGroupPrefix(f.bracketName) === bracketGroupPrefix(g.bracketName)),
+  );
 
   const byGroupSemis = new Map<string, Game[]>();
   for (const g of championshipGames) {
@@ -482,14 +510,10 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   }
   const recoveredFinals: Game[] = [];
   for (const [k, semis] of byGroupSemis) {
-    if (explicitFinals.some((g) => bracketGroupPrefix(g.bracketName) === k)) continue;
+    if ([...explicitFinals, ...structuralFinals].some((g) => bracketGroupPrefix(g.bracketName) === k)) continue;
     const semiWinners = new Set(
       semis
-        .map((g) =>
-          g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB
-            ? (g.scoreA > g.scoreB ? g.teamAId : g.teamBId)
-            : null,
-        )
+        .map((g) => gameWinnerId(g))
         .filter((id): id is string => !!id),
     );
     const recovered = championshipGames.find(
@@ -503,7 +527,7 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     if (recovered) recoveredFinals.push(recovered);
   }
 
-  const finals = [...explicitFinals, ...recoveredFinals];
+  const finals = [...explicitFinals, ...structuralFinals, ...recoveredFinals];
   const byGroup = new Map<string, Game>();
   for (const g of finals) {
     const k = bracketGroupPrefix(g.bracketName);
@@ -1156,12 +1180,13 @@ function ChampionBanner({
    *  tournament opens its 2014 page. See UsauTeamHistory's param read. */
   season?: number | null;
 }) {
-  const aWon = game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
+  const aWon = gameWinnerId(game) === game.teamAId;
   const winnerName = aWon ? game.teamAName : game.teamBName;
   const winnerId = aWon ? game.teamAId : game.teamBId;
   const loserName = aWon ? game.teamBName : game.teamAName;
   const winScore = aWon ? game.scoreA : game.scoreB;
   const loseScore = aWon ? game.scoreB : game.scoreA;
+  const resultLabel = isForfeit(game) ? 'forfeit' : `${winScore}–${loseScore}`;
 
   const WinnerInner = (
     <span className="flex items-center gap-3 min-w-0">
@@ -1172,7 +1197,7 @@ function ChampionBanner({
         </span>
         {loserName && (
           <span className="text-[11px] text-muted font-tight truncate mt-1">
-            def. {loserName} · {winScore}–{loseScore}
+            def. {loserName} · {resultLabel}
           </span>
         )}
       </span>
@@ -1591,8 +1616,9 @@ function PoolScheduleTable({
               const hasScore =
                 g.scoreA != null && g.scoreB != null && !(g.scoreA === 0 && g.scoreB === 0 && status === 'scheduled');
               const isFinal = hasScore || status === 'final';
-              const aWon = hasScore && isFinal && (g.scoreA ?? 0) > (g.scoreB ?? 0);
-              const bWon = hasScore && isFinal && (g.scoreB ?? 0) > (g.scoreA ?? 0);
+              const forfeit = isForfeit(g);
+              const aWon = forfeit ? g.winnerTeamId === g.teamAId : hasScore && isFinal && (g.scoreA ?? 0) > (g.scoreB ?? 0);
+              const bWon = forfeit ? g.winnerTeamId === g.teamBId : hasScore && isFinal && (g.scoreB ?? 0) > (g.scoreA ?? 0);
               // Date and time are split into their own columns here (the card
               // view folds them into one status strip), both in the VENUE's
               // wall clock — see formatGameTime.
@@ -1612,11 +1638,11 @@ function PoolScheduleTable({
                     <TeamCell name={g.teamBName} teamId={g.teamBId} won={bWon} season={season} />
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap tabular font-bold">
-                    {hasScore ? (
+                    {hasScore || forfeit ? (
                       <span className="text-ink">
-                        <span className={aWon ? '' : 'text-muted'}>{g.scoreA}</span>
+                        <span className={aWon ? '' : 'text-muted'}>{forfeit ? (aWon ? 'W' : 'F') : g.scoreA}</span>
                         <span className="text-faint"> – </span>
-                        <span className={bWon ? '' : 'text-muted'}>{g.scoreB}</span>
+                        <span className={bWon ? '' : 'text-muted'}>{forfeit ? (bWon ? 'W' : 'F') : g.scoreB}</span>
                       </span>
                     ) : (
                       <span className="text-faint">—</span>
@@ -1689,8 +1715,9 @@ function GameRow({
   const hasScore =
     game.scoreA != null && game.scoreB != null && !(game.scoreA === 0 && game.scoreB === 0 && status === 'scheduled');
   const isFinal = hasScore || status === 'final';
-  const aWon = hasScore && isFinal && (game.scoreA ?? 0) > (game.scoreB ?? 0);
-  const bWon = hasScore && isFinal && (game.scoreB ?? 0) > (game.scoreA ?? 0);
+  const forfeit = isForfeit(game);
+  const aWon = forfeit ? game.winnerTeamId === game.teamAId : hasScore && isFinal && (game.scoreA ?? 0) > (game.scoreB ?? 0);
+  const bWon = forfeit ? game.winnerTeamId === game.teamBId : hasScore && isFinal && (game.scoreB ?? 0) > (game.scoreA ?? 0);
 
   // Bracket name is shown on the left (crossovers span several bracket_names
   // in one list). Field + time fold into the right-hand status strip along
@@ -1732,7 +1759,7 @@ function GameRow({
         name={game.teamAName ?? shortPlaceholder(game.teamAPlaceholder)}
         seed={game.seedA}
         teamId={game.teamAId}
-        score={hasScore ? game.scoreA : null}
+        score={forfeit ? (aWon ? 'W' : 'F') : hasScore ? game.scoreA : null}
         won={aWon}
         lost={bWon}
         season={season}
@@ -1741,7 +1768,7 @@ function GameRow({
         name={game.teamBName ?? shortPlaceholder(game.teamBPlaceholder)}
         seed={game.seedB}
         teamId={game.teamBId}
-        score={hasScore ? game.scoreB : null}
+        score={forfeit ? (bWon ? 'W' : 'F') : hasScore ? game.scoreB : null}
         won={bWon}
         lost={aWon}
         season={season}
@@ -1762,7 +1789,8 @@ function TeamLine({
   name: string | null;
   seed: number | null;
   teamId: string | null;
-  score: number | null;
+  /** A number, or "W"/"F" for a forfeit. */
+  score: number | string | null;
   won: boolean;
   lost: boolean;
   season?: number | null;

@@ -3332,6 +3332,7 @@ export type Database = {
           updated_at: string
           usau_event_game_id: string | null
           usau_game_id: string | null
+          winner_team_id: string | null
         }
         Insert: {
           bracket_name?: string | null
@@ -3360,6 +3361,7 @@ export type Database = {
           updated_at?: string
           usau_event_game_id?: string | null
           usau_game_id?: string | null
+          winner_team_id?: string | null
         }
         Update: {
           bracket_name?: string | null
@@ -3388,6 +3390,7 @@ export type Database = {
           updated_at?: string
           usau_event_game_id?: string | null
           usau_game_id?: string | null
+          winner_team_id?: string | null
         }
         Relationships: [
           {

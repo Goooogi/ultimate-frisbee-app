@@ -26,6 +26,7 @@ import { BracketScroller } from '@/components/bracket-scroller';
 import Link from 'next/link';
 import type { UsauEventSummary } from '@/lib/usau/data';
 import { formatGameTime } from '@/lib/usau/venue-tz';
+import { gameWinnerId, isForfeit } from '@/lib/usau/game-winner';
 
 type Game = UsauEventSummary['games'][number];
 type Team = UsauEventSummary['teams'][number];
@@ -360,10 +361,13 @@ function MatchCard({
     );
   }
 
-  const aWon =
-    game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
-  const bWon =
-    game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
+  const forfeit = isForfeit(game);
+  const aWon = forfeit
+    ? game.winnerTeamId === game.teamAId
+    : game.scoreA != null && game.scoreB != null && game.scoreA > game.scoreB;
+  const bWon = forfeit
+    ? game.winnerTeamId === game.teamBId
+    : game.scoreA != null && game.scoreB != null && game.scoreB > game.scoreA;
   let tone = matchTone(game);
   const label = statusLabel(game);
   // A slot that names its origin isn't a bare "TBD" card anymore — it's a
@@ -380,8 +384,9 @@ function MatchCard({
   // placeholder on a scheduled game (rows scraped before 2026-09-11) — "0 0"
   // under either reads like a played shutout, so blank the scores instead.
   const unplayed = game.status === 'scheduled' && game.scoreA === 0 && game.scoreB === 0;
-  const scoreA = tone === 'cancelled' || unplayed ? null : game.scoreA;
-  const scoreB = tone === 'cancelled' || unplayed ? null : game.scoreB;
+  // A forfeit shows USAU's own W/F letters in place of the scores.
+  const scoreA = forfeit ? (aWon ? 'W' : 'F') : tone === 'cancelled' || unplayed ? null : game.scoreA;
+  const scoreB = forfeit ? (bWon ? 'W' : 'F') : tone === 'cancelled' || unplayed ? null : game.scoreB;
 
   return (
     <article
@@ -454,7 +459,8 @@ function TeamLine({
    *  origin is known — USAU-style "W of Quarters G1". */
   fallback?: string | null;
   seed: number | null;
-  score: number | null;
+  /** A number, or "W"/"F" for a forfeit. */
+  score: number | string | null;
   won: boolean;
   lost: boolean;
   compact?: boolean;
@@ -699,9 +705,8 @@ function recoverFeederRound(games: Game[], openers: Game[]): Game[] {
   return games.filter((g) => {
     if (TREE_ROUNDS.includes(g.round)) return false;
     if (!g.teamAId || !g.teamBId) return false;
-    if (g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) return false;
-    const winner = g.scoreA > g.scoreB ? g.teamAId : g.teamBId;
-    return openerTeams.has(winner);
+    const winner = gameWinnerId(g);
+    return !!winner && openerTeams.has(winner);
   });
 }
 
@@ -731,11 +736,7 @@ function buildColumns(games: Game[]): RoundColumn[] {
   if (finals.length === 0 && semis.length > 0) {
     const semiWinners = new Set(
       semis
-        .map((g) =>
-          g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB
-            ? (g.scoreA > g.scoreB ? g.teamAId : g.teamBId)
-            : null,
-        )
+        .map((g) => gameWinnerId(g))
         .filter((id): id is string => !!id),
     );
     finals = games.filter(
@@ -924,14 +925,11 @@ export function shortPlaceholder(raw: string | null | undefined): string | null 
 function isDecidedForTree(g: Game): boolean {
   const s = g.status.toLowerCase();
   if (s === 'forfeit') return true;
-  return s === 'final' && g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
+  return s === 'final' && gameWinnerId(g) != null;
 }
 
 function treeWinnerId(g: Game): string | null {
-  if (!isDecidedForTree(g) || g.scoreA == null || g.scoreB == null || g.scoreA === g.scoreB) {
-    return null;
-  }
-  return g.scoreA > g.scoreB ? g.teamAId : g.teamBId;
+  return isDecidedForTree(g) ? gameWinnerId(g) : null;
 }
 
 /** The winner of a feeder slot's game, when decided — id/name/seed for the

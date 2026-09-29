@@ -12,6 +12,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { namesMatch, normalizeName, surnameForPrefilter } from '@/lib/name-match';
+import { loadNameAliases } from '@/lib/name-aliases';
 import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
 import { usauToday } from '@/lib/today';
 
@@ -565,10 +566,11 @@ export async function getWfdfPlayerStints(displayName: string): Promise<WfdfPlay
     .ilike('last_name', `%${fragment}%`)
     .limit(400);
 
+  const aliases = await loadNameAliases();
   const stints: WfdfPlayerStint[] = [];
   for (const h of (hits ?? []) as Row[]) {
     const row = h;
-    if (!namesMatch(displayName, row.full_name as string)) continue;
+    if (!namesMatch(displayName, row.full_name as string, aliases)) continue;
     const team = row.team as Record<string, unknown> | null;
     if (!team) continue;
     const division = team.division as Record<string, unknown> | null;

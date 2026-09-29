@@ -21,6 +21,7 @@ import {
   type SearchResult,
 } from '@/lib/usau/data';
 import { namesMatch } from '@/lib/name-match';
+import { loadNameAliases } from '@/lib/name-aliases';
 import { allUfaTeams, teamEras } from '@/lib/ufa/teams';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { listPulTeams, searchPulPlayers } from '@/lib/pul/data';
@@ -102,7 +103,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   // player search in ONE parallel batch. Each is name-filtered server-side —
   // no more "pull the whole roster, filter in Node".
   const [usau, ufaPlayers, pulPlayers, wulPlayers, pulTeams, wulTeams, wfdfTeams, wfdfPlayers, wfdfEvents,
-         eufTeams, eufPlayers, eufEvents] =
+         eufTeams, eufPlayers, eufEvents, aliases] =
     await Promise.all([
       searchUsau(q, limit),
       searchUfaPlayersDb(q, cap).catch(() => []),
@@ -116,6 +117,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       searchEufTeams(query, cap).catch(() => []),
       searchEufPlayers(query, cap).catch(() => []),
       searchEufEvents(query, cap).catch(() => []),
+      loadNameAliases(),
     ]);
 
   // Names already covered by a USAU player row — used to dedupe same-human
@@ -132,7 +134,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       if (seen.has(key)) continue;
       seen.add(key);
       // Same human as a USAU result already shown? Skip (profile merges them).
-      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName))) continue;
+      if (usauPlayerNames.some((n) => namesMatch(n, p.fullName, aliases))) continue;
       ufaResults.push({ kind: 'player', id: p.id, name: p.fullName, hint: 'UFA', league: 'ufa' });
     }
   }
@@ -219,7 +221,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   const pulPlayerResults: SearchResult[] = [];
   for (const p of pulPlayers) {
     if (pulPlayerResults.length >= cap) break;
-    if (coveredNames.some((n) => namesMatch(n, p.playerName))) continue;
+    if (coveredNames.some((n) => namesMatch(n, p.playerName, aliases))) continue;
     pulPlayerResults.push({
       kind: 'player',
       id: p.id,
@@ -251,7 +253,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
   const wulPlayerResults: SearchResult[] = [];
   for (const p of wulPlayers) {
     if (wulPlayerResults.length >= cap) break;
-    if (coveredNames.some((n) => namesMatch(n, p.playerName))) continue;
+    if (coveredNames.some((n) => namesMatch(n, p.playerName, aliases))) continue;
     wulPlayerResults.push({
       kind: 'player',
       id: p.id,
@@ -283,7 +285,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       const key = p.fullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      if (coveredNames.some((n) => namesMatch(n, p.fullName))) continue;
+      if (coveredNames.some((n) => namesMatch(n, p.fullName, aliases))) continue;
       wfdfPlayerResults.push({
         kind: 'player',
         id: p.fullName, // by-name resolver route uses the name, not a UUID
@@ -336,7 +338,7 @@ export async function searchAll(query: string, limit = 8): Promise<SearchResult[
       const key = p.fullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      if (coveredNames.some((n) => namesMatch(n, p.fullName))) continue;
+      if (coveredNames.some((n) => namesMatch(n, p.fullName, aliases))) continue;
       eufPlayerResults.push({
         kind: 'player',
         id: p.fullName,

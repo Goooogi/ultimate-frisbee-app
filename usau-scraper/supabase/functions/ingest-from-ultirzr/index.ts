@@ -388,7 +388,10 @@ async function ingestEvent(
   const groups = (e.EventGroups ?? []).filter((g) => {
     if (isMasters) return mastersGroupMeta(g) !== null;
     if (!wantedNorm) return true;
-    return normGroupName(g) === wantedNorm;
+    const n = normGroupName(g);
+    // 2021 College Championships labels its groups with a sub-division
+    // ("College - Men D-I Men"); an exact match skipped the whole event.
+    return n === wantedNorm || (n.startsWith(`${wantedNorm} `) && /^d-i{1,3}\b/.test(n.slice(wantedNorm.length + 1)));
   });
   if (groups.length === 0) {
     // Event doesn't have this division — common (e.g. an HS-only event
@@ -720,6 +723,7 @@ async function ingestEvent(
 
     const scoreA = parseScore(gm.HomeTeamScore);
     const scoreB = parseScore(gm.AwayTeamScore);
+    const ff = forfeitWinner(gm.HomeTeamScore, gm.AwayTeamScore);
 
     const row = {
       event_id: eventUuid,
@@ -732,6 +736,7 @@ async function ingestEvent(
       seed_b: awaySplit.seed,
       score_a: scoreA,
       score_b: scoreB,
+      winner_team_id: ff === 'home' ? teamA : ff === 'away' ? teamB : null,
       location: gm.FieldName?.trim() || null,
       scheduled_at: combineDateTime(gm.StartDate, gm.StartTime, venueTz),
       status: classifyStatus(gm.GameStatus),
@@ -793,6 +798,16 @@ function parseScore(v: string | number | undefined): number | null {
   if (typeof v === 'number') return v;
   const m = v.trim().match(/^(\d+)$/);
   return m ? parseInt(m[1], 10) : null;
+}
+
+/** Forfeits arrive as letters in the score fields ("W"/"F"). Mirrors
+ *  sync-event-details' forfeitWinner so both pipelines set winner_team_id. */
+function forfeitWinner(home: string | number | undefined, away: string | number | undefined): 'home' | 'away' | null {
+  const h = String(home ?? '').trim().toUpperCase();
+  const a = String(away ?? '').trim().toUpperCase();
+  if (h === 'W' && a === 'F') return 'home';
+  if (h === 'F' && a === 'W') return 'away';
+  return null;
 }
 
 function divisionLabel(div: string): string | null {

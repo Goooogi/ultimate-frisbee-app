@@ -99,6 +99,10 @@ interface ParsedGame {
   location: string | null;
   scheduled_at: string | null;
   status: GameStatus;
+  /** Forfeit result: USAU prints a forfeit as letters ("F - W") instead of a
+   *  score, so both scores stay null and this names the side that won. Null
+   *  for scored games, unplayed games and a double forfeit ("F - F"). */
+  forfeit_winner: 'home' | 'away' | null;
   /** USAU's own placeholder text for a TBD side ("P1 of Saturday Pool Play
    *  Pool A", "W of Quarterfinals G1") — the bracket cell's plain text when it
    *  has no team link. Null whenever the side has a real team, so a later
@@ -157,12 +161,14 @@ function classifyRound(h4Label: string | null, h3Label: string | null): GameRoun
     h3.includes('bracket play') ||
     h3 === '1st' ||        // bare-ordinal sections (Cooler Classic 37: "1st",
     h3 === 'first' ||      // "5th", "9th" — "1st" IS the championship bracket)
+    /^finals?$/.test(h3) || // a "Finals" section (2026 NW Men, SC Mixed) — its decider was filed 'placement'
     h3 === '';
   const isChampRound =
     h4.includes('1st place') ||
     h4.includes('first place') ||
     h4.includes('final') ||
     h4.startsWith('champ') ||      // "Championship" (HoDown 2026), "Champs" (Vacationland 2026 Men)
+    h4.includes('championship') || // "The Championship" (2026 NE Mixed Regionals) — was 'other'
     h4 === '1st' ||
     (h4 !== '' && h4 === h3);      // deciding game repeats its section label verbatim
   if (isChampSection && isChampRound) {
@@ -211,6 +217,16 @@ function parseScore(s: string | null): number | null {
   return m ? parseInt(m[1], 10) : null;
 }
 
+/** USAU's forfeit letters for one game ("W" and "F", one per side). Returns
+ *  the winning side, or null when the pair isn't exactly one W and one F. */
+function forfeitWinner(home: string | null, away: string | null): 'home' | 'away' | null {
+  const h = (home ?? '').trim().toUpperCase();
+  const a = (away ?? '').trim().toUpperCase();
+  if (h === 'W' && a === 'F') return 'home';
+  if (h === 'F' && a === 'W') return 'away';
+  return null;
+}
+
 /** Postgres smallint range guard: anything outside it becomes null rather
  *  than a write error that would abort the whole page's sync. */
 function smallintOrNull(n: number | null): number | null {
@@ -246,8 +262,13 @@ function unplayedScoresToNull(
  * Parse a bracket `.date` cell ("6/14/2026 9:00 AM" — local venue time) into a
  * correct UTC ISO using the event timezone. Falls back to date-only when the
  * time or zone is missing/unknown so we never store a wrong instant.
+ *
+ * USAU sometimes prints the WRONG year in these full dates (three 2023 college
+ * women's events show 2020 — pages cloned from a cancelled season), so a year
+ * that lands >60 days from the event start (`refDate`) is replaced the same way
+ * year-less pool dates are (yearNearest).
  */
-function parseSchedDate(s: string | null, tz: string | null): string | null {
+function parseSchedDate(s: string | null, tz: string | null, refDate: string | null): string | null {
   if (!s) return null;
   const t = s.trim();
   // "M/D/YYYY h:mm AM" (time optional)
@@ -256,11 +277,13 @@ function parseSchedDate(s: string | null, tz: string | null): string | null {
     // Unknown format — let JS try, but only keep the date (drop time-of-day).
     const d = new Date(t);
     if (isNaN(d.getTime())) return null;
-    return dateOnlyIso(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+    const mo = d.getUTCMonth() + 1;
+    const dd = d.getUTCDate();
+    return dateOnlyIso(sanitizeYear(d.getUTCFullYear(), mo, dd, refDate), mo, dd);
   }
   const month = parseInt(m[1], 10);
   const day = parseInt(m[2], 10);
-  const year = parseInt(m[3], 10);
+  const year = sanitizeYear(parseInt(m[3], 10), month, day, refDate);
   if (!m[4] || !tz) return dateOnlyIso(year, month, day);
   let h = parseInt(m[4], 10);
   const min = parseInt(m[5], 10);
@@ -273,16 +296,26 @@ function parseSchedDate(s: string | null, tz: string | null): string | null {
 /**
  * Pool game schedule cells: date like "Fri 5/22" (no year) + time "8:30 AM"
  * in the venue's local zone. Converts to a correct UTC instant via `tz`; falls
- * back to date-only when time/zone is missing. Year is the current year (rare
- * year-boundary events are an accepted v1 limitation).
+ * back to date-only when time/zone is missing.
+ *
+ * The year comes from the EVENT's start date (`refDate`): whichever of its
+ * year ±1 lands the day closest to it, so a Dec→Jan event still resolves. It
+ * used to be the current year, so every re-scrape of a past season stamped its
+ * pool games a year (or more) late — ~9,000 games by 2026-09-28 (a Nov 2025
+ * event's pool play read 2026-11-08). No refDate → current year.
  */
-function combineDateTimeMaybe(dateText: string, timeText: string, tz: string | null): string | null {
+function combineDateTimeMaybe(
+  dateText: string,
+  timeText: string,
+  tz: string | null,
+  refDate: string | null,
+): string | null {
   if (!dateText) return null;
   const md = dateText.match(/(\d{1,2})\/(\d{1,2})/);
   if (!md) return null;
   const month = parseInt(md[1], 10);
   const day = parseInt(md[2], 10);
-  const year = new Date().getUTCFullYear();
+  const year = yearNearest(month, day, refDate);
   const mt = timeText ? timeText.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i) : null;
   if (!mt || !tz) return dateOnlyIso(year, month, day);
   let h = parseInt(mt[1], 10);
@@ -291,6 +324,35 @@ function combineDateTimeMaybe(dateText: string, timeText: string, tz: string | n
   if (ampm === 'PM' && h < 12) h += 12;
   if (ampm === 'AM' && h === 12) h = 0;
   return localWallTimeToUtcIso(year, month, day, h, min, tz) ?? dateOnlyIso(year, month, day);
+}
+
+/** An explicit year, unless it puts M/D more than 60 days from `refDate` — then
+ *  yearNearest's. No refDate → the year as printed. */
+function sanitizeYear(year: number, month: number, day: number, refDate: string | null): number {
+  const ref = refDate ? Date.parse(`${refDate}T00:00:00Z`) : NaN;
+  if (!Number.isFinite(ref)) return year;
+  if (Math.abs(Date.UTC(year, month - 1, day) - ref) <= 60 * 86_400_000) return year;
+  const fixed = yearNearest(month, day, refDate);
+  console.warn(`[sync-event-details] bracket date ${month}/${day}/${year} is far from event start ${refDate}; using ${fixed}`);
+  return fixed;
+}
+
+/** The year for a year-less "M/D" that lands it closest to `refDate`
+ *  (the event's start, "YYYY-MM-DD"). No refDate → the current year. */
+function yearNearest(month: number, day: number, refDate: string | null): number {
+  const ref = refDate ? Date.parse(`${refDate}T00:00:00Z`) : NaN;
+  if (!Number.isFinite(ref)) return new Date().getUTCFullYear();
+  const refYear = new Date(ref).getUTCFullYear();
+  let best = refYear;
+  let bestDist = Infinity;
+  for (const y of [refYear - 1, refYear, refYear + 1]) {
+    const d = Math.abs(Date.UTC(y, month - 1, day) - ref);
+    if (d < bestDist) {
+      best = y;
+      bestDist = d;
+    }
+  }
+  return best;
 }
 
 // ────────────────────────────────────────────────────────────
@@ -323,7 +385,7 @@ function isPlacementLabel(label: string | null): boolean {
   );
 }
 
-function parseSchedule(html: string, tz: string | null): ScheduleParse {
+function parseSchedule(html: string, tz: string | null, refDate: string | null): ScheduleParse {
   const $ = parseHtml(html);
   const teamsByEventTeamId = new Map<string, ParsedTeam>();
   const poolPlacements: ParsedPoolRow[] = [];
@@ -537,8 +599,13 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
           // Score: "15 - 11" → 15, 11. Empty/blank when not yet played.
           const scoreText = $cells.eq(5).text().trim();
           const scoreMatch = scoreText.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+          const letterMatch = scoreText.match(/^([A-Za-z])\s*[-–]\s*([A-Za-z])$/);
+          const forfeit_winner = letterMatch ? forfeitWinner(letterMatch[1], letterMatch[2]) : null;
           const rawStatus = $cells.eq(6).text().trim() || null;
-          const status = classifyStatus(rawStatus);
+          // A forfeit is decided even if USAU left the status cell blank.
+          const status = forfeit_winner && classifyStatus(rawStatus) === 'scheduled'
+            ? 'final'
+            : classifyStatus(rawStatus);
           const [scoreHome, scoreAway] = unplayedScoresToNull(
             scoreMatch ? parseInt(scoreMatch[1], 10) : null,
             scoreMatch ? parseInt(scoreMatch[2], 10) : null,
@@ -554,7 +621,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
             dataGame ||
             extractEventGameId($matchLink.attr('href') ?? '');
 
-          const scheduled_at = combineDateTimeMaybe(dateText, timeText, tz);
+          const scheduled_at = combineDateTimeMaybe(dateText, timeText, tz, refDate);
 
           games.push({
             usau_game_id: null,
@@ -570,6 +637,7 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
             location: fieldText || null,
             scheduled_at,
             status,
+            forfeit_winner,
             // Pool rows always have both teams — no placeholder text exists.
             home_placeholder: null,
             away_placeholder: null,
@@ -626,10 +694,16 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
 
       const location = $game.find(SELECTORS.schedule.bracketLocation).first().text().trim() || null;
       const rawStatus = $game.find(SELECTORS.schedule.bracketStatus).first().text().trim() || null;
-      const status = classifyStatus(rawStatus);
+      const homeScoreText = $game.find(SELECTORS.schedule.bracketHomeScore).first().text();
+      const awayScoreText = $game.find(SELECTORS.schedule.bracketAwayScore).first().text();
+      const forfeit_winner = forfeitWinner(homeScoreText, awayScoreText);
+      // A forfeit is decided even if USAU left the status cell blank.
+      const status = forfeit_winner && classifyStatus(rawStatus) === 'scheduled'
+        ? 'final'
+        : classifyStatus(rawStatus);
       const [scoreHome, scoreAway] = unplayedScoresToNull(
-        parseScore($game.find(SELECTORS.schedule.bracketHomeScore).first().text()),
-        parseScore($game.find(SELECTORS.schedule.bracketAwayScore).first().text()),
+        parseScore(homeScoreText),
+        parseScore(awayScoreText),
         status,
       );
       const rawDate = $game.find(SELECTORS.schedule.bracketDate).first().text().trim() || null;
@@ -681,8 +755,9 @@ function parseSchedule(html: string, tz: string | null): ScheduleParse {
         score_home: scoreHome,
         score_away: scoreAway,
         location,
-        scheduled_at: parseSchedDate(rawDate, tz),
+        scheduled_at: parseSchedDate(rawDate, tz, refDate),
         status,
+        forfeit_winner,
         home_placeholder: homePlaceholder,
         away_placeholder: awayPlaceholder,
       });
@@ -936,6 +1011,7 @@ async function syncDivision(
   division: Division,
   competitionLevel: CompetitionLevel,
   tz: string | null,
+  refDate: string | null,
 ): Promise<{
   teams: number;
   games: number;
@@ -984,6 +1060,7 @@ async function syncDivision(
       html,
       url,
       tz,
+      refDate,
     );
     if (res.skipped) continue;
     anyResolved = true;
@@ -1010,8 +1087,9 @@ async function persistSchedulePage(
   html: string,
   url: string,
   tz: string | null,
+  refDate: string | null,
 ): Promise<{ teams: number; games: number; skipped: boolean }> {
-  const { teams, poolPlacements, games } = parseSchedule(html, tz);
+  const { teams, poolPlacements, games } = parseSchedule(html, tz, refDate);
   if (teams.length === 0) {
     // Page exists but has no parseable teams — could mean draft schedule,
     // selector drift, or genuinely empty. Don't write anything; let the
@@ -1128,6 +1206,10 @@ async function persistSchedulePage(
       location: g.location,
       scheduled_at: g.scheduled_at,
       status: g.status,
+      // The resolved team, not a side, so it survives either a/b orientation.
+      // Written on every row so a re-scrape clears a stale value.
+      winner_team_id:
+        g.forfeit_winner === 'home' ? teamA : g.forfeit_winner === 'away' ? teamB : null,
       source_url: url,
       team_a_placeholder: g.home_placeholder,
       team_b_placeholder: g.away_placeholder,
@@ -1295,7 +1377,7 @@ async function run(body: RequestBody) {
   // (calendar discovery) with the right level, so this lookup picks that up.
   const { data: eventRow } = await db
     .from('usau_events')
-    .select('competition_level, state')
+    .select('competition_level, state, start_date')
     .eq('id', eventUUID)
     .maybeSingle();
   // Venue timezone (for converting USAU's local schedule times → UTC). Derived
@@ -1335,7 +1417,10 @@ async function run(body: RequestBody) {
   let totalGames = 0;
 
   for (const div of divisions) {
-    perDivision[div] = await syncDivision(db, eventUUID, slug, div, competitionLevel, tz);
+    perDivision[div] = await syncDivision(
+      db, eventUUID, slug, div, competitionLevel, tz,
+      (eventRow?.start_date as string | null | undefined) ?? null,
+    );
     totalTeams += perDivision[div].teams;
     totalGames += perDivision[div].games;
   }
