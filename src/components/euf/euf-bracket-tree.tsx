@@ -78,9 +78,12 @@ export type PlacementMap = ReadonlyMap<string, number>;
 export function EufBracketTree({
   games,
   placements,
+  season,
 }: {
   games: EufGameCard[];
   placements: PlacementMap;
+  /** Event year → `&season=` on club links. */
+  season: number;
 }) {
   const bracketGames = games.filter((g) => bracketOf(g.roundName));
   if (!bracketGames.length) return null;
@@ -111,7 +114,7 @@ export function EufBracketTree({
   return (
     <div className="flex flex-col gap-8">
       {trees.map((tree) => (
-        <TreeSection key={tree.id} tree={tree} placesOf={placesOf} />
+        <TreeSection key={tree.id} tree={tree} placesOf={placesOf} season={season} />
       ))}
     </div>
   );
@@ -280,9 +283,11 @@ function splitBracketGroup(
 function TreeSection({
   tree,
   placesOf,
+  season,
 }: {
   tree: SubTree;
   placesOf: (g: EufGameCard) => [number, number] | null;
+  season: number;
 }) {
   // Horizontal tree at EVERY width via the shared scroll-collapsing scroller
   // (Hunter, 2026-08-20 — WFDF/USAU parity; replaces the desktop-only tree +
@@ -320,7 +325,7 @@ function TreeSection({
         columns={nodeColumns}
         positions={positions}
         cardLift={(g) => (g.places ? PLACE_TAG_H_PX : 0)}
-        renderCard={(g) => <MatchCard game={g.game} places={g.places} compact />}
+        renderCard={(g) => <MatchCard game={g.game} places={g.places} season={season} compact />}
       />
     </div>
   );
@@ -331,10 +336,12 @@ function TreeSection({
 function MatchCard({
   game,
   places,
+  season,
   compact = false,
 }: {
   game: EufGameCard;
   places: [number, number] | null;
+  season: number;
   compact?: boolean;
 }) {
   const homeWon =
@@ -397,6 +404,7 @@ function MatchCard({
           won={homeWon}
           lost={awayWon}
           compact={compact}
+          season={season}
         />
         <div className="h-px bg-hairline" />
         <TeamLine
@@ -408,6 +416,7 @@ function MatchCard({
           won={awayWon}
           lost={homeWon}
           compact={compact}
+          season={season}
         />
       </article>
     </>
@@ -423,6 +432,7 @@ function TeamLine({
   won,
   lost,
   compact,
+  season,
 }: {
   teamId: string | null;
   name: string;
@@ -432,6 +442,7 @@ function TeamLine({
   won: boolean;
   lost: boolean;
   compact?: boolean;
+  season: number;
 }) {
   const labelColor = won ? 'text-ink' : lost ? 'text-faint' : 'text-muted';
   const scoreColor = won ? 'text-accent' : lost ? 'text-faint' : 'text-muted';
@@ -448,7 +459,7 @@ function TeamLine({
     <div className={`flex items-center gap-3 px-3 ${compact ? 'py-1.5' : 'py-2'}`}>
       {teamId ? (
         <Link
-          href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}`}
+          href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}&season=${season}`}
           className="flex-1 min-w-0 hover:opacity-80 transition-opacity no-underline"
         >
           {inner}

@@ -50,7 +50,7 @@ export default async function EufTeamPage({ params }: Props) {
         { label: 'Teams', href: '/euf/clubs' },
         {
           label: `${team.name} · ${team.division}`,
-          href: `/euf/clubs/${encodeURIComponent(team.name)}?div=${encodeURIComponent(team.division)}`,
+          href: `/euf/clubs/${encodeURIComponent(team.name)}?div=${encodeURIComponent(team.division)}&season=${team.eventYear}`,
         },
         { label: team.eventName },
       ]}
@@ -59,7 +59,7 @@ export default async function EufTeamPage({ params }: Props) {
         {/* This page is ONE event. The club page merges every appearance of
             this club in THIS division (its other squads get their own pages). */}
         <Link
-          href={`/euf/clubs/${encodeURIComponent(team.name)}?div=${encodeURIComponent(team.division)}`}
+          href={`/euf/clubs/${encodeURIComponent(team.name)}?div=${encodeURIComponent(team.division)}&season=${team.eventYear}`}
           className="text-[12px] font-tight text-accent no-underline hover:underline"
         >
           View {team.name}&rsquo;s full {team.division} history →

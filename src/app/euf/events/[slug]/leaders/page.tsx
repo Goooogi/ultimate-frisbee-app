@@ -71,7 +71,7 @@ export default async function EufLeadersPage({ params }: Props) {
                       <EufFlag countryName={p.countryName} size={13} />
                       {p.teamName ? (
                         <Link
-                          href={`/euf/clubs/${encodeURIComponent(p.teamName)}?div=${encodeURIComponent(p.division)}`}
+                          href={`/euf/clubs/${encodeURIComponent(p.teamName)}?div=${encodeURIComponent(p.division)}&season=${ev.year}`}
                           className="truncate no-underline hover:underline text-muted"
                         >
                           {p.teamName}

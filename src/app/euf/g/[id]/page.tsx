@@ -103,6 +103,7 @@ export default async function EufGamePage({ params }: Props) {
             country={game.homeCountry}
             score={game.homeScore}
             won={homeWon}
+            season={game.eventYear}
           />
           <div className="h-px bg-hairline my-2" />
           <ScoreRow
@@ -112,6 +113,7 @@ export default async function EufGamePage({ params }: Props) {
             country={game.awayCountry}
             score={game.awayScore}
             won={!homeWon}
+            season={game.eventYear}
           />
         </section>
 
@@ -139,6 +141,7 @@ function ScoreRow({
   country,
   score,
   won,
+  season,
 }: {
   teamId: string | null;
   name: string;
@@ -146,6 +149,7 @@ function ScoreRow({
   country: string | null;
   score: number | null;
   won: boolean;
+  season: number;
 }) {
   return (
     <div className="flex items-center gap-2.5">
@@ -153,7 +157,7 @@ function ScoreRow({
       <span className="flex-1 min-w-0">
         {teamId ? (
           <Link
-            href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}`}
+            href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}&season=${season}`}
             className={[
               'no-underline hover:underline text-[15px] font-tight truncate',
               won ? 'text-ink font-semibold' : 'text-muted',

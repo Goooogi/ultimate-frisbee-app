@@ -86,6 +86,7 @@ export default async function EufEventPage({ params }: Props) {
           standings={standings}
           games={games}
           sourceUrl={eufSourceUrl(ev)}
+          season={ev.year}
         />
       </Suspense>
     </PageShell>

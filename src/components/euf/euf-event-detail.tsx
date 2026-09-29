@@ -35,6 +35,8 @@ interface Props {
   /** Outbound link back to the Ultiorganizer schedule site, mirroring USAU's
    *  "View on USAU". Null when the event's source_origin/season_id aren't set. */
   sourceUrl: string | null;
+  /** The event's year — carried onto club links as ?season=. */
+  season: number;
 }
 
 type ViewTab = 'standings' | 'pools' | 'crossovers' | 'bracket';
@@ -88,7 +90,7 @@ function deriveEufTabs(
   return { visibleTabs, defaultTab };
 }
 
-export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props) {
+export function EufEventDetail({ divisions, standings, games, sourceUrl, season }: Props) {
   // Division lives in the URL (?div=) so back-nav from a team page and hard
   // refresh both keep the filter (Hunter ruling 2026-08-16; default omitted
   // for clean URLs, unknown values fall back to the first division).
@@ -138,8 +140,9 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
         divisions={divisions.map((d) => ({ value: d, label: d }))}
         active={activeDiv}
         onChange={setActiveDiv}
+        // Always passed, even for a one-tab division: without it the pager lays
+        // the division pills out compact and centered, resizing the switcher.
         tabRowLeading={
-          visibleTabs.length > 1 ? (
             <div role="tablist" aria-label="Tournament views" className="flex items-center justify-between gap-5 lg:justify-start">
               {visibleTabs.map((t) => {
                 const on = t.key === activeTab;
@@ -164,7 +167,6 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
                 );
               })}
             </div>
-          ) : undefined
         }
         renderDivision={(division) => (
           <DivisionContent
@@ -172,6 +174,7 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl }: Props
             standings={standings}
             games={games}
             tabParam={tabParam as ViewTab | null}
+            season={season}
           />
         )}
         contentClassName="flex flex-col gap-6"
@@ -195,11 +198,15 @@ function DivisionContent({
   standings,
   games,
   tabParam,
+  season,
 }: {
   division: EufDivision;
   standings: EufStandingRow[];
   games: EufGameCard[];
   tabParam: ViewTab | null;
+  /** Event year → `&season=` on club links, so a team clicked from a 2025
+   *  tournament opens its 2025 season (same as USAU's ?season=). */
+  season: number;
 }) {
   const divStandings = useMemo(
     () => standings.filter((s) => s.division === division),
@@ -268,7 +275,7 @@ function DivisionContent({
     <div className="flex flex-col gap-6">
       {/* Champion — leads the page so the headline result is the first thing
           seen, even though the bracket tree scrolls horizontally on mobile. */}
-      {champion && <ChampionBanner row={champion.row} derived={champion.derived} />}
+      {champion && <ChampionBanner row={champion.row} derived={champion.derived} season={season} />}
 
       {/* View tabs render in the shared control row up in EufEventDetail
           (DivisionPager's tabRowLeading) — this content keeps only its own
@@ -301,7 +308,7 @@ function DivisionContent({
                       </td>
                       <td className="py-2 pr-2">
                         <Link
-                          href={`/euf/clubs/${encodeURIComponent(s.teamName)}?div=${encodeURIComponent(s.division)}`}
+                          href={`/euf/clubs/${encodeURIComponent(s.teamName)}?div=${encodeURIComponent(s.division)}&season=${season}`}
                           className="inline-flex items-center gap-2 no-underline hover:underline text-ink font-tight text-[13px]"
                         >
                           <EufFlag countryName={s.countryName} size={14} />
@@ -327,11 +334,11 @@ function DivisionContent({
       )}
 
       {/* ── Pools ─────────────────────────────────────────────────────────── */}
-      {active === 'pools' && <EufPoolPlay rounds={poolRounds} />}
+      {active === 'pools' && <EufPoolPlay rounds={poolRounds} season={season} />}
 
       {/* ── Crossovers ────────────────────────────────────────────────────── */}
       {active === 'crossovers' && (
-        <RoundSections rounds={[['Crossovers', crossoverGames]]} hideHeading />
+        <RoundSections rounds={[['Crossovers', crossoverGames]]} hideHeading season={season} />
       )}
 
       {/* ── Bracket — tree + any placement rounds it doesn't draw ─────────── */}
@@ -339,8 +346,8 @@ function DivisionContent({
         <div className="flex flex-col gap-6">
           {/* EUCS "Finals" is 4 simultaneous placement games, so the tree labels
               which places each one decides. */}
-          {showTree && <EufBracketTree games={divGames} placements={placements} />}
-          <RoundSections rounds={otherBracketRounds} />
+          {showTree && <EufBracketTree games={divGames} placements={placements} season={season} />}
+          <RoundSections rounds={otherBracketRounds} season={season} />
         </div>
       )}
 
@@ -416,18 +423,18 @@ function buildEufPoolTeams(games: EufGameCard[]): EufPoolTeam[] {
   );
 }
 
-function EufPoolPlay({ rounds }: { rounds: Array<[string, EufGameCard[]]> }) {
+function EufPoolPlay({ rounds, season }: { rounds: Array<[string, EufGameCard[]]>; season: number }) {
   if (rounds.length === 0) return null;
   return (
     <div className="flex flex-col gap-6">
       {rounds.map(([pool, list]) => (
-        <EufPoolCard key={pool} label={pool} games={list} />
+        <EufPoolCard key={pool} label={pool} games={list} season={season} />
       ))}
     </div>
   );
 }
 
-function EufPoolCard({ label, games }: { label: string; games: EufGameCard[] }) {
+function EufPoolCard({ label, games, season }: { label: string; games: EufGameCard[]; season: number }) {
   const teams = useMemo(() => buildEufPoolTeams(games), [games]);
   const sorted = useMemo(
     () => games.slice().sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')),
@@ -462,7 +469,7 @@ function EufPoolCard({ label, games }: { label: string; games: EufGameCard[] }) 
             <li key={t.name} className="border-t border-hairline">
               {t.id ? (
                 <Link
-                  href={`/euf/clubs/${encodeURIComponent(t.name)}?div=${encodeURIComponent(t.division)}`}
+                  href={`/euf/clubs/${encodeURIComponent(t.name)}?div=${encodeURIComponent(t.division)}&season=${season}`}
                   className={`${rowClass} hover:bg-ink/[0.03]`}
                 >
                   {inner}
@@ -501,7 +508,7 @@ function EufPoolCard({ label, games }: { label: string; games: EufGameCard[] }) 
           {gamesOpen && (
             <ul id={panelId} className="list-none m-0 flex flex-col gap-2 px-3 pt-0 pb-3">
               {sorted.map((g) => (
-                <GameRow key={g.id} game={g} />
+                <GameRow key={g.id} game={g} season={season} />
               ))}
             </ul>
           )}
@@ -533,9 +540,11 @@ function PoolGamesChevron({ open }: { open: boolean }) {
 function RoundSections({
   rounds,
   hideHeading = false,
+  season,
 }: {
   rounds: Array<[string, EufGameCard[]]>;
   hideHeading?: boolean;
+  season: number;
 }) {
   if (rounds.length === 0) return null;
   return (
@@ -559,7 +568,7 @@ function RoundSections({
                 )}
                 <ul className="grid grid-cols-1 md:grid-cols-2 gap-2 list-none p-0 m-0 mt-2">
                   {dayGames.map((g) => (
-                    <GameRow key={g.id} game={g} />
+                    <GameRow key={g.id} game={g} season={season} />
                   ))}
                 </ul>
               </div>
@@ -586,7 +595,7 @@ function groupDays(games: EufGameCard[]): Array<[string, EufGameCard[]]> {
 /** One game as a card — date/time + field meta, both teams, box-score link.
  *  Card-per-game in a 2-up grid rather than the old flat rows: it matches the
  *  USAU GameRow and gives the time somewhere to live. */
-function GameRow({ game: g }: { game: EufGameCard }) {
+function GameRow({ game: g, season }: { game: EufGameCard; season: number }) {
   const homeWon = (g.homeScore ?? 0) > (g.awayScore ?? 0);
   const awayWon = (g.awayScore ?? 0) > (g.homeScore ?? 0);
 
@@ -630,6 +639,7 @@ function GameRow({ game: g }: { game: EufGameCard }) {
         country={g.homeCountry}
         score={g.homeScore}
         won={homeWon}
+        season={season}
       />
       <TeamLine
         id={g.awayTeamId}
@@ -638,6 +648,7 @@ function GameRow({ game: g }: { game: EufGameCard }) {
         country={g.awayCountry}
         score={g.awayScore}
         won={awayWon}
+        season={season}
       />
     </li>
   );
@@ -665,7 +676,7 @@ export function EufExternalLink({ url }: { url: string }) {
   );
 }
 
-function ChampionBanner({ row, derived }: { row: EufStandingRow; derived: boolean }) {
+function ChampionBanner({ row, derived, season }: { row: EufStandingRow; derived: boolean; season: number }) {
   const Inner = (
     <span className="flex items-center gap-3 min-w-0">
       <EufFlag countryName={row.countryName} size={26} />
@@ -697,7 +708,7 @@ function ChampionBanner({ row, derived }: { row: EufStandingRow; derived: boolea
       </div>
       <div className="flex items-center justify-between gap-3 px-4 py-4">
         <Link
-          href={`/euf/clubs/${encodeURIComponent(row.teamName)}?div=${encodeURIComponent(row.division)}`}
+          href={`/euf/clubs/${encodeURIComponent(row.teamName)}?div=${encodeURIComponent(row.division)}&season=${season}`}
           className="min-w-0 flex-1 hover:opacity-80 transition-opacity no-underline"
         >
           {Inner}
@@ -735,6 +746,7 @@ function TeamLine({
   country,
   score,
   won,
+  season,
 }: {
   id: string | null;
   name: string;
@@ -742,6 +754,7 @@ function TeamLine({
   country: string | null;
   score: number | null;
   won: boolean;
+  season: number;
 }) {
   const inner = (
     <>
@@ -755,7 +768,7 @@ function TeamLine({
     <div className="flex items-center gap-2 text-[13px] font-tight">
       {id ? (
         <Link
-          href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}`}
+          href={`/euf/clubs/${encodeURIComponent(name)}?div=${encodeURIComponent(division)}&season=${season}`}
           className="flex items-center gap-2 min-w-0 flex-1 no-underline hover:underline"
         >
           {inner}
