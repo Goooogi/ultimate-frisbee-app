@@ -399,7 +399,7 @@ export function DivisionPager<V extends string>({
     if (tabRowLeading == null) return <>{renderRef.current(only)}</>;
     return (
       <div className="flex flex-col">
-        <div className="sticky top-0 z-30 bg-bg pt-2 pb-4 lg:pt-0">{tabRowLeading}</div>
+        <div className="sticky top-0 z-30 bg-bg pt-4 pb-4">{tabRowLeading}</div>
         {renderRef.current(only)}
       </div>
     );
@@ -472,12 +472,12 @@ export function DivisionPager<V extends string>({
     // stuck header would show cards scrolling through it.
     <div className="flex flex-col">
       {tabRowLeading != null ? (
-        <div className="sticky top-0 z-30 bg-bg flex flex-col gap-3.5 pt-2 pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-3 lg:pt-0">
+        <div className="sticky top-0 z-30 bg-bg flex flex-col gap-3.5 pt-4 pb-4 lg:flex-row lg:items-center lg:justify-between lg:gap-3">
           <div className="shrink-0">{tabRowLeading}</div>
           {segmentScroller}
         </div>
       ) : (
-        <div className="sticky top-0 z-30 bg-bg pb-2.5">{segmentScroller}</div>
+        <div className="sticky top-0 z-30 bg-bg pt-4 pb-2.5">{segmentScroller}</div>
       )}
 
       {/* Edge-bleed the TOUCH surface, not the layout: PageShell's px-5 gutter

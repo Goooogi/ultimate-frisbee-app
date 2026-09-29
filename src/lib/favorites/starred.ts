@@ -5,10 +5,12 @@
 // is server-only, and the per-star fetch fan-out stays off the browser); the
 // client passes its already-loaded favorites, like getForYouFeed.
 //
-// Keeps ONLY what's ahead or live: UFA drops final/cancelled, PUL/WUL drop
-// status='final', events drop when (end_date ?? start_date) < today — checked
-// on the denormalized favorite dates BEFORE fetching. A failed fetch drops
-// that star silently. Sorted soonest first.
+// Games keep ONLY what's ahead or live: UFA drops final/cancelled, PUL/WUL drop
+// status='final'. Events stay starred through the week after they end — until
+// the first Friday after (end_date ?? start_date), when the next tournament
+// weekend starts — checked on the denormalized favorite dates BEFORE fetching.
+// A failed fetch drops that star silently. Upcoming/live events sort soonest
+// first, then ended ones most recent first.
 // (Ported from mobile's src/lib/favorites/starred.ts — keep in sync.)
 
 import { createClient } from '@supabase/supabase-js';
@@ -22,6 +24,7 @@ import { getEvent as getUsauEvent } from '@/lib/usau/data';
 import { getEvent as getWfdfEvent } from '@/lib/wfdf/data';
 import { getEvent as getEufEvent } from '@/lib/euf/data';
 import type { StarredEventItem, StarredGameItem, StarredItems } from '@/lib/favorites/starred-feed';
+import { usauToday } from '@/lib/today';
 
 const EVENT_TABLES: Record<FavoriteEvent['league'], { table: string; slugCol: string; groupCol?: string }> = {
   // A starred USAU series member opens — and dedupes as — its merged event.
@@ -53,11 +56,20 @@ export async function resolveEventSlug(
 const dateTs = (iso: string | null): number =>
   iso ? new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).getTime() : Number.MAX_SAFE_INTEGER;
 
+/** First Friday strictly after `day` (yyyy-mm-dd) — a star on an event is kept
+ *  until then. An event ending on a Friday keeps its star a full week. */
+function starGraceEnd(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`);
+  const toFriday = (5 - d.getUTCDay() + 7) % 7 || 7;
+  d.setUTCDate(d.getUTCDate() + toFriday);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function getStarredItems(favorites: {
   games: FavoriteGame[];
   events: FavoriteEvent[];
 }): Promise<StarredItems> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = usauToday();
 
   const gameItems = await Promise.all(
     favorites.games.map(async (f): Promise<StarredGameItem | null> => {
@@ -87,7 +99,10 @@ export async function getStarredItems(favorites: {
   // series event resolve to the same group slug and must render once.
   const resolvedStars = await Promise.all(
     favorites.events
-      .filter((f) => (f.endDate ?? f.startDate ?? '') >= today)
+      .filter((f) => {
+        const last = f.endDate ?? f.startDate;
+        return !!last && today < starGraceEnd(last);
+      })
       .map(async (f) => {
         try {
           return { f, slug: await resolveEventSlug(f.league, f.eventId) };
@@ -107,10 +122,11 @@ export async function getStarredItems(favorites: {
 
   const eventItems = await Promise.all(
     uniqueStars.map(async ({ f, slug }): Promise<StarredEventItem | null> => {
+        const ended = (f.endDate ?? f.startDate ?? '') < today;
         try {
           if (f.league === 'usau') {
             const event = await getUsauEvent(slug);
-            return event ? { league: 'usau', event, sortTs: dateTs(event.startDate) } : null;
+            return event ? { league: 'usau', event, sortTs: dateTs(event.startDate), ended } : null;
           }
           if (f.league === 'wfdf') {
             const detail = await getWfdfEvent(slug);
@@ -121,10 +137,10 @@ export async function getStarredItems(favorites: {
               location: detail.location, startDate: detail.startDate, endDate: detail.endDate,
               isNationalTeams: detail.isNationalTeams, logoUrl: detail.logoUrl, teamCount: detail.teamCount,
             };
-            return { league: 'wfdf', event, sortTs: dateTs(event.startDate) };
+            return { league: 'wfdf', event, sortTs: dateTs(event.startDate), ended };
           }
           const event = await getEufEvent(slug);
-          return event ? { league: 'euf', event, sortTs: dateTs(event.startDate) } : null;
+          return event ? { league: 'euf', event, sortTs: dateTs(event.startDate), ended } : null;
         } catch {
           return null;
         }
@@ -132,8 +148,12 @@ export async function getStarredItems(favorites: {
   );
 
   const bySoonest = (a: { sortTs: number }, b: { sortTs: number }) => a.sortTs - b.sortTs;
+  const events = eventItems.filter((x): x is StarredEventItem => x !== null);
   return {
     games: gameItems.filter((x): x is StarredGameItem => x !== null).sort(bySoonest),
-    events: eventItems.filter((x): x is StarredEventItem => x !== null).sort(bySoonest),
+    events: [
+      ...events.filter((e) => !e.ended).sort(bySoonest),
+      ...events.filter((e) => e.ended).sort((a, b) => b.sortTs - a.sortTs),
+    ],
   };
 }

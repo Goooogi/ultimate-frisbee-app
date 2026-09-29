@@ -29,6 +29,11 @@ export interface KeyedSlide {
 
 export function HomeHero({ slides }: { slides: KeyedSlide[] }) {
   const { items } = useStarredItems();
+  // An ended star (still in its grace week) yields the hero to any starred
+  // event that's upcoming or live; alone, it keeps its slide.
+  const heroEvents = items.events.some((e) => !e.ended)
+    ? items.events.filter((e) => !e.ended)
+    : items.events;
 
   const starred: KeyedSlide[] = [
     ...items.games.map((item) => {
@@ -41,7 +46,7 @@ export function HomeHero({ slides }: { slides: KeyedSlide[] }) {
       }
       return { key, node: <HeroWulSlide key={key} game={item.game} eyebrow="★ Starred · WUL" /> };
     }),
-    ...items.events.map((item) => {
+    ...heroEvents.map((item) => {
       const key = starredEventKey(item);
       if (item.league === 'usau') {
         return { key, node: <HeroUsauSlide key={key} event={item.event} pill="★ Starred · USAU" /> };

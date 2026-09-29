@@ -86,6 +86,26 @@ function isStructuredTitleDecider(g: Game): boolean {
   return /\bfinals?\b|\bchampionship\b|\bchamps?\b|\b1st\b|\bfirst\b/.test(stage);
 }
 
+/** A placement group played round-robin rather than as a bracket. Either named
+ *  like a pool ("11th Place Pool", "Consolation Pool", "13th Place Round Robin",
+ *  "Pool 11-13") and shaped like one — 3+ teams and at least as many games as
+ *  teams, which excludes 2-team "Pool B Placement" games and a 4-team
+ *  semis-plus-final "Pool B 1st Place" — or, whatever its name, a COMPLETE
+ *  round robin: no bracket column, every pairing once, n(n-1)/2 games. That
+ *  second rule catches 2026 SC Men "9th-12th Place" / "13th-16th Place", which
+ *  USAU draws as pools (mobile's rule, adopted 2026-09-29). */
+function isPlacementPoolGroup(name: string, games: Game[]): boolean {
+  const t = bracketTail(name).toLowerCase();
+  if (/crossover/.test(t)) return false;
+  const ids = new Set(games.flatMap((g) => [g.teamAId, g.teamBId]).filter(Boolean));
+  if (!/bracket/.test(t) && /\bpools?\b|round[- ]?robin/.test(t)) {
+    return ids.size >= 3 && games.length >= ids.size;
+  }
+  if (ids.size < 3 || games.some((g) => g.bracketStageIndex != null || !g.teamAId || !g.teamBId)) return false;
+  const pairs = new Set(games.map((g) => [g.teamAId, g.teamBId].sort().join('|')));
+  return pairs.size === games.length && games.length === (ids.size * (ids.size - 1)) / 2;
+}
+
 /** Matchup rounds — pool-less Saturday phases like Cooler Classic 37 Men's
  *  "Sat Round 1/2/3": stored round='other' with the tab label as bracket_name.
  *  Not a pool, not a crossover, not placement — they get their own Rounds tab. */
@@ -406,12 +426,52 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     const o = bracketOrder(name);
     return o === 999 ? derivedPlacementOrder(gs) : o;
   };
-  const placementBrackets = Array.from(byBracket.entries())
+  const placementGroups = Array.from(byBracket.entries())
     .map(([name, gs]) => ({
       name,
       games: gs.slice().sort((a, b) => roundOrder(a.round) - roundOrder(b.round)),
     }))
     .sort((a, b) => placementOrder(a.name, a.games) - placementOrder(b.name, b.games));
+
+  // ── Placement pools — round-robin placement groups ("11th Place Pool",
+  // "13th Place Round Robin", second-phase "Pool 11-13") render in the Pools
+  // tab below the main pools, as standings + games (Hunter, 2026-09-29).
+  const teamIndex = new Map(teams.map((t) => [t.teamId, t] as const));
+  const placementPools: Array<{
+    name: string;
+    teams: Team[];
+    games: Game[];
+    records: Map<string, { wins: number; losses: number; diff: number }>;
+  }> = [];
+  const placementBrackets: typeof placementGroups = [];
+  for (const grp of placementGroups) {
+    if (!isPlacementPoolGroup(grp.name, grp.games)) {
+      placementBrackets.push(grp);
+      continue;
+    }
+    const records = new Map<string, { wins: number; losses: number; diff: number }>();
+    for (const g of grp.games) {
+      if (g.status !== 'final' || !g.teamAId || !g.teamBId) continue;
+      const winner = gameWinnerId(g);
+      if (!winner) continue;
+      const loser = winner === g.teamAId ? g.teamBId : g.teamAId;
+      const margin = isForfeit(g) ? 0 : Math.abs(g.scoreA! - g.scoreB!);
+      const rw = records.get(winner) ?? { wins: 0, losses: 0, diff: 0 };
+      records.set(winner, { wins: rw.wins + 1, losses: rw.losses, diff: rw.diff + margin });
+      const rl = records.get(loser) ?? { wins: 0, losses: 0, diff: 0 };
+      records.set(loser, { wins: rl.wins, losses: rl.losses + 1, diff: rl.diff - margin });
+    }
+    const ids = new Set(grp.games.flatMap((g) => [g.teamAId, g.teamBId]).filter((id): id is string => !!id));
+    placementPools.push({
+      name: grp.name,
+      teams: [...ids]
+        .map((id) => teamIndex.get(id))
+        .filter((t): t is Team => !!t)
+        .sort((a, b) => (a.seed ?? 99) - (b.seed ?? 99)),
+      games: grp.games.slice().sort((a, b) => (a.scheduledAt ?? '').localeCompare(b.scheduledAt ?? '')),
+      records,
+    });
+  }
 
   // ── Matchup rounds ("Sat Round 1/2/3") — pool-less Saturday phases. ─────
   const roundGroupsMap = new Map<string, Game[]>();
@@ -569,7 +629,7 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   );
   const hasBracket =
     games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
-  const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0;
+  const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0 || placementPools.length > 0;
 
   // ── Leaders (goals/assists) — this division's slice of event.playerStats,
   // scoped by team id since stats rows carry a team, not a division. Sorted
@@ -593,7 +653,7 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     hasBracket && (bracketHasTeams || !hasPools) ? 'bracket' : (visibleTabs[0]?.key ?? 'pools');
 
   return {
-    teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
+    teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets, placementPools,
     roundGroups, poolGames, poolRecords, champFinals, poolLeader, leaderRows,
     visibleTabs, defaultTab,
   };
@@ -700,8 +760,10 @@ function EventTabsView(props: {
         divisions={eventDivisions.map((d) => ({ value: d, label: d }))}
         active={activeGender}
         onChange={setDivision}
+        // Always passed, even for a one-tab division: without it the pager
+        // lays the division pills out compact and centered, so switching into
+        // a pools-only or bracket-only division resized the switcher.
         tabRowLeading={
-          visibleTabs.length > 1 ? (
             <div role="tablist" aria-label="Tournament views" className="flex items-center justify-between gap-5 lg:justify-start">
               {visibleTabs.map((t) => {
                 const on = t.key === activeTab;
@@ -726,7 +788,6 @@ function EventTabsView(props: {
                 );
               })}
             </div>
-          ) : undefined
         }
         renderDivision={(division) => (
           <DivisionContent
@@ -761,7 +822,7 @@ function DivisionContent({
   tabRequested: ViewTab | null;
 }) {
   const {
-    teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets,
+    teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets, placementPools,
     roundGroups, poolGames, poolRecords, champFinals, poolLeader, leaderRows,
     visibleTabs, defaultTab,
   } = useMemo(
@@ -871,6 +932,43 @@ function DivisionContent({
                 </section>
               ))}
             </div>
+          )}
+
+          {/* Placement pools — round-robin placement groups, pulled out of the
+              Bracket tab so their records and scores read like pool play. */}
+          {placementPools.length > 0 && (
+            <section aria-labelledby="placement-pools-heading" className="flex flex-col gap-3">
+              <h2
+                id="placement-pools-heading"
+                className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight pb-2 border-b border-hairline"
+              >
+                Placement Pools
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                {placementPools.map((pp) => (
+                  <PoolCard
+                    key={pp.name}
+                    pool={{ name: bracketLabel(pp.name), teams: pp.teams }}
+                    competitionLevel={level || event.competitionLevel}
+                    records={pp.records}
+                    games={pp.games}
+                    venueState={venueKeyFor(event, division)}
+                    season={event.season}
+                  />
+                ))}
+              </div>
+              <div className="hidden lg:flex flex-col gap-4 mt-5">
+                {placementPools.map((pp) => (
+                  <PoolScheduleTable
+                    key={pp.name}
+                    poolName={bracketLabel(pp.name)}
+                    games={pp.games}
+                    venueState={venueKeyFor(event, division)}
+                    season={event.season}
+                  />
+                ))}
+              </div>
+            </section>
           )}
         </section>
       )}

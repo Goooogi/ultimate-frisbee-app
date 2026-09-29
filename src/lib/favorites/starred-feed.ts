@@ -19,10 +19,13 @@ export type StarredGameItem =
   | { league: 'pul'; game: PulGame; sortTs: number }
   | { league: 'wul'; game: WulGame; sortTs: number };
 
+/** `ended`: the event is over but still inside its star grace week (see
+ *  starred.ts) — For You shows it as past, the hero only when nothing starred
+ *  is still ahead. */
 export type StarredEventItem =
-  | { league: 'usau'; event: UsauEventSummary; sortTs: number }
-  | { league: 'wfdf'; event: WfdfEventCard; sortTs: number }
-  | { league: 'euf'; event: EufEventCard; sortTs: number };
+  | { league: 'usau'; event: UsauEventSummary; sortTs: number; ended: boolean }
+  | { league: 'wfdf'; event: WfdfEventCard; sortTs: number; ended: boolean }
+  | { league: 'euf'; event: EufEventCard; sortTs: number; ended: boolean };
 
 export interface StarredItems {
   games: StarredGameItem[];
@@ -97,7 +100,7 @@ export function starredToFeed(items: StarredItems): { games: FeedGame[]; tournam
     slug: item.event.slug,
     startDate: item.event.startDate,
     placement: null,
-    status: 'upcoming',
+    status: item.ended ? 'past' : 'upcoming',
     favoriteTeamName: '',
     sortTs: item.sortTs,
   }));
