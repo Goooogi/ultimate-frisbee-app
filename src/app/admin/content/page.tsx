@@ -14,6 +14,7 @@ import { getAllFeedback } from '@/lib/feedback/server';
 import { getAllUsers } from '@/lib/admin/roles';
 import { getJerseyReports } from '@/lib/jerseys/reports-server';
 import { getPlayerContentReports } from '@/lib/player-content/reports-server';
+import { getFlaggedPairs } from '@/lib/admin/utcg-flags';
 import { PageShell } from '@/components/page-shell';
 import { AdminPortal, type AdminTab } from '@/components/admin/admin-tabs';
 
@@ -24,10 +25,12 @@ export const metadata = {
   robots: { index: false, follow: false },
 };
 
+const FLAG_WINDOWS = [7, 30, 90];
+
 export default async function AdminPage({
   searchParams,
 }: {
-  searchParams: { tab?: string };
+  searchParams: { tab?: string; days?: string };
 }) {
   const supabase = createClient();
   const { data: userData } = await supabase.auth.getUser();
@@ -39,13 +42,16 @@ export default async function AdminPage({
     .maybeSingle();
   if (profile?.role !== 'admin') notFound();
 
-  const [pending, recent, feedback, users, jerseyReports, contentReports] = await Promise.all([
+  const flaggedPairsDays = FLAG_WINDOWS.includes(Number(searchParams.days)) ? Number(searchParams.days) : 30;
+
+  const [pending, recent, feedback, users, jerseyReports, contentReports, flaggedPairs] = await Promise.all([
     getPendingContent(),
     getRecentReviewedContent(25),
     getAllFeedback(200),
     getAllUsers(),
     getJerseyReports(100),
     getPlayerContentReports(100),
+    getFlaggedPairs(flaggedPairsDays),
   ]);
   const openJerseyReports = jerseyReports.filter((r) => r.status === 'new').length;
   const openContentReports = contentReports.filter((r) => r.status === 'new').length;
@@ -59,7 +65,9 @@ export default async function AdminPage({
           ? 'roles'
           : searchParams.tab === 'reports'
             ? 'reports'
-            : 'content';
+            : searchParams.tab === 'utcg-flags'
+              ? 'utcg-flags'
+              : 'content';
 
   return (
     <PageShell
@@ -84,6 +92,8 @@ export default async function AdminPage({
           openContentReports={openContentReports}
           users={users}
           currentUserId={userData.user.id}
+          flaggedPairs={flaggedPairs}
+          flaggedPairsDays={flaggedPairsDays}
           initialTab={initialTab}
         />
       </Suspense>

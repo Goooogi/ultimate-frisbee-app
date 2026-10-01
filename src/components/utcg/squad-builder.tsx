@@ -20,8 +20,9 @@
 
 import { useMemo, useState, useCallback, useEffect, useRef } from 'react';
 import type { OwnedCard } from '@/lib/utcg/server';
+import type { UtcgCard } from '@/lib/utcg/data';
 import type { FormationKey, SlotType, Formation } from '@/lib/utcg/formations';
-import { FORMATIONS } from '@/lib/utcg/formations';
+import { FORMATIONS, scoreSquad, type ScoredCard } from '@/lib/utcg/formations';
 import { fitsSlot } from '@/lib/utcg/position';
 import { teamChemistry, type ChemCard } from '@/lib/utcg/chemistry';
 import { CardTile } from '@/components/utcg/card-tile';
@@ -163,6 +164,14 @@ interface SquadBuilderProps {
   /** CTA copy override, forwarded to the footer (PvP shows its stake). */
   ctaLabel?: string;
   onGoToPacks: () => void;
+  /** Weekly Brawl legality gate (brawlSquadLegal mirror) — when set, the
+   *  footer CTA stays disabled until the full squad also passes this check,
+   *  with `label` shown as the reason. Boss mode has no squad-shape rule
+   *  (any 7 cards are legal), so it omits this prop. */
+  rule?: { legal: (cards: UtcgCard[]) => boolean; label: string };
+  /** Brawl target / boss strength to beat — shown next to the live rating so
+   *  the player can see how close they are before submitting. */
+  targetStrength?: number;
 }
 
 function cardKeyOf(o: OwnedCard): string {
@@ -178,6 +187,8 @@ export function SquadBuilder({
   onPlayMatch,
   ctaLabel,
   onGoToPacks,
+  rule,
+  targetStrength,
 }: SquadBuilderProps) {
   const formation = FORMATIONS[formationKey];
   const isWide = useIsWide();
@@ -241,6 +252,44 @@ export function SquadBuilder({
     return Math.round(meanScore + chemResult.total * 0.35);
   }, [meanScore, chemResult.total]);
 
+  // Against-a-target estimate (Brawl/Boss): reuse the SAME scoreSquad() the
+  // server evaluator mirrors, not liveRating's looser `+chem*0.35` — the two
+  // formulas diverge (liveRating can run +7+, scoreSquad caps the chem bonus
+  // at +3), and a target comparison needs to track what the server will
+  // actually check. Only computed when a target is in play.
+  const targetEstimate = useMemo(() => {
+    if (targetStrength === undefined) return null;
+    const placedCards: ScoredCard[] = [];
+    for (let i = 0; i < assignment.length; i++) {
+      const key = assignment[i];
+      const o = key ? ownedByKey.get(key) : null;
+      if (!o) continue;
+      placedCards.push({
+        teamSlug: o.card.teamSlug,
+        division: o.card.division,
+        position: o.card.position,
+        slot: formation.slots[i],
+        playerScore: o.card.playerScore,
+        boost: o.card.boost,
+      });
+    }
+    if (placedCards.length === 0) return null;
+    return scoreSquad(placedCards).effectiveStrength;
+  }, [assignment, ownedByKey, formation, targetStrength]);
+
+  // Brawl's squad-shape rule (e.g. "all ≤85 OVR", "one team") — only checked
+  // once the squad is full, mirroring brawlSquadLegal's own `length !== 7`
+  // short-circuit. Boss mode has no such rule (rule is undefined).
+  const ruleLegal = useMemo(() => {
+    if (!rule) return true;
+    const placedCards = assignment
+      .map((key) => (key ? ownedByKey.get(key) : null))
+      .filter((o): o is OwnedCard => !!o)
+      .map((o) => o.card);
+    if (placedCards.length !== formation.slots.length) return true; // don't show the failure mid-build
+    return rule.legal(placedCards);
+  }, [rule, assignment, ownedByKey, formation]);
+
   const handleSlotTap = useCallback((slotIndex: number) => setPickerSlot(slotIndex), []);
 
   const handleClearSlot = useCallback(
@@ -265,7 +314,10 @@ export function SquadBuilder({
     [pickerSlot, assignment, onAssignmentChange],
   );
 
-  const allFilled = filledCount === formation.slots.length;
+  const allSlotsFilled = filledCount === formation.slots.length;
+  // With a rule gate (Brawl), the squad must ALSO pass it before the CTA
+  // activates; Boss (no `rule`) only needs every slot filled.
+  const allFilled = allSlotsFilled && ruleLegal;
 
   const handlerIndices = formation.slots.map((s, i) => (s === 'handler' ? i : -1)).filter((i) => i >= 0);
   const cutterIndices = formation.slots.map((s, i) => (s === 'cutter' ? i : -1)).filter((i) => i >= 0);
@@ -310,6 +362,21 @@ export function SquadBuilder({
           the field where it used to get clipped behind the floating tab bar. */}
       <ChemistryMeter total={chemResult.total} perCard={chemResult.perCard} rating={liveRating} />
 
+      {targetStrength !== undefined && (
+        <p className="text-[11px] text-center font-tight -mt-3">
+          <span className={targetEstimate !== null && targetEstimate > targetStrength ? 'text-accent font-bold' : 'text-faint'}>
+            Est. strength {targetEstimate !== null ? targetEstimate.toFixed(1) : '—'} vs target {targetStrength.toFixed(1)}
+          </span>
+          <span className="text-faint"> · server strength decides it</span>
+        </p>
+      )}
+
+      {allSlotsFilled && !ruleLegal && rule && (
+        <p className="text-[11px] text-live font-tight -mt-2 text-center" role="alert">
+          Squad doesn&rsquo;t meet this week&rsquo;s rule: {rule.label}
+        </p>
+      )}
+
       <Field
         formation={formation}
         layout={layout}
@@ -345,7 +412,13 @@ export function SquadBuilder({
       {/* Spacer so scrolled content never sits under the sticky Play footer. */}
       <div className="h-20" aria-hidden="true" />
 
-      <PlayMatchFooter allFilled={allFilled} remaining={formation.slots.length - filledCount} onPlayMatch={onPlayMatch} ctaLabel={ctaLabel} />
+      <PlayMatchFooter
+        allFilled={allFilled}
+        remaining={formation.slots.length - filledCount}
+        ruleBlocked={allSlotsFilled && !ruleLegal}
+        onPlayMatch={onPlayMatch}
+        ctaLabel={ctaLabel}
+      />
 
       {pickerSlot !== null && (
         <SlotPicker
@@ -405,12 +478,12 @@ function Field({
   return (
     <div ref={wrapRef} className="w-full flex justify-center">
       <div
-        className="relative flex-shrink-0"
-        style={{ width: fieldW * scale, height: fieldH * scale }}
+        className="relative flex-shrink-0 w-[var(--fw)] h-[var(--fh)]"
+        style={{ '--fw': `${fieldW * scale}px`, '--fh': `${fieldH * scale}px` } as React.CSSProperties}
       >
         <div
-          className="absolute top-0 left-0 origin-top-left"
-          style={{ width: fieldW, height: fieldH, transform: `scale(${scale})` }}
+          className="absolute top-0 left-0 origin-top-left w-[var(--fw)] h-[var(--fh)] [transform:var(--sc)]"
+          style={{ '--fw': `${fieldW}px`, '--fh': `${fieldH}px`, '--sc': `scale(${scale})` } as React.CSSProperties}
         >
           {/* Group labels — anchored just above-left of each group's own slots
               (its min x / min y), so they sit over the right group whether the
@@ -424,8 +497,8 @@ function Field({
             return (
               <span
                 key={type}
-                className="absolute text-[10px] font-bold tracking-[0.22em] uppercase text-faint"
-                style={{ top: minY - 22, left: minX }}
+                className="absolute text-[10px] font-bold tracking-[0.22em] uppercase text-faint top-[var(--t)] left-[var(--l)]"
+                style={{ '--t': `${minY - 22}px`, '--l': `${minX}px` } as React.CSSProperties}
               >
                 {type === 'handler' ? 'Handlers' : 'Cutters'}
               </span>
@@ -497,8 +570,8 @@ function Field({
             return (
               <div
                 key={i}
-                className="absolute z-[2]"
-                style={{ left: pos.x, top: pos.y, width: CARD_W, height: CARD_H }}
+                className="absolute z-[2] w-[var(--cw)] h-[var(--ch)] left-[var(--l)] top-[var(--t)]"
+                style={{ '--cw': `${CARD_W}px`, '--ch': `${CARD_H}px`, '--l': `${pos.x}px`, '--t': `${pos.y}px` } as React.CSSProperties}
               >
                 {owned ? (
                   <div className="relative w-full h-full" key={key + (lastPlaced === i ? '-p' : '')}>
@@ -549,11 +622,15 @@ function Field({
 function PlayMatchFooter({
   allFilled,
   remaining,
+  ruleBlocked = false,
   onPlayMatch,
   ctaLabel,
 }: {
   allFilled: boolean;
   remaining: number;
+  /** Every slot is filled but the Brawl rule still fails — distinct from
+   *  "slots remaining" so the CTA copy explains why it's still disabled. */
+  ruleBlocked?: boolean;
   onPlayMatch: () => void;
   /** Overrides the CTA copy. PvP passes its stake here so the button never
    *  spends coins behind a generic "Play Match" label. */
@@ -578,7 +655,11 @@ function PlayMatchFooter({
             : 'bg-surface text-faint cursor-not-allowed',
         ].join(' ')}
       >
-        {allFilled ? (ctaLabel ?? 'Play Match') : `${remaining} slot${remaining === 1 ? '' : 's'} left`}
+        {allFilled
+          ? (ctaLabel ?? 'Play Match')
+          : ruleBlocked
+            ? "Doesn't meet this week's rule"
+            : `${remaining} slot${remaining === 1 ? '' : 's'} left`}
       </button>
     </div>
   );

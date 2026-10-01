@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { OwnedCard } from '@/lib/utcg/server';
 import { CardTile } from '@/components/utcg/card-tile';
 import { CoinGlyph } from '@/components/utcg/coin-glyph';
-import { makeOffer, type Listing } from '@/lib/utcg/market';
+import { makeOffer, priceCeiling, tradeFee, OFFER_MAX_QTY, type Listing } from '@/lib/utcg/market';
 
 const MAX_CARDS = 5;
 
@@ -25,7 +25,8 @@ interface MakeOfferModalProps {
 }
 
 export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: MakeOfferModalProps) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // card key -> qty offered (1..min(OFFER_MAX_QTY, copies owned)).
+  const [selected, setSelected] = useState<Map<string, number>>(new Map());
   const [coinInput, setCoinInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,22 +39,48 @@ export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: Ma
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  const eligible = useMemo(() => owned.filter((o) => o.copies > 0), [owned]);
+  // Only copies beyond untradeable (e.g. free-pack grants) can be offered.
+  const eligible = useMemo(() => owned.filter((o) => o.copies - o.untradeable > 0), [owned]);
+  const byKey = useMemo(() => new Map(eligible.map((o) => [ownedKey(o), o])), [eligible]);
 
+  const coinCeiling = priceCeiling(listing.card);
   const offeredCoins = coinInput.trim() === '' ? 0 : Math.max(0, Math.floor(Number(coinInput)) || 0);
-  const coinsExceedBalance = offeredCoins > coins;
-  const atMaxCards = selected.size >= MAX_CARDS;
-  const canSubmit = (selected.size > 0 || offeredCoins > 0) && !coinsExceedBalance;
+  const coinsOverCeiling = offeredCoins > coinCeiling;
 
-  function toggleCard(key: string) {
+  const selectedCards = useMemo(
+    () =>
+      Array.from(selected.entries())
+        .map(([key, qty]) => {
+          const o = byKey.get(key);
+          return o ? { card: o.card, qty } : null;
+        })
+        .filter((c): c is { card: OwnedCard['card']; qty: number } => c !== null),
+    [selected, byKey],
+  );
+  // Charged now, refunded if the offer is declined or withdrawn.
+  const fee = tradeFee(selectedCards);
+  const totalCost = offeredCoins + fee;
+  const coinsExceedBalance = totalCost > coins;
+  const atMaxCards = selected.size >= MAX_CARDS;
+  const canSubmit = (selected.size > 0 || offeredCoins > 0) && !coinsExceedBalance && !coinsOverCeiling;
+
+  function toggleCard(key: string, maxQty: number) {
     setSelected((prev) => {
-      const next = new Set(prev);
+      const next = new Map(prev);
       if (next.has(key)) {
         next.delete(key);
       } else {
         if (next.size >= MAX_CARDS) return prev;
-        next.add(key);
+        next.set(key, Math.min(1, maxQty));
       }
+      return next;
+    });
+  }
+
+  function setQty(key: string, qty: number, maxQty: number) {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      next.set(key, Math.max(1, Math.min(qty, maxQty)));
       return next;
     });
   }
@@ -63,12 +90,14 @@ export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: Ma
     setSubmitting(true);
     setError(null);
     try {
-      const cards = eligible
-        .filter((o) => selected.has(ownedKey(o)))
-        .map((o) => ({
-          ref: { playerId: o.card.playerId, teamSlug: o.card.teamSlug, year: o.card.year },
-          qty: 1,
-        }));
+      // Built from selectedCards (already filtered to keys still present in
+      // `owned`) rather than re-reading byKey here — owned can refresh out
+      // from under an open modal via router.refresh(), and a stale key would
+      // otherwise throw mid-submit instead of failing cleanly.
+      const cards = selectedCards.map(({ card, qty }) => ({
+        ref: { playerId: card.playerId, teamSlug: card.teamSlug, year: card.year },
+        qty,
+      }));
       await makeOffer(listing.id, cards, offeredCoins);
       onOffered();
     } catch (err) {
@@ -129,17 +158,27 @@ export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: Ma
               <div className="grid grid-cols-3 gap-2.5">
                 {eligible.map((o) => {
                   const key = ownedKey(o);
-                  const isSelected = selected.has(key);
+                  const qty = selected.get(key);
+                  const isSelected = qty !== undefined;
+                  const maxQty = Math.min(OFFER_MAX_QTY, o.copies - o.untradeable);
                   return (
-                    <CardTile
-                      key={key}
-                      card={o.card}
-                      copies={o.copies}
-                      compact
-                      selected={isSelected}
-                      disabled={!isSelected && atMaxCards}
-                      onClick={() => toggleCard(key)}
-                    />
+                    <div key={key} className="flex flex-col gap-1">
+                      <CardTile
+                        card={o.card}
+                        copies={o.copies}
+                        compact
+                        selected={isSelected}
+                        disabled={!isSelected && atMaxCards}
+                        onClick={() => toggleCard(key, maxQty)}
+                      />
+                      {isSelected && maxQty > 1 && (
+                        <QtyStepper
+                          qty={qty}
+                          max={maxQty}
+                          onChange={(next) => setQty(key, next, maxQty)}
+                        />
+                      )}
+                    </div>
                   );
                 })}
               </div>
@@ -159,7 +198,7 @@ export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: Ma
                 type="number"
                 inputMode="numeric"
                 min={0}
-                max={coins}
+                max={Math.min(coins, coinCeiling)}
                 step={1}
                 value={coinInput}
                 onChange={(e) => setCoinInput(e.target.value)}
@@ -169,17 +208,22 @@ export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: Ma
               <CoinGlyph size={15} className="text-accent absolute right-4 top-1/2 -translate-y-1/2" />
             </div>
             <p className="text-[11px] text-faint font-tight">
-              You have {coins.toLocaleString()} coins.
+              You have {coins.toLocaleString()} coins · max offer {coinCeiling.toLocaleString()}.
             </p>
-            {coinsExceedBalance && (
+            {coinsOverCeiling && (
               <p className="text-[11px] text-live font-tight" role="alert">
-                You only have {coins.toLocaleString()} coins.
+                Coin offer can&rsquo;t exceed {coinCeiling.toLocaleString()}.
+              </p>
+            )}
+            {coinsExceedBalance && !coinsOverCeiling && (
+              <p className="text-[11px] text-live font-tight" role="alert">
+                You only have {coins.toLocaleString()} coins ({totalCost.toLocaleString()} needed with the trade fee).
               </p>
             )}
           </div>
 
           {/* Live summary */}
-          <div className="rounded-card bg-ink/5 p-4">
+          <div className="rounded-card bg-ink/5 p-4 flex flex-col gap-1.5">
             <p className="text-[12px] text-muted font-tight">
               Offering:{' '}
               <span className="text-ink font-bold">
@@ -188,9 +232,16 @@ export function MakeOfferModal({ listing, owned, coins, onClose, onOffered }: Ma
               </span>{' '}
               for <span className="text-ink font-bold">{listing.card.name}</span>
             </p>
+            {fee > 0 && (
+              <p className="text-[11px] text-faint font-tight">
+                Trade fee <span className="text-ink font-bold">{fee.toLocaleString()}</span> — charged now,
+                refunded if declined or withdrawn. Total cost{' '}
+                <span className="text-ink font-bold">{totalCost.toLocaleString()}</span> coins.
+              </p>
+            )}
           </div>
 
-          {!canSubmit && !coinsExceedBalance && (
+          {!canSubmit && !coinsExceedBalance && !coinsOverCeiling && (
             <p className="text-[11px] text-faint font-tight">
               Select at least one card or add coins to make an offer.
             </p>
@@ -237,5 +288,33 @@ function Spinner() {
       <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="2.5" strokeOpacity="0.3" />
       <path d="M10 2a8 8 0 0 1 8 8" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
     </svg>
+  );
+}
+
+/** Minus/qty/plus row under a selected card — lets the offerer bump how many
+ *  copies of that card go into the offer, capped at min(OFFER_MAX_QTY, owned). */
+function QtyStepper({ qty, max, onChange }: { qty: number; max: number; onChange: (next: number) => void }) {
+  return (
+    <div className="flex items-center justify-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => onChange(qty - 1)}
+        disabled={qty <= 1}
+        aria-label="Decrease quantity"
+        className="w-6 h-6 rounded-full bg-ink/8 text-ink text-[13px] font-bold flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed hover:bg-ink/15 motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        −
+      </button>
+      <span className="text-[11px] font-bold text-ink tabular min-w-[18px] text-center">{qty}</span>
+      <button
+        type="button"
+        onClick={() => onChange(qty + 1)}
+        disabled={qty >= max}
+        aria-label="Increase quantity"
+        className="w-6 h-6 rounded-full bg-ink/8 text-ink text-[13px] font-bold flex items-center justify-center cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed hover:bg-ink/15 motion-safe:transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        +
+      </button>
+    </div>
   );
 }

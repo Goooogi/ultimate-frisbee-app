@@ -5672,7 +5672,7 @@ export type Database = {
         | "forfeit"
         | "cancelled"
       usau_gender_division: "Men" | "Women" | "Mixed" | "Open"
-      user_role: "user" | "admin" | "beta"
+      user_role: "user" | "admin"
       wfdf_event_kind:
         | "club"
         | "national"
@@ -5887,7 +5887,7 @@ export const Constants = {
         "cancelled",
       ],
       usau_gender_division: ["Men", "Women", "Mixed", "Open"],
-      user_role: ["user", "admin", "beta"],
+      user_role: ["user", "admin"],
       wfdf_event_kind: [
         "club",
         "national",

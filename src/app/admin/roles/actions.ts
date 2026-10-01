@@ -10,7 +10,7 @@ import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import type { UserRole } from '@/lib/auth/types';
 
-const ALLOWED: UserRole[] = ['user', 'beta', 'admin'];
+const ALLOWED: UserRole[] = ['user', 'admin'];
 
 async function assertAdmin() {
   const supabase = createClient();

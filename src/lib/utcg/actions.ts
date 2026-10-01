@@ -11,6 +11,8 @@ import { createClient } from '@/lib/supabase/client';
 import type { CardTier } from './packs';
 import type { PackKind } from './packs';
 import type { FormationKey } from './formations';
+import type { WeeklyPlayResult } from './brawl';
+import type { RivalsOutcome } from './rivals';
 
 // The generated Database types don't include the utcg_* RPCs (same as the
 // twelve_oh_* tables in data.ts). Wrap the browser client in a minimal untyped
@@ -31,6 +33,8 @@ export interface PackPull {
   playerScore: number;
   tierRank: number;
   isNew: boolean;
+  /** Pulled from a reward pack: playable, never tradeable. */
+  untradeable: boolean;
 }
 
 interface RawPull {
@@ -42,6 +46,7 @@ interface RawPull {
   player_score: number;
   tier_rank: number;
   is_new: boolean;
+  untradeable?: boolean;
 }
 
 function mapPull(r: RawPull): PackPull {
@@ -54,6 +59,7 @@ function mapPull(r: RawPull): PackPull {
     playerScore: Number(r.player_score),
     tierRank: r.tier_rank,
     isNew: r.is_new,
+    untradeable: Boolean(r.untradeable),
   };
 }
 
@@ -120,6 +126,9 @@ export interface MatchOutcome extends WalletState {
   /** True when the daily match-reward cap was hit — reward is 0 but the match
    *  still counted (record/best_wins update). Server-enforced. */
   capped: boolean;
+  /** Squad Battles played today (UTC) including this one — pay decays with it
+   *  (progression.ts matchPayMultiplier). */
+  matchesToday: number;
   chem: number;
   strength: number;
 }
@@ -161,9 +170,11 @@ export async function getPullHeadshots(playerIds: string[]): Promise<Map<string,
  * Note: the client's own scoreSquad() is only for the instant preview; this
  * result is the source of truth for coins and should be reconciled into the UI.
  */
-/** Coins staked per PvP entry. Winner takes both stakes. Mirrors the `stake`
- *  constant inside utcg_pvp_enter — keep the two in sync. */
+/** Coins staked per PvP entry. Winner takes both stakes minus the house rake
+ *  (PVP_RAKE_PCT of the pot, destroyed; draws refund with no rake). Mirrors
+ *  `stake` / `rake_pct` inside utcg_pvp_enter — keep them in sync. */
 export const PVP_STAKE = 100;
+export const PVP_RAKE_PCT = 0.1;
 
 export interface PvpQueued extends WalletState {
   status: 'queued';
@@ -185,7 +196,9 @@ export interface PvpResolved extends WalletState {
   opponentChem: number;
   opponentStrength: number;
   pot: number;
-  /** Coins credited back to us: full pot on a win, our stake on a draw, 0 loss. */
+  /** Coins destroyed by the house on a decided match (0 on a draw). */
+  rake: number;
+  /** Coins credited back to us: pot minus rake on a win, our stake on a draw, 0 loss. */
   payout: number;
   stake: number;
 }
@@ -234,6 +247,7 @@ export async function enterPvp(
     opponentChem: Number(row.opponent_chem),
     opponentStrength: Number(row.opponent_strength),
     pot: Number(row.pot),
+    rake: Number(row.rake ?? 0),
     payout: Number(row.payout),
     stake: Number(row.stake),
   };
@@ -273,7 +287,138 @@ export async function recordMatch(
     losses: Number(row.losses),
     reward: Number(row.reward),
     capped: Boolean(row.capped),
+    matchesToday: Number(row.matches_today),
     chem: Number(row.chem),
     strength: Number(row.strength),
   };
+}
+
+/** Open an unopened reward pack (season/streak/Brawl/SBC rewards). Every card
+ *  it grants is untradeable. */
+export async function openRewardPack(id: string): Promise<PackPull[]> {
+  const { data, error } = await rpcClient().rpc('utcg_open_reward_pack', { p_id: id });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as RawPull[]).map(mapPull);
+}
+
+/** Claim a completed daily/weekly objective's coins + season XP. */
+export async function claimObjective(
+  key: string,
+  periodKey: string,
+): Promise<{ coins: number; rewardCoins: number; rewardXp: number }> {
+  const { data, error } = await rpcClient().rpc('utcg_claim_objective', { p_key: key, p_period_key: periodKey });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  return { coins: Number(row.coins), rewardCoins: Number(row.reward_coins), rewardXp: Number(row.reward_xp) };
+}
+
+/** Play this week's Brawl (rule-checked server-side) or Featured Boss. */
+export async function playWeekly(
+  mode: 'brawl' | 'boss',
+  formation: FormationKey,
+  cards: SquadCardRef[],
+): Promise<WeeklyPlayResult> {
+  const payload = cards.map((c) => ({ player_id: c.playerId, team_slug: c.teamSlug, year: c.year }));
+  const { data, error } = await rpcClient().rpc(mode === 'brawl' ? 'utcg_brawl_play' : 'utcg_boss_play', {
+    p_formation: formation,
+    p_cards: payload,
+  });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  return {
+    won: Boolean(row.won),
+    strength: Number(row.strength),
+    chem: Number(row.chem),
+    bar: Number(mode === 'brawl' ? row.target : row.boss_strength),
+    rewardPackId: row.reward_pack_id ? String(row.reward_pack_id) : null,
+  };
+}
+
+/** Hand in cards for an SBC (one entry per copy). Pack rewards come back as a
+ *  reward pack to open; the TOTW Upgrade SBC grants a card directly. */
+export async function submitSbc(
+  key: string,
+  cards: SquadCardRef[],
+): Promise<
+  | { kind: 'pack'; rewardPackId: string; rewardPack: PackKind }
+  | { kind: 'card'; card: SquadCardRef }
+> {
+  const payload = cards.map((c) => ({ player_id: c.playerId, team_slug: c.teamSlug, year: c.year }));
+  const { data, error } = await rpcClient().rpc('utcg_sbc_submit', { p_key: key, p_cards: payload });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  if (row.reward_pack === 'totw') {
+    const c = row.card as Record<string, unknown>;
+    return { kind: 'card', card: { playerId: String(c.player_id), teamSlug: String(c.team_slug), year: Number(c.year) } };
+  }
+  return { kind: 'pack', rewardPackId: String(row.reward_pack_id), rewardPack: row.reward_pack as PackKind };
+}
+
+/** Claim a collection milestone: 'distinct:<n>' or 'team_set:<team_slug>:<year>'. */
+export async function claimMilestone(milestone: string): Promise<{ rewardPackId: string; rewardPack: PackKind }> {
+  const { data, error } = await rpcClient().rpc('utcg_claim_milestone', { p_milestone: milestone });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  return { rewardPackId: String(row.reward_pack_id), rewardPack: row.reward_pack as PackKind };
+}
+
+/** Spend pack points on a specific card (granted untradeable). */
+export async function craftCard(playerId: string, teamSlug: string, year: number): Promise<{ packPoints: number }> {
+  const { data, error } = await rpcClient().rpc('utcg_craft_card', {
+    p_player_id: playerId, p_team_slug: teamSlug, p_year: year,
+  });
+  if (error) throw new Error(error.message);
+  return { packPoints: Number((data as Record<string, unknown>).pack_points) };
+}
+
+/** Enter Rivals (unstaked): resolve against a parked squad, or park ours. */
+export async function enterRivals(formation: FormationKey, cards: SquadCardRef[]): Promise<RivalsOutcome> {
+  const payload = cards.map((c) => ({ player_id: c.playerId, team_slug: c.teamSlug, year: c.year }));
+  const { data, error } = await rpcClient().rpc('utcg_rivals_enter', { p_formation: formation, p_cards: payload });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  if (row.status === 'queued') {
+    return { status: 'queued', chem: Number(row.chem), strength: Number(row.strength) };
+  }
+  return {
+    status: 'resolved',
+    matchId: String(row.match_id),
+    outcome: row.outcome as 'challenger' | 'defender' | 'draw',
+    decidedBy: row.decided_by as 'strength' | 'chem' | 'mean' | 'draw',
+    chem: Number(row.chem),
+    strength: Number(row.strength),
+    opponentChem: Number(row.opponent_chem),
+    opponentStrength: Number(row.opponent_strength),
+    weekPoints: Number(row.week_points),
+  };
+}
+
+/** Withdraw our parked Rivals squad. */
+export async function cancelRivals(): Promise<void> {
+  const { error } = await rpcClient().rpc('utcg_rivals_cancel');
+  if (error) throw new Error(error.message);
+}
+
+/** Claim every Rivals tier reached but unclaimed for a week (this or last). */
+export async function claimRivals(weekKey: string): Promise<{ rewardPackIds: string[]; claimedTier: number }> {
+  const { data, error } = await rpcClient().rpc('utcg_rivals_claim', { p_week_key: weekKey });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  return { rewardPackIds: ((row.reward_pack_ids ?? []) as unknown[]).map(String), claimedTier: Number(row.claimed_tier) };
+}
+
+/** Claim a Flash challenge (e.g. own 3 of this week's TOTW). */
+export async function claimFlash(key: string): Promise<{ rewardPackId: string; rewardPack: PackKind }> {
+  const { data, error } = await rpcClient().rpc('utcg_claim_flash', { p_key: key });
+  if (error) throw new Error(error.message);
+  const row = data as Record<string, unknown>;
+  return { rewardPackId: String(row.reward_pack_id), rewardPack: row.reward_pack as PackKind };
+}
+
+/** Commit a card to an Evolution (locks one copy as untradeable). */
+export async function startEvolution(evoKey: string, playerId: string, teamSlug: string, year: number): Promise<void> {
+  const { error } = await rpcClient().rpc('utcg_evolution_start', {
+    p_key: evoKey, p_player_id: playerId, p_team_slug: teamSlug, p_year: year,
+  });
+  if (error) throw new Error(error.message);
 }

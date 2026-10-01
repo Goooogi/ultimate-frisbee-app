@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { SquadScoreResult } from '@/lib/utcg/formations';
 import { MAX_TEAM_CHEM } from '@/lib/utcg/chemistry';
+import { matchPayMultiplier } from '@/lib/utcg/progression';
 
 interface MatchResultProps {
   result: SquadScoreResult;
@@ -24,6 +25,11 @@ interface MatchResultProps {
   coinsAwarded: number | null;
   /** Server hit the daily match-reward cap — reward was 0 by design. */
   rewardCapped?: boolean;
+  /** Squad Battles played today (UTC) including this one, from the server's
+   *  recordMatch() response — drives the pay-decay context line below the
+   *  coin award (matchPayMultiplier decays by match-of-day). null while the
+   *  request is still in flight. */
+  matchesToday?: number | null;
   matchError: string | null;
   onBuildAgain: () => void;
   onBackToPlay: () => void;
@@ -61,8 +67,7 @@ function SimBeat({ reducedMotion }: { reducedMotion: boolean }) {
       {!reducedMotion && (
         <div className="relative w-[120px] h-[120px] flex items-center justify-center motion-safe:animate-orb-spin">
           <span
-            className="w-11 h-11 rounded-full -translate-y-9"
-            style={{ border: '4px solid #FF3D00', borderTopColor: 'transparent', boxShadow: '0 0 20px rgba(255,61,0,0.45), inset 0 0 10px rgba(255,61,0,0.3)' }}
+            className="w-11 h-11 rounded-full -translate-y-9 border-[4px] border-[#FF3D00] border-t-transparent shadow-[0_0_20px_rgba(255,61,0,0.45),inset_0_0_10px_rgba(255,61,0,0.3)]"
           />
         </div>
       )}
@@ -90,8 +95,8 @@ function Bar({ label, value, max, accent }: { label: string; value: number; max:
       </div>
       <div className="h-1.5 rounded-full bg-ink/10 overflow-hidden">
         <div
-          className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
-          style={{ width: `${pct}%`, background: accent ? '#FF3D00' : 'linear-gradient(90deg,#7d7a70,#cfcfc6)' }}
+          className={`h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out w-[var(--pct)] ${accent ? 'bg-[#FF3D00]' : 'bg-[linear-gradient(90deg,#7d7a70,#cfcfc6)]'}`}
+          style={{ '--pct': `${pct}%` } as React.CSSProperties}
         />
       </div>
     </div>
@@ -116,8 +121,8 @@ function Confetti({ gold }: { gold: boolean }) {
       {parts.map((p, i) => (
         <span
           key={i}
-          className="absolute rounded-[1px] motion-safe:animate-conf-fly"
-          style={{ '--dx': `${p.dx}px`, '--dy': `${p.dy}px`, width: p.s, height: p.s * 1.7, background: p.c, transform: `rotate(${p.rot}deg)`, animationDelay: `${p.d}s` } as React.CSSProperties}
+          className="absolute rounded-[1px] motion-safe:animate-conf-fly w-[var(--size)] h-[var(--h)] bg-[color:var(--bg)] [transform:rotate(var(--rot))] [animation-delay:var(--delay)]"
+          style={{ '--dx': `${p.dx}px`, '--dy': `${p.dy}px`, '--size': `${p.s}px`, '--h': `${p.s * 1.7}px`, '--bg': p.c, '--rot': `${p.rot}deg`, '--delay': `${p.d}s` } as React.CSSProperties}
         />
       ))}
     </div>
@@ -134,15 +139,15 @@ function GoldDrift() {
       {parts.map((p, i) => (
         <span
           key={i}
-          className="absolute rounded-full bg-[#F5C451] motion-safe:animate-gold-drift"
-          style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.s, height: p.s, boxShadow: '0 0 8px rgba(245,196,81,0.8)', animationDelay: `${p.d}s`, animationDuration: `${p.t}s` }}
+          className="absolute rounded-full bg-[#F5C451] motion-safe:animate-gold-drift shadow-[0_0_8px_rgba(245,196,81,0.8)] [left:var(--x)] [top:var(--y)] w-[var(--size)] h-[var(--size)] [animation-delay:var(--delay)] [animation-duration:var(--dur)]"
+          style={{ '--x': `${p.x}%`, '--y': `${p.y}%`, '--size': `${p.s}px`, '--delay': `${p.d}s`, '--dur': `${p.t}s` } as React.CSSProperties}
         />
       ))}
     </div>
   );
 }
 
-export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchError, onBuildAgain, onBackToPlay }: MatchResultProps) {
+export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchesToday = null, matchError, onBuildAgain, onBackToPlay }: MatchResultProps) {
   const reducedMotion = usePrefersReducedMotion();
   const { wins, losses, rationale } = result.record;
   const isPerfect = wins === 12;
@@ -152,30 +157,18 @@ export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchE
 
   return (
     <div
-      className="relative flex flex-col min-h-[70vh] rounded-card-xl overflow-hidden"
-      style={isPerfect && full ? { background: '#050504' } : undefined}
+      className={`relative flex flex-col min-h-[70vh] rounded-card-xl overflow-hidden ${isPerfect && full ? 'bg-[#050504]' : ''}`}
     >
       {isPerfect && full && !reducedMotion && (
         <div
-          className="absolute -inset-[45%] pointer-events-none motion-safe:animate-ray-spin"
-          style={{
-            background: 'repeating-conic-gradient(from 0deg at 50% 50%, rgba(245,196,81,0.16) 0deg 7deg, transparent 7deg 26deg)',
-            maskImage: 'radial-gradient(circle, #000 0%, transparent 66%)',
-            WebkitMaskImage: 'radial-gradient(circle, #000 0%, transparent 66%)',
-          }}
+          className="absolute -inset-[45%] pointer-events-none motion-safe:animate-ray-spin bg-[repeating-conic-gradient(from_0deg_at_50%_50%,rgba(245,196,81,0.16)_0deg_7deg,transparent_7deg_26deg)] [mask-image:radial-gradient(circle,#000_0%,transparent_66%)] [-webkit-mask-image:radial-gradient(circle,#000_0%,transparent_66%)]"
           aria-hidden="true"
         />
       )}
       {!isPerfect && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 pointer-events-none motion-safe:transition-opacity motion-safe:duration-600"
-          style={{
-            opacity: full ? 1 : 0,
-            background: isWin
-              ? 'radial-gradient(circle at 50% 34%, rgba(255,61,0,0.16), transparent 60%)'
-              : 'radial-gradient(circle at 50% 34%, rgba(255,61,0,0.07), transparent 60%)',
-          }}
+          className={`absolute inset-0 pointer-events-none motion-safe:transition-opacity motion-safe:duration-600 ${full ? 'opacity-100' : 'opacity-0'} ${isWin ? 'bg-[radial-gradient(circle_at_50%_34%,rgba(255,61,0,0.16),transparent_60%)]' : 'bg-[radial-gradient(circle_at_50%_34%,rgba(255,61,0,0.07),transparent_60%)]'}`}
         />
       )}
 
@@ -184,22 +177,14 @@ export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchE
       ) : (
         <div className="relative z-[4] flex-1 flex flex-col items-center justify-center px-6 py-10 text-center gap-0">
           <p
-            className="text-[11px] font-extrabold tracking-[0.32em] uppercase"
-            style={{ color: isPerfect ? '#F5C451' : isWin ? '#FF3D00' : undefined }}
+            className={`text-[11px] font-extrabold tracking-[0.32em] uppercase ${isPerfect ? 'text-[#F5C451]' : isWin ? 'text-[#FF3D00]' : ''}`}
           >
             <span className={isPerfect || isWin ? '' : 'text-faint'}>Season Complete</span>
           </p>
 
           {isPerfect && (
             <p
-              className="font-display italic text-5xl sm:text-6xl leading-[0.86] mt-2.5 motion-safe:animate-slam"
-              style={{
-                background: 'linear-gradient(160deg,#FBE9AE,#F5C451 44%,#E4A32C 70%,#F8DA80)',
-                WebkitBackgroundClip: 'text',
-                backgroundClip: 'text',
-                color: 'transparent',
-                filter: 'drop-shadow(0 4px 24px rgba(245,196,81,0.4))',
-              }}
+              className="font-display italic text-5xl sm:text-6xl leading-[0.86] mt-2.5 motion-safe:animate-slam bg-[linear-gradient(160deg,#FBE9AE,#F5C451_44%,#E4A32C_70%,#F8DA80)] bg-clip-text text-transparent [filter:drop-shadow(0_4px_24px_rgba(245,196,81,0.4))]"
             >
               Undefeated
             </p>
@@ -208,12 +193,11 @@ export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchE
           <p
             aria-live="assertive"
             aria-label={`Final record: ${wins} wins, ${losses} losses`}
-            className="font-display italic font-bold tabular leading-[0.8] text-[100px] sm:text-[132px] mt-1.5 mb-0.5 motion-safe:animate-slam"
-            style={isPerfect ? { color: '#F5C451', textShadow: '0 0 50px rgba(245,196,81,0.6)' } : isWin ? { color: '#FF3D00', textShadow: '0 0 44px rgba(255,61,0,0.55)' } : undefined}
+            className={`font-display italic font-bold tabular leading-[0.8] text-[100px] sm:text-[132px] mt-1.5 mb-0.5 motion-safe:animate-slam ${isPerfect ? 'text-[#F5C451] [text-shadow:0_0_50px_rgba(245,196,81,0.6)]' : isWin ? 'text-[#FF3D00] [text-shadow:0_0_44px_rgba(255,61,0,0.55)]' : ''}`}
           >
             <span className={isPerfect || isWin ? '' : 'text-ink'}>{wins}</span>
             <span className={isPerfect ? 'mx-1 opacity-60' : 'mx-1 text-faint'}>–</span>
-            <span className={isPerfect || isWin ? '' : 'text-faint'} style={isPerfect ? { color: 'rgba(245,196,81,0.7)' } : undefined}>{losses}</span>
+            <span className={`${isPerfect || isWin ? '' : 'text-faint'} ${isPerfect ? 'text-[#F5C451]/70' : ''}`}>{losses}</span>
           </p>
 
           {!isPerfect && (
@@ -222,7 +206,7 @@ export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchE
             </p>
           )}
 
-          <p className={['text-[13px] leading-relaxed max-w-[300px] mt-2.5', isPerfect ? '' : 'text-muted'].join(' ')} style={isPerfect ? { color: '#b39a5c' } : undefined}>
+          <p className={`text-[13px] leading-relaxed max-w-[300px] mt-2.5 ${isPerfect ? 'text-[#b39a5c]' : 'text-muted'}`}>
             {rationale}
           </p>
 
@@ -237,16 +221,21 @@ export function MatchResult({ result, coinsAwarded, rewardCapped = false, matchE
             ) : (
               <>
                 <div className="flex items-baseline gap-2">
-                  <span className="font-display italic font-bold text-4xl tabular" style={{ color: isPerfect ? '#F5C451' : '#FF3D00' }}>
+                  <span className={`font-display italic font-bold text-4xl tabular ${isPerfect ? 'text-[#F5C451]' : 'text-[#FF3D00]'}`}>
                     +{(coinsAwarded ?? 0).toLocaleString()}
                   </span>
-                  <span className="text-[10px] font-bold tracking-[0.24em] uppercase" style={{ color: isPerfect ? '#b39a5c' : undefined }}>
+                  <span className={`text-[10px] font-bold tracking-[0.24em] uppercase ${isPerfect ? 'text-[#b39a5c]' : ''}`}>
                     <span className={isPerfect ? '' : 'text-faint'}>Coins</span>
                   </span>
                 </div>
                 {rewardCapped && (
                   <span className="text-[11px] text-faint font-tight">
                     Daily match rewards used up — coins return tomorrow.
+                  </span>
+                )}
+                {!rewardCapped && matchesToday !== null && (
+                  <span className="text-[11px] text-faint font-tight">
+                    Match {matchesToday} today · {Math.round(matchPayMultiplier(matchesToday) * 100)}% pay
                   </span>
                 )}
               </>

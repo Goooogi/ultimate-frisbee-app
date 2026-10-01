@@ -139,7 +139,7 @@ export function PvpResult({
           <CoinGlyph size={14} className={won ? 'text-accent-ink' : 'text-faint'} />
           {won ? `+${outcome.payout - outcome.stake}` : drew ? '±0' : `−${outcome.stake}`}
           <span className="font-semibold opacity-70">
-            {won ? `(pot ${outcome.pot})` : drew ? '(refunded)' : ''}
+            {won ? `(pot ${outcome.pot} − ${outcome.rake} house)` : drew ? '(refunded)' : ''}
           </span>
         </span>
       </div>

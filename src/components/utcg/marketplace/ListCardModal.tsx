@@ -8,16 +8,20 @@
 
 import { useEffect, useState } from 'react';
 import type { UtcgCard } from '@/lib/utcg/data';
+import type { MarketAccess } from '@/lib/utcg/server';
 import { CardTile } from '@/components/utcg/card-tile';
-import { listCard, sellFloor, sellerProceeds, type CardRef, type ListingKind } from '@/lib/utcg/market';
+import { MarketUnlockChecklist } from '@/components/utcg/market-unlock';
+import { MARKET_UNLOCK } from '@/lib/utcg/packs';
+import { listCard, sellFloor, priceCeiling, sellerProceeds, type CardRef, type ListingKind } from '@/lib/utcg/market';
 
 interface ListCardModalProps {
   card: UtcgCard;
+  marketAccess: MarketAccess | null;
   onClose: () => void;
   onListed: () => void;
 }
 
-export function ListCardModal({ card, onClose, onListed }: ListCardModalProps) {
+export function ListCardModal({ card, marketAccess, onClose, onListed }: ListCardModalProps) {
   const [kind, setKind] = useState<ListingKind>('sell');
   const [priceInput, setPriceInput] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -31,10 +35,13 @@ export function ListCardModal({ card, onClose, onListed }: ListCardModalProps) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  const locked = marketAccess !== null && !marketAccess.unlocked;
   const floor = sellFloor(card);
+  const ceiling = priceCeiling(card);
   const price = Number(priceInput);
-  const priceValid = priceInput.trim() !== '' && Number.isFinite(price) && price >= floor;
-  const canSubmit = kind === 'trade' || priceValid;
+  const priceValid = priceInput.trim() !== '' && Number.isFinite(price) && price >= floor && price <= ceiling;
+  const overCeiling = priceInput.trim() !== '' && Number.isFinite(price) && price > ceiling;
+  const canSubmit = !locked && (kind === 'trade' || priceValid);
 
   async function handleSubmit() {
     if (submitting) return;
@@ -86,6 +93,17 @@ export function ListCardModal({ card, onClose, onListed }: ListCardModalProps) {
             <CardTile card={card} />
           </div>
 
+          {locked && (
+            <div className="rounded-card bg-ink/5 p-4 flex flex-col gap-2.5">
+              <p className="text-[13px] font-bold text-ink font-tight">Market locked</p>
+              <p className="text-[12px] text-muted font-tight">
+                Listing cards unlocks after {MARKET_UNLOCK.days} days and {MARKET_UNLOCK.games} games on{' '}
+                {MARKET_UNLOCK.playDays} different days.
+              </p>
+              <MarketUnlockChecklist access={marketAccess} />
+            </div>
+          )}
+
           {/* Sell / Trade toggle */}
           <div className="flex items-center gap-2" role="group" aria-label="Listing type">
             <ModeButton active={kind === 'sell'} onClick={() => setKind('sell')} label="Sell" />
@@ -102,6 +120,7 @@ export function ListCardModal({ card, onClose, onListed }: ListCardModalProps) {
                 type="number"
                 inputMode="numeric"
                 min={floor}
+                max={ceiling}
                 step={1}
                 value={priceInput}
                 onChange={(e) => setPriceInput(e.target.value)}
@@ -110,11 +129,16 @@ export function ListCardModal({ card, onClose, onListed }: ListCardModalProps) {
                 className="w-full px-4 py-3 rounded-full bg-ink/5 text-[13px] font-tight text-ink placeholder:text-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent min-h-[44px]"
               />
               <p id="sell-price-help" className="text-[11px] text-faint font-tight">
-                Minimum {floor.toLocaleString()}
+                Min {floor.toLocaleString()} · Max {ceiling.toLocaleString()}
               </p>
-              {priceInput.trim() !== '' && !priceValid && (
+              {priceInput.trim() !== '' && !priceValid && !overCeiling && (
                 <p className="text-[11px] text-live font-tight" role="alert">
                   Price must be at least {floor.toLocaleString()}.
+                </p>
+              )}
+              {overCeiling && (
+                <p className="text-[11px] text-live font-tight" role="alert">
+                  Price can&rsquo;t exceed {ceiling.toLocaleString()}.
                 </p>
               )}
               {priceValid && (

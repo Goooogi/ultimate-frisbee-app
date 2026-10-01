@@ -294,6 +294,21 @@ export function sellFloor(card: UtcgCard): number {
   return quicksellValue(card.playerScore);
 }
 
+// ─── Price ceiling + offer limits (mirror of utcg_market_list/_make_offer) ───
+// Asks and coin offers top out at MARKET_CEILING_MULT × the card's quicksell
+// value, so one junk card can't carry an arbitrary coin transfer. Offering
+// cards costs TRADE_FEE_RATE (rounded up) of their quicksell value, charged at
+// offer time and refunded if the offer doesn't go through.
+export const MARKET_CEILING_MULT = 15;
+export const OFFER_MAX_QTY = 10;
+export const TRADE_FEE_RATE = 0.05;
+export function priceCeiling(card: UtcgCard): number {
+  return quicksellValue(card.playerScore) * MARKET_CEILING_MULT;
+}
+export function tradeFee(cards: { card: UtcgCard; qty: number }[]): number {
+  return Math.ceil(cards.reduce((s, c) => s + quicksellValue(c.card.playerScore) * c.qty, 0) * TRADE_FEE_RATE);
+}
+
 /** The 5% marketplace sink applied to sale proceeds (display helper). */
 export const MARKET_SINK_RATE = 0.05;
 export function sellerProceeds(price: number): number {

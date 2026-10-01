@@ -10,6 +10,7 @@
 
 import type { PvpMatchRow } from '@/lib/utcg/server';
 import { CoinGlyph } from '@/components/utcg/coin-glyph';
+import { RIVALS_POINTS } from '@/lib/utcg/rivals';
 
 interface PvpHistoryProps {
   matches: PvpMatchRow[];
@@ -78,17 +79,25 @@ export function PvpHistory({ matches, openSquad }: PvpHistoryProps) {
                   {m.ourStrength.toFixed(1)} v {m.theirStrength.toFixed(1)}
                   <span className="text-faint"> · chem {m.ourChem}–{m.theirChem}</span>
                   {!m.wasChallenger && <span className="text-faint"> · defended</span>}
+                  {m.mode === 'rivals' && <span className="text-faint"> · Rivals</span>}
                 </span>
               </div>
-              <span
-                className={[
-                  'inline-flex items-center gap-1 text-[11.5px] font-bold tabular flex-shrink-0',
-                  m.coinDelta > 0 ? 'text-accent' : m.coinDelta < 0 ? 'text-faint' : 'text-muted',
-                ].join(' ')}
-              >
-                <CoinGlyph size={11} className={m.coinDelta > 0 ? 'text-accent' : 'text-faint'} />
-                {m.coinDelta > 0 ? `+${m.coinDelta}` : m.coinDelta < 0 ? `−${Math.abs(m.coinDelta)}` : '±0'}
-              </span>
+              {m.mode === 'rivals' ? (
+                // Rivals is unstaked — points, not coins (pot/coinDelta are 0).
+                <span className="text-[11.5px] font-bold tabular flex-shrink-0 text-muted">
+                  +{m.result === 'won' ? RIVALS_POINTS.win : m.result === 'draw' ? RIVALS_POINTS.draw : RIVALS_POINTS.loss} pts
+                </span>
+              ) : (
+                <span
+                  className={[
+                    'inline-flex items-center gap-1 text-[11.5px] font-bold tabular flex-shrink-0',
+                    m.coinDelta > 0 ? 'text-accent' : m.coinDelta < 0 ? 'text-faint' : 'text-muted',
+                  ].join(' ')}
+                >
+                  <CoinGlyph size={11} className={m.coinDelta > 0 ? 'text-accent' : 'text-faint'} />
+                  {m.coinDelta > 0 ? `+${m.coinDelta}` : m.coinDelta < 0 ? `−${Math.abs(m.coinDelta)}` : '±0'}
+                </span>
+              )}
             </li>
           ))}
         </ul>

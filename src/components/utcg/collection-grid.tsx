@@ -30,13 +30,12 @@ const POSITION_FILTERS: { key: PositionFilter; label: string }[] = [
 
 interface CollectionGridProps {
   owned: OwnedCard[];
-  /** When provided, tapping a card opens the list-on-market modal for it
-   *  (wired by UtcgGame -> ListCardModal). Omitted keeps cards non-interactive,
-   *  exactly matching prior behavior. */
-  onListCard?: (card: UtcgCard) => void;
+  /** When provided, tapping a card opens the CardActionsSheet for it (List /
+   *  Craft). Omitted keeps cards non-interactive. */
+  onTapCard?: (card: UtcgCard) => void;
 }
 
-export function CollectionGrid({ owned, onListCard }: CollectionGridProps) {
+export function CollectionGrid({ owned, onTapCard }: CollectionGridProps) {
   const [positionFilter, setPositionFilter] = useState<PositionFilter>('all');
   const [tierFilter, setTierFilter] = useState<CardTier | 'all'>('all');
   const [search, setSearch] = useState('');
@@ -92,7 +91,7 @@ export function CollectionGrid({ owned, onListCard }: CollectionGridProps) {
                 key={tier}
                 className="inline-flex items-center gap-1.5 text-[9.5px] font-bold tracking-[0.04em] uppercase px-2 py-1 rounded-full leading-none bg-ink/5 text-ink/70"
               >
-                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={tierDotStyle(tier)} aria-hidden="true" />
+                <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-[color:var(--dot)]" style={tierDotStyle(tier)} aria-hidden="true" />
                 {label}
                 <span className="tabular opacity-70">{count}</span>
               </span>
@@ -140,7 +139,8 @@ export function CollectionGrid({ owned, onListCard }: CollectionGridProps) {
               key={`${o.card.playerId}|${o.card.teamSlug}|${o.card.year}`}
               card={o.card}
               copies={o.copies}
-              onClick={onListCard ? () => onListCard(o.card) : undefined}
+              untradeable={o.untradeable}
+              onClick={onTapCard ? () => onTapCard(o.card) : undefined}
               // Collection is the natural home for flip-to-stats: you're
               // browsing cards you already own, and there's no competing
               // tap-to-select gesture to fight (beta ask: stats on the back).
@@ -153,7 +153,7 @@ export function CollectionGrid({ owned, onListCard }: CollectionGridProps) {
   );
 }
 
-function FilterPill({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+export function FilterPill({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
   return (
     <button
       type="button"

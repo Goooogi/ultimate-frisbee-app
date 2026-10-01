@@ -11,6 +11,12 @@
  * USAGE (run from repo root):
  *   npx tsx scripts/backfill-twelve-oh-league.ts pul
  *   npx tsx scripts/backfill-twelve-oh-league.ts wul
+ *   npx tsx scripts/backfill-twelve-oh-league.ts <pul|wul> --season YYYY [--dry-run]
+ *
+ * --season adds ONE season scored against the league's STORED baseline
+ * (twelve_oh_league_baselines) instead of re-baselining — existing seasons'
+ * scores never move. Replaces only that (league, year) slice. --dry-run
+ * writes nothing and diffs against any stored rows for that season.
  *
  * REQUIRED ENV VARS (.env / .env.local):
  *   NEXT_PUBLIC_SUPABASE_URL
@@ -74,8 +80,11 @@ const BACKFILL_VERSION = 1;
 const PUL_TOUCHES_MIN_SEASON = 2024;
 
 const league = process.argv[2];
-if (league !== 'pul' && league !== 'wul') {
-  console.error('Usage: npx tsx scripts/backfill-twelve-oh-league.ts <pul|wul>');
+const seasonArgIdx = process.argv.indexOf('--season');
+const SEASON = seasonArgIdx > -1 ? Number(process.argv[seasonArgIdx + 1]) : null;
+const DRY_RUN = process.argv.includes('--dry-run');
+if ((league !== 'pul' && league !== 'wul') || (SEASON !== null && !Number.isInteger(SEASON))) {
+  console.error('Usage: npx tsx scripts/backfill-twelve-oh-league.ts <pul|wul> [--season YYYY [--dry-run]]');
   process.exit(1);
 }
 
@@ -216,6 +225,44 @@ function percentile(sorted: number[], p: number): number {
   return sorted[lo] + (idx - lo) * (sorted[hi] - sorted[lo]);
 }
 
+const abbrFor = (teamId: string): string =>
+  league === 'pul'
+    ? (PUL_TEAM_ABBR[teamId] ?? teamId.slice(0, 3).toUpperCase())
+    : (WUL_TEAMS[teamId]?.abbr ?? teamId.slice(0, 3).toUpperCase());
+
+/** One twelve_oh_players row for a scored season (full + --season runs). */
+function toDbRow(s: Candidate & { playerScore: number }) {
+  return {
+    league,
+    player_id: s.row.id,
+    team_slug: s.row.team_id,
+    team_abbr: abbrFor(s.row.team_id),
+    year: s.row.season,
+    name: s.row.player_name,
+    team_internal_id: 0, // UFA-only concept
+    games_played: s.row.games_played,
+    goals: s.stats.goals,
+    assists: s.stats.assists,
+    blocks: s.stats.blocks,
+    plus_minus: Math.round(s.stats.plusMinus), // WUL halves rounded for display
+    turnovers: s.stats.turnovers,
+    touches: s.stats.touches || null,          // 0 (gated/missing) → null
+    o_points: s.row.o_points ?? 0,
+    d_points: s.row.d_points ?? 0,
+    points_played: s.stats.pointsPlayed,
+    callahans: s.stats.callahans ?? 0,
+    hucks_completed: s.stats.hucksCompleted ?? 0,
+    yards_thrown: 0,
+    yards_received: s.stats.yardsTotal ?? 0,   // WUL total yards (not split)
+    hockey_assists: 0,
+    completions: 0,
+    completion_pct: null,
+    drops: 0,
+    player_score: Number(s.playerScore.toFixed(2)),
+    backfill_version: BACKFILL_VERSION,
+  };
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -231,6 +278,7 @@ async function main(): Promise<void> {
     .filter((r) => (r.games_played ?? 0) >= MIN_GAMES_PLAYED)
     .map((row) => ({ row, stats: toStats(row) }));
   console.log(`  ${candidates.length} qualifying player-seasons (≥${MIN_GAMES_PLAYED} GP)`);
+  if (SEASON !== null) return runSeason(candidates.filter((c) => c.row.season === SEASON), dims);
 
   // Pass 1 — baseline mean/std per dim.
   const baseline = computeBaseline(candidates, dims);
@@ -266,40 +314,7 @@ async function main(): Promise<void> {
   }
 
   // Write rows — delete league slice then insert (idempotent reconcile).
-  const abbrFor = (teamId: string): string =>
-    league === 'pul'
-      ? (PUL_TEAM_ABBR[teamId] ?? teamId.slice(0, 3).toUpperCase())
-      : (WUL_TEAMS[teamId]?.abbr ?? teamId.slice(0, 3).toUpperCase());
-
-  const dbRows = scored.map((s) => ({
-    league,
-    player_id: s.row.id,
-    team_slug: s.row.team_id,
-    team_abbr: abbrFor(s.row.team_id),
-    year: s.row.season,
-    name: s.row.player_name,
-    team_internal_id: 0, // UFA-only concept
-    games_played: s.row.games_played,
-    goals: s.stats.goals,
-    assists: s.stats.assists,
-    blocks: s.stats.blocks,
-    plus_minus: Math.round(s.stats.plusMinus), // WUL halves rounded for display
-    turnovers: s.stats.turnovers,
-    touches: s.stats.touches || null,          // 0 (gated/missing) → null
-    o_points: s.row.o_points ?? 0,
-    d_points: s.row.d_points ?? 0,
-    points_played: s.stats.pointsPlayed,
-    callahans: s.stats.callahans ?? 0,
-    hucks_completed: s.stats.hucksCompleted ?? 0,
-    yards_thrown: 0,
-    yards_received: s.stats.yardsTotal ?? 0,   // WUL total yards (not split)
-    hockey_assists: 0,
-    completions: 0,
-    completion_pct: null,
-    drops: 0,
-    player_score: Number(s.playerScore.toFixed(2)),
-    backfill_version: BACKFILL_VERSION,
-  }));
+  const dbRows = scored.map(toDbRow);
 
   console.log(`\nWriting ${dbRows.length} rows to twelve_oh_players (league=${league})…`);
   const del = await db.from('twelve_oh_players').delete().eq('league', league);
@@ -335,6 +350,59 @@ async function main(): Promise<void> {
   );
 
   console.log('\nDone.');
+}
+
+/** Add one season scored against the stored baseline; replace that slice only. */
+async function runSeason(candidates: Candidate[], dims: LeagueDim[]): Promise<void> {
+  console.log(`\nSeason ${SEASON}: ${candidates.length} qualifying player-seasons${DRY_RUN ? ' (dry run)' : ''}`);
+  if (candidates.length === 0) throw new Error(`no ${league} ${SEASON} player-seasons in source table`);
+
+  const { data: stored, error: bErr } = await db
+    .from('twelve_oh_league_baselines')
+    .select('payload')
+    .eq('league', league)
+    .single();
+  if (bErr) throw bErr;
+  const baseline = stored.payload as LeagueBaseline;
+
+  const scored = candidates.map((c) => ({
+    ...c,
+    playerScore: pwlNormalize(computeLeagueRawScore(c.stats, dims, baseline), baseline.anchors, LEAGUE_TARGET_SCORES),
+  }));
+  const dbRows = scored.map(toDbRow);
+  const top = [...scored].sort((a, b) => b.playerScore - a.playerScore).slice(0, 10);
+  for (const t of top) {
+    console.log(`  ${t.playerScore.toFixed(1).padStart(5)}  ${t.row.player_name} (${t.row.team_id})`);
+  }
+
+  if (DRY_RUN) {
+    const { data: prev, error } = await db
+      .from('twelve_oh_players')
+      .select('player_id, player_score')
+      .eq('league', league)
+      .eq('year', SEASON!);
+    if (error) throw error;
+    if ((prev ?? []).length > 0) {
+      const byId = new Map(prev!.map((r) => [String(r.player_id), Number(r.player_score)]));
+      const diffs = dbRows
+        .filter((r) => byId.has(r.player_id))
+        .map((r) => Math.abs(r.player_score - byId.get(r.player_id)!));
+      console.log(
+        `\nReproduction vs stored ${SEASON}: ${diffs.length}/${prev!.length} matched, ` +
+        `max |Δ| ${Math.max(...diffs).toFixed(4)}`,
+      );
+    }
+    console.log('Dry run — nothing written.');
+    return;
+  }
+
+  const del = await db.from('twelve_oh_players').delete().eq('league', league).eq('year', SEASON!);
+  if (del.error) throw del.error;
+  for (let i = 0; i < dbRows.length; i += 500) {
+    const ins = await db.from('twelve_oh_players').insert(dbRows.slice(i, i + 500));
+    if (ins.error) throw ins.error;
+  }
+  console.log(`\n${dbRows.length} rows written for ${league} ${SEASON}.`);
 }
 
 main().catch((err) => {

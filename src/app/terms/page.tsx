@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   description: 'The terms that govern your use of The Layout.',
 };
 
-const CONTACT_EMAIL = 'support@thelayout.app';
+const CONTACT_EMAIL = 'info@altiusapps.com';
 
 export default function TermsPage() {
   return (

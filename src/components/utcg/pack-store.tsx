@@ -73,17 +73,16 @@ const FOIL_BG: Record<PackKind, string> = {
 
 // ── crimped foil-wrapper edge ───────────────────────────────────────────
 
-const CRIMP_MASK = 'repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 7px)';
-
 function Crimp({ position }: { position: 'top' | 'bottom' }) {
   return (
     <span
       aria-hidden="true"
       className={[
         'absolute inset-x-0 h-4 z-[6] pointer-events-none bg-white/10',
+        '[mask-image:repeating-linear-gradient(90deg,#000_0_3px,transparent_3px_7px)]',
+        '[-webkit-mask-image:repeating-linear-gradient(90deg,#000_0_3px,transparent_3px_7px)]',
         position === 'top' ? 'top-0' : 'bottom-0',
       ].join(' ')}
-      style={{ WebkitMaskImage: CRIMP_MASK, maskImage: CRIMP_MASK }}
     />
   );
 }
@@ -186,11 +185,10 @@ function ProdShell({
     <div className={`${PROD_W} flex-shrink-0`}>
       <div
         className={[
-          'relative w-full rounded-card-lg overflow-hidden shadow-hero',
+          'relative w-full aspect-[9/16] rounded-card-lg overflow-hidden shadow-hero',
           dim ? 'saturate-[0.4] brightness-[0.6]' : '',
           bob && !reducedMotion ? 'motion-safe:animate-pack-bob' : '',
         ].join(' ')}
-        style={{ aspectRatio: '9 / 16' }}
       >
         <Crimp position="top" />
         {children}
@@ -203,7 +201,10 @@ function ProdShell({
 function Guarantee({ floorLabel, tier }: { floorLabel: string; tier: CardTier }) {
   return (
     <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[9px] font-bold tracking-[0.04em] uppercase text-white/90 bg-black/30 px-3 py-1.5 rounded-full max-w-full">
-      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ ...tierDotStyle(tier), boxShadow: `0 0 8px ${RARITY[tier].c}` }} />
+      <span
+        className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-[color:var(--dot)] shadow-[0_0_8px_var(--glow)]"
+        style={{ ...tierDotStyle(tier), '--glow': RARITY[tier].c } as React.CSSProperties}
+      />
       <span className="truncate">Guaranteed {floorLabel} or better</span>
     </span>
   );
@@ -239,23 +240,21 @@ function FreePackTile({
 
   return (
     <ProdShell dim={!ready} reducedMotion={reducedMotion} bob={ready}>
-      <div className="absolute inset-0" style={{ background: FOIL_BG.free }} aria-hidden="true" />
+      <div
+        className="absolute inset-0 bg-[image:var(--foil)]"
+        style={{ '--foil': FOIL_BG.free } as React.CSSProperties}
+        aria-hidden="true"
+      />
       {ready && (
         <span
           aria-hidden="true"
-          className="absolute inset-0"
-          style={{
-            background:
-              'radial-gradient(120% 60% at 50% 42%, rgba(255,61,0,0.22), transparent 62%), radial-gradient(90% 50% at 50% 84%, rgba(245,196,81,0.16), transparent 70%)',
-            boxShadow: 'inset 0 0 60px rgba(255,61,0,0.14), inset 0 0 0 1.5px rgba(255,61,0,0.32)',
-          }}
+          className="absolute inset-0 bg-[image:radial-gradient(120%_60%_at_50%_42%,rgba(255,61,0,0.22),transparent_62%),radial-gradient(90%_50%_at_50%_84%,rgba(245,196,81,0.16),transparent_70%)] shadow-[inset_0_0_60px_rgba(255,61,0,0.14),inset_0_0_0_1.5px_rgba(255,61,0,0.32)]"
         />
       )}
       {ready && !reducedMotion && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep mix-blend-overlay"
-          style={{ background: 'linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.4) 50%, transparent 60%)' }}
+          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep mix-blend-overlay bg-[image:linear-gradient(115deg,transparent_40%,rgba(255,255,255,0.4)_50%,transparent_60%)]"
         />
       )}
 
@@ -280,7 +279,7 @@ function FreePackTile({
             <Guarantee floorLabel={guarantee ?? 'Contributor'} tier={guaranteeKey ?? 'contributor'} />
           </div>
         ) : (
-          <div className="relative flex items-center justify-center" style={{ width: 128, height: 128 }}>
+          <div className="relative flex items-center justify-center w-32 h-32">
             <svg width="128" height="128" viewBox="0 0 128 128" className="-rotate-90" aria-hidden="true">
               <circle cx="64" cy="64" r={R} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth="6" />
               <circle
@@ -323,8 +322,7 @@ function FreePackTile({
               type="button"
               disabled
               aria-label={`On cooldown, come back in ${countdownCoarse}`}
-              className="w-full h-14 rounded-card bg-white/[0.08] flex flex-col items-center justify-center gap-0.5 cursor-default"
-              style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.12)' }}
+              className="w-full h-14 rounded-card bg-white/[0.08] flex flex-col items-center justify-center gap-0.5 cursor-default shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]"
             >
               <span className="text-[13px] font-extrabold tracking-[0.12em] text-white/60">On Cooldown</span>
               <span className="text-[10px] font-medium text-white/40">come back {countdownCoarse}</span>
@@ -389,27 +387,22 @@ function BuyPackTile({
 
   return (
     <ProdShell dim={!affordable} reducedMotion={reducedMotion} bob={affordable}>
-      <div className="absolute inset-0" style={{ background: FOIL_BG[kind] }} aria-hidden="true" />
+      <div
+        className="absolute inset-0 bg-[image:var(--foil)]"
+        style={{ '--foil': FOIL_BG[kind] } as React.CSSProperties}
+        aria-hidden="true"
+      />
 
       {kind === 'platinum' && (
         <>
           <span
             aria-hidden="true"
-            className="absolute inset-0 mix-blend-screen"
-            style={{
-              background:
-                'linear-gradient(118deg, rgba(42,167,155,.16) 6%, transparent 26%, rgba(144,97,249,.2) 46%, transparent 64%, rgba(255,61,0,.14) 78%, rgba(245,196,81,.18))',
-              boxShadow: 'inset 0 0 0 2px rgba(245,196,81,0.55), inset 0 0 80px rgba(144,97,249,0.18)',
-            }}
+            className="absolute inset-0 mix-blend-screen bg-[image:linear-gradient(118deg,rgba(42,167,155,.16)_6%,transparent_26%,rgba(144,97,249,.2)_46%,transparent_64%,rgba(255,61,0,.14)_78%,rgba(245,196,81,.18))] shadow-[inset_0_0_0_2px_rgba(245,196,81,0.55),inset_0_0_80px_rgba(144,97,249,0.18)]"
           />
           {!reducedMotion && affordable && (
             <span
               aria-hidden="true"
-              className="absolute -inset-8 opacity-40 motion-safe:animate-spin-slow"
-              style={{
-                background:
-                  'repeating-conic-gradient(from 0deg, rgba(245,196,81,0.08) 0 6deg, transparent 6deg 22deg)',
-              }}
+              className="absolute -inset-8 opacity-40 motion-safe:animate-spin-slow bg-[image:repeating-conic-gradient(from_0deg,rgba(245,196,81,0.08)_0_6deg,transparent_6deg_22deg)]"
             />
           )}
           {!reducedMotion && affordable && <Motes />}
@@ -419,8 +412,7 @@ function BuyPackTile({
       {kind !== 'bronze' && !reducedMotion && affordable && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep mix-blend-overlay"
-          style={{ background: 'linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.5) 50%, transparent 60%)' }}
+          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep mix-blend-overlay bg-[image:linear-gradient(115deg,transparent_40%,rgba(255,255,255,0.5)_50%,transparent_60%)]"
         />
       )}
 
@@ -432,8 +424,7 @@ function BuyPackTile({
       {(kind === 'silver' || kind === 'platinum') && (
         <span
           aria-hidden="true"
-          className="absolute inset-0"
-          style={{ background: 'linear-gradient(180deg, rgba(12,16,22,0.5) 0%, rgba(12,16,22,0.12) 22%, transparent 42%, transparent 60%, rgba(12,16,22,0.18) 78%, rgba(12,16,22,0.55) 100%)' }}
+          className="absolute inset-0 bg-[image:linear-gradient(180deg,rgba(12,16,22,0.5)_0%,rgba(12,16,22,0.12)_22%,transparent_42%,transparent_60%,rgba(12,16,22,0.18)_78%,rgba(12,16,22,0.55)_100%)]"
         />
       )}
 
@@ -446,10 +437,13 @@ function BuyPackTile({
         </div>
 
         <div className="flex flex-col items-center gap-2.5">
-          <span className="font-display italic text-5xl leading-[0.82] drop-shadow-[0_4px_24px_rgba(0,0,0,0.4)]" style={{ color: wordColor }}>
+          <span
+            className="font-display italic text-5xl leading-[0.82] drop-shadow-[0_4px_24px_rgba(0,0,0,0.4)] text-[color:var(--word)]"
+            style={{ '--word': wordColor } as React.CSSProperties}
+          >
             {def.name.replace(' Pack', '')}
           </span>
-          <span className="font-display italic text-5xl leading-[0.82]" style={{ color: wordColor2 }}>Pack</span>
+          <span className="font-display italic text-5xl leading-[0.82] text-[color:var(--word2)]" style={{ '--word2': wordColor2 } as React.CSSProperties}>Pack</span>
           {guarantee && guaranteeKey && <Guarantee floorLabel={guarantee} tier={guaranteeKey} />}
         </div>
 
@@ -463,26 +457,24 @@ function BuyPackTile({
               onClick={handleClick}
               disabled={!canOpen}
               aria-label={`Open ${def.name} for ${def.price} coins`}
-              className="w-full h-14 rounded-card flex items-center justify-between pl-5 pr-1.5 cursor-pointer motion-safe:transition-transform motion-safe:duration-100 active:translate-y-px disabled:opacity-60"
-              style={{ background: '#ffffff', color: '#0A0A09' }}
+              className="w-full h-14 rounded-card flex items-center justify-between pl-5 pr-1.5 cursor-pointer motion-safe:transition-transform motion-safe:duration-100 active:translate-y-px disabled:opacity-60 bg-[#ffffff] text-[#0A0A09]"
             >
               <span className="text-[15px] font-extrabold tracking-[0.06em]">Open</span>
-              <span className="flex items-center gap-1.5 text-[15px] font-extrabold tabular h-11 px-4 rounded-card-sm" style={{ color: '#F4F2EC', background: '#0A0A09' }}>
+              <span className="flex items-center gap-1.5 text-[15px] font-extrabold tabular h-11 px-4 rounded-card-sm text-[#F4F2EC] bg-[#0A0A09]">
                 <CoinGlyph size={15} />
                 {def.price.toLocaleString()}
               </span>
             </button>
           ) : (
             <div className="flex flex-col gap-2">
-              <p className="flex items-center justify-center gap-1.5 text-[11px] font-semibold" style={{ color: RARITY.greatest.c }}>
+              <p className="flex items-center justify-center gap-1.5 text-[11px] font-semibold text-[#F5C451]">
                 <CoinGlyph size={13} /> {shortfall.toLocaleString()} more to unlock
               </p>
               <button
                 type="button"
                 disabled
                 aria-label={`Not enough coins for ${def.name}`}
-                className="w-full h-14 rounded-card flex items-center justify-between pl-5 pr-1.5 opacity-60 cursor-default"
-                style={{ boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.08)' }}
+                className="w-full h-14 rounded-card flex items-center justify-between pl-5 pr-1.5 opacity-60 cursor-default shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)] bg-[rgba(255,255,255,0.08)]"
               >
                 <span className="text-[15px] font-extrabold tracking-[0.06em] text-white/70">Open</span>
                 <span className="flex items-center gap-1.5 text-[15px] font-extrabold tabular text-white/70">
@@ -515,8 +507,8 @@ function Motes() {
         <span
           key={i}
           aria-hidden="true"
-          className="absolute rounded-full bg-[#F5C451] motion-safe:animate-mote-drift"
-          style={{ top: d.top, left: d.left, width: d.size, height: d.size, animationDelay: d.delay, boxShadow: '0 0 6px 1px rgba(245,196,81,0.7)' }}
+          className="absolute rounded-full bg-[#F5C451] motion-safe:animate-mote-drift shadow-[0_0_6px_1px_rgba(245,196,81,0.7)] top-[var(--top)] left-[var(--left)] w-[var(--size)] h-[var(--size)] [animation-delay:var(--delay)]"
+          style={{ '--top': d.top, '--left': d.left, '--size': `${d.size}px`, '--delay': d.delay } as React.CSSProperties}
         />
       ))}
     </>

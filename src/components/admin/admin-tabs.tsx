@@ -15,13 +15,15 @@ import { AdminFeedbackList } from '@/components/admin/admin-feedback-list';
 import { AdminRolesList } from '@/components/admin/admin-roles-list';
 import { AdminJerseyReports } from '@/components/admin/admin-jersey-reports';
 import { AdminPlayerContentReports } from '@/components/admin/admin-player-content-reports';
+import { AdminUtcgFlagsList } from '@/components/admin/admin-utcg-flags-list';
 import type { PlayerContentItem } from '@/lib/player-content/types';
 import type { FeedbackItem } from '@/lib/feedback/server';
 import type { AdminUserRow } from '@/lib/admin/roles';
 import type { JerseyReportItem } from '@/lib/jerseys/reports-server';
 import type { PlayerContentReportItem } from '@/lib/player-content/reports-server';
+import type { FlaggedPair } from '@/lib/admin/utcg-flags';
 
-export type AdminTab = 'content' | 'feedback' | 'jerseys' | 'reports' | 'roles';
+export type AdminTab = 'content' | 'feedback' | 'jerseys' | 'reports' | 'roles' | 'utcg-flags';
 
 const TABS: { id: AdminTab; label: string }[] = [
   { id: 'content', label: 'Content' },
@@ -31,6 +33,8 @@ const TABS: { id: AdminTab; label: string }[] = [
   // Reports against already-approved player_content (photos/videos/links).
   { id: 'reports', label: 'Content reports' },
   { id: 'roles', label: 'Roles' },
+  // Suspicious UTCG coin/card transfer pairs, via utcg_admin_flagged_pairs().
+  { id: 'utcg-flags', label: 'Trading flags' },
 ];
 
 interface AdminPortalProps {
@@ -44,17 +48,19 @@ interface AdminPortalProps {
   openContentReports: number;
   users: AdminUserRow[];
   currentUserId: string;
+  flaggedPairs: FlaggedPair[];
+  flaggedPairsDays: number;
   initialTab: AdminTab;
 }
 
-export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyReports, openJerseyReports, contentReports, openContentReports, users, currentUserId, initialTab }: AdminPortalProps) {
+export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyReports, openJerseyReports, contentReports, openContentReports, users, currentUserId, flaggedPairs, flaggedPairsDays, initialTab }: AdminPortalProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   const rawTab = searchParams.get('tab');
   const activeTab: AdminTab =
-    rawTab === 'feedback' ? 'feedback' : rawTab === 'jerseys' ? 'jerseys' : rawTab === 'reports' ? 'reports' : rawTab === 'roles' ? 'roles' : rawTab === 'content' ? 'content' : initialTab;
+    rawTab === 'feedback' ? 'feedback' : rawTab === 'jerseys' ? 'jerseys' : rawTab === 'reports' ? 'reports' : rawTab === 'roles' ? 'roles' : rawTab === 'utcg-flags' ? 'utcg-flags' : rawTab === 'content' ? 'content' : initialTab;
 
   const counts: Record<AdminTab, number> = {
     content: pending.length,
@@ -62,6 +68,7 @@ export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyRepo
     jerseys: openJerseyReports,
     reports: openContentReports,
     roles: users.length,
+    'utcg-flags': flaggedPairs.length,
   };
 
   function setTab(tab: AdminTab) {
@@ -134,11 +141,22 @@ export function AdminPortal({ pending, recent, feedback, newFeedback, jerseyRepo
             <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-ink text-bg">
               {users.length} users
             </span>
-            <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-accent/15 text-accent">
-              {users.filter((u) => u.role === 'beta').length} beta
-            </span>
           </StatusPillRow>
           <AdminRolesList users={users} currentUserId={currentUserId} />
+        </section>
+      )}
+
+      {activeTab === 'utcg-flags' && (
+        <section aria-labelledby="admin-utcg-flags-heading" role="tabpanel" id="admin-panel-utcg-flags" aria-label="Trading flags">
+          <h2 id="admin-utcg-flags-heading" className="sr-only">
+            UTCG trading flags
+          </h2>
+          <StatusPillRow>
+            <span className="inline-flex items-center px-3 py-1.5 rounded-full bg-ink text-bg">
+              {flaggedPairs.length} flagged pairs
+            </span>
+          </StatusPillRow>
+          <AdminUtcgFlagsList pairs={flaggedPairs} days={flaggedPairsDays} />
         </section>
       )}
     </div>

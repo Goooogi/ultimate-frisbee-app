@@ -45,8 +45,7 @@ function FormationGlyph({ formation }: { formation: Formation }) {
   const layout = FORMATION_LAYOUT[formation.key];
   return (
     <div
-      className="relative w-full rounded-card-sm bg-ink/[0.035] overflow-hidden"
-      style={{ aspectRatio: '4 / 3' }}
+      className="relative w-full aspect-[4/3] rounded-card-sm bg-ink/[0.035] overflow-hidden"
       aria-hidden="true"
     >
       {/* Faint center line suggesting a pitch */}
@@ -54,15 +53,15 @@ function FormationGlyph({ formation }: { formation: Formation }) {
       {layout.handlers.map(([x, y], i) => (
         <span
           key={`h${i}`}
-          className="absolute rounded-full bg-accent -translate-x-1/2 -translate-y-1/2"
-          style={{ left: `${x}%`, top: `${y}%`, width: 8, height: 8 }}
+          className="absolute rounded-full bg-accent -translate-x-1/2 -translate-y-1/2 w-2 h-2 [left:var(--x)] [top:var(--y)]"
+          style={{ '--x': `${x}%`, '--y': `${y}%` } as React.CSSProperties}
         />
       ))}
       {layout.cutters.map(([x, y], i) => (
         <span
           key={`c${i}`}
-          className="absolute rounded-full bg-ink/35 -translate-x-1/2 -translate-y-1/2"
-          style={{ left: `${x}%`, top: `${y}%`, width: 8, height: 8 }}
+          className="absolute rounded-full bg-ink/35 -translate-x-1/2 -translate-y-1/2 w-2 h-2 [left:var(--x)] [top:var(--y)]"
+          style={{ '--x': `${x}%`, '--y': `${y}%` } as React.CSSProperties}
         />
       ))}
     </div>

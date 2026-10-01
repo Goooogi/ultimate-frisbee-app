@@ -53,9 +53,20 @@ export function tierBadgeClasses(tier: CardTier): string {
   return 'bg-ink/5 text-ink/70';
 }
 
-/** Colored dot companion to tierBadgeClasses (mock: .cf-dot / .sc-dot / .grt-dot). */
+/** Colored dot companion to tierBadgeClasses (mock: .cf-dot / .sc-dot / .grt-dot).
+ *  Runtime rarity color, carried as a CSS var — consume with
+ *  `className="bg-[color:var(--dot)]"`. */
 export function tierDotStyle(tier: CardTier): React.CSSProperties {
-  return { background: tier === 'greatest' ? GOLD_TEXT : RARITY[tier].c };
+  return { '--dot': tier === 'greatest' ? GOLD_TEXT : RARITY[tier].c } as React.CSSProperties;
+}
+
+function LockGlyph() {
+  return (
+    <svg width="6" height="6" viewBox="0 0 10 10" fill="none" aria-hidden="true" className="flex-shrink-0">
+      <rect x="2" y="4.3" width="6" height="4.7" rx="0.8" fill="currentColor" />
+      <path d="M3.3 4.3V3.2a1.7 1.7 0 0 1 3.4 0v1.1" stroke="currentColor" strokeWidth="1" fill="none" />
+    </svg>
+  );
 }
 
 function initialsOf(name: string): string {
@@ -84,12 +95,12 @@ function CardPhoto({ card, gold, compact }: { card: UtcgCard; gold: boolean; com
 
   return (
     <div
-      className="relative w-full overflow-hidden rounded-card-sm flex-shrink-0"
-      style={{ background: card.primary, aspectRatio: compact ? '16 / 7' : '3 / 4' }}
+      className={`relative w-full overflow-hidden rounded-card-sm flex-shrink-0 bg-[color:var(--photo-bg)] ${compact ? 'aspect-[16/7]' : 'aspect-[3/4]'}`}
+      style={{ '--photo-bg': card.primary } as React.CSSProperties}
     >
       <span
-        className="absolute inset-0"
-        style={{ background: `linear-gradient(155deg, transparent 35%, ${card.accent}55 100%)` }}
+        className="absolute inset-0 bg-[image:var(--photo-wash)]"
+        style={{ '--photo-wash': `linear-gradient(155deg, transparent 35%, ${card.accent}55 100%)` } as React.CSSProperties}
         aria-hidden="true"
       />
       <span className="absolute -bottom-2 -right-2 pointer-events-none" aria-hidden="true">
@@ -97,7 +108,7 @@ function CardPhoto({ card, gold, compact }: { card: UtcgCard; gold: boolean; com
           // eslint-disable-next-line @next/next/no-img-element
           <img src={card.logo} alt="" className={`${compact ? 'w-9 h-9' : 'w-14 h-14'} object-contain opacity-[0.16] brightness-0 invert`} />
         ) : (
-          <span className="font-display italic font-bold text-white opacity-[0.14] leading-none" style={{ fontSize: compact ? 26 : 44 }}>
+          <span className={`font-display italic font-bold text-white opacity-[0.14] leading-none ${compact ? 'text-[26px]' : 'text-[44px]'}`}>
             {card.teamAbbr}
           </span>
         )}
@@ -113,8 +124,7 @@ function CardPhoto({ card, gold, compact }: { card: UtcgCard; gold: boolean; com
         />
       ) : (
         <span
-          className={`absolute inset-0 flex items-center justify-center font-display italic font-bold ${gold ? '' : 'text-white/90'}`}
-          style={{ fontSize: compact ? 13 : 22, color: gold ? 'rgba(36,26,4,0.55)' : undefined }}
+          className={`absolute inset-0 flex items-center justify-center font-display italic font-bold ${compact ? 'text-[13px]' : 'text-[22px]'} ${gold ? 'text-[#241A04]/[0.55]' : 'text-white/90'}`}
         >
           {initialsOf(card.name)}
         </span>
@@ -144,8 +154,7 @@ function StatBar({ card }: { card: UtcgCard }) {
   ];
   return (
     <div
-      className="absolute inset-x-0 bottom-0 flex items-center justify-around px-1.5 py-1 backdrop-blur-[2px]"
-      style={{ background: 'linear-gradient(to top, rgba(10,12,16,0.82), rgba(10,12,16,0.62) 60%, transparent)' }}
+      className="absolute inset-x-0 bottom-0 flex items-center justify-around px-1.5 py-1 backdrop-blur-[2px] bg-[linear-gradient(to_top,rgba(10,12,16,0.82),rgba(10,12,16,0.62)_60%,transparent)]"
       aria-hidden="true"
     >
       {stats.map((s) => (
@@ -161,6 +170,10 @@ function StatBar({ card }: { card: UtcgCard }) {
 interface CardTileProps {
   card: UtcgCard;
   copies?: number;
+  /** Of `copies`, how many are reward grants (untradeable — playable, but
+   *  can't be listed/offered/quicksold). Shows a small lock glyph + count
+   *  next to the copies badge when > 0. */
+  untradeable?: number;
   onClick?: () => void;
   selected?: boolean;
   /** Disable interaction (e.g. already placed elsewhere in the squad). */
@@ -183,7 +196,7 @@ interface CardTileProps {
   flippable?: boolean;
 }
 
-export function CardTile({ card, copies, onClick, selected = false, disabled = false, className = '', offRole = false, compact = false, flippable = false }: CardTileProps) {
+export function CardTile({ card, copies, untradeable = 0, onClick, selected = false, disabled = false, className = '', offRole = false, compact = false, flippable = false }: CardTileProps) {
   const [flipped, setFlipped] = useState(false);
   const interactive = typeof onClick === 'function';
   const rarity = RARITY[card.tier];
@@ -192,13 +205,25 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
   const inner = (
     <div className={['flex flex-col w-full', compact ? 'gap-1 p-1.5' : 'gap-1.5 p-2.5'].join(' ')}>
       <div className="flex items-start justify-between gap-1">
-        <p className={`font-display italic font-bold tabular leading-none ${compact ? 'text-base' : 'text-xl'}`} style={{ color: gold ? GOLD_TEXT : undefined }}>
-          <span className={gold ? '' : 'text-ink'}>{card.playerScore.toFixed(0)}</span>
-        </p>
-        <span className="w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0" style={tierDotStyle(card.tier)} aria-hidden="true" />
+        <div className="flex items-baseline gap-1 min-w-0">
+          <p className={`font-display italic font-bold tabular leading-none ${compact ? 'text-base' : 'text-xl'} ${gold ? 'text-[#241A04]' : ''}`}>
+            <span className={gold ? '' : 'text-ink'}>{card.playerScore.toFixed(0)}</span>
+          </p>
+          {!compact && !!card.boost && (
+            <span
+              className={`text-[7.5px] font-extrabold tabular px-1 py-0.5 rounded-full leading-none flex-shrink-0 ${gold ? 'bg-black/[0.15] text-[#241A04]' : ''}`}
+              title={card.boostLabels?.join(', ')}
+            >
+              <span className={gold ? '' : 'bg-accent/15 text-accent rounded-full px-0 py-0'}>
+                +{card.boost}{card.boostLabels?.[0] ? ` · ${card.boostLabels[0]}` : ''}
+              </span>
+            </span>
+          )}
+        </div>
+        <span className="w-1.5 h-1.5 rounded-full mt-0.5 flex-shrink-0 bg-[color:var(--dot)]" style={tierDotStyle(card.tier)} aria-hidden="true" />
       </div>
       {!compact && (
-        <p className={`text-[7px] font-bold tracking-[0.1em] uppercase leading-none -mt-1 ${gold ? '' : 'text-faint'}`} style={{ color: gold ? 'rgba(36,26,4,0.7)' : undefined }}>
+        <p className={`text-[7px] font-bold tracking-[0.1em] uppercase leading-none -mt-1 ${gold ? 'text-[#241A04]/70' : 'text-faint'}`}>
           {positionLabel(card.position)}
         </p>
       )}
@@ -209,32 +234,43 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
           taller (4:3) in grid/picker contexts. */}
       <CardPhoto card={card} gold={gold} compact={compact} />
 
-      <p className={`font-display italic font-bold leading-none truncate pr-[0.14em] ${compact ? 'text-[12px]' : 'text-[15px]'}`} style={{ color: gold ? GOLD_TEXT : undefined }}>
+      <p className={`font-display italic font-bold leading-none truncate pr-[0.14em] ${compact ? 'text-[12px]' : 'text-[15px]'} ${gold ? 'text-[#241A04]' : ''}`}>
         <span className={gold ? '' : 'text-ink'}>{card.name}</span>
       </p>
       {!compact && (
         <div className="flex items-center justify-between gap-1">
           <span
-            className="text-[6.5px] font-bold tracking-[0.08em] uppercase truncate leading-none"
-            style={{ color: gold ? 'rgba(36,26,4,0.7)' : undefined }}
+            className={`text-[6.5px] font-bold tracking-[0.08em] uppercase truncate leading-none ${gold ? 'text-[#241A04]/70' : ''}`}
           >
             <span className={gold ? '' : 'text-faint'}>{card.teamAbbr} · {card.year}</span>
           </span>
-          {copies !== undefined && copies > 1 && (
-            <span
-              className="text-[7px] font-bold tabular px-1 py-0.5 rounded-full leading-none flex-shrink-0"
-              style={{ background: gold ? 'rgba(0,0,0,0.15)' : undefined, color: gold ? GOLD_TEXT : undefined }}
-            >
-              <span className={gold ? '' : 'bg-ink/5 text-faint rounded-full px-0 py-0'}>×{copies}</span>
-            </span>
-          )}
+          <div className="flex items-center gap-1 flex-shrink-0">
+            {untradeable > 0 && (
+              <span
+                className={`inline-flex items-center gap-0.5 text-[6.5px] font-bold tabular px-1 py-0.5 rounded-full leading-none ${gold ? 'bg-black/[0.15] text-[#241A04]' : ''}`}
+                title={`${untradeable} reward cop${untradeable === 1 ? 'y' : 'ies'} — untradeable`}
+              >
+                <span className={gold ? 'inline-flex items-center gap-0.5' : 'inline-flex items-center gap-0.5 bg-ink/5 text-faint rounded-full px-0 py-0'}>
+                  <LockGlyph />
+                  {untradeable}
+                </span>
+              </span>
+            )}
+            {copies !== undefined && copies > 1 && (
+              <span
+                className={`text-[7px] font-bold tabular px-1 py-0.5 rounded-full leading-none ${gold ? 'bg-black/[0.15] text-[#241A04]' : ''}`}
+              >
+                <span className={gold ? '' : 'bg-ink/5 text-faint rounded-full px-0 py-0'}>×{copies}</span>
+              </span>
+            )}
+          </div>
         </div>
       )}
 
       {/* Rarity bar */}
       <span
-        className={`w-full rounded-full flex-shrink-0 ${compact ? 'h-[3px]' : 'h-1 mt-0.5'}`}
-        style={{ background: gold ? GOLD_BAR : rarity.c }}
+        className={`w-full rounded-full flex-shrink-0 ${compact ? 'h-[3px]' : 'h-1 mt-0.5'} ${gold ? 'bg-[linear-gradient(90deg,#4A3606,#8a6a1c)]' : 'bg-[color:var(--rarity)]'}`}
+        style={gold ? undefined : ({ '--rarity': rarity.c } as React.CSSProperties)}
         aria-hidden="true"
       />
 
@@ -246,24 +282,27 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
     </div>
   );
 
+  // Rarity ring + top glow — inset box-shadow so it never fights the app's
+  // shadow-only elevation rule (no literal border). Greatest gets the full
+  // gold face instead (rendered as a background layer beneath the content).
+  // Carried as a CSS var since the ring color is per-tier runtime data.
+  const rarityShadowClass = gold ? '' : '[box-shadow:var(--ring)]';
+  const rarityShadow: React.CSSProperties | undefined = gold
+    ? undefined
+    : ({ '--ring': `inset 0 0 0 1.5px ${rarity.c}, inset 0 40px 46px -40px ${rarity.c}66` } as React.CSSProperties);
+
   const sharedClasses = [
     'utcg-card-face relative rounded-card text-left w-full overflow-hidden',
     gold ? '' : 'bg-surface',
     'shadow-card motion-safe:transition-shadow motion-safe:duration-150',
+    rarityShadowClass,
     offRole ? 'opacity-50' : '',
     selected ? 'ring-2 ring-accent shadow-lift' : '',
     className,
   ].join(' ');
 
-  // Rarity ring + top glow — inset box-shadow so it never fights the app's
-  // shadow-only elevation rule (no literal border). Greatest gets the full
-  // gold face instead (rendered as a background layer beneath the content).
-  const rarityShadow: React.CSSProperties = gold
-    ? {}
-    : { boxShadow: `inset 0 0 0 1.5px ${rarity.c}, inset 0 40px 46px -40px ${rarity.c}66` };
-
   const goldFace = gold ? (
-    <span className="absolute inset-0 pointer-events-none" style={{ background: GOLD_FACE }} aria-hidden="true" />
+    <span className="absolute inset-0 pointer-events-none bg-[linear-gradient(155deg,#F8DA80,#E9B23B_45%,#F5C451_70%,#C98F1F)]" aria-hidden="true" />
   ) : null;
 
   // ── Flippable wrapper ───────────────────────────────────────────────────
@@ -274,10 +313,9 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
   // it just cross-fades instead of rotating).
   if (flippable) {
     return (
-      <div className={['relative w-full', className].join(' ')} style={{ perspective: 1000 }}>
+      <div className={['relative w-full [perspective:1000px]', className].join(' ')}>
         <div
-          className="relative w-full motion-safe:transition-transform motion-safe:duration-500 [transform-style:preserve-3d]"
-          style={{ transform: flipped ? 'rotateY(180deg)' : 'rotateY(0deg)' }}
+          className={`relative w-full motion-safe:transition-transform motion-safe:duration-500 [transform-style:preserve-3d] ${flipped ? '[transform:rotateY(180deg)]' : '[transform:rotateY(0deg)]'}`}
         >
           {/* FRONT */}
           <div className="[backface-visibility:hidden]">
@@ -287,7 +325,7 @@ export function CardTile({ card, copies, onClick, selected = false, disabled = f
             </div>
           </div>
           {/* BACK — absolutely positioned over the front, pre-rotated. */}
-          <div className="absolute inset-0 [backface-visibility:hidden]" style={{ transform: 'rotateY(180deg)' }}>
+          <div className="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)]">
             <CardBack card={card} gold={gold} rarityColor={rarity.c} compact={compact} />
           </div>
         </div>
@@ -366,22 +404,20 @@ function CardBack({
   return (
     <div
       className={[
-        'utcg-card-face relative rounded-card w-full h-full overflow-hidden shadow-card',
+        'utcg-card-face relative rounded-card w-full h-full overflow-hidden shadow-card [box-shadow:var(--ring)]',
         gold ? '' : 'bg-surface',
       ].join(' ')}
-      style={{ boxShadow: `inset 0 0 0 1.5px ${rarityColor}` }}
+      style={{ '--ring': `inset 0 0 0 1.5px ${rarityColor}` } as React.CSSProperties}
     >
-      {gold && <span className="absolute inset-0 pointer-events-none" style={{ background: GOLD_FACE }} aria-hidden="true" />}
+      {gold && <span className="absolute inset-0 pointer-events-none bg-[linear-gradient(155deg,#F8DA80,#E9B23B_45%,#F5C451_70%,#C98F1F)]" aria-hidden="true" />}
       <div className={['relative z-10 flex flex-col h-full justify-between', compact ? 'p-1.5 gap-1' : 'p-2.5 gap-1.5'].join(' ')}>
         <p
-          className={['font-display italic font-bold leading-none truncate', compact ? 'text-[12px]' : 'text-[14px]'].join(' ')}
-          style={{ color: gold ? GOLD_TEXT : undefined }}
+          className={['font-display italic font-bold leading-none truncate', compact ? 'text-[12px]' : 'text-[14px]', gold ? 'text-[#241A04]' : ''].join(' ')}
         >
           <span className={gold ? '' : 'text-ink'}>{card.name}</span>
         </p>
         <p
-          className="text-[7px] font-bold tracking-[0.1em] uppercase leading-none"
-          style={{ color: gold ? 'rgba(36,26,4,0.7)' : undefined }}
+          className={`text-[7px] font-bold tracking-[0.1em] uppercase leading-none ${gold ? 'text-[#241A04]/70' : ''}`}
         >
           <span className={gold ? '' : 'text-faint'}>{card.teamAbbr} · {card.year} · {positionLabel(card.position)}</span>
         </p>
@@ -390,14 +426,12 @@ function CardBack({
           {rows.map(([label, value]) => (
             <div key={label} className="flex items-baseline justify-between gap-1">
               <span
-                className={['font-bold tracking-[0.08em] uppercase leading-none', compact ? 'text-[6.5px]' : 'text-[7.5px]'].join(' ')}
-                style={{ color: gold ? 'rgba(36,26,4,0.65)' : undefined }}
+                className={['font-bold tracking-[0.08em] uppercase leading-none', compact ? 'text-[6.5px]' : 'text-[7.5px]', gold ? 'text-[#241A04]/65' : ''].join(' ')}
               >
                 <span className={gold ? '' : 'text-faint'}>{label}</span>
               </span>
               <span
-                className={['font-bold tabular leading-none', compact ? 'text-[11px]' : 'text-[13px]'].join(' ')}
-                style={{ color: gold ? GOLD_TEXT : undefined }}
+                className={['font-bold tabular leading-none', compact ? 'text-[11px]' : 'text-[13px]', gold ? 'text-[#241A04]' : ''].join(' ')}
               >
                 <span className={gold ? '' : 'text-ink'}>{value}</span>
               </span>
@@ -406,8 +440,8 @@ function CardBack({
         </div>
 
         <span
-          className={['w-full rounded-full flex-shrink-0', compact ? 'h-[3px]' : 'h-1'].join(' ')}
-          style={{ background: gold ? GOLD_BAR : rarityColor }}
+          className={['w-full rounded-full flex-shrink-0', compact ? 'h-[3px]' : 'h-1', gold ? 'bg-[linear-gradient(90deg,#4A3606,#8a6a1c)]' : 'bg-[color:var(--rarity)]'].join(' ')}
+          style={gold ? undefined : ({ '--rarity': rarityColor } as React.CSSProperties)}
           aria-hidden="true"
         />
       </div>

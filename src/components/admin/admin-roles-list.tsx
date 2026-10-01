@@ -1,7 +1,6 @@
 'use client';
 
-// Admin Roles list — the user directory with a per-user role selector for beta
-// testing. Search by email / display name / username. Role changes go through
+// Admin Roles list — the user directory with a per-user role selector. Search by email / display name / username. Role changes go through
 // the admin-guarded setUserRole server action (useTransition keeps the row
 // responsive across the action + revalidate round-trip). Mirrors the
 // AdminFeedbackList control pattern.
@@ -13,7 +12,6 @@ import type { AdminUserRow } from '@/lib/admin/roles';
 
 const ROLE_STYLE: Record<UserRole, string> = {
   user: 'bg-ink/5 text-muted',
-  beta: 'bg-accent/15 text-accent',
   admin: 'bg-ink text-bg',
 };
 
@@ -35,7 +33,7 @@ export function AdminRolesList({ users, currentUserId }: { users: AdminUserRow[]
   }, [users, search, roleFilter]);
 
   const roleCounts = useMemo(() => {
-    const c: Record<string, number> = { user: 0, beta: 0, admin: 0 };
+    const c: Record<string, number> = { user: 0, admin: 0 };
     for (const u of users) c[u.role] = (c[u.role] ?? 0) + 1;
     return c;
   }, [users]);

@@ -10,9 +10,11 @@
 // gauntlet of up to 4 matches vs escalating opponents. Each win banks a
 // growing reward (+ a jackpot for 4-0); a loss ends the run but the bank is
 // kept. Server constants mirrored here for display only: entry 150, targets
-// [77,86,93,97], rewards [70,130,300,600], jackpot 500 (see utcg_draft_play).
-// Tuned so a run nets coins ~60-70% of the time long-run (round 3 @ target 93
-// is the wall); rebalanced 2026-07-22 (was 76/83/89/94 + 120/220/380/600).
+// [70,90,94,97], rewards [90,110,140,210], jackpot 250 (see utcg_draft_play).
+// Rebalanced 2026-09-30 so Draft is a coin SINK: a strong drafter gets back
+// ~0.89x entry, a random picker ~0.60x; round 2 @ 90 is the skill wall. Only
+// DRAFT_PAID_RUNS_PER_DAY (packs.ts) runs/UTC day are paid — later runs are practice
+// (no entry, no payout; run.practice).
 
 import { createClient } from '@/lib/supabase/client';
 import type { FormationKey } from './formations';
@@ -25,9 +27,9 @@ function rpcClient(): RpcClient {
 
 // Display-only mirrors of the server constants (utcg_draft_start/_play).
 export const DRAFT_ENTRY_FEE = 150;
-export const DRAFT_TARGETS = [77, 86, 93, 97] as const;
-export const DRAFT_REWARDS = [70, 130, 300, 600] as const;
-export const DRAFT_JACKPOT = 500;
+export const DRAFT_TARGETS = [70, 90, 94, 97] as const;
+export const DRAFT_REWARDS = [90, 110, 140, 210] as const;
+export const DRAFT_JACKPOT = 250;
 export const DRAFT_ROUNDS = 4;
 
 /** One dealt/picked card (server payload — display-ready, no extra fetch). */
@@ -59,6 +61,8 @@ export interface DraftRun {
   round: number;
   bank: number;
   payout: number | null;
+  /** Past the daily paid-run cap: no entry fee was charged and it pays 0. */
+  practice: boolean;
 }
 
 interface RawDraftCard {
@@ -98,6 +102,7 @@ export function mapDraftRun(row: Record<string, unknown>): DraftRun {
     round: Number(row.round),
     bank: Number(row.bank),
     payout: row.payout === null || row.payout === undefined ? null : Number(row.payout),
+    practice: Boolean(row.practice),
   };
 }
 

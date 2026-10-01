@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   description: 'Get help with The Layout — contact, account questions, and common fixes.',
 };
 
-const CONTACT_EMAIL = 'support@thelayout.app';
+const CONTACT_EMAIL = 'info@altiusapps.com';
 
 export default function SupportPage() {
   return (

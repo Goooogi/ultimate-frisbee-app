@@ -1,5 +1,5 @@
 // /fantasy — Fantasy hub. Server Component, public + ISR. Sleeper-style
-// front door: My Leagues → Mini Games → Start a League, with a "+ Play"
+// front door: My Leagues → Start a League, with a "+ Play"
 // menu (create / join) in the header. Replaces the old "pick a game" card
 // grid — game selection now happens inside league creation (Start a League /
 // create-league form), not as the hub's primary landing.
@@ -9,7 +9,6 @@
 import { PageShell } from '@/components/page-shell';
 import { PlayMenu } from '@/components/fantasy/play-menu';
 import { MyLeaguesList } from '@/components/fantasy/my-leagues-list';
-import { MiniGamesTile } from '@/components/fantasy/mini-games-tile';
 import { StartALeagueList } from '@/components/fantasy/start-a-league-list';
 import { hubGames } from '@/lib/fantasy/games';
 import { sortGamesBySoonest } from '@/lib/fantasy/game-dates';
@@ -24,7 +23,6 @@ export default async function FantasyHubPage() {
   return (
     <PageShell title="Fantasy Ultimate" titleSize="compact" controls={<PlayMenu />} hideFooterMobile>
       <MyLeaguesList />
-      <MiniGamesTile />
       <StartALeagueList games={orderedGames} starts={starts} />
     </PageShell>
   );

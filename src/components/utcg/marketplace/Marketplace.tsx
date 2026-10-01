@@ -15,12 +15,13 @@
 // listing had no undo.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { OwnedCard } from '@/lib/utcg/server';
+import type { OwnedCard, MarketAccess } from '@/lib/utcg/server';
 import type { CardTier } from '@/lib/utcg/packs';
-import { TIERS } from '@/lib/utcg/packs';
+import { TIERS, MARKET_UNLOCK } from '@/lib/utcg/packs';
 import { CardTile, tierDotStyle } from '@/components/utcg/card-tile';
 import { CoinGlyph } from '@/components/utcg/coin-glyph';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
+import { MarketUnlockChecklist } from '@/components/utcg/market-unlock';
 import { ConfirmPurchaseModal } from '@/components/utcg/marketplace/ConfirmPurchaseModal';
 import { MakeOfferModal } from '@/components/utcg/marketplace/MakeOfferModal';
 import {
@@ -61,12 +62,14 @@ interface MarketplaceProps {
   owned: OwnedCard[];
   coins: number;
   userId: string | null;
+  marketAccess: MarketAccess | null;
   onCoinsChange: (n: number) => void;
   onMutated: () => void;
 }
 
-export function Marketplace({ owned, coins, userId, onCoinsChange, onMutated }: MarketplaceProps) {
+export function Marketplace({ owned, coins, userId, marketAccess, onCoinsChange, onMutated }: MarketplaceProps) {
   const [subTab, setSubTab] = useState<SubTab>('browse');
+  const locked = marketAccess !== null && !marketAccess.unlocked;
 
   // Shared listings state — Browse fetches every active listing; My Market's
   // "Offers Made" cross-references this same map to show the target card, so
@@ -113,6 +116,17 @@ export function Marketplace({ owned, coins, userId, onCoinsChange, onMutated }: 
 
   return (
     <div className="flex flex-col gap-5">
+      {locked && (
+        <div className="rounded-card bg-surface shadow-card p-4 flex flex-col gap-2.5">
+          <p className="text-[13px] font-bold text-ink font-tight">Market locked</p>
+          <p className="text-[12px] text-muted font-tight">
+            Buying, selling, and offers unlock after {MARKET_UNLOCK.days} days and {MARKET_UNLOCK.games} games on{' '}
+            {MARKET_UNLOCK.playDays} different days. Browsing stays open.
+          </p>
+          <MarketUnlockChecklist access={marketAccess} />
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         <FilterPill active={subTab === 'browse'} onClick={() => setSubTab('browse')} label="Browse" />
         <FilterPill active={subTab === 'my-market'} onClick={() => setSubTab('my-market')} label="My Market" />
@@ -127,6 +141,7 @@ export function Marketplace({ owned, coins, userId, onCoinsChange, onMutated }: 
           coins={coins}
           userId={userId}
           owned={owned}
+          locked={locked}
           onCoinsChange={onCoinsChange}
           onMutated={afterMutation}
         />
@@ -151,6 +166,7 @@ function BrowseTab({
   coins,
   userId,
   owned,
+  locked,
   onCoinsChange,
   onMutated,
 }: {
@@ -161,6 +177,7 @@ function BrowseTab({
   coins: number;
   userId: string | null;
   owned: OwnedCard[];
+  locked: boolean;
   onCoinsChange: (n: number) => void;
   onMutated: () => void;
 }) {
@@ -313,6 +330,7 @@ function BrowseTab({
               listing={listing}
               userId={userId}
               coins={coins}
+              locked={locked}
               buying={buyingId === listing.id}
               buyError={buyErrors.get(listing.id) ?? null}
               onBuy={() => setConfirmingListing(listing)}
@@ -361,6 +379,7 @@ function ListingTile({
   listing,
   userId,
   coins,
+  locked,
   buying,
   buyError,
   onBuy,
@@ -369,6 +388,7 @@ function ListingTile({
   listing: Listing;
   userId: string | null;
   coins: number;
+  locked: boolean;
   buying: boolean;
   buyError: string | null;
   onBuy: () => void;
@@ -397,7 +417,7 @@ function ListingTile({
             <button
               type="button"
               onClick={onBuy}
-              disabled={isMine || buying || !canAffordSell}
+              disabled={isMine || buying || !canAffordSell || locked}
               className={[
                 'inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-full',
                 'text-[10.5px] font-bold tracking-[0.06em] uppercase font-tight',
@@ -413,7 +433,7 @@ function ListingTile({
           <button
             type="button"
             onClick={onMakeOffer}
-            disabled={isMine}
+            disabled={isMine || locked}
             className={[
               'inline-flex items-center justify-center px-3 py-2 rounded-full w-full',
               'text-[10.5px] font-bold tracking-[0.06em] uppercase font-tight',
@@ -425,7 +445,8 @@ function ListingTile({
             Make Offer
           </button>
         )}
-        {!isMine && listing.kind === 'sell' && !canAffordSell && (
+        {!isMine && locked && <p className="text-[10px] text-faint font-tight">Market locked</p>}
+        {!isMine && !locked && listing.kind === 'sell' && !canAffordSell && (
           <p className="text-[10px] text-live font-tight">Not enough coins.</p>
         )}
         {buyError && (
@@ -919,7 +940,7 @@ function ListingsSkeleton() {
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" aria-hidden="true">
       {Array.from({ length: 10 }).map((_, i) => (
-        <div key={i} className="rounded-card bg-ink/5 animate-pulse" style={{ aspectRatio: '3 / 4.6' }} />
+        <div key={i} className="rounded-card bg-ink/5 animate-pulse aspect-[3/4.6]" />
       ))}
     </div>
   );

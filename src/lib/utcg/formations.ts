@@ -102,6 +102,8 @@ export interface SquadScoreResult {
 
 export interface ScoredCard extends ChemCard {
   playerScore: number;
+  /** Active boost (TOTW / Champion / Evolution), mirrored from utcg_eval_lineup. */
+  boost?: number;
 }
 
 /**
@@ -109,7 +111,7 @@ export interface ScoredCard extends ChemCard {
  * produce a simulated season record via the UFA 12-0 win curve.
  */
 export function scoreSquad(cards: ScoredCard[]): SquadScoreResult {
-  const scores = cards.map((c) => c.playerScore);
+  const scores = cards.map((c) => c.playerScore + (c.boost ?? 0));
   const meanScore =
     scores.length > 0 ? scores.reduce((s, x) => s + x, 0) / scores.length : 0;
 

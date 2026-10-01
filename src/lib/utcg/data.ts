@@ -53,6 +53,12 @@ export interface UtcgCard {
   assists: number;
   blocks: number;
   plusMinus: number;
+  /** Active in-game boost on top of playerScore (TOTW / Champion / the
+   *  owner's Evolution) — set only on the owner's hydrated collection.
+   *  Scoring uses playerScore + boost; tiers, quicksell and market limits
+   *  stay on the base playerScore. */
+  boost?: number;
+  boostLabels?: string[];
 }
 
 /** Stable per-card key (matches the ownership PK). */

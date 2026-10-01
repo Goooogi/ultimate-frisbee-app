@@ -47,9 +47,8 @@ export function ChemistryMeter({ total, rating }: ChemistryMeterProps) {
       className={[
         'rounded-card-lg bg-surface shadow-card p-3.5 grid grid-cols-[auto_1fr_auto] gap-x-4 gap-y-2.5 items-center',
         'motion-safe:transition-shadow motion-safe:duration-300',
-        pulse ? 'motion-safe:animate-pulse-once' : '',
+        pulse ? 'motion-safe:animate-pulse-once shadow-[0_0_0_2px_#FF3D00,0_12px_30px_rgba(255,61,0,0.3)]' : '',
       ].join(' ')}
-      style={pulse ? { boxShadow: '0 0 0 2px #FF3D00, 0 12px 30px rgba(255,61,0,0.3)' } : undefined}
     >
       <div>
         <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-faint leading-none">Team Chemistry</p>
@@ -76,9 +75,10 @@ export function ChemistryMeter({ total, rating }: ChemistryMeterProps) {
               key={i}
               className={[
                 'flex-1 h-2 rounded-[3px] motion-safe:transition-[background-color,box-shadow] motion-safe:duration-300',
+                '[transition-delay:var(--delay)]',
                 on ? 'bg-accent shadow-[0_0_8px_rgba(255,61,0,0.5)]' : 'bg-ink/10',
               ].join(' ')}
-              style={{ transitionDelay: `${i * 10}ms` }}
+              style={{ '--delay': `${i * 10}ms` } as React.CSSProperties}
             />
           );
         })}

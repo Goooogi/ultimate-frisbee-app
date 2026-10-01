@@ -14,7 +14,7 @@ export const metadata: Metadata = {
   description: 'How to delete your The Layout account and data, in the app or by request.',
 };
 
-const CONTACT_EMAIL = 'support@thelayout.app';
+const CONTACT_EMAIL = 'info@altiusapps.com';
 
 export default function DeleteAccountPage() {
   return (

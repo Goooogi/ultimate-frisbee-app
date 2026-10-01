@@ -76,6 +76,7 @@ import {
   computeZScores,
   computeRawScore,
   normalizeScore,
+  BAKED_BASELINE,
   COMPLETION_PCT_MIN_COMPLETIONS,
   CALLAHANS_WINSORIZE_MAX,
   type Baseline,
@@ -94,6 +95,19 @@ const BACKFILL_YEARS = [
   // 2020 skipped — COVID season, no games played
   2021, 2022, 2023, 2024, 2025,
 ];
+
+// `--season YYYY` adds ONE season scored against the frozen BAKED_BASELINE
+// (rating.ts) instead of re-baselining every year — existing seasons' scores
+// never move, so owned UTCG cards keep their tiers. `--dry-run` scores without
+// writing; for a season already in the DB it diffs against the stored scores
+// (the check that BAKED_BASELINE still reproduces the table).
+const seasonArgIdx = process.argv.indexOf('--season');
+const SEASON = seasonArgIdx > -1 ? Number(process.argv[seasonArgIdx + 1]) : null;
+const DRY_RUN = process.argv.includes('--dry-run');
+if (SEASON !== null && !Number.isInteger(SEASON)) {
+  console.error('Usage: npx tsx scripts/backfill-twelve-oh.ts [--season YYYY [--dry-run]]');
+  process.exit(1);
+}
 
 /** Minimum games played to include a player-season. */
 const MIN_GAMES_PLAYED = 3;
@@ -225,16 +239,87 @@ interface CollectedSeason {
   raw: UfaPlayerStatRaw;
 }
 
-async function main() {
-  console.log('=== 12-0 Backfill v3 ===');
-  console.log(`Years: ${BACKFILL_YEARS.join(', ')}`);
-  console.log(`Min games played: ${MIN_GAMES_PLAYED}`);
-  console.log(`Completion % threshold: ${COMPLETION_PCT_MIN_COMPLETIONS} completions`);
-  console.log('Pre-2021 seasons: yards z-scores = 0 (no yards data in API)');
-  console.log('All years: drops/throwaways/callahans/pointsPlayed present in API\n');
+/** API season totals → the rating inputs (shared by full + --season runs). */
+function toSeasonStats(raw: UfaPlayerStatRaw): PlayerSeasonStats {
+  return {
+    goals: raw.goals ?? 0,
+    assists: raw.assists ?? 0,
+    blocks: raw.blocks ?? 0,
+    hockeyAssists: raw.hockeyAssists ?? 0,
+    // Pre-2021: yardsThrown/yardsReceived are 0 from the API (no data).
+    // computeZScores detects both==0 and returns zYards* = 0 (neutral)
+    // rather than z-scoring 0 against the 2021+-only baseline mean (~763).
+    yardsThrown: raw.yardsThrown ?? 0,
+    yardsReceived: raw.yardsReceived ?? 0,
+    plusMinus: raw.plusMinus ?? 0,
+    completions: raw.completions ?? 0,
+    completionPercentage: raw.completionPercentage ?? '0',
+    // v3: all present for all years
+    drops: raw.drops ?? 0,
+    throwaways: raw.throwaways ?? 0,
+    callahans: raw.callahans ?? 0,
+    pointsPlayed: raw.pointsPlayed ?? 0,
+  };
+}
 
-  // ── PASS 1: Collect all qualifying player-seasons ──────────────────────────
-  console.log('PASS 1: Fetching rosters from UFA API...');
+/** One twelve_oh_players row (shared by full + --season runs). */
+function toDbRow(
+  c: CollectedSeason,
+  zScores: ReturnType<typeof computeZScores>,
+  playerScore: number,
+) {
+  const completionPctNum = parseFloat(c.raw.completionPercentage);
+  const hasCompletionPct =
+    c.raw.completions >= COMPLETION_PCT_MIN_COMPLETIONS && isFinite(completionPctNum);
+  const huckPctNum = parseFloat(c.raw.huckPercentage as string);
+
+  return {
+    league: 'ufa', // this script owns only the UFA slice of twelve_oh_players
+    player_id: c.raw.playerID,
+    team_slug: c.teamSlug,
+    year: c.year,
+    name: c.raw.name,
+    team_abbr: c.teamAbbr,
+    team_internal_id: c.teamInternalId,
+    games_played: c.raw.gamesPlayed,
+    goals: c.raw.goals ?? 0,
+    assists: c.raw.assists ?? 0,
+    blocks: c.raw.blocks ?? 0,
+    hockey_assists: c.raw.hockeyAssists ?? 0,
+    completions: c.raw.completions ?? 0,
+    completion_pct: hasCompletionPct ? completionPctNum : null,
+    yards_thrown: c.raw.yardsThrown ?? 0,
+    yards_received: c.raw.yardsReceived ?? 0,
+    plus_minus: c.raw.plusMinus ?? 0,
+    hucks_completed: c.raw.hucksCompleted ?? 0,
+    huck_pct: isFinite(huckPctNum) ? huckPctNum : null,
+    turnovers: c.raw.throwaways ?? 0,
+    // v3 additions
+    drops: c.raw.drops ?? 0,
+    callahans: c.raw.callahans ?? 0,
+    points_played: c.raw.pointsPlayed ?? 0,
+    z_goals: zScores.zGoals,
+    z_assists: zScores.zAssists,
+    z_blocks: zScores.zBlocks,
+    z_hockey_assists: zScores.zHockeyAssists,
+    z_yards_thrown: zScores.zYardsThrown,
+    z_yards_received: zScores.zYardsReceived,
+    z_plus_minus: zScores.zPlusMinus,
+    z_completion_pct: zScores.zCompletionPct,
+    z_drops: zScores.zDrops,
+    z_throwaways: zScores.zThrowaways,
+    z_callahans: zScores.zCallahans,
+    z_points_played: zScores.zPointsPlayed,
+    player_score: playerScore,
+    backfill_version: 3,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+/** Fetch every (team, year) roster and keep the ≥ MIN_GAMES_PLAYED seasons. */
+async function collectSeasons(
+  years: number[],
+): Promise<{ collected: CollectedSeason[]; apiCalls: number; teamYearsWithData: number }> {
   const collected: CollectedSeason[] = [];
   let apiCalls = 0;
   let teamYearsWithData = 0;
@@ -243,7 +328,7 @@ async function main() {
   for (const team of allTeams) {
     if (!team.internalID || team.internalID === 0) continue;
 
-    for (const year of BACKFILL_YEARS) {
+    for (const year of years) {
       process.stdout.write(`  ${team.abbr} ${year}... `);
       try {
         const roster = await fetchTeamRoster(team.internalID, year);
@@ -270,6 +355,21 @@ async function main() {
       await sleep(INTER_REQUEST_DELAY_MS);
     }
   }
+
+  return { collected, apiCalls, teamYearsWithData };
+}
+
+async function main() {
+  console.log('=== 12-0 Backfill v3 ===');
+  console.log(`Years: ${BACKFILL_YEARS.join(', ')}`);
+  console.log(`Min games played: ${MIN_GAMES_PLAYED}`);
+  console.log(`Completion % threshold: ${COMPLETION_PCT_MIN_COMPLETIONS} completions`);
+  console.log('Pre-2021 seasons: yards z-scores = 0 (no yards data in API)');
+  console.log('All years: drops/throwaways/callahans/pointsPlayed present in API\n');
+
+  // ── PASS 1: Collect all qualifying player-seasons ──────────────────────────
+  console.log('PASS 1: Fetching rosters from UFA API...');
+  const { collected, apiCalls, teamYearsWithData } = await collectSeasons(BACKFILL_YEARS);
 
   console.log(`\nPass 1 complete: ${collected.length} qualifying player-seasons`);
   console.log(`  from ${apiCalls} API calls across ${teamYearsWithData} team-years with data\n`);
@@ -377,25 +477,7 @@ async function main() {
 
   const rawScores: number[] = [];
   const scored = collected.map((c) => {
-    const stats: PlayerSeasonStats = {
-      goals: c.raw.goals ?? 0,
-      assists: c.raw.assists ?? 0,
-      blocks: c.raw.blocks ?? 0,
-      hockeyAssists: c.raw.hockeyAssists ?? 0,
-      // Pre-2021: yardsThrown/yardsReceived are 0 from the API (no data).
-      // computeZScores detects both==0 and returns zYards* = 0 (neutral)
-      // rather than z-scoring 0 against the 2021+-only baseline mean (~763).
-      yardsThrown: c.raw.yardsThrown ?? 0,
-      yardsReceived: c.raw.yardsReceived ?? 0,
-      plusMinus: c.raw.plusMinus ?? 0,
-      completions: c.raw.completions ?? 0,
-      completionPercentage: c.raw.completionPercentage ?? '0',
-      // v3: all present for all years
-      drops: c.raw.drops ?? 0,
-      throwaways: c.raw.throwaways ?? 0,
-      callahans: c.raw.callahans ?? 0,
-      pointsPlayed: c.raw.pointsPlayed ?? 0,
-    };
+    const stats = toSeasonStats(c.raw);
     const zScores = computeZScores(stats, tempBaseline);
     const rawScore = computeRawScore(zScores);
     rawScores.push(rawScore);
@@ -499,55 +581,9 @@ async function main() {
   const BATCH = 200;
   let upserted = 0;
 
-  const rows = scored.map(({ c, zScores, rawScore }) => {
-    const playerScore = normalizeScore(rawScore, baseline);
-    const completionPctNum = parseFloat(c.raw.completionPercentage);
-    const hasCompletionPct =
-      c.raw.completions >= COMPLETION_PCT_MIN_COMPLETIONS && isFinite(completionPctNum);
-    const huckPctNum = parseFloat(c.raw.huckPercentage as string);
-
-    return {
-      league: 'ufa', // this script owns only the UFA slice of twelve_oh_players
-      player_id: c.raw.playerID,
-      team_slug: c.teamSlug,
-      year: c.year,
-      name: c.raw.name,
-      team_abbr: c.teamAbbr,
-      team_internal_id: c.teamInternalId,
-      games_played: c.raw.gamesPlayed,
-      goals: c.raw.goals ?? 0,
-      assists: c.raw.assists ?? 0,
-      blocks: c.raw.blocks ?? 0,
-      hockey_assists: c.raw.hockeyAssists ?? 0,
-      completions: c.raw.completions ?? 0,
-      completion_pct: hasCompletionPct ? completionPctNum : null,
-      yards_thrown: c.raw.yardsThrown ?? 0,
-      yards_received: c.raw.yardsReceived ?? 0,
-      plus_minus: c.raw.plusMinus ?? 0,
-      hucks_completed: c.raw.hucksCompleted ?? 0,
-      huck_pct: isFinite(huckPctNum) ? huckPctNum : null,
-      turnovers: c.raw.throwaways ?? 0,
-      // v3 additions
-      drops: c.raw.drops ?? 0,
-      callahans: c.raw.callahans ?? 0,
-      points_played: c.raw.pointsPlayed ?? 0,
-      z_goals: zScores.zGoals,
-      z_assists: zScores.zAssists,
-      z_blocks: zScores.zBlocks,
-      z_hockey_assists: zScores.zHockeyAssists,
-      z_yards_thrown: zScores.zYardsThrown,
-      z_yards_received: zScores.zYardsReceived,
-      z_plus_minus: zScores.zPlusMinus,
-      z_completion_pct: zScores.zCompletionPct,
-      z_drops: zScores.zDrops,
-      z_throwaways: zScores.zThrowaways,
-      z_callahans: zScores.zCallahans,
-      z_points_played: zScores.zPointsPlayed,
-      player_score: playerScore,
-      backfill_version: 3,
-      updated_at: new Date().toISOString(),
-    };
-  });
+  const rows = scored.map(({ c, zScores, rawScore }) =>
+    toDbRow(c, zScores, normalizeScore(rawScore, baseline)),
+  );
 
   for (let i = 0; i < rows.length; i += BATCH) {
     const batch = rows.slice(i, i + BATCH);
@@ -816,7 +852,66 @@ async function main() {
   console.log('\nBackfill v3 complete.');
 }
 
-main().catch((err) => {
+/**
+ * Add one season scored against the frozen BAKED_BASELINE. Upserts only that
+ * season's rows; with --dry-run, writes nothing and (if the season is already
+ * stored) reports how closely the scores reproduce.
+ */
+async function runSeason(year: number, dryRun: boolean): Promise<void> {
+  console.log(`=== 12-0 season add: UFA ${year}${dryRun ? ' (dry run)' : ''} ===`);
+  const { collected } = await collectSeasons([year]);
+  console.log(`\n${collected.length} qualifying player-seasons`);
+  if (collected.length === 0) {
+    console.error('No data collected. Check API connectivity / that the season exists.');
+    process.exit(1);
+  }
+
+  const rows = collected.map((c) => {
+    const zScores = computeZScores(toSeasonStats(c.raw), BAKED_BASELINE);
+    return toDbRow(c, zScores, normalizeScore(computeRawScore(zScores), BAKED_BASELINE));
+  });
+
+  const top = [...rows].sort((a, b) => b.player_score - a.player_score).slice(0, 10);
+  console.log('\nTop 10:');
+  for (const r of top) console.log(`  ${r.player_score.toFixed(1).padStart(5)}  ${r.name} (${r.team_abbr})`);
+  const sortedScores = rows.map((r) => r.player_score).sort((a, b) => a - b);
+  console.log(`\nMedian ${percentile(sortedScores, 50).toFixed(1)} · p90 ${percentile(sortedScores, 90).toFixed(1)} · max ${sortedScores[sortedScores.length - 1].toFixed(1)}`);
+
+  if (dryRun) {
+    const { data: stored, error } = await db
+      .from('twelve_oh_players')
+      .select('player_id, team_slug, player_score')
+      .eq('league', 'ufa')
+      .eq('year', year)
+      .limit(5000);
+    if (error) throw error;
+    if ((stored ?? []).length > 0) {
+      const byKey = new Map(stored!.map((r) => [`${r.player_id}|${r.team_slug}`, Number(r.player_score)]));
+      const diffs = rows
+        .filter((r) => byKey.has(`${r.player_id}|${r.team_slug}`))
+        .map((r) => Math.abs(r.player_score - byKey.get(`${r.player_id}|${r.team_slug}`)!));
+      console.log(
+        `\nReproduction vs stored ${year}: ${diffs.length}/${stored!.length} matched, ` +
+        `max |Δ| ${Math.max(...diffs).toFixed(4)}, mean |Δ| ${(diffs.reduce((s, d) => s + d, 0) / diffs.length).toFixed(4)}`,
+      );
+    }
+    console.log('\nDry run — nothing written.');
+    return;
+  }
+
+  for (let i = 0; i < rows.length; i += 200) {
+    const { error } = await db
+      .from('twelve_oh_players')
+      .upsert(rows.slice(i, i + 200), { onConflict: 'league,player_id,team_slug,year' });
+    if (error) {
+      console.error(`Batch ${i} failed:`, error);
+      process.exit(1);
+    }
+  }
+  console.log(`\n${rows.length} rows upserted for UFA ${year}.`);
+}
+
+(SEASON !== null ? runSeason(SEASON, DRY_RUN) : main()).catch((err) => {
   console.error('Backfill failed:', err);
   process.exit(1);
 });

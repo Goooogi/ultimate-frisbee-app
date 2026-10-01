@@ -94,8 +94,7 @@ export function DraftPick({ run, headshots, onPick, onCashOut, picking, error }:
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col overflow-y-auto"
-      style={{ background: '#0E1622' }}
+      className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[#0E1622]"
     >
       <div className="flex-1 flex flex-col px-4 sm:px-6 pt-7 pb-4 max-w-2xl mx-auto w-full">
         {/* Header */}
@@ -337,6 +336,7 @@ export function CashOutConfirm({
   onConfirm,
   onCancel,
   duringDraft = false,
+  practice = false,
 }: {
   bank: number;
   onConfirm: () => void;
@@ -344,6 +344,8 @@ export function CashOutConfirm({
   /** True when cashing out mid-draft (before any gauntlet wins) — the copy
    *  changes since there may be nothing banked yet. */
   duringDraft?: boolean;
+  /** Past the daily paid-run cap — cashing out banks nothing real. */
+  practice?: boolean;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -360,8 +362,7 @@ export function CashOutConfirm({
         role="alertdialog"
         aria-modal="true"
         aria-label="Confirm cash out"
-        className="relative z-10 w-full sm:max-w-sm rounded-t-card-lg sm:rounded-card-lg p-6 flex flex-col gap-4"
-        style={{ background: '#161B22' }}
+        className="relative z-10 w-full sm:max-w-sm rounded-t-card-lg sm:rounded-card-lg p-6 flex flex-col gap-4 bg-[#161B22]"
       >
         <h3 className="font-display italic text-2xl font-bold text-white leading-tight">
           Cash out now?
@@ -369,7 +370,9 @@ export function CashOutConfirm({
         <p className="text-[13px] text-white/60 leading-relaxed">
           {duringDraft
             ? 'Ending the draft now forfeits your entry fee and any cards you’ve picked — they never leave the draft. This can’t be undone.'
-            : `Ending the run now banks your ${bank.toLocaleString()} coins and ends the gauntlet. This can’t be undone.`}
+            : practice
+              ? `This is a practice run — ending it now banks nothing (would’ve been ${bank.toLocaleString()} coins). This can’t be undone.`
+              : `Ending the run now banks your ${bank.toLocaleString()} coins and ends the gauntlet. This can’t be undone.`}
         </p>
         <div className="flex gap-3 mt-2">
           <button

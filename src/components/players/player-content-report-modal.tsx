@@ -88,7 +88,7 @@ export function PlayerContentReportModal({
 
   if (!mounted || loading) return null;
 
-  const mailtoHref = `mailto:support@thelayout.app?subject=${encodeURIComponent(
+  const mailtoHref = `mailto:info@altiusapps.com?subject=${encodeURIComponent(
     `Report content (${contentId})`,
   )}`;
 

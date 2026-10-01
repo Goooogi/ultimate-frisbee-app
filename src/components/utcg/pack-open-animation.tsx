@@ -25,9 +25,9 @@ import { CoinGlyph } from '@/components/utcg/coin-glyph';
 type Stage = 'pack' | 'tear' | 'reveal' | 'summary';
 type CardPhase = 'facedown' | 'flipping' | 'revealed';
 
-// Dark reveal-stage backdrop — matches the app's existing hero-slide dark
-// base (see redesign-v2-style-guide.md's Hero Carousel section).
-const STAGE_DARK = '#0E1622';
+// Dark reveal-stage backdrop (#0E1622, used throughout below) — matches the
+// app's existing hero-slide dark base (see redesign-v2-style-guide.md's Hero
+// Carousel section).
 
 // Per-index reveal timing, from the mock (ANT = anticipation hold before the
 // flip starts, FLIP = flip duration, DIM = background dim opacity once
@@ -71,13 +71,16 @@ const CLOSED_PACK_BG: Record<PackKind, string> = {
   platinum: 'linear-gradient(160deg,#8fa2b8 0%,#4a5a70 30%,#b9c7d8 55%,#5c6f88 78%,#dfe8f2 100%)',
 };
 
-const CRIMP_MASK = 'repeating-linear-gradient(90deg, #000 0 3px, transparent 3px 7px)';
 function Crimp({ position }: { position: 'top' | 'bottom' }) {
   return (
     <span
       aria-hidden="true"
-      className={['absolute inset-x-0 h-4 z-20 pointer-events-none bg-white/10', position === 'top' ? 'top-0' : 'bottom-0'].join(' ')}
-      style={{ WebkitMaskImage: CRIMP_MASK, maskImage: CRIMP_MASK }}
+      className={[
+        'absolute inset-x-0 h-4 z-20 pointer-events-none bg-white/10',
+        '[mask-image:repeating-linear-gradient(90deg,#000_0_3px,transparent_3px_7px)]',
+        '[-webkit-mask-image:repeating-linear-gradient(90deg,#000_0_3px,transparent_3px_7px)]',
+        position === 'top' ? 'top-0' : 'bottom-0',
+      ].join(' ')}
     />
   );
 }
@@ -86,34 +89,32 @@ function ClosedPack({ packKind, reducedMotion, tearing }: { packKind: PackKind; 
   return (
     <div
       className={[
-        'relative rounded-card-lg overflow-hidden shadow-hero',
+        'relative w-[250px] h-[356px] rounded-card-lg overflow-hidden shadow-hero',
         !tearing && !reducedMotion ? 'motion-safe:animate-pack-breathe' : '',
         tearing ? 'motion-safe:animate-pack-tear-scale' : '',
       ].join(' ')}
-      style={{ width: 250, height: 356 }}
     >
       <Crimp position="top" />
-      <div className="absolute inset-0" style={{ background: CLOSED_PACK_BG[packKind] }} aria-hidden="true" />
+      <div
+        className="absolute inset-0 bg-[image:var(--foil)]"
+        style={{ '--foil': CLOSED_PACK_BG[packKind] } as React.CSSProperties}
+        aria-hidden="true"
+      />
       <span
         aria-hidden="true"
-        className="absolute inset-0 mix-blend-screen"
-        style={{
-          background:
-            'linear-gradient(115deg, rgba(42,167,155,0.10) 8%, transparent 32%, rgba(144,97,249,0.09) 58%, transparent 80%, rgba(255,61,0,0.08))',
-        }}
+        className="absolute inset-0 mix-blend-screen bg-[image:linear-gradient(115deg,rgba(42,167,155,0.10)_8%,transparent_32%,rgba(144,97,249,0.09)_58%,transparent_80%,rgba(255,61,0,0.08))]"
       />
       {!reducedMotion && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep"
-          style={{ background: 'linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.4) 50%, transparent 60%)' }}
+          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep bg-[image:linear-gradient(115deg,transparent_40%,rgba(255,255,255,0.4)_50%,transparent_60%)]"
         />
       )}
       {tearing && <span aria-hidden="true" className="absolute inset-0 bg-white motion-safe:animate-flash-white" />}
 
       <div className="relative z-10 flex flex-col items-center justify-center gap-1.5 h-full text-center">
         <span className="font-display italic text-6xl text-white leading-[0.9] drop-shadow-[0_2px_6px_rgba(0,0,0,0.5)]">UTCG</span>
-        <span className="h-[3px] w-13 bg-accent my-1" style={{ width: 52 }} aria-hidden="true" />
+        <span className="h-[3px] w-[52px] bg-accent my-1" aria-hidden="true" />
         <span className="text-[10px] font-semibold tracking-[0.26em] uppercase text-white/60">{PACKS[packKind].name} · Series 01</span>
       </div>
       <Crimp position="bottom" />
@@ -138,8 +139,8 @@ function TearParticles() {
       {particles.map((p, i) => (
         <span
           key={i}
-          className="absolute rounded-full motion-safe:animate-particle-burst"
-          style={{ width: p.size, height: p.size, background: p.color, boxShadow: `0 0 8px 1px ${p.color}`, animationDelay: p.delay, '--particle-end': p.end } as React.CSSProperties}
+          className="absolute rounded-full motion-safe:animate-particle-burst w-[var(--size)] h-[var(--size)] bg-[color:var(--c)] [box-shadow:0_0_8px_1px_var(--c)] [animation-delay:var(--delay)]"
+          style={{ '--size': `${p.size}px`, '--c': p.color, '--delay': p.delay, '--particle-end': p.end } as React.CSSProperties}
         />
       ))}
     </div>
@@ -153,15 +154,9 @@ function FacedownCard() {
     <div className="relative w-full h-full rounded-card-lg flex items-center justify-center overflow-hidden bg-[#141412]">
       <span
         aria-hidden="true"
-        className="absolute inset-0 opacity-[0.14]"
-        style={{
-          backgroundImage:
-            'radial-gradient(circle, transparent 0, transparent 5px, rgba(255,255,255,0.9) 5px, rgba(255,255,255,0.9) 6.5px, transparent 6.5px)',
-          backgroundSize: '34px 34px',
-          backgroundPosition: '0 0, 17px 17px',
-        }}
+        className="absolute inset-0 opacity-[0.14] [background-image:radial-gradient(circle,transparent_0,transparent_5px,rgba(255,255,255,0.9)_5px,rgba(255,255,255,0.9)_6.5px,transparent_6.5px)] [background-size:34px_34px] [background-position:0_0,17px_17px]"
       />
-      <span aria-hidden="true" className="absolute inset-3 rounded-card pointer-events-none" style={{ boxShadow: 'inset 0 0 0 1px #2a2a26' }} />
+      <span aria-hidden="true" className="absolute inset-3 rounded-card pointer-events-none shadow-[inset_0_0_0_1px_#2a2a26]" />
       <div className="relative z-10 flex flex-col items-center justify-center gap-2">
         <span className="font-display italic text-5xl text-white leading-none">UTCG</span>
         <span className="text-[8px] font-semibold tracking-[0.3em] uppercase text-white/45">The Layout · Trading Card Game</span>
@@ -192,12 +187,15 @@ function RevealPhoto({ pull, headshotUrl, gold, fill = true }: { pull: PackPull;
 
   return (
     <div
-      className={['relative w-full my-3.5 rounded-card overflow-hidden', fill ? 'flex-1 min-h-0' : 'flex-shrink-0'].join(' ')}
-      style={{ background: teamColors.primary, aspectRatio: fill ? undefined : '4 / 3' }}
+      className={[
+        'relative w-full my-3.5 rounded-card overflow-hidden bg-[color:var(--team-primary)]',
+        fill ? 'flex-1 min-h-0' : 'flex-shrink-0 aspect-[4/3]',
+      ].join(' ')}
+      style={{ '--team-primary': teamColors.primary } as React.CSSProperties}
     >
       <span
-        className="absolute inset-0"
-        style={{ background: `linear-gradient(155deg, ${teamColors.primary} 0%, ${teamColors.accent}40 100%)` }}
+        className="absolute inset-0 bg-[image:var(--team-wash)]"
+        style={{ '--team-wash': `linear-gradient(155deg, ${teamColors.primary} 0%, ${teamColors.accent}40 100%)` } as React.CSSProperties}
         aria-hidden="true"
       />
       {teamColors.logo && (
@@ -208,7 +206,7 @@ function RevealPhoto({ pull, headshotUrl, gold, fill = true }: { pull: PackPull;
       )}
       {!showPhoto && !teamColors.logo && (
         <span className="absolute inset-0 flex items-center justify-center pointer-events-none" aria-hidden="true">
-          <span className="font-display italic font-bold text-white opacity-[0.14] leading-none" style={{ fontSize: 90 }}>
+          <span className="font-display italic font-bold text-white opacity-[0.14] leading-none text-[90px]">
             {pull.teamAbbr}
           </span>
         </span>
@@ -219,8 +217,7 @@ function RevealPhoto({ pull, headshotUrl, gold, fill = true }: { pull: PackPull;
         <img src={headshotUrl!} alt="" className="absolute inset-0 w-full h-full object-cover object-[center_22%]" onError={() => setFailed(true)} />
       ) : (
         <span
-          className="absolute inset-0 flex items-center justify-center font-display italic font-bold text-white/90"
-          style={{ fontSize: 48, color: gold ? 'rgba(36,26,4,0.55)' : undefined }}
+          className={`absolute inset-0 flex items-center justify-center font-display italic font-bold text-[48px] ${gold ? 'text-[#241A04]/[0.55]' : 'text-white/90'}`}
         >
           {initialsOf(pull.name)}
         </span>
@@ -233,56 +230,61 @@ function CardFront({ pull, headshotUrl }: { pull: PackPull; headshotUrl: string 
   const tier: CardTier = tierFromRank(pull.tierRank);
   const rarity = RARITY[tier];
   const gold = tier === 'greatest';
-  const value = pull.isNew ? null : quicksellValue(pull.playerScore);
+  const value = pull.isNew || pull.untradeable ? null : quicksellValue(pull.playerScore);
 
   return (
     <div
-      className="relative w-full h-full flex flex-col p-5 overflow-hidden rounded-card-lg"
-      style={{
-        background: gold ? GOLD_FACE : '#141412',
-        boxShadow: gold ? undefined : `inset 0 0 0 1.5px ${rarity.c}, inset 0 60px 70px -55px ${rarity.c}66`,
-      }}
+      className={[
+        'relative w-full h-full flex flex-col p-5 overflow-hidden rounded-card-lg',
+        gold ? 'bg-[image:var(--face)]' : 'bg-[#141412] [box-shadow:var(--ring)]',
+      ].join(' ')}
+      style={
+        gold
+          ? ({ '--face': GOLD_FACE } as React.CSSProperties)
+          : ({ '--ring': `inset 0 0 0 1.5px ${rarity.c}, inset 0 60px 70px -55px ${rarity.c}66` } as React.CSSProperties)
+      }
     >
       <div className="flex items-start justify-between">
         <div className="leading-none">
-          <p className="font-display italic font-bold text-6xl leading-[0.85]" style={{ color: gold ? GOLD_TEXT : '#F4F2EC' }}>
+          <p className={`font-display italic font-bold text-6xl leading-[0.85] ${gold ? 'text-[#241A04]' : 'text-[#F4F2EC]'}`}>
             {pull.playerScore.toFixed(0)}
           </p>
-          <p className="text-[10px] font-bold tracking-[0.14em] uppercase mt-2 whitespace-nowrap" style={{ color: gold ? '#6b5314' : '#8a8a82' }}>
+          <p className={`text-[10px] font-bold tracking-[0.14em] uppercase mt-2 whitespace-nowrap ${gold ? 'text-[#6b5314]' : 'text-[#8a8a82]'}`}>
             {pull.teamAbbr} · {pull.year}
           </p>
         </div>
         <span
-          className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.1em] mt-1.5"
-          style={{ color: gold ? GOLD_TEXT : rarity.c }}
+          className={`inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.1em] mt-1.5 ${gold ? 'text-[#241A04]' : 'text-[color:var(--rarity)]'}`}
+          style={!gold ? ({ '--rarity': rarity.c } as React.CSSProperties) : undefined}
         >
-          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={tierDotStyle(tier)} />
+          <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-[color:var(--dot)]" style={tierDotStyle(tier)} />
           {rarity.label}
         </span>
       </div>
 
       <RevealPhoto pull={pull} headshotUrl={headshotUrl} gold={gold} />
 
-      <p className="font-display italic font-bold text-4xl leading-[0.95] truncate pr-[0.14em]" style={{ color: gold ? GOLD_TEXT : '#F4F2EC' }}>
+      <p className={`font-display italic font-bold text-4xl leading-[0.95] truncate pr-[0.14em] ${gold ? 'text-[#241A04]' : 'text-[#F4F2EC]'}`}>
         {pull.name}
       </p>
-      <span className="h-1 rounded-full mt-3" style={{ background: gold ? 'linear-gradient(90deg,#4A3606,#8a6a1c)' : rarity.c }} aria-hidden="true" />
+      <span
+        className={`h-1 rounded-full mt-3 ${gold ? 'bg-[linear-gradient(90deg,#4A3606,#8a6a1c)]' : 'bg-[color:var(--rarity)]'}`}
+        style={gold ? undefined : ({ '--rarity': rarity.c } as React.CSSProperties)}
+        aria-hidden="true"
+      />
 
-      {/* Chip — New or dupe-value. Mock anchors this at bottom:78px (a ribbon
-          above the name/bar block), NOT top-right — top-right collided with
-          and truncated the rarity label there. */}
+      {/* Chip — New, Reward (untradeable), or dupe-value. Mock anchors this at
+          bottom:78px (a ribbon above the name/bar block), NOT top-right —
+          top-right collided with and truncated the rarity label there. */}
       <span
         className={[
           'absolute bottom-[74px] -right-1.5 text-[10px] font-extrabold tracking-[0.1em] px-3.5 py-1.5 rounded-l-md',
-          pull.isNew ? (gold ? '' : 'bg-accent text-white') : gold ? '' : 'bg-white/10 text-white/75',
+          pull.isNew || pull.untradeable
+            ? gold ? 'bg-[#241A04] text-[#F5C451]' : 'bg-accent text-white'
+            : gold ? 'bg-[#241A04]/20 text-[#241A04]' : 'bg-white/10 text-white/75',
         ].join(' ')}
-        style={
-          pull.isNew
-            ? gold ? { background: GOLD_TEXT, color: rarity.c } : undefined
-            : gold ? { background: 'rgba(36,26,4,0.2)', color: GOLD_TEXT } : undefined
-        }
       >
-        {pull.isNew ? 'New' : (
+        {pull.isNew ? 'New' : pull.untradeable ? 'Reward' : (
           <span className="inline-flex items-center gap-1 tabular">
             <CoinGlyph size={11} />+{value}
           </span>
@@ -292,8 +294,7 @@ function CardFront({ pull, headshotUrl }: { pull: PackPull; headshotUrl: string 
       {gold && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep mix-blend-overlay"
-          style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent)' }}
+          className="absolute inset-0 -translate-x-full motion-safe:animate-foil-sweep mix-blend-overlay bg-[image:linear-gradient(90deg,transparent,rgba(255,255,255,0.55),transparent)]"
         />
       )}
     </div>
@@ -314,12 +315,12 @@ function RaySweep({ jackpot }: { jackpot: boolean }) {
   return (
     <div className="absolute -inset-[45%] pointer-events-none overflow-hidden motion-safe:animate-ray-spin" aria-hidden="true">
       <div
-        className="w-full h-full"
-        style={{
-          background: `repeating-conic-gradient(from 0deg at 50% 50%, rgba(245,196,81,${jackpot ? 0.16 : 0.1}) 0deg 7deg, transparent 7deg 26deg)`,
-          maskImage: 'radial-gradient(circle, #000 0%, transparent 68%)',
-          WebkitMaskImage: 'radial-gradient(circle, #000 0%, transparent 68%)',
-        }}
+        className={[
+          'w-full h-full [mask-image:radial-gradient(circle,#000_0%,transparent_68%)] [-webkit-mask-image:radial-gradient(circle,#000_0%,transparent_68%)]',
+          jackpot
+            ? 'bg-[image:repeating-conic-gradient(from_0deg_at_50%_50%,rgba(245,196,81,0.16)_0deg_7deg,transparent_7deg_26deg)]'
+            : 'bg-[image:repeating-conic-gradient(from_0deg_at_50%_50%,rgba(245,196,81,0.1)_0deg_7deg,transparent_7deg_26deg)]',
+        ].join(' ')}
       />
     </div>
   );
@@ -345,12 +346,12 @@ function PulledCard({
   const teamColors = teamColorsFor(pull.teamSlug);
 
   return (
-    <div className="relative flex flex-col items-center justify-center w-full max-w-[300px] mx-auto" style={{ perspective: 1100 }}>
+    <div className="relative flex flex-col items-center justify-center w-full max-w-[300px] mx-auto [perspective:1100px]">
       {revealed && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 -m-12 rounded-full pointer-events-none motion-safe:animate-fade-in"
-          style={{ background: `radial-gradient(circle, ${teamColors.primary}55, transparent 68%)` }}
+          className="absolute inset-0 -m-12 rounded-full pointer-events-none motion-safe:animate-fade-in bg-[image:var(--glow)]"
+          style={{ '--glow': `radial-gradient(circle, ${teamColors.primary}55, transparent 68%)` } as React.CSSProperties}
         />
       )}
       {revealed && isJackpot && !reducedMotion && <RaySweep jackpot />}
@@ -371,18 +372,17 @@ function PulledCard({
           double-shake. `will-change` + translateZ keep the flip on the GPU. */}
       <div
         className={[
-          'relative w-full rounded-card-lg overflow-hidden',
+          'relative w-full aspect-[3/4] rounded-card-lg overflow-hidden',
           revealed && !reducedMotion ? 'motion-safe:animate-card-flip-in [will-change:transform,opacity] [transform:translateZ(0)]' : '',
         ].join(' ')}
-        style={{ aspectRatio: '3 / 4' }}
       >
         {!revealed ? <FacedownCard /> : <CardFront pull={pull} headshotUrl={headshotUrl} />}
       </div>
 
       {revealed && isJackpot && (
         <div className="text-center mt-6 motion-safe:animate-fade-in">
-          <span className="block font-display italic text-4xl" style={{ color: RARITY.greatest.c }}>All-Time Greatest</span>
-          <span className="block text-[10px] font-bold tracking-[0.3em] uppercase mt-1.5" style={{ color: '#8a7a4a' }}>
+          <span className="block font-display italic text-4xl text-[#F5C451]">All-Time Greatest</span>
+          <span className="block text-[10px] font-bold tracking-[0.3em] uppercase mt-1.5 text-[#8a7a4a]">
             The Jackpot · 1 in 400 packs
           </span>
         </div>
@@ -400,7 +400,11 @@ function EliteDrift() {
   return (
     <div className="absolute -inset-8 pointer-events-none" aria-hidden="true">
       {dots.map((d, i) => (
-        <span key={i} className="absolute rounded-full motion-safe:animate-mote-drift" style={{ top: d.top, left: d.left, width: 3, height: 3, background: '#9061F9', boxShadow: '0 0 8px 2px rgba(144,97,249,0.7)', animationDelay: d.delay }} />
+        <span
+          key={i}
+          className="absolute rounded-full motion-safe:animate-mote-drift w-[3px] h-[3px] bg-[#9061F9] shadow-[0_0_8px_2px_rgba(144,97,249,0.7)] top-[var(--top)] left-[var(--left)] [animation-delay:var(--delay)]"
+          style={{ '--top': d.top, '--left': d.left, '--delay': d.delay } as React.CSSProperties}
+        />
       ))}
     </div>
   );
@@ -415,7 +419,11 @@ function GoldDrift() {
   return (
     <div className="absolute -inset-10 pointer-events-none" aria-hidden="true">
       {dots.map((d, i) => (
-        <span key={i} className="absolute rounded-full motion-safe:animate-mote-drift" style={{ top: d.top, left: d.left, width: 3, height: 3, background: '#F5C451', boxShadow: '0 0 8px 2px rgba(245,196,81,0.7)', animationDelay: d.delay }} />
+        <span
+          key={i}
+          className="absolute rounded-full motion-safe:animate-mote-drift w-[3px] h-[3px] bg-[#F5C451] shadow-[0_0_8px_2px_rgba(245,196,81,0.7)] top-[var(--top)] left-[var(--left)] [animation-delay:var(--delay)]"
+          style={{ '--top': d.top, '--left': d.left, '--delay': d.delay } as React.CSSProperties}
+        />
       ))}
     </div>
   );
@@ -554,7 +562,9 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
   const dupeGroups = useMemo(() => {
     const map = new Map<string, { playerId: string; teamSlug: string; year: number; qty: number; playerScore: number; name: string; teamAbbr: string }>();
     for (const p of pulls) {
-      if (p.isNew) continue;
+      // Reward-pack pulls are untradeable — never offer them for quicksell,
+      // even when they duplicate a card the user already owns.
+      if (p.isNew || p.untradeable) continue;
       const key = `${p.playerId}|${p.teamSlug}|${p.year}`;
       const existing = map.get(key);
       if (existing) existing.qty += 1;
@@ -583,8 +593,7 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
   if (stage === 'pack') {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center px-4 cursor-pointer"
-        style={{ background: STAGE_DARK }}
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center px-4 cursor-pointer bg-[#0E1622]"
         onClick={advance}
         role="button"
         tabIndex={0}
@@ -606,8 +615,7 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
   if (stage === 'tear') {
     return (
       <div
-        className="fixed inset-0 z-50 flex flex-col items-center justify-center px-4 cursor-pointer overflow-hidden"
-        style={{ background: STAGE_DARK }}
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center px-4 cursor-pointer overflow-hidden bg-[#0E1622]"
         onClick={advance}
         role="button"
         tabIndex={0}
@@ -628,8 +636,10 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
 
     return (
       <div
-        className={['fixed inset-0 z-50 flex flex-col cursor-pointer motion-safe:transition-colors motion-safe:duration-300', jackpot && revealed ? 'motion-safe:animate-card-shake' : ''].join(' ')}
-        style={{ background: jackpot && revealed ? '#000000' : STAGE_DARK }}
+        className={[
+          'fixed inset-0 z-50 flex flex-col cursor-pointer motion-safe:transition-colors motion-safe:duration-300',
+          jackpot && revealed ? 'bg-black motion-safe:animate-card-shake' : 'bg-[#0E1622]',
+        ].join(' ')}
         onClick={advance}
         role="button"
         tabIndex={0}
@@ -640,11 +650,15 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
         {tier && (
           <span
             aria-hidden="true"
-            className="absolute inset-0 pointer-events-none motion-safe:transition-[background] motion-safe:duration-400"
-            style={{ background: `radial-gradient(circle at 50% 40%, ${RARITY[tier].c}26, transparent 62%)` }}
+            className="absolute inset-0 pointer-events-none motion-safe:transition-[background] motion-safe:duration-400 bg-[image:var(--tint)]"
+            style={{ '--tint': `radial-gradient(circle at 50% 40%, ${RARITY[tier].c}26, transparent 62%)` } as React.CSSProperties}
           />
         )}
-        <span aria-hidden="true" className="absolute inset-0 bg-black pointer-events-none motion-safe:transition-opacity motion-safe:duration-500" style={{ opacity: dim }} />
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 bg-black pointer-events-none motion-safe:transition-opacity motion-safe:duration-500 [opacity:var(--dim)]"
+          style={{ '--dim': dim } as React.CSSProperties}
+        />
         {jackpot && revealed && !reducedMotion && <RaySweep jackpot />}
 
         <div className="relative z-10 flex items-center justify-between px-6 pt-7">
@@ -686,15 +700,15 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
   // the flow never jarringly cuts from dark to cream. ──
   const bestRarity = bestPull ? RARITY[tierFromRank(bestPull.tierRank)] : null;
   return (
-    <div
-      className="fixed inset-0 z-50 flex flex-col overflow-y-auto motion-safe:animate-fade-in"
-      style={{ background: 'radial-gradient(circle at 50% 18%, rgba(245,196,81,0.14), transparent 55%), #0E1622' }}
-    >
+    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto motion-safe:animate-fade-in bg-[#0E1622] bg-[image:radial-gradient(circle_at_50%_18%,rgba(245,196,81,0.14),transparent_55%)]">
       <div className="max-w-2xl mx-auto w-full px-4 sm:px-6 py-10 flex flex-col items-center gap-6">
         <div className="text-center motion-safe:animate-fade-up">
           {bestIsStarPlus && bestPull && bestRarity ? (
             <>
-              <p className="text-[11px] font-extrabold tracking-[0.3em] uppercase mb-1.5" style={{ color: bestRarity.c }}>
+              <p
+                className="text-[11px] font-extrabold tracking-[0.3em] uppercase mb-1.5 text-[color:var(--rarity)]"
+                style={{ '--rarity': bestRarity.c } as React.CSSProperties}
+              >
                 {tierLabel(tierFromRank(bestPull.tierRank))} Pulled
               </p>
               <h2 className="font-display italic text-3xl sm:text-4xl font-bold text-white leading-[0.95] tracking-[-0.02em]">
@@ -712,11 +726,11 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
         </div>
 
         {bestPull && bestRarity && (
-          <div className="relative flex flex-col items-center motion-safe:animate-fade-up" style={{ animationDelay: '90ms' }}>
+          <div className="relative flex flex-col items-center motion-safe:animate-fade-up [animation-delay:90ms]">
             <span
               aria-hidden="true"
-              className="absolute inset-0 -m-16 rounded-full pointer-events-none"
-              style={{ background: `radial-gradient(circle, ${bestRarity.c}55 0%, transparent 70%)` }}
+              className="absolute inset-0 -m-16 rounded-full pointer-events-none bg-[image:var(--glow)]"
+              style={{ '--glow': `radial-gradient(circle, ${bestRarity.c}55 0%, transparent 70%)` } as React.CSSProperties}
             />
             <div className="relative w-[156px]">
               <SummaryCard pull={bestPull} large headshotUrl={headshotFor(bestPull.playerId)} />
@@ -728,17 +742,18 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
           {pulls
             .filter((p) => p !== bestPull)
             .map((p, i) => (
-              <div key={i} className="motion-safe:animate-fade-up" style={{ animationDelay: `${180 + i * 70}ms` }}>
+              <div
+                key={i}
+                className="motion-safe:animate-fade-up [animation-delay:var(--delay)]"
+                style={{ '--delay': `${180 + i * 70}ms` } as React.CSSProperties}
+              >
                 <SummaryCard pull={p} headshotUrl={headshotFor(p.playerId)} />
               </div>
             ))}
         </div>
 
         {dupeGroups.length > 0 && (
-          <div
-            className="w-full rounded-card p-4 flex items-center justify-between gap-3 flex-wrap"
-            style={{ background: 'rgba(255,255,255,0.06)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)' }}
-          >
+          <div className="w-full rounded-card p-4 flex items-center justify-between gap-3 flex-wrap bg-[rgba(255,255,255,0.06)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
             <div>
               <p className="text-[12.5px] font-bold text-white font-tight">
                 {dupeGroups.reduce((s, d) => s + d.qty, 0)} duplicate{dupeGroups.reduce((s, d) => s + d.qty, 0) === 1 ? '' : 's'}
@@ -769,8 +784,7 @@ export function PackOpenAnimation({ pulls, packKind, onSellDuplicates, selling, 
 
         {sellError && (
           <p
-            className="w-full text-[12px] text-center text-white/70 font-tight rounded-card px-4 py-3"
-            style={{ background: 'rgba(255,255,255,0.06)' }}
+            className="w-full text-[12px] text-center text-white/70 font-tight rounded-card px-4 py-3 bg-[rgba(255,255,255,0.06)]"
             role="alert"
           >
             {sellError}
@@ -807,23 +821,32 @@ function SummaryCard({ pull, large = false, headshotUrl = null }: { pull: PackPu
   if (large) {
     return (
       <div
-        className="flex flex-col gap-2.5 p-4 rounded-card-lg w-full shadow-hero"
-        style={{
-          background: gold ? GOLD_FACE : '#161B22',
-          boxShadow: `inset 0 0 0 1.5px ${gold ? 'transparent' : rarity.c}`,
-        }}
+        className={[
+          'flex flex-col gap-2.5 p-4 rounded-card-lg w-full shadow-hero',
+          gold ? 'bg-[image:var(--face)]' : 'bg-[#161B22] [box-shadow:var(--ring)]',
+        ].join(' ')}
+        style={
+          gold
+            ? ({ '--face': GOLD_FACE } as React.CSSProperties)
+            : ({ '--ring': `inset 0 0 0 1.5px ${rarity.c}` } as React.CSSProperties)
+        }
       >
         <div className="flex items-start justify-between gap-1.5">
           <TeamLogo team={{ abbr: pull.teamAbbr, ...teamColors }} size={22} />
           {pull.isNew ? (
             <span
-              className="text-[9px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none"
-              style={{ background: gold ? GOLD_TEXT : '#FF3D00', color: gold ? rarity.c : '#fff' }}
+              className={`text-[9px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none ${gold ? 'bg-[#241A04] text-[#F5C451]' : 'bg-[#FF3D00] text-white'}`}
             >
               New
             </span>
+          ) : pull.untradeable ? (
+            <span
+              className={`text-[9px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none ${gold ? 'bg-[#241A04] text-[#F5C451]' : 'bg-[rgba(255,255,255,0.14)] text-white'}`}
+            >
+              Reward
+            </span>
           ) : (
-            <span className="text-[9px] font-bold tabular" style={{ color: gold ? '#6b5314' : 'rgba(255,255,255,0.55)' }}>
+            <span className={`text-[9px] font-bold tabular ${gold ? 'text-[#6b5314]' : 'text-[rgba(255,255,255,0.55)]'}`}>
               Dupe
             </span>
           )}
@@ -831,21 +854,29 @@ function SummaryCard({ pull, large = false, headshotUrl = null }: { pull: PackPu
         <div className="flex justify-center py-1">
           <RevealPhoto pull={pull} headshotUrl={headshotUrl} gold={gold} fill={false} />
         </div>
-        <p className="text-[14px] font-tight font-bold leading-tight truncate" style={{ color: gold ? GOLD_TEXT : '#F4F2EC' }}>
+        <p className={`text-[14px] font-tight font-bold leading-tight truncate ${gold ? 'text-[#241A04]' : 'text-[#F4F2EC]'}`}>
           {pull.name}
         </p>
         <div className="flex items-center justify-between">
-          <span className="font-display italic font-bold text-3xl tabular leading-none" style={{ color: gold ? GOLD_TEXT : '#F4F2EC' }}>
+          <span className={`font-display italic font-bold text-3xl tabular leading-none ${gold ? 'text-[#241A04]' : 'text-[#F4F2EC]'}`}>
             {pull.playerScore.toFixed(0)}
           </span>
-          <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.06em]" style={{ color: gold ? GOLD_TEXT : rarity.c }}>
-            <span className="w-1.5 h-1.5 rounded-full" style={tierDotStyle(tier)} />
+          <span
+            className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.06em] ${gold ? 'text-[#241A04]' : 'text-[color:var(--rarity)]'}`}
+            style={!gold ? ({ '--rarity': rarity.c } as React.CSSProperties) : undefined}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--dot)]" style={tierDotStyle(tier)} />
             {rarity.label}
           </span>
         </div>
-        {!pull.isNew && (
-          <span className="text-[11px] font-tight" style={{ color: gold ? '#6b5314' : 'rgba(255,255,255,0.5)' }}>
+        {!pull.isNew && !pull.untradeable && (
+          <span className={`text-[11px] font-tight ${gold ? 'text-[#6b5314]' : 'text-[rgba(255,255,255,0.5)]'}`}>
             Worth {quicksellValue(pull.playerScore)} coins
+          </span>
+        )}
+        {pull.untradeable && (
+          <span className={`text-[11px] font-tight ${gold ? 'text-[#6b5314]' : 'text-[rgba(255,255,255,0.5)]'}`}>
+            Untradeable
           </span>
         )}
       </div>
@@ -854,30 +885,47 @@ function SummaryCard({ pull, large = false, headshotUrl = null }: { pull: PackPu
 
   return (
     <div
-      className="flex flex-col gap-2 p-3 rounded-card"
-      style={{ background: gold ? GOLD_FACE : '#161B22', boxShadow: `inset 0 0 0 1.5px ${gold ? 'transparent' : rarity.c}66` }}
+      className={[
+        'flex flex-col gap-2 p-3 rounded-card',
+        gold ? 'bg-[image:var(--face)]' : 'bg-[#161B22] [box-shadow:var(--ring)]',
+      ].join(' ')}
+      style={
+        gold
+          ? ({ '--face': GOLD_FACE } as React.CSSProperties)
+          : ({ '--ring': `inset 0 0 0 1.5px ${rarity.c}66` } as React.CSSProperties)
+      }
     >
       <div className="flex items-start justify-between gap-1.5">
         <TeamLogo team={{ abbr: pull.teamAbbr, ...teamColors }} size={18} />
         {pull.isNew ? (
           <span
-            className="text-[8px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none"
-            style={{ background: gold ? GOLD_TEXT : '#FF3D00', color: gold ? rarity.c : '#fff' }}
+            className={`text-[8px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none ${gold ? 'bg-[#241A04] text-[#F5C451]' : 'bg-[#FF3D00] text-white'}`}
           >
             New
           </span>
+        ) : pull.untradeable ? (
+          <span
+            className={`text-[8px] font-bold tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full leading-none ${gold ? 'bg-[#241A04] text-[#F5C451]' : 'bg-[rgba(255,255,255,0.14)] text-white'}`}
+          >
+            Reward
+          </span>
         ) : (
-          <span className="text-[8px] font-bold tabular" style={{ color: gold ? '#6b5314' : 'rgba(255,255,255,0.5)' }}>Dupe</span>
+          <span className={`text-[8px] font-bold tabular ${gold ? 'text-[#6b5314]' : 'text-[rgba(255,255,255,0.5)]'}`}>Dupe</span>
         )}
       </div>
-      <p className="text-[11.5px] font-tight font-bold leading-tight truncate" style={{ color: gold ? GOLD_TEXT : '#F4F2EC' }}>{pull.name}</p>
+      <p className={`text-[11.5px] font-tight font-bold leading-tight truncate ${gold ? 'text-[#241A04]' : 'text-[#F4F2EC]'}`}>{pull.name}</p>
       <div className="flex items-center justify-between">
-        <span className="font-display font-bold text-base tabular leading-none" style={{ color: gold ? GOLD_TEXT : '#F4F2EC' }}>{pull.playerScore.toFixed(0)}</span>
-        <span className="w-1.5 h-1.5 rounded-full" style={tierDotStyle(tier)} aria-hidden="true" />
+        <span className={`font-display font-bold text-base tabular leading-none ${gold ? 'text-[#241A04]' : 'text-[#F4F2EC]'}`}>{pull.playerScore.toFixed(0)}</span>
+        <span className="w-1.5 h-1.5 rounded-full bg-[color:var(--dot)]" style={tierDotStyle(tier)} aria-hidden="true" />
       </div>
-      {!pull.isNew && (
-        <span className="text-[9.5px] font-tight" style={{ color: gold ? '#6b5314' : 'rgba(255,255,255,0.5)' }}>
+      {!pull.isNew && !pull.untradeable && (
+        <span className={`text-[9.5px] font-tight ${gold ? 'text-[#6b5314]' : 'text-[rgba(255,255,255,0.5)]'}`}>
           Worth {quicksellValue(pull.playerScore)} coins
+        </span>
+      )}
+      {pull.untradeable && (
+        <span className={`text-[9.5px] font-tight ${gold ? 'text-[#6b5314]' : 'text-[rgba(255,255,255,0.5)]'}`}>
+          Untradeable
         </span>
       )}
     </div>

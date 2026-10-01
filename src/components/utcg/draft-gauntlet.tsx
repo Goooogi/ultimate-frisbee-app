@@ -87,6 +87,7 @@ export function DraftGauntlet({ run, headshots, lastResult, onPlayRound, onCashO
     return (
       <DraftRoundReveal
         result={lastResult}
+        practice={run.practice}
         reducedMotion={reducedMotion}
         onContinue={() => setPhase('idle')}
       />
@@ -94,12 +95,17 @@ export function DraftGauntlet({ run, headshots, lastResult, onPlayRound, onCashO
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto" style={{ background: '#0E1622' }}>
+    <div className="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-[#0E1622]">
       <div className="flex-1 flex flex-col px-4 sm:px-6 pt-6 pb-8 max-w-2xl lg:max-w-4xl mx-auto w-full">
         <div className="flex items-start justify-between gap-3 mb-5">
           <div>
-            <p className="text-[10px] font-bold tracking-[0.24em] uppercase text-white/45">
+            <p className="text-[10px] font-bold tracking-[0.24em] uppercase text-white/45 flex items-center gap-2">
               Draft Gauntlet · {FORMATIONS[run.formation].name}
+              {run.practice && (
+                <span className="inline-flex items-center px-2 py-[3px] rounded-full bg-white/10 text-white/60 text-[9px] font-extrabold tracking-[0.1em] normal-case">
+                  Practice run
+                </span>
+              )}
             </p>
             <h1 className="font-display italic text-2xl sm:text-3xl font-bold text-white leading-[0.95] tracking-[-0.02em] mt-1">
               {phase === 'sim' ? 'Simulating…' : `Round ${run.round + 1} of ${DRAFT_TARGETS.length}`}
@@ -115,6 +121,12 @@ export function DraftGauntlet({ run, headshots, lastResult, onPlayRound, onCashO
           </button>
         </div>
 
+        {run.practice && (
+          <p className="text-[11px] text-white/45 font-tight -mt-3 mb-4">
+            Practice run · no entry fee, no payout. Paid runs reset at 00:00 UTC.
+          </p>
+        )}
+
         {phase === 'sim' ? (
           <SimBeat reducedMotion={reducedMotion} />
         ) : (
@@ -122,7 +134,9 @@ export function DraftGauntlet({ run, headshots, lastResult, onPlayRound, onCashO
             {/* Bank */}
             <div className="rounded-card-lg bg-white/[0.05] p-4 flex items-center justify-between mb-4">
               <div>
-                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/40">Bank</p>
+                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/40">
+                  {run.practice ? 'Bank · not paid' : 'Bank'}
+                </p>
                 <p className="font-display italic font-bold text-3xl text-white tabular leading-none mt-1">
                   {run.bank.toLocaleString()}
                 </p>
@@ -142,8 +156,12 @@ export function DraftGauntlet({ run, headshots, lastResult, onPlayRound, onCashO
                 </p>
               </div>
               <div className="text-right">
-                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/40">Win Pays</p>
-                <p className="font-display italic font-bold text-2xl tabular leading-none mt-1.5" style={{ color: '#F5C451' }}>
+                <p className="text-[9px] font-bold tracking-[0.2em] uppercase text-white/40">
+                  {run.practice ? 'Win Pays · not paid' : 'Win Pays'}
+                </p>
+                <p
+                  className={`font-display italic font-bold text-2xl tabular leading-none mt-1.5 ${run.practice ? 'text-white/40' : 'text-[#F5C451]'}`}
+                >
                   +{DRAFT_REWARDS[run.round].toLocaleString()}
                 </p>
               </div>
@@ -185,6 +203,7 @@ export function DraftGauntlet({ run, headshots, lastResult, onPlayRound, onCashO
       {showCashOutConfirm && (
         <CashOutConfirm
           bank={run.bank}
+          practice={run.practice}
           onConfirm={() => {
             setShowCashOutConfirm(false);
             onCashOut();
@@ -209,9 +228,8 @@ function RewardLadder({ round }: { round: number }) {
             key={i}
             className={[
               'flex-1 rounded-card-sm p-2.5 flex flex-col items-center gap-1 motion-safe:transition-all motion-safe:duration-200',
-              current ? 'bg-accent/20' : done ? 'bg-white/[0.06]' : 'bg-white/[0.03]',
+              current ? 'bg-accent/20 [box-shadow:inset_0_0_0_1.5px_#FF3D00]' : done ? 'bg-white/[0.06]' : 'bg-white/[0.03]',
             ].join(' ')}
-            style={current ? { boxShadow: 'inset 0 0 0 1.5px #FF3D00' } : undefined}
           >
             <span className={`text-[8px] font-bold tracking-[0.1em] uppercase ${current ? 'text-accent' : 'text-white/35'}`}>
               R{i + 1}
@@ -239,8 +257,7 @@ function SimBeat({ reducedMotion }: { reducedMotion: boolean }) {
       {!reducedMotion && (
         <div className="relative w-[120px] h-[120px] flex items-center justify-center motion-safe:animate-orb-spin">
           <span
-            className="w-11 h-11 rounded-full -translate-y-9"
-            style={{ border: '4px solid #FF3D00', borderTopColor: 'transparent', boxShadow: '0 0 20px rgba(255,61,0,0.45), inset 0 0 10px rgba(255,61,0,0.3)' }}
+            className="w-11 h-11 rounded-full -translate-y-9 border-[4px] border-[#FF3D00] border-t-transparent shadow-[0_0_20px_rgba(255,61,0,0.45),inset_0_0_10px_rgba(255,61,0,0.3)]"
           />
         </div>
       )}
@@ -252,11 +269,20 @@ function SimBeat({ reducedMotion }: { reducedMotion: boolean }) {
 
 // ── Round reveal — W or L, slam-in, matching match-result.tsx's language ─
 
-function DraftRoundReveal({ result, reducedMotion, onContinue }: { result: DraftRoundResult; reducedMotion: boolean; onContinue: () => void }) {
+function DraftRoundReveal({
+  result,
+  practice,
+  reducedMotion,
+  onContinue,
+}: {
+  result: DraftRoundResult;
+  practice: boolean;
+  reducedMotion: boolean;
+  onContinue: () => void;
+}) {
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 text-center cursor-pointer"
-      style={{ background: '#0E1622' }}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 text-center cursor-pointer bg-[#0E1622]"
       onClick={onContinue}
       role="button"
       tabIndex={0}
@@ -265,22 +291,15 @@ function DraftRoundReveal({ result, reducedMotion, onContinue }: { result: Draft
     >
       <span
         aria-hidden="true"
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: result.won
-            ? 'radial-gradient(circle at 50% 34%, rgba(255,61,0,0.18), transparent 60%)'
-            : 'radial-gradient(circle at 50% 34%, rgba(255,255,255,0.06), transparent 60%)',
-        }}
+        className={`absolute inset-0 pointer-events-none ${result.won ? 'bg-[radial-gradient(circle_at_50%_34%,rgba(255,61,0,0.18),transparent_60%)]' : 'bg-[radial-gradient(circle_at_50%_34%,rgba(255,255,255,0.06),transparent_60%)]'}`}
       />
       <p
-        className="relative z-10 text-[11px] font-extrabold tracking-[0.32em] uppercase"
-        style={{ color: result.won ? '#FF3D00' : 'rgba(255,255,255,0.5)' }}
+        className={`relative z-10 text-[11px] font-extrabold tracking-[0.32em] uppercase ${result.won ? 'text-[#FF3D00]' : 'text-white/50'}`}
       >
         {result.won ? 'Round Won' : 'Round Lost'}
       </p>
       <p
-        className={`relative z-10 font-display italic font-bold leading-[0.85] text-[88px] sm:text-[110px] mt-2 ${reducedMotion ? '' : 'motion-safe:animate-slam'}`}
-        style={{ color: result.won ? '#FF3D00' : '#F4F2EC', textShadow: result.won ? '0 0 44px rgba(255,61,0,0.55)' : undefined }}
+        className={`relative z-10 font-display italic font-bold leading-[0.85] text-[88px] sm:text-[110px] mt-2 ${reducedMotion ? '' : 'motion-safe:animate-slam'} ${result.won ? 'text-[#FF3D00] [text-shadow:0_0_44px_rgba(255,61,0,0.55)]' : 'text-[#F4F2EC]'}`}
       >
         {result.won ? 'W' : 'L'}
       </p>
@@ -288,8 +307,9 @@ function DraftRoundReveal({ result, reducedMotion, onContinue }: { result: Draft
         Your squad ({Math.round(result.strength)} strength, {result.chem} chem) vs {result.opponentStrength} opponent.
       </p>
       {result.won && (
-        <p className="relative z-10 font-display italic font-bold text-3xl tabular mt-5" style={{ color: '#F5C451' }}>
+        <p className={`relative z-10 font-display italic font-bold text-3xl tabular mt-5 ${practice ? 'text-white/50' : 'text-[#F5C451]'}`}>
           Bank: {result.bank.toLocaleString()}
+          {practice && <span className="block text-[11px] font-tight not-italic font-bold tracking-[0.12em] uppercase mt-1">Practice — not paid</span>}
         </p>
       )}
       <p className="relative z-10 text-[11px] font-bold tracking-[0.2em] uppercase text-white/35 mt-8 motion-safe:animate-cue-pulse">
@@ -333,43 +353,32 @@ function DraftRunComplete({
 }) {
   const perfect = run.round === DRAFT_TARGETS.length && (lastResult?.won ?? false);
   const payout = run.payout ?? run.bank;
-  const coinsUp = useCountUp(payout, perfect ? 1500 : 900, true);
+  const practice = run.practice;
+  // Practice runs pay 0 — count up the bank itself (what was "won" in the
+  // gauntlet) rather than the payout, and label it clearly as not paid.
+  const coinsUp = useCountUp(practice ? run.bank : payout, perfect ? 1500 : 900, true);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6 text-center overflow-hidden"
-      style={{ background: perfect ? '#050504' : '#0E1622' }}
+      className={`fixed inset-0 z-50 flex flex-col items-center justify-center px-6 text-center overflow-hidden ${perfect ? 'bg-[#050504]' : 'bg-[#0E1622]'}`}
     >
       {perfect && !reducedMotion && (
         <div
-          className="absolute -inset-[45%] pointer-events-none motion-safe:animate-ray-spin"
-          style={{
-            background: 'repeating-conic-gradient(from 0deg at 50% 50%, rgba(245,196,81,0.16) 0deg 7deg, transparent 7deg 26deg)',
-            maskImage: 'radial-gradient(circle, #000 0%, transparent 66%)',
-            WebkitMaskImage: 'radial-gradient(circle, #000 0%, transparent 66%)',
-          }}
+          className="absolute -inset-[45%] pointer-events-none motion-safe:animate-ray-spin bg-[repeating-conic-gradient(from_0deg_at_50%_50%,rgba(245,196,81,0.16)_0deg_7deg,transparent_7deg_26deg)] [mask-image:radial-gradient(circle,#000_0%,transparent_66%)] [-webkit-mask-image:radial-gradient(circle,#000_0%,transparent_66%)]"
           aria-hidden="true"
         />
       )}
       {perfect && !reducedMotion && <GoldDrift />}
 
       <p
-        className="relative z-10 text-[11px] font-extrabold tracking-[0.32em] uppercase"
-        style={{ color: perfect ? '#F5C451' : run.round > 0 ? '#FF3D00' : 'rgba(255,255,255,0.5)' }}
+        className={`relative z-10 text-[11px] font-extrabold tracking-[0.32em] uppercase ${perfect ? 'text-[#F5C451]' : run.round > 0 ? 'text-[#FF3D00]' : 'text-white/50'}`}
       >
         {perfect ? 'Perfect Gauntlet' : run.round > 0 ? 'Run Complete' : 'Run Ended'}
       </p>
 
       {perfect && (
         <p
-          className="relative z-10 font-display italic text-4xl sm:text-5xl leading-[0.9] mt-3 motion-safe:animate-slam"
-          style={{
-            background: 'linear-gradient(160deg,#FBE9AE,#F5C451 44%,#E4A32C 70%,#F8DA80)',
-            WebkitBackgroundClip: 'text',
-            backgroundClip: 'text',
-            color: 'transparent',
-            filter: 'drop-shadow(0 4px 24px rgba(245,196,81,0.4))',
-          }}
+          className="relative z-10 font-display italic text-4xl sm:text-5xl leading-[0.9] mt-3 motion-safe:animate-slam bg-[linear-gradient(160deg,#FBE9AE,#F5C451_44%,#E4A32C_70%,#F8DA80)] bg-clip-text text-transparent [filter:drop-shadow(0_4px_24px_rgba(245,196,81,0.4))]"
         >
           4-0 Cleared
         </p>
@@ -380,14 +389,24 @@ function DraftRunComplete({
       </p>
 
       <div className="relative z-10 mt-6 flex items-baseline gap-2">
-        <span className="font-display italic font-bold text-6xl tabular" style={{ color: perfect ? '#F5C451' : '#FF3D00' }}>
-          +{coinsUp.toLocaleString()}
+        <span
+          className={`font-display italic font-bold text-6xl tabular ${practice ? 'text-white/55' : perfect ? 'text-[#F5C451]' : 'text-[#FF3D00]'}`}
+        >
+          {practice ? '' : '+'}{coinsUp.toLocaleString()}
         </span>
-        <span className="text-[11px] font-bold tracking-[0.24em] uppercase text-white/50">Coins</span>
+        <span className="text-[11px] font-bold tracking-[0.24em] uppercase text-white/50">
+          {practice ? 'Coins (not paid)' : 'Coins'}
+        </span>
       </div>
 
-      {perfect && (
-        <p className="relative z-10 text-[11px] font-bold tracking-[0.16em] uppercase mt-2" style={{ color: '#b39a5c' }}>
+      {practice && (
+        <p className="relative z-10 text-[11px] font-bold tracking-[0.16em] uppercase mt-2 text-white/40">
+          Practice run · nothing paid out
+        </p>
+      )}
+
+      {!practice && perfect && (
+        <p className="relative z-10 text-[11px] font-bold tracking-[0.16em] uppercase mt-2 text-[#b39a5c]">
           Includes a {DRAFT_JACKPOT.toLocaleString()}-coin jackpot
         </p>
       )}
@@ -427,8 +446,8 @@ function GoldDrift() {
       {parts.map((p, i) => (
         <span
           key={i}
-          className="absolute rounded-full bg-[#F5C451] motion-safe:animate-gold-drift"
-          style={{ left: `${p.x}%`, top: `${p.y}%`, width: p.s, height: p.s, boxShadow: '0 0 8px rgba(245,196,81,0.8)', animationDelay: `${p.d}s`, animationDuration: `${p.t}s` }}
+          className="absolute rounded-full bg-[#F5C451] motion-safe:animate-gold-drift shadow-[0_0_8px_rgba(245,196,81,0.8)] [left:var(--x)] [top:var(--y)] w-[var(--size)] h-[var(--size)] [animation-delay:var(--delay)] [animation-duration:var(--dur)]"
+          style={{ '--x': `${p.x}%`, '--y': `${p.y}%`, '--size': `${p.s}px`, '--delay': `${p.d}s`, '--dur': `${p.t}s` } as React.CSSProperties}
         />
       ))}
     </div>

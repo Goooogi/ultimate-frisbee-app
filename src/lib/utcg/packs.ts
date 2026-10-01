@@ -116,21 +116,16 @@ export function freePackCooldownMs(lastFreeAt: Date | null, now: Date): number {
   return Math.max(0, FREE_PACK_INTERVAL_MS - elapsed);
 }
 
-// ── Match rewards ───────────────────────────────────────────────────────────
-//
-// Coins earned per draft match, scaling with the record so a better squad pays
-// out more — the reason to keep pulling and building. A ~9-3 tops up toward the
-// next Bronze; a 12-0 is a jackpot.
-export function matchReward(wins: number): number {
-  // 0 wins → 20 (participation), 12-0 → 600. Convex so top records feel great.
-  const base = 20;
-  const perWin = 12;
-  const bonus = wins >= 12 ? 300 : wins >= 11 ? 150 : wins >= 10 ? 60 : 0;
-  return base + wins * perWin + bonus;
-}
-
 // ── Starter grant (new wallet) ──────────────────────────────────────────────
 export const STARTER_COINS = 500; // enough for a Bronze pack out of the gate
+
+// ── Draft daily cap (mirrors utcg_draft_start's paid_cap) ───────────────────
+// Lives here, not in draft.ts ('use client'), so server.ts can read it.
+export const DRAFT_PAID_RUNS_PER_DAY = 5;
+
+// ── Market / staked-PvP unlock (mirrors utcg_require_market_unlocked) ───────
+// Account age in days, finished Squad Battles + drafts, distinct UTC play days.
+export const MARKET_UNLOCK = { days: 7, games: 10, playDays: 3 } as const;
 
 // ── Tier-roll helper (deterministic given an rng) ───────────────────────────
 //
