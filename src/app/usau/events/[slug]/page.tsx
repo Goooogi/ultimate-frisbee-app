@@ -24,14 +24,6 @@ import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { FLIGHT_LABELS } from '@/lib/usau/flights';
 import { USAU_LEVELS, buildLeagueQs, seriesListHref, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
 
-// Stars only render for events that haven't fully wrapped — a star on a past
-// event can never produce a notification (Push Notifications.md plan rule).
-function isUpcomingOrLive(event: UsauEventSummary): boolean {
-  const cutoff = event.endDate ?? event.startDate;
-  if (!cutoff) return false;
-  return cutoff >= usauToday();
-}
-
 export const revalidate = 60;
 
 // SSG mode with on-demand paths — see /players/[id]. Without this export the
@@ -130,7 +122,7 @@ export default async function UsauEventPage({ params }: Props) {
       // as the WFDF event page — a quiet accent link, not a pill on its own row
       // (Hunter, 2026-08-22).
       controls={
-        event.url || event.members.some((m) => m.url) || isUpcomingOrLive(event) ? (
+        (
           <div className="flex items-center gap-2">
             {event.members.length > 0 ? (
               // A merged event links the USAU page of the division being viewed.
@@ -154,8 +146,7 @@ export default async function UsauEventPage({ params }: Props) {
                 />
               )
             )}
-            {isUpcomingOrLive(event) &&
-              (event.members.length > 0 ? (
+            {event.members.length > 0 ? (
                 // Merged event: the star is stored on the division being viewed
                 // (pushes follow that division, as before the merge) and shows
                 // filled when any division is starred.
@@ -182,9 +173,9 @@ export default async function UsauEventPage({ params }: Props) {
                     endDate: event.endDate,
                   }}
                 />
-              ))}
+              )}
           </div>
-        ) : undefined
+        )
       }
       breadcrumbs={[
         { label: 'Home', href: '/' },

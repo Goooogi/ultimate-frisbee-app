@@ -13,15 +13,6 @@ import { WfdfSourceLink } from '@/components/wfdf/wfdf-source-link';
 import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
 import { wfdfEventUrl } from '@/lib/wfdf/source-links';
 
-// Stars only render for events that haven't fully wrapped — a star on a past
-// event can never produce a notification (Push Notifications.md plan rule).
-function isUpcomingOrLive(ev: WfdfEventDetailType): boolean {
-  const cutoff = ev.endDate ?? ev.startDate;
-  if (!cutoff) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return cutoff >= today;
-}
-
 export const revalidate = 120;
 
 // SSG mode with on-demand paths — see /players/[id]. Without this export the
@@ -69,7 +60,7 @@ export default async function WfdfEventPage({ params }: Props) {
       // event bar, which floated over content on scroll).
       titleLeft={<WfdfEventLogo logoUrl={ev.logoUrl} year={ev.year} variant="hero" />}
       controls={
-        (dates || ev.location || ev.sourceOrigin || isUpcomingOrLive(ev)) && (
+        (
           <div className="flex items-start gap-2">
             <div className="flex flex-col items-end text-right font-tight leading-tight gap-0.5">
               {dates && <span className="text-[12px] lg:text-[14px] font-semibold text-ink">{dates}</span>}
@@ -81,8 +72,7 @@ export default async function WfdfEventPage({ params }: Props) {
                 label="WFDF site"
               />
             </div>
-            {isUpcomingOrLive(ev) && (
-              <EventFavoriteStar
+            <EventFavoriteStar
                 event={{
                   league: 'wfdf',
                   eventId: ev.id,
@@ -91,7 +81,6 @@ export default async function WfdfEventPage({ params }: Props) {
                   endDate: ev.endDate,
                 }}
               />
-            )}
           </div>
         )
       }

@@ -10,15 +10,6 @@ import { eufDateRange } from '@/lib/euf/format-date';
 import { EufEventDetail } from '@/components/euf/euf-event-detail';
 import { EventFavoriteStar } from '@/components/favorites/event-favorite-star';
 
-// Stars only render for events that haven't fully wrapped — same rule as the
-// USAU/WFDF event pages (Push Notifications.md plan rule).
-function isUpcomingOrLive(ev: EufEventCard): boolean {
-  const cutoff = ev.endDate ?? ev.startDate;
-  if (!cutoff) return false;
-  const today = new Date().toISOString().slice(0, 10);
-  return cutoff >= today;
-}
-
 export const revalidate = 120;
 
 // SSG mode with on-demand paths — see /players/[id]. Without this export the
@@ -52,8 +43,7 @@ export default async function EufEventPage({ params }: Props) {
       eyebrow="EUF · EUCS"
       subtitle={formatSubtitle(ev) ?? undefined}
       controls={
-        isUpcomingOrLive(ev) ? (
-          <EventFavoriteStar
+        <EventFavoriteStar
             event={{
               league: 'euf',
               eventId: ev.id,
@@ -61,8 +51,7 @@ export default async function EufEventPage({ params }: Props) {
               startDate: ev.startDate,
               endDate: ev.endDate,
             }}
-          />
-        ) : undefined
+        />
       }
       breadcrumbs={[
         { label: 'Home', href: '/' },
