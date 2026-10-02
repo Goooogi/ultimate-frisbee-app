@@ -19,10 +19,21 @@
 //     semi winners, else its single game, else the one ladder game after its
 //     single semi, else the game the place-(N-1) loser plays in it — a
 //     game-to-go): winner → N, loser → N+1. A single semi's loser → N+2.
+//   • A bracket SECTION whose stored shape checks out against USAU's own links
+//     (HTML scrapes since 2026-09-13: column 0 holds one game that feeds
+//     nothing, every other game's winner feeds a game in the column before it)
+//     is read by position instead: its column-0 game is the decider (no score
+//     → no decider) and the column-1 games that fed it are its semis — only
+//     when every one is scored, or final with its winner standing in the
+//     decider (USAU advanced it). Unverified sections keep the labels.
+//   • A second-chance section named without a place ("Game-To-Go Bracket",
+//     "Backdoor") awards the one place its column headings name ("2nd - R5",
+//     "Third Semis"), unless another bracket holds or lands on that place.
 //   • Semifinal losers in a place-N bracket → N+2. If a 3rd-place-style game
 //     between them exists (present only ~69% of the time), its winner → N+2,
 //     loser → N+3. A rematch in any other bracket AFTER the semis orders them
-//     the same way; otherwise both tie at N+2.
+//     the same way (one in a bracket that starts past N+2 leaves them
+//     unplaced); with no rematch both tie at N+2.
 //   • A team finishes where the LAST (lowest-ranked) placement bracket it
 //     played in put it: a game-to-go / backdoor bracket decides after the one
 //     that first placed it, so a final loser who then loses the 2nd-place game
@@ -31,7 +42,8 @@
 //   • EXCLUDE non-placement brackets (Play-In, Qualification) — they decide
 //     next-season seeding / Worlds qualification, not this event's finish. A
 //     numbered game-to-go ("2nd Place Game to Go") awards its place.
-//   • Only status='final' games count.
+//   • Only status='final' games are results; a cancelled one only fills out
+//     its section's shape.
 //
 // Deliberately conservative: when the data can't place a team unambiguously we
 // leave it UNPLACED rather than guess — a wrong placement is worse than none.
@@ -54,6 +66,17 @@ export interface DerivePlacementGame {
   division: string | null;
   /** Start time (ISO). Orders a semi-loser rematch against the semis; null = unknown. */
   scheduledAt?: string | null;
+  /** usau_games.status. Omitted = 'final'; anything else is not a result. */
+  status?: string | null;
+  /** usau_games.bracket_stage_index: the game's column in its bracket section,
+   *  deciding column first (0 = the decider); null on older/pool rows.
+   *  bracketStage is that column's heading ("2nd - R5"). */
+  bracketStageIndex?: number | null;
+  bracketStage?: string | null;
+  /** usau_games.usau_game_id / next_usau_game_id: the game this one's WINNER
+   *  feeds (USAU's data-relation; null on the decider and on ultirzr rows). */
+  usauGameId?: string | null;
+  nextUsauGameId?: string | null;
 }
 
 const WORD_ORDINALS: Record<string, number> = {
@@ -161,6 +184,8 @@ function decided(g: DerivePlacementGame): boolean {
   if (forfeitWinner(g)) return true;
   return g.scoreA != null && g.scoreB != null && g.scoreA !== g.scoreB;
 }
+const isResult = (g: DerivePlacementGame) => (g.status ?? 'final') === 'final';
+const scored = (g: DerivePlacementGame) => isResult(g) && decided(g);
 const aWins = (g: DerivePlacementGame) => {
   const f = forfeitWinner(g);
   return f ? f === g.teamAId : g.scoreA! > g.scoreB!;
@@ -209,10 +234,10 @@ export function placementPartition(g: DerivePlacementGame): string {
 }
 
 /**
- * Each decided game's partition. A team row missing its gender would split one
- * real bracket across partitions and invent lone-game brackets; teams linked by
- * games share a division, so a game without one takes the single division its
- * linked teams show.
+ * Each scored (final, decided) game's partition. A team row missing its gender
+ * would split one real bracket across partitions and invent lone-game brackets;
+ * teams linked by games share a division, so a game without one takes the
+ * single division its linked teams show.
  */
 function partitionGames(games: DerivePlacementGame[]): Map<DerivePlacementGame, string> {
   const parent = new Map<string, string>();
@@ -222,7 +247,7 @@ function partitionGames(games: DerivePlacementGame[]): Map<DerivePlacementGame, 
     parent.set(t, r);
     return r;
   };
-  const decidedGames = games.filter(decided);
+  const decidedGames = games.filter(scored);
   for (const g of decidedGames) {
     for (const t of [g.teamAId!, g.teamBId!]) if (!parent.has(t)) parent.set(t, t);
     parent.set(root(g.teamAId!), root(g.teamBId!));
@@ -240,6 +265,14 @@ function partitionGames(games: DerivePlacementGame[]): Map<DerivePlacementGame, 
     out.set(g, placementPartition({ ...g, division }));
   }
   return out;
+}
+
+/** A game partitionGames skipped (unscored, cancelled): its own division, else
+ *  the one partition its teams' scored games share; null = can't tell. */
+function shapePartition(g: DerivePlacementGame, teamParts: Map<string, Set<string>>): string | null {
+  if (g.division != null) return placementPartition(g);
+  const ps = new Set([g.teamAId, g.teamBId].flatMap((t) => [...((t && teamParts.get(t)) || [])]));
+  return ps.size === 1 ? [...ps][0] : null;
 }
 
 /** A bracket (non-pool) game. An event is only settled once all of these are. */
@@ -263,9 +296,11 @@ interface Decider {
 
 /**
  * A place-N bracket's deciding game: winner → N, loser → N+1. `upperLoser` is
- * the loser of the place-(N-1) bracket's decider, when there is one.
+ * the loser of the place-(N-1) bracket's decider, when there is one. `cols` is
+ * the bracket's verified section, whose column-0 game decides it outright.
  */
-function findDecider(bg: DerivePlacementGame[], upperLoser: string | null): Decider | null {
+function findDecider(bg: DerivePlacementGame[], upperLoser: string | null, cols?: DerivePlacementGame[][]): Decider | null {
+  if (cols) return scored(cols[0][0]) ? { game: cols[0][0] } : null;
   const own = ownDecider(bg, upperLoser);
   if (!own || !upperLoser || involves(own, upperLoser)) return own && { game: own };
   // The place above's loser met this bracket's winner after it: game-to-go.
@@ -319,6 +354,124 @@ function ownDecider(bg: DerivePlacementGame[], upperLoser: string | null): Deriv
   return null;
 }
 
+/** A verified section's semis: the column-1 games that fed its decider (played
+ *  or not) — two whose winners met in it, or a ladder's one. Each must be
+ *  scored, or a final with no score whose one team standing in the decider is
+ *  its winner (USAU advanced it). Any other (cancelled, unclear) → none. */
+function sectionSemis(cols: DerivePlacementGame[][]): DerivePlacementGame[] {
+  const decider = cols[0][0];
+  const fed = cols[1] ?? [];
+  if (fed.length > 2) return [];
+  const semis: DerivePlacementGame[] = [];
+  for (const g of fed) {
+    if (scored(g)) { semis.push(g); continue; }
+    const advanced = [g.teamAId, g.teamBId].filter((t): t is string => t != null && involves(decider, t));
+    if (!isResult(g) || g.teamAId == null || g.teamBId == null || advanced.length !== 1) return [];
+    semis.push({ ...g, scoreA: null, scoreB: null, winnerTeamId: advanced[0] });
+  }
+  const ws = semis.map(winner);
+  return ws.every((w) => involves(decider, w)) && new Set(ws).size === ws.length ? semis : [];
+}
+
+// Second-chance sections, often named without a place ("Game-To-Go Bracket").
+const SECOND_CHANCE_RE = /game.?to.?go|g2g|back.?door/i;
+
+/**
+ * The bracket sections whose stored shape checks out against USAU's own links:
+ * every game carries its column and id, column 0 holds one game that feeds
+ * nothing (the decider), and every other game's winner feeds a game in the
+ * column before it. Unlinked (ultirzr) and reversed layouts fail.
+ */
+function verifiedSections(shape: DerivePlacementGame[]): Map<string, DerivePlacementGame[][]> {
+  const byName = new Map<string, DerivePlacementGame[]>();
+  for (const g of shape) {
+    if (!isBracketGame(g.bracketName)) continue;
+    byName.set(g.bracketName!, [...(byName.get(g.bracketName!) ?? []), g]);
+  }
+  const out = new Map<string, DerivePlacementGame[][]>();
+  for (const [name, gs] of byName) {
+    if (gs.some((g) => g.bracketStageIndex == null || !g.usauGameId)) continue;
+    const cols: DerivePlacementGame[][] = [];
+    for (const g of gs) cols[g.bracketStageIndex!] = [...(cols[g.bracketStageIndex!] ?? []), g];
+    const feeds = (g: DerivePlacementGame) =>
+      g.bracketStageIndex === 0
+        ? !g.nextUsauGameId
+        : (cols[g.bracketStageIndex! - 1] ?? []).some((n) => n.usauGameId === g.nextUsauGameId);
+    if (cols[0]?.length === 1 && gs.every(feeds)) out.set(name, cols);
+  }
+  return out;
+}
+
+/**
+ * The place each second-chance section named without one awards: the single
+ * place its column headings name. A place another bracket name holds, or two
+ * such sections share, isn't taken.
+ */
+function ladderBases(sections: Map<string, DerivePlacementGame[][]>, named: Set<number>): Map<string, number> {
+  const found = new Map<string, number>();
+  for (const [name, cols] of sections) {
+    const t = name.toLowerCase().replace(/\s+/g, ' ').trim().replace(/^[^·]*·\s*/, '');
+    if (bracketBasePlace(name) != null || isNonPlacementBracket(t) || !SECOND_CHANCE_RE.test(t)) continue;
+    const places = new Set(cols.flat().map((g) => bracketBasePlace(g.bracketStage)).filter((p): p is number => p != null));
+    if (places.size === 1) found.set(name, [...places][0]);
+  }
+  const shared = (p: number) => [...found.values()].filter((q) => q === p).length > 1;
+  return new Map([...found].filter(([, p]) => !named.has(p) && !shared(p)));
+}
+
+interface Arrangement {
+  baseOf: (bracketName: string | null) => number | null;
+  /** This division's scored games by the base place their bracket awards. */
+  byBase: Map<number, DerivePlacementGame[]>;
+  /** The verified section a base's games all come from. */
+  sectionOf: Map<number, DerivePlacementGame[][]>;
+  deciders: Map<number, Decider | null>;
+  /** Where each base's bracket starts awarding. */
+  start: Map<number, number>;
+  /** How many brackets start at each place. */
+  claims: Map<number, number>;
+}
+
+function arrange(
+  divGames: DerivePlacementGame[],
+  sections: Map<string, DerivePlacementGame[][]>,
+  ladders: Map<string, number>,
+): Arrangement {
+  const baseOf = (name: string | null) => bracketBasePlace(name) ?? ladders.get(name ?? '') ?? null;
+  // Each bracket_name is a SELF-CONTAINED sub-bracket awarding places starting
+  // at `base` (Championship=1, "5th Place"=5, "3rd Place"=3, "Ninals"=9…).
+  const byBase = new Map<number, DerivePlacementGame[]>();
+  for (const g of divGames) {
+    const base = baseOf(g.bracketName);
+    if (base == null) continue; // pool / non-placement / unrecognized
+    let arr = byBase.get(base);
+    if (!arr) { arr = []; byBase.set(base, arr); }
+    arr.push(g);
+  }
+  const sectionOf = new Map<number, DerivePlacementGame[][]>();
+  for (const [base, bg] of byBase) {
+    const cols = sections.get(bg[0].bracketName!);
+    if (cols && bg.every((g) => g.bracketName === bg[0].bracketName)) sectionOf.set(base, cols);
+  }
+  const deciders = new Map<number, Decider | null>();
+  for (const base of [...byBase.keys()].sort((a, b) => a - b)) {
+    const above = deciders.get(base - 1);
+    deciders.set(base, findDecider(byBase.get(base)!, above ? loser(above.game) : null, sectionOf.get(base)));
+  }
+
+  // A bracket one place below a decided bracket awards that place only when
+  // the decider's loser plays in it (a 2nd-place game-to-go / backdoor
+  // bracket). Otherwise it is for the places after: it starts one lower.
+  const start = new Map<number, number>();
+  for (const [base, bg] of byBase) {
+    const above = deciders.get(base - 1);
+    start.set(base, above != null && !bg.some((g) => involves(g, loser(above.game))) ? base + 1 : base);
+  }
+  const claims = new Map<number, number>();
+  for (const s of start.values()) claims.set(s, (claims.get(s) ?? 0) + 1);
+  return { baseOf, byBase, sectionOf, deciders, start, claims };
+}
+
 interface Award {
   team: string;
   place: number;
@@ -338,8 +491,8 @@ interface PendingSemiLosers {
 }
 
 /** Placement brackets that follow a bracket starting at `base`. */
-function isLaterStage(g: DerivePlacementGame, base: number): boolean {
-  const b = bracketBasePlace(g.bracketName);
+function isLaterStage(g: DerivePlacementGame, base: number, baseOf: Arrangement['baseOf']): boolean {
+  const b = baseOf(g.bracketName);
   return (b != null && b > base) || /game.?to.?go|g2g/i.test(g.bracketName ?? '');
 }
 /** Brackets played before the placement brackets. */
@@ -356,7 +509,11 @@ function isEarlierStage(g: DerivePlacementGame): boolean {
  * placement bracket), null when they never met after, 'unknown' when they met
  * but neither the clock nor the bracket says whether it was after.
  */
-function semiLoserRematch(divGames: DerivePlacementGame[], p: PendingSemiLosers): DerivePlacementGame | null | 'unknown' {
+function semiLoserRematch(
+  divGames: DerivePlacementGame[],
+  p: PendingSemiLosers,
+  baseOf: Arrangement['baseOf'],
+): DerivePlacementGame | null | 'unknown' {
   const semiTimes = p.semis.map(timeOf);
   const known = semiTimes.every((t) => t != null);
   const semisStart = known ? Math.min(...(semiTimes as number[])) : null;
@@ -368,7 +525,7 @@ function semiLoserRematch(divGames: DerivePlacementGame[], p: PendingSemiLosers)
     const at = t != null && semisEnd != null && Math.abs(t - semisEnd) <= MAX_GAP_MS ? t : null;
     if (semisEnd != null && at != null && at > semisEnd) after.push(g);
     else if (semisStart != null && at != null && at < semisStart) continue;
-    else if (isLaterStage(g, p.base)) after.push(g);
+    else if (isLaterStage(g, p.base, baseOf)) after.push(g);
     else if (!isEarlierStage(g)) return 'unknown';
   }
   if (after.length === 0) return null;
@@ -381,19 +538,26 @@ function semiLoserRematch(divGames: DerivePlacementGame[], p: PendingSemiLosers)
   return last.length === 1 ? last[0] : 'unknown';
 }
 
-/** Placements from ONE division's placement brackets. */
-function divisionPlacements(divGames: DerivePlacementGame[], ambiguous: Set<string>): Map<string, number> {
-  // Group this division's games by the base place their bracket awards.
-  // Each bracket_name is a SELF-CONTAINED sub-bracket awarding places starting
-  // at `base` (Championship=1, "5th Place"=5, "3rd Place"=3, "Ninals"=9…).
-  const byBase = new Map<number, DerivePlacementGame[]>();
-  for (const g of divGames) {
-    const base = bracketBasePlace(g.bracketName);
-    if (base == null) continue; // pool / non-placement / unrecognized
-    let arr = byBase.get(base);
-    if (!arr) { arr = []; byBase.set(base, arr); }
-    arr.push(g);
+/** Placements from ONE division's placement brackets. `divGames` are its scored
+ *  games; `shape` is every game it holds, scored or not. */
+function divisionPlacements(
+  divGames: DerivePlacementGame[],
+  shape: DerivePlacementGame[],
+  ambiguous: Set<string>,
+): Map<string, number> {
+  const sections = verifiedSections(shape);
+  const named = new Set(shape.map((g) => bracketBasePlace(g.bracketName)).filter((b): b is number => b != null));
+  const ladders = ladderBases(sections, named);
+  let plan = arrange(divGames, sections, ladders);
+  // A ladder section that lands on another bracket's start would unplace that
+  // bracket's teams too: leave it out instead.
+  const clashing = [...ladders].filter(([, b]) => plan.start.has(b) && plan.claims.get(plan.start.get(b)!)! > 1);
+  if (clashing.length > 0) {
+    for (const [name] of clashing) ladders.delete(name);
+    plan = arrange(divGames, sections, ladders);
   }
+  const { baseOf, byBase, sectionOf, deciders, start, claims } = plan;
+
   // Different 'final's in one bracket more than a few days apart are several
   // seasons merged into one event (a year-less slug): nothing here holds.
   const merged = [...byBase.values()].some((bg) => {
@@ -407,38 +571,20 @@ function divisionPlacements(divGames: DerivePlacementGame[], ambiguous: Set<stri
     }
     return new Map();
   }
-  const deciders = new Map<number, Decider | null>();
-  for (const base of [...byBase.keys()].sort((a, b) => a - b)) {
-    const above = deciders.get(base - 1);
-    deciders.set(base, findDecider(byBase.get(base)!, above ? loser(above.game) : null));
-  }
-
-  // A bracket one place below a decided bracket awards that place only when
-  // the decider's loser plays in it (a 2nd-place game-to-go / backdoor
-  // bracket). Otherwise it is for the places after: it starts one lower.
-  const start = new Map<number, number>();
-  for (const [base, bg] of byBase) {
-    const above = deciders.get(base - 1);
-    start.set(base, above != null && !bg.some((g) => involves(g, loser(above.game))) ? base + 1 : base);
-  }
-  const claims = new Map<number, number>();
-  for (const s of start.values()) claims.set(s, (claims.get(s) ?? 0) + 1);
 
   // The placement brackets each team played in, by where they start, with its
   // last game time in each (null when any is unknown).
   const played = new Map<string, Map<number, number | null>>();
-  for (const [base, bg] of byBase) {
-    const s = start.get(base)!;
-    for (const g of bg) {
-      const at = timeOf(g);
-      for (const t of [g.teamAId!, g.teamBId!]) {
-        const byStart = played.get(t) ?? new Map<number, number | null>();
-        const cur = byStart.has(s) ? byStart.get(s)! : at;
-        byStart.set(s, cur == null || at == null ? null : Math.max(cur, at));
-        played.set(t, byStart);
-      }
+  const play = (g: DerivePlacementGame, s: number) => {
+    const at = timeOf(g);
+    for (const t of [g.teamAId!, g.teamBId!]) {
+      const byStart = played.get(t) ?? new Map<number, number | null>();
+      const cur = byStart.has(s) ? byStart.get(s)! : at;
+      byStart.set(s, cur == null || at == null ? null : Math.max(cur, at));
+      played.set(t, byStart);
     }
-  }
+  };
+  for (const [base, bg] of byBase) for (const g of bg) play(g, start.get(base)!);
 
   const awards: Award[] = [];
   const pending: PendingSemiLosers[] = [];
@@ -459,7 +605,10 @@ function divisionPlacements(divGames: DerivePlacementGame[], ambiguous: Set<stri
     }
 
     // Semifinal losers finish at b+2 / b+3.
-    const semis = bg.filter((g) => g.round === 'semi');
+    const cols = sectionOf.get(base);
+    const semis = cols ? sectionSemis(cols) : bg.filter((g) => g.round === 'semi');
+    // A semi read from USAU advancing its winner still puts both teams here.
+    for (const g of semis) if (!bg.includes(g)) play(g, b);
     // A ladder's single semi: its loser finishes below the decider's loser.
     if (semis.length === 1 && decider && decider !== semis[0] && involves(decider, winner(semis[0]))) {
       awards.push({ team: loser(semis[0]), place: b + 2, base: b, at: timeOf(semis[0]) });
@@ -483,18 +632,20 @@ function divisionPlacements(divGames: DerivePlacementGame[], ambiguous: Set<stri
   //   (b) they met again AFTER the semis (a game-to-go, a lower placement
   //       bracket) → that game orders them b+2 / b+3, as a result of the
   //       bracket it was played in unless that bracket places them itself; a
-  //       rematch that can't be ordered leaves both unplaced;
+  //       rematch that can't be ordered, or one in a bracket that starts after
+  //       b+2 (they had already dropped past it), leaves both unplaced;
   //   (c) otherwise they tie at b+2 (USAU's official standings tie for 3rd when
   //       no bronze game is played) — unless a bracket starting at b+2 exists,
   //       which is where they'd be placed.
   for (const p of pending) {
-    const rematch = semiLoserRematch(divGames, p);
+    const rematch = semiLoserRematch(divGames, p, baseOf);
     if (rematch === 'unknown') {
       ambiguous.add(p.l1);
       ambiguous.add(p.l2);
     } else if (rematch) {
-      const rb = bracketBasePlace(rematch.bracketName);
+      const rb = baseOf(rematch.bracketName);
       const base = rb != null && start.has(rb) ? start.get(rb)! : p.base;
+      if (base > p.base + 2) continue;
       const at = timeOf(rematch);
       awards.push(
         { team: winner(rematch), place: p.base + 2, base, at, soft: true },
@@ -550,16 +701,28 @@ export interface PlacementDerivation {
  * bracket results can place unambiguously are returned.
  */
 export function derivePlacementsDetailed(games: DerivePlacementGame[]): PlacementDerivation {
+  const parts = partitionGames(games);
   const byDivision = new Map<string, DerivePlacementGame[]>();
-  for (const [g, div] of partitionGames(games)) {
+  const teamParts = new Map<string, Set<string>>();
+  for (const [g, div] of parts) {
     let arr = byDivision.get(div);
     if (!arr) { arr = []; byDivision.set(div, arr); }
     arr.push(g);
+    for (const t of [g.teamAId!, g.teamBId!]) teamParts.set(t, (teamParts.get(t) ?? new Set<string>()).add(div));
+  }
+  // Every game shapes its division's sections, scored or not; one whose
+  // division can't be told counts in each, so it can only fail a check.
+  const shapes = new Map<string, DerivePlacementGame[]>();
+  const loose: DerivePlacementGame[] = [];
+  for (const g of games) {
+    const div = parts.get(g) ?? shapePartition(g, teamParts);
+    if (div == null) loose.push(g);
+    else shapes.set(div, [...(shapes.get(div) ?? []), g]);
   }
   const ambiguous = new Set<string>();
   const placements = new Map<string, number>();
-  for (const divGames of byDivision.values()) {
-    for (const [team, place] of divisionPlacements(divGames, ambiguous)) {
+  for (const [div, divGames] of byDivision) {
+    for (const [team, place] of divisionPlacements(divGames, [...shapes.get(div)!, ...loose], ambiguous)) {
       // A team placed in two divisions (a gender-less team row) differently is unplaced.
       if (placements.has(team) && placements.get(team) !== place) ambiguous.add(team);
       placements.set(team, place);

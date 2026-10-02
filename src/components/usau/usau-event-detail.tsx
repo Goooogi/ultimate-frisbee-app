@@ -629,7 +629,10 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   );
   const hasBracket =
     games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
-  const hasPools = pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0 || placementPools.length > 0;
+  // Pools shows whenever the division has teams: a bracket-only event falls
+  // back to an "All Teams" list by seed (mobile parity, Hunter 2026-10-02).
+  const hasPools =
+    pools.length > 0 || poolGames.size > 0 || roundGroups.length > 0 || placementPools.length > 0 || teams.length > 0;
 
   // ── Leaders (goals/assists) — this division's slice of event.playerStats,
   // scoped by team id since stats rows carry a team, not a division. Sorted
@@ -914,6 +917,10 @@ function DivisionContent({
           )}
 
           {pools.length > 0 && poolGames.size === 0 && <PoolGamesEmpty slug={usauSlugFor(event, division)} />}
+
+          {pools.length === 0 && teams.length > 0 && (
+            <AllTeamsCard teams={teams} competitionLevel={level || event.competitionLevel} season={event.season} />
+          )}
 
           {/* Matchup rounds — pool-less Saturday phases ("Sat Round 1/2/3"),
               folded into Pool Play as generic sections below the pools. */}
@@ -1396,6 +1403,61 @@ function TrophyIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+/** Pools-tab fallback for a division with no pools (bracket-only events):
+ *  every team by seed, in PoolCard's row style. Column-major on wider screens
+ *  so the ranking still reads top-to-bottom. Final placements are
+ *  all-or-nothing per division (mobile parity, Hunter 2026-10-02): the
+ *  derivation leaves ambiguous teams unplaced, and a partial column reads as
+ *  wrong. */
+function AllTeamsCard({
+  teams,
+  competitionLevel,
+  season,
+}: {
+  teams: Team[];
+  competitionLevel: string;
+  season?: number | null;
+}) {
+  const sorted = teams.slice().sort((a, b) => (a.seed ?? 9999) - (b.seed ?? 9999));
+  const showPlacement = sorted.every((t) => t.finalPlacement != null);
+  return (
+    <div className="bg-surface rounded-card shadow-card overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-ink font-tight">All Teams</span>
+        <span className="tabular text-[11px] font-bold text-muted font-tight">{sorted.length}</span>
+      </div>
+      <ul className="md:columns-2 lg:columns-3 md:gap-x-0">
+        {sorted.map((t, i) => (
+          <li key={t.teamId} className="border-t border-hairline break-inside-avoid">
+            <Link
+              href={season != null ? `/usau/teams/${t.teamId}?season=${season}` : `/usau/teams/${t.teamId}`}
+              className="flex items-center gap-3 px-4 py-2.5 hover:bg-ink/[0.03] transition-colors no-underline"
+            >
+              <span className="tabular text-[11px] font-bold text-faint font-tight w-5 text-right flex-shrink-0">
+                {t.seed ?? i + 1}
+              </span>
+              <UsauTeamLogo
+                name={t.teamName}
+                genderDivision={t.genderDivision}
+                competitionLevel={competitionLevel}
+                size={20}
+              />
+              <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink font-tight truncate">
+                {t.teamName}
+              </span>
+              {showPlacement && (
+                <span className="tabular font-display italic font-bold text-[14px] text-accent flex-shrink-0">
+                  #{t.finalPlacement}
+                </span>
+              )}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

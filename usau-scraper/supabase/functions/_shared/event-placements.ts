@@ -18,10 +18,11 @@ import {
   type PlacementTeam,
 } from './derive-placement.ts';
 
-// One event's final games fit a single PostgREST page (the largest is ~340).
+// One event's final + cancelled games fit a single PostgREST page (the largest is ~340).
 const PAGE = 1000;
 
 interface GameRow {
+  status: string;
   team_a_id: string | null;
   team_b_id: string | null;
   score_a: number | null;
@@ -29,6 +30,10 @@ interface GameRow {
   winner_team_id: string | null;
   round: string;
   bracket_name: string | null;
+  bracket_stage: string | null;
+  bracket_stage_index: number | null;
+  usau_game_id: string | null;
+  next_usau_game_id: string | null;
   scheduled_at: string | null;
   team_a: PlacementTeam | null;
   team_b: PlacementTeam | null;
@@ -51,16 +56,18 @@ export async function refreshEventPlacements(
   const { data: games, error: gamesErr } = await db
     .from('usau_games')
     .select(
-      'team_a_id, team_b_id, score_a, score_b, winner_team_id, round, bracket_name, scheduled_at, ' +
+      'status, team_a_id, team_b_id, score_a, score_b, winner_team_id, round, bracket_name, ' +
+        'bracket_stage, bracket_stage_index, usau_game_id, next_usau_game_id, scheduled_at, ' +
         'team_a:usau_teams!team_a_id(gender_division, competition_level), ' +
         'team_b:usau_teams!team_b_id(gender_division, competition_level)',
     )
     .eq('event_id', eventId)
-    .eq('status', 'final')
+    // cancelled games only fill out a bracket's shape (derive-placement.ts)
+    .in('status', ['final', 'cancelled'])
     .order('id')
     .range(0, PAGE - 1);
   if (gamesErr) throw new Error(`placements ${eventId}: games: ${gamesErr.message}`);
-  if ((games ?? []).length === PAGE) throw new Error(`placements ${eventId}: ${PAGE}+ final games — page this read`);
+  if ((games ?? []).length === PAGE) throw new Error(`placements ${eventId}: ${PAGE}+ games — page this read`);
 
   const { data: teams, error: teamsErr } = await db
     .from('usau_event_teams')
@@ -81,6 +88,11 @@ export async function refreshEventPlacements(
     bracketName: g.bracket_name,
     division: gameDivision(g.team_a, g.team_b),
     scheduledAt: g.scheduled_at,
+    status: g.status,
+    bracketStage: g.bracket_stage,
+    bracketStageIndex: g.bracket_stage_index,
+    usauGameId: g.usau_game_id,
+    nextUsauGameId: g.next_usau_game_id,
   }));
   const { changes } = planEventPlacements(input, stored);
 

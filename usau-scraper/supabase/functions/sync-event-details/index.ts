@@ -1298,11 +1298,55 @@ async function persistSchedulePage(
   //     case, where vanishing from the page is normal.
   // The teams.length===0 early-return above means a page that parsed nothing
   // never reaches this, so selector drift can't mass-delete.
+  //
+  // An id carrying `"` or `\` would break out of PostgREST's quoted in-list and
+  // unprotect the ids after it, so such a page skips the prune (dropping just
+  // that id would unprotect it instead).
+  const quotedList = (ids: string[]): string | null =>
+    ids.some((id) => /["\\]/.test(id)) ? null : `(${ids.map((id) => `"${id}"`).join(',')})`;
+
+  // Team-prune candidates (see the team prune below) are fixed BEFORE the game
+  // prunes: a team whose games THIS pass deletes — a partial render — must
+  // survive until a later pass still finds it gone, or one bad page cascades
+  // into deleting its participation and rosters.
+  const seenTeamIds = new Set(teamUUIDByEventTeamId.values());
+  const { data: scoped, error: scopedErr } = await db
+    .from('usau_event_teams')
+    .select('team_id, usau_teams!inner(gender_division, competition_level)')
+    .eq('event_id', eventUUID)
+    .eq('usau_teams.gender_division', division)
+    .eq('usau_teams.competition_level', competitionLevel);
+  if (scopedErr) throw new Error(`usau_event_teams scope lookup: ${stringifyErr(scopedErr)}`);
+  const scopedIds = ((scoped ?? []) as Array<{ team_id: string }>).map((r) => r.team_id);
+  const unseen = scopedIds.filter((id) => !seenTeamIds.has(id));
+  let staleTeams: string[] = [];
+  if (unseen.length > 0 && (scopedIds.length - unseen.length) * 2 < scopedIds.length) {
+    // Under half the stored field is on the page: more likely a broken page
+    // than a republish. Leave the participations alone.
+    console.warn(`team prune skipped for ${url}: page lists ${scopedIds.length - unseen.length} of ${scopedIds.length}`);
+  } else if (unseen.length > 0) {
+    const idList = `(${unseen.join(',')})`;
+    const { data: withGames, error: gamesErr } = await db
+      .from('usau_games')
+      .select('team_a_id, team_b_id')
+      .eq('event_id', eventUUID)
+      .or(`team_a_id.in.${idList},team_b_id.in.${idList}`);
+    if (gamesErr) throw new Error(`usau_games team-presence lookup: ${stringifyErr(gamesErr)}`);
+    const played = new Set<string>();
+    for (const g of (withGames ?? []) as Array<{ team_a_id: string | null; team_b_id: string | null }>) {
+      if (g.team_a_id) played.add(g.team_a_id);
+      if (g.team_b_id) played.add(g.team_b_id);
+    }
+    staleTeams = unseen.filter((id) => !played.has(id));
+  }
+
   const seenEventGameIds = games
     .map((g) => g.usau_event_game_id)
     .filter((id): id is string => !!id);
-  if (seenEventGameIds.length > 0) {
-    const inList = `(${seenEventGameIds.map((id) => `"${id.replace(/"/g, '')}"`).join(',')})`;
+  const eventGameInList = seenEventGameIds.length > 0 ? quotedList(seenEventGameIds) : null;
+  if (seenEventGameIds.length > 0 && !eventGameInList) {
+    console.warn(`stale-generation prune skipped for ${url}: unquotable event-game id`);
+  } else if (eventGameInList) {
     const { error: pruneErr, count: pruned } = await db
       .from('usau_games')
       .delete({ count: 'exact' })
@@ -1313,9 +1357,79 @@ async function persistSchedulePage(
       // "0 - 0" placeholder older rows still carry.
       .or('and(score_a.is.null,score_b.is.null),and(score_a.eq.0,score_b.eq.0)')
       .not('usau_event_game_id', 'is', null)
-      .not('usau_event_game_id', 'in', inList);
+      .not('usau_event_game_id', 'in', eventGameInList);
     if (pruneErr) throw new Error(`usau_games stale-generation prune: ${stringifyErr(pruneErr)}`);
     if (pruned) console.log(`pruned ${pruned} stale-generation games for ${url}`);
+  }
+
+  // ── Same prune for BRACKET games (2026-10-01, NC Men's Regionals) ──
+  // Bracket rows are keyed on usau_game_id, which the prune above never looks
+  // at. USAU published a 16-team / 4-pool placeholder (dated the wrong weekend),
+  // then the real 10-team / 2-pool schedule under new GameIds — the
+  // placeholder's 19 bracket games lived on beside the real ones. Same guards.
+  // Rows WITH an event-game id are left to the prune above (a pool row merged
+  // with the other pipeline's copy can carry a foreign usau_game_id).
+  const seenGameIds = games
+    .map((g) => g.usau_game_id)
+    .filter((id): id is string => !!id);
+  const gameInList = seenGameIds.length > 0 ? quotedList(seenGameIds) : null;
+  if (seenGameIds.length > 0 && !gameInList) {
+    console.warn(`stale bracket prune skipped for ${url}: unquotable game id`);
+  } else if (gameInList) {
+    const { error: pruneErr, count: pruned } = await db
+      .from('usau_games')
+      .delete({ count: 'exact' })
+      .eq('event_id', eventUUID)
+      .eq('source_url', url)
+      .eq('status', 'scheduled')
+      .or('and(score_a.is.null,score_b.is.null),and(score_a.eq.0,score_b.eq.0)')
+      .is('usau_event_game_id', null)
+      .not('usau_game_id', 'is', null)
+      .not('usau_game_id', 'in', gameInList);
+    if (pruneErr) throw new Error(`usau_games stale bracket prune: ${stringifyErr(pruneErr)}`);
+    if (pruned) console.log(`pruned ${pruned} stale-generation bracket games for ${url}`);
+  }
+
+  // ── Prune teams the page no longer lists (same republish) ──
+  // The placeholder also carried 17 entrants; the real schedule has 10. The
+  // participation upsert never removes a row, so the 7 extras surfaced as
+  // phantom Pools C/D and padded A/B. `staleTeams` (fixed above, before the
+  // game prunes) holds teams in THIS page's scope (gender + level — a
+  // multi-division event shares one event_id), absent from the page, with no
+  // game in the event: a team that played is kept, which covers USAU hiding
+  // pool tables once brackets start. Its event-scoped roster rows go with it so
+  // players aren't credited with an event they never attended (event_id NULL
+  // legacy rows untouched); the roster stale-profile trigger doesn't fire on
+  // DELETE, so their cached profiles are flagged here.
+  if (staleTeams.length > 0) {
+    const { data: rosterRows, error: rosterReadErr } = await db
+      .from('usau_rosters')
+      .select('player_id')
+      .eq('event_id', eventUUID)
+      .in('team_id', staleTeams);
+    if (rosterReadErr) throw new Error(`usau_rosters stale-team lookup: ${stringifyErr(rosterReadErr)}`);
+    const playerIds = [...new Set(((rosterRows ?? []) as Array<{ player_id: string }>).map((r) => r.player_id))];
+    const { error: rosterErr } = await db
+      .from('usau_rosters')
+      .delete()
+      .eq('event_id', eventUUID)
+      .in('team_id', staleTeams);
+    if (rosterErr) throw new Error(`usau_rosters stale-team prune: ${stringifyErr(rosterErr)}`);
+    const { error: etPruneErr } = await db
+      .from('usau_event_teams')
+      .delete()
+      .eq('event_id', eventUUID)
+      .in('team_id', staleTeams);
+    if (etPruneErr) throw new Error(`usau_event_teams stale-team prune: ${stringifyErr(etPruneErr)}`);
+    for (let i = 0; i < playerIds.length; i += 100) {
+      const { error: staleErr } = await db
+        .from('player_profiles')
+        .update({ built_at: '-infinity' })
+        .in('anchor_id', playerIds.slice(i, i + 100))
+        .neq('built_at', '-infinity');
+      if (staleErr) throw new Error(`player_profiles stale flag: ${stringifyErr(staleErr)}`);
+    }
+    console.log(`pruned ${staleTeams.length} teams no longer listed for ${url}: ${staleTeams.join(',')}`);
   }
 
   return { teams: teams.length, games: games.length, skipped: false };

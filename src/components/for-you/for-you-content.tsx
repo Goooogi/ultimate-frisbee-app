@@ -994,9 +994,15 @@ function TeamDashboardCard({ snapshot }: { snapshot: TeamSnapshot }) {
         href={href}
         className="group flex items-center gap-3 px-5 py-3.5 hover:bg-surface-hi transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset cursor-pointer"
       >
-        <SearchResultIcon
-          result={{ kind: 'team', id: team.teamId, name: team.name, hint: null, league: team.league, logoUrl: team.logoUrl }}
-        />
+        {!team.logoUrl && snapshot.countryCode ? (
+          <span className="shrink-0 w-7 h-7 flex items-center justify-center">
+            <WfdfFlag countryCode={snapshot.countryCode} size={18} />
+          </span>
+        ) : (
+          <SearchResultIcon
+            result={{ kind: 'team', id: team.teamId, name: team.name, hint: null, league: team.league, logoUrl: team.logoUrl }}
+          />
+        )}
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-2">
             <span className="font-tight font-bold text-[15px] text-ink truncate group-hover:text-accent transition-colors">

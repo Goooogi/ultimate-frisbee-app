@@ -130,6 +130,7 @@ interface OpenGameRow {
 interface GameRow {
   id: string;
   event_id: string;
+  status: string;
   team_a_id: string | null;
   team_b_id: string | null;
   score_a: number | null;
@@ -137,6 +138,10 @@ interface GameRow {
   winner_team_id: string | null;
   round: string;
   bracket_name: string | null;
+  bracket_stage: string | null;
+  bracket_stage_index: number | null;
+  usau_game_id: string | null;
+  next_usau_game_id: string | null;
   scheduled_at: string | null;
   team_a: PlacementTeam | null;
   team_b: PlacementTeam | null;
@@ -186,6 +191,11 @@ const toInput = (g: GameRow): DerivePlacementGame => ({
   bracketName: g.bracket_name,
   division: gameDivision(g.team_a, g.team_b),
   scheduledAt: g.scheduled_at,
+  status: g.status,
+  bracketStage: g.bracket_stage,
+  bracketStageIndex: g.bracket_stage_index,
+  usauGameId: g.usau_game_id,
+  nextUsauGameId: g.next_usau_game_id,
 });
 
 const comment = (s: string) => s.replace(/[\r\n$]+/g, ' ');
@@ -331,21 +341,25 @@ async function main() {
       db
         .from('usau_games')
         .select(
-          'id, event_id, team_a_id, team_b_id, score_a, score_b, winner_team_id, round, bracket_name, scheduled_at, ' +
+          'id, event_id, status, team_a_id, team_b_id, score_a, score_b, winner_team_id, round, bracket_name, ' +
+            'bracket_stage, bracket_stage_index, usau_game_id, next_usau_game_id, scheduled_at, ' +
             'team_a:usau_teams!team_a_id(gender_division, competition_level), ' +
             'team_b:usau_teams!team_b_id(gender_division, competition_level)',
         )
         .in('event_id', batch)
-        .eq('status', 'final')
+        // cancelled games only fill out a bracket's shape (derive-placement.ts)
+        .in('status', ['final', 'cancelled'])
         .order('event_id')
         .order('id'),
     );
     for (const g of rows) gamesByEvent.set(g.event_id, [...(gamesByEvent.get(g.event_id) ?? []), g]);
-    process.stdout.write(`\r  final games: ${Math.min(i + EVENT_BATCH, ids.length)}/${ids.length} events`);
+    process.stdout.write(`\r  final + cancelled games: ${Math.min(i + EVENT_BATCH, ids.length)}/${ids.length} events`);
   }
   process.stdout.write('\n');
 
-  const candidates = withTeams.filter((e) => (gamesByEvent.get(e.id) ?? []).some((g) => isBracketGame(g.bracket_name)));
+  const candidates = withTeams.filter((e) =>
+    (gamesByEvent.get(e.id) ?? []).some((g) => g.status === 'final' && isBracketGame(g.bracket_name)),
+  );
   const plans: EventPlan[] = [];
   for (const e of candidates) {
     const input = gamesByEvent.get(e.id)!.map(toInput);

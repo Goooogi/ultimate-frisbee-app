@@ -125,6 +125,8 @@ export interface TeamLeader {
 
 export interface TeamSnapshot {
   team: FavoriteTeam;
+  /** WFDF only — IOC country code, for the flag shown when no crest resolves. */
+  countryCode?: string | null;
   record: string | null;
   standing: string | null;
   /**
@@ -575,7 +577,7 @@ async function ufaSnapshot(
   const standing = s ? `${s.division} Division` : `${year} season`;
 
   return {
-    team,
+    team: { ...team, logoUrl: teamMeta(team.teamId).logo ?? team.logoUrl },
     record,
     standing,
     rankContext,
@@ -655,7 +657,7 @@ async function proSnapshot(
   const rankContext = rankContextLine(standings, team.teamId, null);
 
   return {
-    team: { ...team, name },
+    team: { ...team, name, logoUrl: teamMetaRow?.logoUrl ?? team.logoUrl },
     record: row ? `${row.wins}-${row.losses}` : null,
     standing: row ? ordinal(row.place) + ` in ${league.toUpperCase()}` : null,
     rankContext,
@@ -911,6 +913,14 @@ async function usauUpcomingGamesFor(team: FavoriteTeam, now: number, year: numbe
   return out;
 }
 
+function genderOf(divisionName: string | null): 'Men' | 'Women' | 'Mixed' | null {
+  const d = (divisionName ?? '').toLowerCase();
+  if (d.includes('mixed')) return 'Mixed';
+  if (d.includes('women')) return 'Women';
+  if (d.includes('open') || d.includes('men')) return 'Men';
+  return null;
+}
+
 async function wfdfSnapshot(team: FavoriteTeam): Promise<TeamSnapshot> {
   const t = await getWfdfTeam(team.teamId).catch(() => null);
   const record = t && t.wins != null && t.losses != null ? `${t.wins}-${t.losses}` : null;
@@ -923,7 +933,15 @@ async function wfdfSnapshot(team: FavoriteTeam): Promise<TeamSnapshot> {
   if (t?.spiritAvg != null) stats.push({ label: 'Spirit', value: t.spiritAvg.toFixed(1) });
   const rosterSize = t?.roster?.length ?? 0;
   if (rosterSize > 0) stats.push({ label: 'Roster', value: String(rosterSize) });
-  return { team, record, standing, rankContext: null, form: [], stats, leaders: [], roster: [], accolades: [], isPreview: false };
+  // Worlds clubs are often USAU clubs — use the crest when the manifest has one;
+  // otherwise the card falls back to the country flag.
+  const gender = genderOf(t?.divisionName ?? null);
+  const crest = t && gender ? usauTeamLogo(t.name, gender, 'CLUB') : null;
+  return {
+    team: { ...team, logoUrl: crest ?? team.logoUrl },
+    countryCode: t?.countryCode ?? null,
+    record, standing, rankContext: null, form: [], stats, leaders: [], roster: [], accolades: [], isPreview: false,
+  };
 }
 
 /** EUF: a per-event club entry. Record is derived from its games (EUCS publishes
@@ -1311,13 +1329,6 @@ async function wfdfLeagueCard(): Promise<FeedLeague | null> {
     .filter((t) => t.finalStanding != null && t.finalStanding <= LEAGUE_TOP_N)
     .sort((a, b) => (a.finalStanding ?? 99) - (b.finalStanding ?? 99));
   if (medalists.length === 0) return null;
-  const genderOf = (divisionName: string | null): 'Men' | 'Women' | 'Mixed' | null => {
-    const d = (divisionName ?? '').toLowerCase();
-    if (d.includes('mixed')) return 'Mixed';
-    if (d.includes('women')) return 'Women';
-    if (d.includes('open') || d.includes('men')) return 'Men';
-    return null;
-  };
   const byDivision = new Map<string, LeagueTopRow[]>();
   for (const t of medalists) {
     const title = t.divisionName ?? 'Overall';
