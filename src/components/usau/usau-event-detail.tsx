@@ -422,9 +422,18 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     }
     return Number.isFinite(best) ? best + 0.5 : 999;
   };
+  // Next fallback: the place USAU's column headings name — "Select Flight Play
+  // In" is headed "5th Place Semifinals" / "5th Place Final", so it sits after
+  // 3rd Place, where USAU's page puts it (it rendered last pre-tournament).
+  const stagePlacementOrder = (gs: Game[]): number | null => {
+    const places = gs
+      .map((g) => bracketOrder(g.bracketStage ?? ''))
+      .filter((o) => o >= 2 && o < 500);
+    return places.length > 0 ? Math.min(...places) + 0.5 : null;
+  };
   const placementOrder = (name: string, gs: Game[]): number => {
     const o = bracketOrder(name);
-    return o === 999 ? derivedPlacementOrder(gs) : o;
+    return o === 999 ? (stagePlacementOrder(gs) ?? derivedPlacementOrder(gs)) : o;
   };
   const placementGroups = Array.from(byBracket.entries())
     .map(([name, gs]) => ({
