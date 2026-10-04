@@ -206,7 +206,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}/` : undefined,
       },
     });
-    if (error) return { error: error.message };
+    // Email confirmation is OFF on this project (mailer_autoconfirm), so Supabase
+    // rejects a repeat sign-up outright rather than masking it — say so plainly
+    // instead of surfacing its raw "User already registered".
+    if (error) {
+      const alreadyRegistered =
+        error.code === 'user_already_exists' || /already (been )?registered/i.test(error.message);
+      return { error: alreadyRegistered ? 'An account with this email already exists. Sign in instead.' : error.message };
+    }
     // When email confirmation is on, Supabase returns a user but no session.
     const needsConfirmation = !data.session && !!data.user;
     return { needsConfirmation };

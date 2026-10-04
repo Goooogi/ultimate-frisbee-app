@@ -21,6 +21,7 @@ import type { UsauEventSummary } from '@/lib/usau/data';
 import { useDivision, type UsauDivision } from '@/lib/use-division';
 import { useLevel, type UsauLevel } from '@/lib/use-level';
 import { useViewParam } from '@/lib/use-view-param';
+import { useRememberedEventView } from '@/lib/use-remembered-event-view';
 import { USAU_LEVELS } from '@/lib/league';
 import { UsauBracketTree, UsauPlacementBracketTree, UsauFlatBracketCards, isChampionshipBracket, bracketGroupPrefix, shortPlaceholder, hasBracketStructure, structuredColumnLabel } from './usau-bracket-tree';
 import { formatGameTime, formatGameDate, formatGameClock } from '@/lib/usau/venue-tz';
@@ -628,14 +629,7 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
   // any team is seeded into it. USAU's own page draws the full structure with
   // "P1 of Pool A" / "W of Quarterfinals G1" placeholders pre-tournament, and
   // the tree already renders those (completeBracket). Gating on a real team id
-  // hid the whole tab until Sunday (Hunter, 2026-08-21). Whether a team has
-  // actually landed in the bracket now only decides the DEFAULT landing tab:
-  // pools while play is still there, bracket once it matters.
-  const bracketHasTeams = games.some(
-    (g) =>
-      (isChampionshipBracket(g) || isPlacementName(g.bracketName) || isCrossoverBracket(g.bracketName)) &&
-      (g.teamAId != null || g.teamBId != null),
-  );
+  // hid the whole tab until Sunday (Hunter, 2026-08-21).
   const hasBracket =
     games.some((g) => isChampionshipBracket(g)) || placementBrackets.length > 0;
   // Pools shows whenever the division has teams: a bracket-only event falls
@@ -661,8 +655,9 @@ function buildDivisionData(event: UsauEventSummary, levelTeams: Team[], division
     { key: 'leaders',    label: 'Leaders',    show: hasLeaders },
   ];
   const visibleTabs = TABS.filter((t) => t.show);
-  const defaultTab: ViewTab =
-    hasBracket && (bracketHasTeams || !hasPools) ? 'bracket' : (visibleTabs[0]?.key ?? 'pools');
+  // Always land on Pools when it exists — a returning visitor gets the tab they
+  // left off on instead (useRememberedEventView; Hunter, 2026-10-03).
+  const defaultTab: ViewTab = visibleTabs[0]?.key ?? 'pools';
 
   return {
     teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets, placementPools,
@@ -698,6 +693,7 @@ function EventTabsView(props: {
   // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
   const [tabParam, setTabParam] = useViewParam('tab');
   const [, setDivision] = useDivision();
+  useRememberedEventView();
   const tabRequested =
     tabParam === 'pools' || tabParam === 'bracket' || tabParam === 'leaders' ? tabParam : null;
 
