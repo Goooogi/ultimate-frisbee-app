@@ -103,6 +103,22 @@ function insideHorizontalScroller(target: EventTarget | null, stop: HTMLElement)
   return false;
 }
 
+/**
+ * Call from a view-tab click inside `tabRowLeading`: if the reader has scrolled
+ * past the frozen header, bring the pane back so the new section starts right
+ * under it — switching Pools → Bracket from the bottom of Pools used to land at
+ * the bottom of Bracket (Hunter, 2026-10-03). Above that point, nothing moves.
+ * The pane is PageShell's nested overflow-y-auto, same lookup as commitChange.
+ */
+export function scrollToSectionTop(fromTab: HTMLElement): void {
+  const header = fromTab.closest('.sticky');
+  const pane = fromTab.closest('.overflow-y-auto');
+  const block = header?.parentElement;
+  if (!pane || !block) return;
+  const top = block.getBoundingClientRect().top - pane.getBoundingClientRect().top + pane.scrollTop;
+  if (pane.scrollTop > top) pane.scrollTop = top;
+}
+
 export function DivisionPager<V extends string>({
   divisions,
   active,

@@ -13,7 +13,7 @@ import { useRouter } from 'next/navigation';
 import { useViewParam } from '@/lib/use-view-param';
 import type { WfdfEventDetail as WfdfEvent } from '@/lib/wfdf/data';
 import { wfdfGameTime } from '@/lib/wfdf/format-date';
-import { DivisionPager } from '@/components/division-pager';
+import { DivisionPager, scrollToSectionTop } from '@/components/division-pager';
 import { WfdfFlag } from './wfdf-flag';
 import { WfdfBracketTree, hasWfdfBracket, wfdfBracketCoveredIds } from './wfdf-bracket-tree';
 
@@ -301,7 +301,10 @@ export function WfdfEventDetail({ event }: Props) {
                     type="button"
                     role="tab"
                     aria-selected={on}
-                    onClick={() => setActiveTab(t)}
+                    onClick={(e) => {
+                      setActiveTab(t);
+                      scrollToSectionTop(e.currentTarget);
+                    }}
                     className={[
                       'flex-1 lg:flex-none flex justify-center lg:justify-start whitespace-nowrap',
                       'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',

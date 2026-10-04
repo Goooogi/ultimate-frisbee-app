@@ -26,7 +26,7 @@ import type { EufDivision, EufGameCard, EufStandingRow } from '@/lib/euf/data';
 import { eufGameDate, eufGameTime, eufDayKey } from '@/lib/euf/format-date';
 import { EufFlag } from './euf-flag';
 import { EufBracketTree, hasEufBracket } from './euf-bracket-tree';
-import { DivisionPager } from '@/components/division-pager';
+import { DivisionPager, scrollToSectionTop } from '@/components/division-pager';
 
 interface Props {
   divisions: EufDivision[];
@@ -152,7 +152,10 @@ export function EufEventDetail({ divisions, standings, games, sourceUrl, season 
                     type="button"
                     role="tab"
                     aria-selected={on}
-                    onClick={() => setTab(t.key)}
+                    onClick={(e) => {
+                      setTab(t.key);
+                      scrollToSectionTop(e.currentTarget);
+                    }}
                     className={[
                       'flex-1 lg:flex-none flex justify-center lg:justify-start whitespace-nowrap',
                       'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',

@@ -27,7 +27,7 @@ import { UsauBracketTree, UsauPlacementBracketTree, UsauFlatBracketCards, isCham
 import { formatGameTime, formatGameDate, formatGameClock } from '@/lib/usau/venue-tz';
 import { gameWinnerId, isForfeit } from '@/lib/usau/game-winner';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
-import { DivisionPager } from '@/components/division-pager';
+import { DivisionPager, scrollToSectionTop } from '@/components/division-pager';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
 
 // Masters combined events prefix every bracket with its group ("GM Women ·
@@ -781,7 +781,10 @@ function EventTabsView(props: {
                     type="button"
                     role="tab"
                     aria-selected={on}
-                    onClick={() => setTabParam(t.key)}
+                    onClick={(e) => {
+                      setTabParam(t.key);
+                      scrollToSectionTop(e.currentTarget);
+                    }}
                     className={[
                       'flex-1 lg:flex-none flex justify-center lg:justify-start whitespace-nowrap',
                       'text-[12px] font-bold tracking-[0.1em] uppercase font-tight cursor-pointer',
