@@ -48,6 +48,7 @@ import {
   recentUsauMajorsWithChampions,
   listSeriesStages,
   type UsauFeedCard,
+  type CompetitionLevel,
 } from '@/lib/usau/data';
 import { listPulGames, getPulCurrentSeason } from '@/lib/pul/data';
 import { listWulGames, getWulCurrentSeason, getWulResultsSeason } from '@/lib/wul/data';
@@ -118,26 +119,31 @@ export default async function HomePage() {
   const now = homeNow();
   const year = currentSeasonYear(now);
 
+  // USAU hero pick for one level group: current tournament via weekend cadence —
+  // mirrors scores/page.tsx pattern. Can be LAST weekend's finished event. A
+  // whole series stage can headline instead ("2026 USAU Sectionals"). No
+  // DB-wide fallback: an out-of-season level just drops its slide.
+  const usauHeroPick = async (competitionLevels: CompetitionLevel[]) => {
+    const pick = await getCurrentEvent({ competitionLevels, fallback: false });
+    if (!pick) return null;
+    if ('series' in pick) return { kind: 'series' as const, series: pick.series };
+    const event = await getEvent(pick.slug);
+    return event ? { kind: 'event' as const, event } : null;
+  };
+
   // Fetch all data sources in parallel. Cross-league fetches are gated with
   // try/catch via Promise.allSettled so a failure in one league never breaks
   // the page — the slide is simply omitted.
-  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes, usauCollegeRes, usauSeriesRes] =
+  const [gamesRes, seasonRes, standingsRes, teamStatsRes, usauRes, usauUpNextRes, pulRes, wulRes, usauMajorsRes, wfdfRes, standoutsRes, wfdfSeasonRes, usauCollegeRes, usauSeriesRes, usauCollegeHeroRes] =
     await Promise.allSettled([
       getCurrentGames(),
       // Season-wide fetch so "Up next" stays populated between weekends.
       getAllGamesByYears([year]),
       getStandings(),
       getTeamStats({ year }),
-      // USAU (hero + recent-results): current tournament via weekend cadence —
-      // mirrors scores/page.tsx pattern. Can be LAST weekend's finished event.
-      // A whole series stage can headline instead ("2026 USAU Sectionals").
-      (async () => {
-        const pick = await getCurrentEvent();
-        if (!pick) return null;
-        if ('series' in pick) return { kind: 'series' as const, series: pick.series };
-        const event = await getEvent(pick.slug);
-        return event ? { kind: 'event' as const, event } : null;
-      })(),
+      // USAU hero, Club slide — College gets its own slide (last entry), so
+      // the two levels never compete for one card. Masters stays here.
+      usauHeroPick(['CLUB', 'MASTERS', 'GRAND_MASTERS', 'GREAT_GRAND_MASTERS']),
       // USAU ("Up next" card): the next several UPCOMING flighted tournaments,
       // always forward-looking (unlike getCurrentEvent, which looks back Sun–Tue).
       // A LIST (not one event's pool games) so the card stays full even before
@@ -186,6 +192,8 @@ export default async function HomePage() {
         startTo: usauToday(now),
         levels: ['CLUB'],
       }),
+      // USAU hero, College slide (D-I + D-III).
+      usauHeroPick(['COLLEGE_D1', 'COLLEGE_D3']),
     ]);
 
   const currentGames: UfaGame[] = gamesRes.status === 'fulfilled' ? gamesRes.value : [];
@@ -207,6 +215,9 @@ export default async function HomePage() {
   const usauPick = usauRes.status === 'fulfilled' ? usauRes.value : null;
   const usauEvent = usauPick?.kind === 'event' ? usauPick.event : null;
   const usauSeries = usauPick?.kind === 'series' ? usauPick.series : null;
+  const collegePick = usauCollegeHeroRes.status === 'fulfilled' ? usauCollegeHeroRes.value : null;
+  const collegeEvent = collegePick?.kind === 'event' ? collegePick.event : null;
+  const collegeSeries = collegePick?.kind === 'series' ? collegePick.series : null;
 
   // USAU "Up next" card: a LIST of upcoming flighted tournaments (forward-looking,
   // unlike the hero's getCurrentEvent which looks back Sun–Tue). Listing several
@@ -490,7 +501,7 @@ export default async function HomePage() {
             />
           ),
         }))
-      : gotwGame || !(allStarGame || usauEvent || usauSeries || wfdfEvent || pulFeatured || wulFeatured)
+      : gotwGame || !(allStarGame || usauEvent || usauSeries || collegeEvent || collegeSeries || wfdfEvent || pulFeatured || wulFeatured)
         ? [
             {
               key: gotwGame ? `ufa:${gotwGame.gameID}` : 'ufa:empty',
@@ -523,12 +534,22 @@ export default async function HomePage() {
           ),
         }
       : null,
-    // USAU — tournament card, null when no current event.
+    // USAU — Club then College tournament cards, each null when its level has
+    // no current event.
     usauEvent ? { key: `usau:${usauEvent.slug}`, node: <HeroUsauSlide key="usau" event={usauEvent} /> } : null,
     usauSeries
       ? {
           key: `usau-series:${usauSeries.id}`,
           node: <HeroUsauSeriesSlide key="usau-series" series={usauSeries} today={usauToday(now)} />,
+        }
+      : null,
+    collegeEvent
+      ? { key: `usau:${collegeEvent.slug}`, node: <HeroUsauSlide key="usau-college" event={collegeEvent} /> }
+      : null,
+    collegeSeries
+      ? {
+          key: `usau-series:${collegeSeries.id}`,
+          node: <HeroUsauSeriesSlide key="usau-college-series" series={collegeSeries} today={usauToday(now)} />,
         }
       : null,
     // WFDF — Worlds tournament card, null in the off-season. Same weekend flip.

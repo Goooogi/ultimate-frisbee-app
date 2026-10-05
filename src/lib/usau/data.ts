@@ -841,6 +841,13 @@ export async function getCurrentEvent(opts?: {
   genderDivision?: 'Men' | 'Women' | 'Mixed';
   /** Restrict to ONE competition level (e.g. 'MASTERS'). Default: all flagship levels. */
   competitionLevel?: CompetitionLevel;
+  /** Restrict to a SET of levels (e.g. both College divisions). Ignored when
+   *  competitionLevel is set. Default: all flagship levels. */
+  competitionLevels?: CompetitionLevel[];
+  /** false → null when nothing is in the window, skipping the DB-wide fallback.
+   *  A level-scoped hero slide wants that: the fallback would headline last
+   *  season's final months into the off-season. Default true. */
+  fallback?: boolean;
 }): Promise<UsauCurrentPick | null> {
   const db = await supabase();
   const now = new Date();
@@ -854,10 +861,11 @@ export async function getCurrentEvent(opts?: {
   const windowBack = usauToday(new Date(now.getTime() - 45 * 86400_000));
   const windowForward = usauToday(new Date(now.getTime() + 45 * 86400_000));
 
-  // One explicit level filters exactly; otherwise any flagship level headlines.
+  // One explicit level (or level set) filters exactly; otherwise any flagship
+  // level headlines.
   const levelFilter = opts?.competitionLevel
     ? [opts.competitionLevel]
-    : FLAGSHIP_LEVELS;
+    : (opts?.competitionLevels ?? FLAGSHIP_LEVELS);
 
   // Masters-family: also headline combined-championship events that field this
   // division under a sibling tag (see MASTERS_FAMILY note).
@@ -1163,6 +1171,7 @@ export async function getCurrentEvent(opts?: {
     return series ? { series, hasGames } : { slug: e.usau_slug, hasGames };
   };
   if (ordered.length > 0) return pick(ordered[0], hasGames(ordered[0]));
+  if (opts?.fallback === false) return null;
 
   // Final fallback: most-recent flagship event with games anywhere in DB.
   // Apply the division filter via the team-participation join when set.
