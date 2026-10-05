@@ -13,7 +13,15 @@ import { notFound, redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { PageShell } from '@/components/page-shell';
 import { SourceLink } from '@/components/source-link';
-import { loadUsauEvent, resolveUsauEvent, seriesStageName, type UsauEventSummary } from '@/lib/usau/data';
+import {
+  getNationalsField,
+  isNationalsChampionshipName,
+  loadUsauEvent,
+  resolveUsauEvent,
+  seriesStageName,
+  type UsauEventSummary,
+} from '@/lib/usau/data';
+import type { NationalsFieldState } from '@/components/usau/nationals-field';
 import { usauEventHref } from '@/lib/usau/event-href';
 import { usauToday } from '@/lib/today';
 import { UsauMemberSourceLink } from '@/components/usau/usau-member-source-link';
@@ -80,6 +88,16 @@ export default async function UsauEventPage({ params }: Props) {
   // ingested the WFDF twin, every USAU-side link lands there instead.
   const worldsTwin = await findWorldsTwinSlug(event.name, Number(event.season));
   if (worldsTwin) redirect(`/wfdf/events/${worldsTwin}`);
+
+  // Club Nationals before USA Ultimate posts its teams has nothing to show, so
+  // the projected field (Regionals qualifiers by region) stands in as a FIELD
+  // tab. The cheap name check gates the read — no other event ever runs it —
+  // and the season is the loaded event row's own, never a route param.
+  const isClubNationals = event.competitionLevel === 'CLUB' && isNationalsChampionshipName(event.name);
+  const noTeamsPosted = event.teams.length === 0;
+  // Drop `&& noTeamsPosted` to keep the FIELD tab once pools are published.
+  const fieldEligible = isClubNationals && noTeamsPosted;
+  const nationalsField: NationalsFieldState | null = fieldEligible ? await loadNationalsField(event.season) : null;
 
   const subtitle = formatSubtitle(event);
   const eyebrowParts = [
@@ -193,10 +211,23 @@ export default async function UsauEventPage({ params }: Props) {
           500'd (FUNCTION_INVOCATION_FAILED) until this boundary. Same pattern
           as page-shell.tsx and usau-team-history.tsx. */}
       <Suspense>
-        <UsauEventDetail event={event} />
+        <UsauEventDetail event={event} nationalsField={nationalsField} />
       </Suspense>
     </PageShell>
   );
+}
+
+/** The FIELD tab's data. A failed read renders the tab's generic error copy
+ *  (the spec's error state) instead of failing the whole event page; the real
+ *  error is logged. Null = no field this season → no tab. */
+async function loadNationalsField(season: number): Promise<NationalsFieldState | null> {
+  try {
+    const field = await getNationalsField(season);
+    return field ? { status: 'ready', field } : null;
+  } catch (err) {
+    console.error('[usau/events] getNationalsField failed', err);
+    return { status: 'error' };
+  }
 }
 
 function formatSubtitle(event: UsauEventSummary): string | null {

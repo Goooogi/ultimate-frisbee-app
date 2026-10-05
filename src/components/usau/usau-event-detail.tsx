@@ -29,6 +29,8 @@ import { gameWinnerId, isForfeit } from '@/lib/usau/game-winner';
 import { UsauTeamLogo } from '@/components/usau/usau-team-logo';
 import { DivisionPager, scrollToSectionTop } from '@/components/division-pager';
 import { UsauLevelSelect } from '@/components/usau/usau-level-select';
+import { NationalsFieldPanel, type NationalsFieldState } from '@/components/usau/nationals-field';
+import { NATIONALS_DIVISIONS } from '@/lib/usau/nationals-field';
 
 // Masters combined events prefix every bracket with its group ("GM Women ·
 // Pool A", "Masters Mixed · 1st Place"). Pool detection and display labels
@@ -147,9 +149,21 @@ function usauSlugFor(event: UsauEventSummary, division: string): string {
 
 interface Props {
   event: UsauEventSummary;
+  /** The projected Club Nationals field (FIELD tab). The route passes it only
+   *  for a club Nationals with no teams posted; null/absent everywhere else. */
+  nationalsField?: NationalsFieldState | null;
 }
 
-export function UsauEventDetail({ event }: Props) {
+export function UsauEventDetail({ event, nationalsField = null }: Props) {
+  // The FIELD tab exists once the field has a qualifier (or its read failed,
+  // which shows the generic error copy). Before any qualifier, nothing new
+  // renders at all.
+  const field =
+    nationalsField != null &&
+    (nationalsField.status === 'error' || nationalsField.field.divisions.some((d) => d.qualifiedCount > 0))
+      ? nationalsField
+      : null;
+
   // ── Detect available competition levels ───────────────────────────────
   // Combined masters championships host Masters AND Grand Masters groups in
   // ONE event (each team is tagged per-group). Those must be viewed one
@@ -185,12 +199,19 @@ export function UsauEventDetail({ event }: Props) {
     // Merged events: one tab per division USAU published, even before any
     // team is posted (the empty state explains it), in Men/Women/Mixed order.
     if (mergedDivisions) return event.members.map((m) => m.division as string);
+    // A pre-teams Club Nationals: the projected field's divisions drive the
+    // pills (all three if its read failed).
+    if (event.teams.length === 0 && field) {
+      return field.status === 'ready'
+        ? field.field.divisions.map((d) => d.division as string)
+        : [...NATIONALS_DIVISIONS];
+    }
     const set = new Set<string>();
     for (const t of levelTeams) {
       if (t.genderDivision) set.add(t.genderDivision);
     }
     return Array.from(set);
-  }, [levelTeams, mergedDivisions, event.members]);
+  }, [levelTeams, mergedDivisions, event.members, event.teams.length, field]);
 
   // Source of truth: the global ?div URL param, set by the
   // UsauDivisionSelect dropdown at the top of the page.
@@ -224,11 +245,28 @@ export function UsauEventDetail({ event }: Props) {
       levelTeams={levelTeams}
       eventDivisions={eventDivisions}
       gender={gender}
+      field={field}
     />
   );
 }
 
-type ViewTab = 'pools' | 'bracket' | 'leaders';
+type ViewTab = 'pools' | 'bracket' | 'leaders' | 'field';
+
+/** A division's view tabs plus FIELD (last) when the projected field shows.
+ *  FIELD is the landing tab only when the division has neither pools nor
+ *  bracket — the Pools-first rule is unchanged (mobile parity). */
+function withFieldTab(
+  visibleTabs: Array<{ key: ViewTab; label: string; show: boolean }>,
+  defaultTab: ViewTab,
+  hasField: boolean,
+): { tabs: Array<{ key: ViewTab; label: string; show: boolean }>; defaultTab: ViewTab } {
+  if (!hasField) return { tabs: visibleTabs, defaultTab };
+  const hasPoolsOrBracket = visibleTabs.some((t) => t.key === 'pools' || t.key === 'bracket');
+  return {
+    tabs: [...visibleTabs, { key: 'field', label: 'Field', show: true }],
+    defaultTab: hasPoolsOrBracket ? defaultTab : 'field',
+  };
+}
 
 /** Everything derived FOR ONE DIVISION — pools, games, brackets, standings,
  *  and which view tabs it can fill. DivisionPager's renderDivision calls this
@@ -686,8 +724,9 @@ function EventTabsView(props: {
   levelTeams: Team[];
   eventDivisions: UsauDivision[];
   gender: string;
+  field: NationalsFieldState | null;
 }) {
-  const { event, level, availableLevels, levelTeams, eventDivisions, gender } = props;
+  const { event, level, availableLevels, levelTeams, eventDivisions, gender, field } = props;
 
   // Tab lives in the URL (?tab=) so back-nav from a team page and hard refresh
   // both keep it (Hunter ruling 2026-08-16; div/level were already URL-backed).
@@ -695,7 +734,9 @@ function EventTabsView(props: {
   const [, setDivision] = useDivision();
   useRememberedEventView();
   const tabRequested =
-    tabParam === 'pools' || tabParam === 'bracket' || tabParam === 'leaders' ? tabParam : null;
+    tabParam === 'pools' || tabParam === 'bracket' || tabParam === 'leaders' || tabParam === 'field'
+      ? tabParam
+      : null;
 
   const activeGender = eventDivisions.includes(gender as UsauDivision)
     ? (gender as UsauDivision)
@@ -707,10 +748,11 @@ function EventTabsView(props: {
   // buildDivisionData is pure and memoized; DivisionContent still runs it per
   // rendered division for the sections themselves.
   const effectiveDivision = activeGender ?? eventDivisions[0] ?? '';
-  const { visibleTabs, defaultTab } = useMemo(
+  const divisionData = useMemo(
     () => buildDivisionData(event, levelTeams, effectiveDivision),
     [event, levelTeams, effectiveDivision],
   );
+  const { tabs: visibleTabs, defaultTab } = withFieldTab(divisionData.visibleTabs, divisionData.defaultTab, field != null);
   const activeTab: ViewTab =
     tabRequested != null && visibleTabs.some((t) => t.key === tabRequested)
       ? tabRequested
@@ -807,6 +849,7 @@ function EventTabsView(props: {
             levelTeams={levelTeams}
             division={division}
             tabRequested={tabRequested}
+            field={field}
           />
         )}
         contentClassName="flex flex-col gap-6"
@@ -825,21 +868,24 @@ function DivisionContent({
   levelTeams,
   division,
   tabRequested,
+  field,
 }: {
   event: UsauEventSummary;
   level: UsauLevel | '';
   levelTeams: Team[];
   division: string;
   tabRequested: ViewTab | null;
+  field: NationalsFieldState | null;
 }) {
   const {
     teams, games, showGroupPrefixes, bracketLabel, pools, placementBrackets, placementPools,
     roundGroups, poolGames, poolRecords, champFinals, poolLeader, leaderRows,
-    visibleTabs, defaultTab,
+    visibleTabs: divisionTabs, defaultTab: divisionDefault,
   } = useMemo(
     () => buildDivisionData(event, levelTeams, division),
     [event, levelTeams, division],
   );
+  const { tabs: visibleTabs, defaultTab } = withFieldTab(divisionTabs, divisionDefault, field != null);
 
   // A tab requested via the URL only applies here when THIS division can fill
   // it — otherwise this division falls back to its OWN first-filled tab, not
@@ -1002,6 +1048,9 @@ function DivisionContent({
 
       {/* ── Leaders — goals/assists, published for flagship events only ──── */}
       {active === 'leaders' && <LeadersTable rows={leaderRows} season={event.season} />}
+
+      {/* ── Field — projected Club Nationals qualifiers, pre-teams only ───── */}
+      {active === 'field' && field && <NationalsFieldPanel state={field} division={division} season={event.season} />}
 
       {visibleTabs.length === 0 && (
         <div className="text-[12px] text-faint font-tight">

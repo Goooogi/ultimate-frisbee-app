@@ -141,10 +141,11 @@ export default async function HomePage() {
       // USAU ("Up next" card): the next several UPCOMING flighted tournaments,
       // always forward-looking (unlike getCurrentEvent, which looks back Sun–Tue).
       // A LIST (not one event's pool games) so the card stays full even before
-      // any games are ingested for the nearest event. Fetch 6 (the card's max
-      // rows) so it can match the UFA card's height; UpNextCards trims to the
-      // shared row count.
-      listNextUpcomingEvents(6),
+      // any games are ingested for the nearest event. Fetch the whole preview
+      // window (the limit only slices — same query cost) so every level section
+      // (Club / College / Masters) has supply; a small slice let College fall
+      // invitationals crowd Club out. UpNextCards caps rows per section.
+      listNextUpcomingEvents(50),
       // PUL: upcoming-this-week else most-recent final. Season resolved from the
       // data (newest present) so it self-advances and never queries an empty year.
       (async () => listPulGames({ season: await getPulCurrentSeason() }))(),

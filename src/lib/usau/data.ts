@@ -22,6 +22,15 @@ import { usauToday } from '@/lib/today';
 import { gameWinnerId } from '@/lib/usau/game-winner';
 import { SEASON_PREVIEW_DAYS } from '@/lib/season-windows';
 import { seriesStageHref, seriesUnitLabel, type UsauLevel, type UsauSeriesStage } from '@/lib/league';
+import {
+  NATIONALS_DIVISIONS,
+  buildNationalsField,
+  type NationalsDivision,
+  type NationalsEntrantRow,
+  type NationalsField,
+  type NationalsRankingSnapshot,
+  type NationalsRegionalEventRow,
+} from '@/lib/usau/nationals-field';
 
 type DB = SupabaseClient<Database>;
 
@@ -1682,7 +1691,7 @@ export interface UsauNationalsMedal {
  * (isPinnacleEventName misses "National Championships" — singular "national" —
  * which cost real titles, so we don't reuse it here.)
  */
-function isNationalsChampionshipName(name: string): boolean {
+export function isNationalsChampionshipName(name: string): boolean {
   const n = name.toLowerCase();
   if (/regional|sectional|conference/.test(n)) return false;
   if (/u\.?\s?s\.?\s?open|pro[- ]?championship|pro[- ]?elite|tune ?up|warm ?up|\binvite\b/.test(n))
@@ -2696,7 +2705,7 @@ async function championsForEvents(
   const PAGE = 1000;
   const finals: Row[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data: page } = await db
+    const { data: page, error } = await db
       .from('usau_games')
       .select(
         'id, event_id, team_a_id, team_b_id, score_a, score_b, winner_team_id, scheduled_at, bracket_name, status, ' +
@@ -2708,6 +2717,8 @@ async function championsForEvents(
       .or('round.eq.final,bracket_stage_index.eq.0')
       .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
       .range(from, from + PAGE - 1);
+    // A failed page (e.g. statement timeout) must not read as "no champion yet".
+    if (error) throw error;
     const rows = (page ?? []) as unknown as Row[];
     finals.push(...rows);
     if (rows.length < PAGE) break;
@@ -2875,7 +2886,7 @@ async function bestPoolRecordWinners(
   const PAGE = 1000;
   const poolGames: Row[] = [];
   for (let from = 0; ; from += PAGE) {
-    const { data: page } = await db
+    const { data: page, error } = await db
       .from('usau_games')
       .select(
         'id, event_id, team_a_id, team_b_id, score_a, score_b, winner_team_id, bracket_name, ' +
@@ -2886,6 +2897,7 @@ async function bestPoolRecordWinners(
       .ilike('bracket_name', '%pool%')
       .order('id', { ascending: true }) // stable order so paged ranges don't skip/overlap
       .range(from, from + PAGE - 1);
+    if (error) throw error;
     const rows = (page ?? []) as unknown as Row[];
     poolGames.push(...rows);
     if (rows.length < PAGE) break;
@@ -4642,6 +4654,102 @@ export async function listSeriesStageEvents(
   events.sort((a, b) => (a.startDate ?? '').localeCompare(b.startDate ?? '') || a.name.localeCompare(b.name));
 
   return { stage: toStageCard(aggregateSeriesStages(rows)[0]), events };
+}
+
+/**
+ * The projected Club Nationals field for a season: per division, each
+ * region's bids and the Regionals finishers holding them (pure logic in
+ * ./nationals-field, mirrored verbatim from mobile). Null until the season has
+ * club-regionals rows and a rankings snapshot before them. (Ported from the
+ * mobile repo's src/lib/usau/data.ts getNationalsField.)
+ *
+ * Bids come from USA Ultimate's Final Regular Season Rankings, published just
+ * before Sectionals: per division, the latest usau_rankings week scraped (UTC
+ * date) strictly before the first Regional starts. Earlier weeks predate the
+ * final rankings and later ones reflect the series (2026: weeks 36 and 40
+ * both misallocate); week 39, scraped 05:00 UTC on Regionals' first day, is
+ * kept out by the strict cutoff. Until the final rankings are out this is
+ * just the latest week, so bids read that early are provisional.
+ */
+export async function getNationalsField(season: number): Promise<NationalsField | null> {
+  const db = await supabase();
+  const { data, error } = await db
+    .from('usau_events')
+    .select('id, start_date, end_date, series_division, series_group_name, series_group_key')
+    .eq('season', season)
+    .eq('series_stage', 'club-regionals')
+    .in('series_division', [...NATIONALS_DIVISIONS]);
+  if (error) throw error;
+  const events = (data ?? []) as unknown as Array<
+    NationalsRegionalEventRow & { start_date: string | null; end_date: string | null }
+  >;
+  const cutoff = events
+    .map((e) => e.start_date)
+    .filter((d): d is string => !!d)
+    .sort()[0];
+  if (!cutoff) return null;
+
+  const snapshots: NationalsRankingSnapshot[] = [];
+  await Promise.all(
+    NATIONALS_DIVISIONS.map(async (division) => {
+      const { data: head, error: headError } = await db
+        .from('usau_rankings')
+        .select('week')
+        .eq('division', `Club-${division}`)
+        .eq('season', season)
+        .lt('scraped_at', `${cutoff}T00:00:00Z`)
+        .order('week', { ascending: false })
+        .limit(1);
+      if (headError) throw headError;
+      const week = head?.[0]?.week;
+      if (week == null) return;
+      // One division-week is ~200 rows, far under the 1000-row cap.
+      const { data: rows, error: rowsError } = await db
+        .from('usau_rankings')
+        .select('rank, region, team_name')
+        .eq('division', `Club-${division}`)
+        .eq('season', season)
+        .eq('week', week)
+        .order('rank', { ascending: true });
+      if (rowsError) throw rowsError;
+      snapshots.push({ division, week, rows: rows ?? [] });
+    }),
+  );
+  if (snapshots.length === 0) return null;
+
+  // Placed entrants only, paged past the 1000-row cap.
+  const ids = events.map((e) => e.id);
+  const entrants: NationalsEntrantRow[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data: page, error: teamsError } = await db
+      .from('usau_event_teams')
+      .select('event_id, team_id, final_placement, usau_teams(name)')
+      .in('event_id', ids)
+      .not('final_placement', 'is', null)
+      .order('event_id', { ascending: true })
+      .order('team_id', { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (teamsError) throw teamsError;
+    const pageRows = (page ?? []) as unknown as NationalsEntrantRow[];
+    entrants.push(...pageRows);
+    if (pageRows.length < PAGE) break;
+  }
+
+  // final_placement misses a champion whose title bracket names no place
+  // (2026 North Central Women's "Bracket play"), so those come off the final.
+  // Only Regionals still without a 1st: championsForEvents' pool-record
+  // fallback would otherwise read every ended Regional's pool games.
+  const hasFirst = new Set(entrants.filter((t) => t.final_placement === 1).map((t) => t.event_id));
+  const unplaced = events.filter((e) => !hasFirst.has(e.id));
+  const { championsByEvent } = await championsForEvents(
+    db,
+    unplaced.map((e) => ({ id: e.id, endDate: e.end_date })),
+    usauToday(),
+    new Map(unplaced.map((e) => [e.id, e.series_division as NationalsDivision])),
+  );
+
+  return buildNationalsField({ season, snapshots, events, entrants, champions: championsByEvent });
 }
 
 export type UsauScheduleItem =

@@ -10,6 +10,12 @@
 // data. When only ONE league has anything upcoming (UFA's off-season, most
 // of the year) that card spans the full row and its rows flow into two
 // columns on lg, so the section never shows a half-empty row.
+//
+// The USAU card is split into level sections — Club → College → Masters,
+// empty ones hidden — so different levels' events aren't lumped into one list
+// (Hunter, 2026-10-05). Club always leads and wins any row-budget squeeze. A
+// lone USAU card puts each section in its own lg column (a single section
+// keeps the two-column row flow).
 
 import Link from 'next/link';
 import type { UfaGame } from '@/lib/ufa/types';
@@ -69,10 +75,29 @@ interface UpNextCardsProps {
 /** Upper bound on rows per card — keeps a huge slate from ballooning the card. */
 const MAX_UP_NEXT_ROWS = 6;
 
+/** USAU card sections in display order — Club always first. */
+const USAU_SECTIONS: { label: string; levels: string[] }[] = [
+  { label: 'Club', levels: ['CLUB'] },
+  { label: 'College', levels: ['COLLEGE_D1', 'COLLEGE_D3'] },
+  { label: 'Masters', levels: ['MASTERS', 'GRAND_MASTERS', 'GREAT_GRAND_MASTERS'] },
+];
+
+/** Rows per section when the USAU card has 2+ sections. */
+const SECTION_ROWS = 3;
+
 export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
+  const usauSections = USAU_SECTIONS.map((s) => ({
+    label: s.label,
+    events: usauEvents.filter((e) => e.competitionLevel !== null && s.levels.includes(e.competitionLevel)),
+  })).filter((s) => s.events.length > 0);
+
   const hasUfa = ufaGames.length > 0;
-  const hasUsau = usauEvents.length > 0;
+  const hasUsau = usauSections.length > 0;
   if (!hasUfa && !hasUsau) return null;
+
+  const sectionCap = usauSections.length > 1 ? SECTION_ROWS : MAX_UP_NEXT_ROWS;
+  const sectionSizes = usauSections.map((s) => Math.min(s.events.length, sectionCap));
+  const usauSupply = sectionSizes.reduce((a, b) => a + b, 0);
 
   // Equal-height guarantee: when BOTH cards render side by side, they show the
   // SAME number of rows — the smaller of the two supplies (capped) — so neither
@@ -81,28 +106,57 @@ export function UpNextCards({ ufaGames, usauEvents }: UpNextCardsProps) {
   // shows as many games as USAU has events) and never leaves one card short.
   const rowCount =
     hasUfa && hasUsau
-      ? Math.min(ufaGames.length, usauEvents.length, MAX_UP_NEXT_ROWS)
+      ? Math.min(ufaGames.length, usauSupply, MAX_UP_NEXT_ROWS)
       : MAX_UP_NEXT_ROWS;
   const alone = hasUfa !== hasUsau;
+
+  const usauRows = allocateRows(sectionSizes, hasUfa ? rowCount : usauSupply);
+  const shownSections = usauSections
+    .map((s, i) => ({ label: s.label, events: s.events.slice(0, usauRows[i]) }))
+    .filter((s) => s.events.length > 0);
+  const columns = alone && shownSections.length > 1;
 
   return (
     <>
       {hasUfa && (
-        <CardShell title="Up next" pill="UFA" alone={alone} rows={Math.min(ufaGames.length, rowCount)}>
+        <CardShell title="Up next" pill="UFA" alone={alone} bodyClassName={rowsClass(alone, Math.min(ufaGames.length, rowCount))}>
           {ufaGames.slice(0, rowCount).map((g, i) => (
             <UfaUpNextRow key={g.gameID} game={g} first={i === 0} secondColumnStart={alone && i === splitAt(Math.min(ufaGames.length, rowCount))} />
           ))}
         </CardShell>
       )}
       {hasUsau && (
-        <CardShell title="Up next" pill="USAU" alone={alone} rows={Math.min(usauEvents.length, rowCount)}>
-          {usauEvents.slice(0, rowCount).map((e, i) => (
-            <UsauEventRow key={e.key} event={e} first={i === 0} secondColumnStart={alone && i === splitAt(Math.min(usauEvents.length, rowCount))} />
+        <CardShell
+          title="Up next"
+          pill="USAU"
+          alone={alone}
+          bodyClassName={columns ? 'grid grid-cols-1 lg:grid-cols-2 gap-x-8 gap-y-4' : 'flex flex-col gap-y-4'}
+        >
+          {shownSections.map((s) => (
+            <UsauSection key={s.label} label={s.label} events={s.events} flow={alone && shownSections.length === 1} />
           ))}
         </CardShell>
       )}
     </>
   );
+}
+
+/** Splits a row budget across sections (sizes already capped, display order):
+ *  one row each while the budget lasts, then the rest fills Club → College →
+ *  Masters — so a tight budget squeezes the later sections, never Club. */
+function allocateRows(sizes: number[], budget: number): number[] {
+  const rows = sizes.map(() => 0);
+  let left = budget;
+  for (let i = 0; i < sizes.length && left > 0; i++) {
+    rows[i] = 1;
+    left--;
+  }
+  for (let i = 0; i < sizes.length && left > 0; i++) {
+    const add = Math.min(sizes[i] - rows[i], left);
+    rows[i] += add;
+    left -= add;
+  }
+  return rows;
 }
 
 /** Index of the first row in the second column of a lone card's lg layout
@@ -131,14 +185,14 @@ function CardShell({
   title,
   pill,
   alone,
-  rows,
+  bodyClassName,
   children,
 }: {
   title: string;
   pill: string;
   /** The only Up next card on the page → span the whole lg row. */
   alone: boolean;
-  rows: number;
+  bodyClassName: string;
   children: React.ReactNode;
 }) {
   return (
@@ -154,7 +208,7 @@ function CardShell({
         </h3>
         <LeaguePill>{pill}</LeaguePill>
       </div>
-      <div className={rowsClass(alone, rows)}>{children}</div>
+      <div className={bodyClassName}>{children}</div>
     </div>
   );
 }
@@ -222,6 +276,32 @@ function UfaUpNextRow({
         {when}
       </span>
     </Link>
+  );
+}
+
+// ─── USAU section — one level's upcoming events ───────────────────────────
+
+/** `flow`: the lone card's only section → rows flow into two lg columns. */
+function UsauSection({
+  label,
+  events,
+  flow,
+}: {
+  label: string;
+  events: UpcomingUsauEvent[];
+  flow: boolean;
+}) {
+  return (
+    <section>
+      <h4 className="font-sans text-[10.5px] font-bold tracking-[0.12em] uppercase text-muted m-0">
+        {label}
+      </h4>
+      <div className={rowsClass(flow, events.length)}>
+        {events.map((e, i) => (
+          <UsauEventRow key={e.key} event={e} first={i === 0} secondColumnStart={flow && i === splitAt(events.length)} />
+        ))}
+      </div>
+    </section>
   );
 }
 
