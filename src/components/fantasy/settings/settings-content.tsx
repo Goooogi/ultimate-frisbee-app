@@ -21,6 +21,7 @@ import {
 } from '@/lib/fantasy/leagues';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 import type { Draft, DraftReadiness } from '@/lib/fantasy/draft-room';
+import { getGame } from '@/lib/fantasy/games';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { LeagueLogoPicker } from '@/components/fantasy/league-logo-picker';
 import { NameCard, RosterCard, ScoringCard } from '@/components/fantasy/league-settings-panel';
@@ -113,7 +114,13 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
       <div className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6">
         <h3 className="text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight mb-4">Logo</h3>
         <div className="flex items-center gap-3.5">
-          <LeagueLogo name={leagueName} logoUrl={league?.logoUrl} logoIcon={league?.logoIcon} size={56} />
+          <LeagueLogo
+            name={leagueName}
+            logoUrl={league?.logoUrl}
+            logoIcon={league?.logoIcon}
+            logoSrc={getGame(contest.competition)?.logoSrc}
+            size={56}
+          />
           <div className="min-w-0 flex-1">
             <p className="font-tight text-[13.5px] font-semibold text-ink truncate">{leagueName}</p>
             <p className="font-tight text-[11.5px] text-faint">Shown across the app for this league.</p>

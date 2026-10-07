@@ -16,6 +16,7 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { getMyLeagues, type MyLeagueRow, type MyLeagueContestRow } from '@/lib/fantasy/leagues';
 import { contestFormat } from '@/lib/fantasy/competitions';
+import { getGame } from '@/lib/fantasy/games';
 
 interface StatusChip {
   label: string;
@@ -164,6 +165,7 @@ export function MyLeaguesList() {
                       name={r.league.name}
                       logoUrl={r.league.logoUrl}
                       logoIcon={r.league.logoIcon}
+                      logoSrc={getGame(r.contest.competition)?.logoSrc}
                       size={40}
                     />
                     <span className="min-w-0 flex-1 flex flex-col gap-0.5">
