@@ -88,13 +88,10 @@ export function FormatCard({ contest, onSaved }: Props) {
           })}
         </div>
 
-        {locked ? (
-          <p className="font-tight text-[12px] text-faint">Locked — the schedule is set.</p>
-        ) : (
-          <div>
-            <SaveButton disabled={!canSave} saving={saving} />
-          </div>
-        )}
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-tight text-[12px] text-faint">{locked ? 'Locked — the schedule is set.' : ''}</p>
+          {!locked && <SaveButton disabled={!canSave} saving={saving} />}
+        </div>
       </form>
       {!locked && <Feedback error={error} saved={saved} />}
     </Card>

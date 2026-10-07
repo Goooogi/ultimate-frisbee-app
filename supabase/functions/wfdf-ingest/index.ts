@@ -32,6 +32,21 @@ const UA = 'Mozilla/5.0 (the-layout/wfdf-ingest)';
 const FETCH_DELAY_MS = 120; // polite pacing between the per-team roster fetches
 const ROSTER_CONCURRENCY = 6;
 
+// FAR TIER (Hunter, 2026-10-06: "pull event info AS SOON as the league source
+// has it"). The live window starts at start_date-21d, so a known event whose
+// pools/schedule/rosters go up earlier sat frozen at its first snapshot. Events
+// starting in (today+LOOKAHEAD, today+FAR_LOOKAHEAD_DAYS] — plus modern events
+// with no start_date yet — get a separate capped check on the 15-min live cron:
+// the FAR_PER_RUN least-recently-scraped whose last scrape is older than
+// FAR_MIN_INTERVAL_MIN. One ingest is ~3 + one request per team (up to ~100 at
+// a Worlds); nothing sits in this band today, so the cap bounds peak load, not
+// current load. Interval < 60 so cron drift can't push a check to 75 min.
+// Constants, not body overrides — this endpoint is reachable by anyone with a key.
+const FAR_LOOKAHEAD_DAYS = 120;
+const FAR_PER_RUN = 2;
+const FAR_MIN_INTERVAL_MIN = 50;
+const LIVE_CRON_INTERVAL_MIN = 15;
+
 function db(): SupabaseClient {
   const url = Deno.env.get('SUPABASE_URL');
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -57,7 +72,7 @@ async function getJson(url: string): Promise<any> {
   }
 }
 
-// ── Discovery helpers ────────────────────────────────────────────────────────
+// ── Discovery helpers ───────────────────────────────────────────────────────
 
 /**
  * Full event base URL for a stored wfdf_events row.
@@ -834,9 +849,40 @@ Deno.serve(async (req) => {
       });
     }
     const live = (events ?? []).filter((e: any) => e.source_origin);
+
+    const thisYear = new Date().getUTCFullYear();
+    const { data: farRows, error: farErr } = await supabase
+      .from('wfdf_events')
+      .select('slug, name, source_origin, static_base, start_date, end_date, last_scraped_at')
+      .eq('last_scraped_status', 'ok')
+      .or(
+        // Lower bound floors at 21 so a body lookaheadDays can't drag the far
+        // tier back over finished events.
+        `and(start_date.gt.${dayOffset(Math.max(LOOKAHEAD_DAYS, 21))},start_date.lte.${dayOffset(FAR_LOOKAHEAD_DAYS)}),` +
+          `and(start_date.is.null,year.gte.${thisYear})`,
+      );
+    if (farErr) {
+      return new Response(JSON.stringify({ ok: false, error: farErr.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const scrapedAt = (e: any) => (e.last_scraped_at ? Date.parse(e.last_scraped_at) : 0);
+    const staleBefore = Date.now() - FAR_MIN_INTERVAL_MIN * 60_000;
+    const farStale = (farRows ?? [])
+      .filter((e: any) => e.source_origin && scrapedAt(e) < staleBefore)
+      .sort((a: any, b: any) => scrapedAt(a) - scrapedAt(b));
+    // Rotate by cron firing: an event that fails before the upsert never stamps
+    // last_scraped_at, so oldest-first alone would give it the slot forever.
+    const farSlots = Math.max(1, Math.ceil(farStale.length / FAR_PER_RUN));
+    const farOffset =
+      (Math.floor(Date.now() / 60_000 / LIVE_CRON_INTERVAL_MIN) % farSlots) * FAR_PER_RUN;
+    const far = farStale.slice(farOffset, farOffset + FAR_PER_RUN);
+
     const results: any[] = [];
     // Sequential — polite to the source, and each event's ingest is quick.
-    for (const e of live) {
+    // Far events go last so live events always refresh first.
+    for (const e of [...live, ...far]) {
       try {
         // source_origin is the ORIGIN only; a path event's segment lives in
         // static_base ("/wucc-2026/live/data/"). Re-ingesting the bare origin
@@ -848,7 +894,7 @@ Deno.serve(async (req) => {
         console.error(`[wfdf-ingest] live re-ingest failed for ${e.slug}:`, err);
       }
     }
-    return new Response(JSON.stringify({ ok: true, mode: 'dispatch-live', liveEvents: live.length, results }), {
+    return new Response(JSON.stringify({ ok: true, mode: 'dispatch-live', liveEvents: live.length, farWindow: farRows?.length ?? 0, farRefreshed: far.length, results }), {
       headers: { 'Content-Type': 'application/json' },
     });
   }

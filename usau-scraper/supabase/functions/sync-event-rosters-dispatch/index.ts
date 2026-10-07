@@ -66,6 +66,16 @@ const MAX_TEAMS_PER_EVENT_PER_RUN = 8;
 const IMMINENT_MAX_TEAMS_PER_EVENT_PER_RUN = 20;
 /** An event starting within this many days counts as imminent. */
 const IMMINENT_DAYS = 3;
+/** Live-mode window: events starting within this many days. Matches
+ *  sync-live-events' early tier so rosters land as soon as teams are posted
+ *  (2026 Club Nationals posted ~16 days out — Hunter, 2026-10-06). */
+const LOOKAHEAD_DAYS = 30;
+/** Rosters fetched more than this many days before the start were scraped in the
+ *  early window; once the event is imminent each gets ONE re-scrape so late
+ *  roster adds land. Normal events are first scraped inside this, so unaffected. */
+const EARLY_REFRESH_DAYS = 7;
+/** Non-imminent teams whose page was fetched but empty wait this long before a re-check. */
+const EMPTY_RECHECK_HOURS = 20;
 
 /**
  * Run `items` through `fn` with at most `limit` in flight. Preserves order.
@@ -190,12 +200,27 @@ async function dispatchEvent(
   /** Event start_date (yyyy-mm-dd). Events starting within IMMINENT_DAYS get a
    *  larger per-event share so a Series weekend's rosters land before games. */
   startDate?: string | null,
+  /** Fair share of the remaining budget (budget ÷ events left). Lets a lone
+   *  event in the window use the whole per-run budget instead of the steady-state
+   *  cap — a 48-team Nationals alone would otherwise take ~3 days of firings. */
+  fairShare = 0,
 ): Promise<EventDispatchResult> {
+  // No teams posted yet (most of the 30-day window) → nothing to resolve; skip
+  // the resolver call so the wider window doesn't cost an edge call per event.
+  const { count: teamCount, error: countErr } = await db
+    .from('usau_event_teams')
+    .select('team_id', { count: 'exact', head: true })
+    .eq('event_id', eventId);
+  if (countErr) throw new Error(`count event_teams: ${stringifyErr(countErr)}`);
+  if (!teamCount) {
+    return { slug, season, teamsToScrape: 0, deferred: 0, dispatched: 0, failedToDispatch: 0 };
+  }
+
   await resolveEventUrls(slug);
 
   const { data: parts, error: ptErr } = await db
     .from('usau_event_teams')
-    .select('team_id')
+    .select('team_id, roster_checked_at')
     .eq('event_id', eventId)
     .not('usau_event_team_url_id', 'is', null);
   if (ptErr) throw new Error(`load event_teams: ${stringifyErr(ptErr)}`);
@@ -211,6 +236,7 @@ async function dispatchEvent(
   // attends the moment one event was scraped — permanently starving the rest.
   // Legacy rows (event_id null) don't count as done for the same reason: they
   // predate per-event tracking and can't tell us which event they came from.
+  const refreshIds = new Set<string>();
   if (!includeResolved) {
     const { data: haveRoster } = await db
       .from('usau_rosters')
@@ -219,7 +245,30 @@ async function dispatchEvent(
       .eq('event_id', eventId)
       .in('team_id', teamIds);
     const done = new Set((haveRoster ?? []).map((r) => r.team_id as string));
-    teamIds = teamIds.filter((id) => !done.has(id));
+    const refreshBefore = startDate && isImminent(startDate)
+      ? Date.parse(startDate) - EARLY_REFRESH_DAYS * 86400_000
+      : null;
+    const checkedAt = new Map(
+      (parts ?? []).map((p) => [p.team_id as string, p.roster_checked_at as string | null]),
+    );
+    const scrapedEarly = (id: string) => {
+      const at = checkedAt.get(id);
+      return refreshBefore != null && at != null && Date.parse(at) < refreshBefore;
+    };
+    // An empty page (stamped, no rows) is re-checked every firing so late-posted
+    // rosters land. Before the event is imminent, once a day is plenty — the
+    // 30-day window would otherwise re-fetch weeks of empty pages twice daily.
+    const recheckEmptyBefore = isImminent(startDate)
+      ? Infinity
+      : Date.now() - EMPTY_RECHECK_HOURS * 3_600_000;
+    const emptyCheckedRecently = (id: string) => {
+      const at = checkedAt.get(id);
+      return at != null && Date.parse(at) >= recheckEmptyBefore;
+    };
+    for (const id of teamIds) if (done.has(id) && scrapedEarly(id)) refreshIds.add(id);
+    teamIds = teamIds.filter((id) =>
+      done.has(id) ? refreshIds.has(id) : !emptyCheckedRecently(id),
+    );
   }
 
   // Bound BOTH the per-run count (global budget) and the in-flight concurrency.
@@ -240,10 +289,18 @@ async function dispatchEvent(
     const j = Math.floor(Math.random() * (i + 1));
     [teamIds[i], teamIds[j]] = [teamIds[j], teamIds[i]];
   }
+  // First-time rosters before one-off refreshes, so refreshes never crowd them out.
+  if (refreshIds.size) {
+    teamIds = [
+      ...teamIds.filter((id) => !refreshIds.has(id)),
+      ...teamIds.filter((id) => refreshIds.has(id)),
+    ];
+  }
   const totalNeeded = teamIds.length;
-  const perEventCap = isImminent(startDate)
-    ? IMMINENT_MAX_TEAMS_PER_EVENT_PER_RUN
-    : MAX_TEAMS_PER_EVENT_PER_RUN;
+  const perEventCap = Math.max(
+    isImminent(startDate) ? IMMINENT_MAX_TEAMS_PER_EVENT_PER_RUN : MAX_TEAMS_PER_EVENT_PER_RUN,
+    fairShare,
+  );
   const allowance = Math.max(0, Math.min(budget, perEventCap));
   const slice = allowance >= totalNeeded ? teamIds : teamIds.slice(0, allowance);
   const dispatches = await pooled(slice, MAX_CONCURRENT_TEAMS, (id) => dispatchTeam(slug, id));
@@ -279,14 +336,12 @@ async function run(body: RequestBody) {
   }
 
   // ── Live mode (cron): flagship events in (or about to enter) their window ─
-  // Rosters/pools/seeds get published on USAU up to ~a week before an event
-  // starts, so we scrape a LOOKAHEAD window: start_date ≤ today + 7 days AND
-  // end_date ≥ today. This picks up pools/teams a week out (e.g. Pro Elite
-  // Challenge West's Sat pools seeded days before the event) rather than only
-  // once the event is live. (Live scores still come from sync-live-events,
-  // which keeps its tighter same-day window.)
+  // Rosters/pools/seeds get published on USAU weeks before an event starts
+  // (2026 Club Nationals: ~16 days), so we scrape a LOOKAHEAD window:
+  // start_date ≤ today + LOOKAHEAD_DAYS AND end_date ≥ today. Events with no
+  // teams posted yet return before any USAU call (see dispatchEvent).
   const today = new Date().toISOString().slice(0, 10);
-  const lookahead = new Date(Date.now() + 7 * 86400_000).toISOString().slice(0, 10);
+  const lookahead = new Date(Date.now() + LOOKAHEAD_DAYS * 86400_000).toISOString().slice(0, 10);
   const { data: events, error: evErr } = await db
     .from('usau_events')
     .select('id, usau_slug, season, start_date')
@@ -305,7 +360,7 @@ async function run(body: RequestBody) {
   let budgetLeft = MAX_TEAMS_PER_RUN;
   // Sequential across events (each only fires fast resolve + fan-out, no heavy
   // work) so we respect the source with one event's resolve at a time.
-  for (const e of live) {
+  for (const [i, e] of live.entries()) {
     if (budgetLeft <= 0) {
       // Out of budget: record the event as fully deferred WITHOUT calling
       // resolveEventUrls (which is itself a USAU request).
@@ -313,7 +368,8 @@ async function run(body: RequestBody) {
       continue;
     }
     try {
-      const r = await dispatchEvent(db, e.id, e.usau_slug, e.season, includeResolved, budgetLeft, e.start_date);
+      const fairShare = Math.floor(budgetLeft / (live.length - i));
+      const r = await dispatchEvent(db, e.id, e.usau_slug, e.season, includeResolved, budgetLeft, e.start_date, fairShare);
       budgetLeft -= r.dispatched;
       perEvent.push(r);
     } catch (err) {

@@ -251,12 +251,12 @@ export function PricesCard({ contest, draft, onSaved }: Props) {
           </ul>
         )}
 
-        <div>
+        <div className="flex items-center justify-between gap-3">
+          <p className="font-tight text-[11px] text-faint">
+            Prices are opening bids. Unpriced players open at the minimum bid.
+          </p>
           <SaveButton disabled={rows === null || saving} saving={saving} label="Save prices" />
         </div>
-        <p className="font-tight text-[11px] text-faint">
-          Prices are opening bids. Unpriced players open at the minimum bid.
-        </p>
       </form>
       <Feedback error={error} saved={saved} />
     </Card>

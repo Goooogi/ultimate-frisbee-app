@@ -447,6 +447,23 @@ export async function getLeagueCode(leagueId: string): Promise<string> {
   return data as string;
 }
 
+/** Native share sheet when available, else clipboard. A dismissed share sheet is not an error. */
+export async function shareLeagueInvite(code: string): Promise<'shared' | 'copied' | 'cancelled'> {
+  const text = `Join my league on The Layout! Use code ${code} in Fantasy → My Leagues → Join.`;
+  const url = `${window.location.origin}/fantasy/join/${code}`;
+  if (typeof navigator.share === 'function') {
+    try {
+      await navigator.share({ text, url });
+      return 'shared';
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return 'cancelled';
+      throw err;
+    }
+  }
+  await navigator.clipboard.writeText(`${text} ${url}`);
+  return 'copied';
+}
+
 /** Rotate the join code (invalidates the old link). Commissioner-only. */
 export async function regenerateLeagueCode(leagueId: string): Promise<string> {
   const { data, error } = await sessionClient().rpc('fantasy_regenerate_league_code', { p_league: leagueId });
@@ -790,8 +807,8 @@ export async function createContestTeam(
 
 // ─── League limits, logo, format (commissioner-only RPCs) ────────────────────
 
-/** Team cap for a contest (commissioner-only). unlimited only applies to
- *  USAU Club Nationals. */
+/** Team cap for a contest (commissioner-only), 4–16 or unlimited for any
+ *  competition. p_max_teams is range-checked even when unlimited, so pass a real number. */
 export async function setContestLimits(contestId: string, maxTeams: number, unlimited?: boolean): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_set_contest_limits', {
     p_contest: contestId,

@@ -32,6 +32,20 @@ const UA = 'Mozilla/5.0 (the-layout/euf-ingest)';
 const FETCH_DELAY_MS = 250;
 const CONCURRENCY = 4;
 
+// FAR TIER (Hunter, 2026-10-06: "pull event info AS SOON as the league source
+// has it"). The refresh window starts at start_date-21d, so once EUCS posts
+// teams/games further out the event sat frozen until then. Events starting in
+// (today+LOOKAHEAD, today+FAR_LOOKAHEAD_DAYS] get a separate capped check on the
+// hourly refresh: the FAR_PER_RUN least-recently-scraped whose last scrape is
+// older than FAR_MIN_INTERVAL_MIN. One stats:false ingest is ~2 requests plus
+// one teamcard per team (≤ ~56). Nothing sits in this band today, so the cap
+// bounds peak load, not current load. Interval < 60 so cron drift (the :41 tick
+// lands a few seconds before the previous stamp + 60min) can't skip an hour.
+// Constants, not body overrides — this endpoint is reachable by anyone with a key.
+const FAR_LOOKAHEAD_DAYS = 120;
+const FAR_PER_RUN = 3;
+const FAR_MIN_INTERVAL_MIN = 50;
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const teamKey = (d: Division, n: string) => `${d}|${normName(n)}`;
@@ -549,8 +563,34 @@ Deno.serve(async (req) => {
         });
       }
 
+      const { data: farRows, error: farErr } = await supabase
+        .from('euf_events')
+        .select('season_id, slug, name, year, kind, location, start_date, end_date, last_scraped_at')
+        // Floors at 21 so a body lookaheadDays can't drag the far tier back over
+        // finished events.
+        .gt('start_date', day(Math.max(LOOKAHEAD, 21)))
+        .lte('start_date', day(FAR_LOOKAHEAD_DAYS));
+      if (farErr) {
+        return new Response(JSON.stringify({ ok: false, error: farErr.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      const scrapedAt = (e: { last_scraped_at: string | null }) =>
+        e.last_scraped_at ? Date.parse(e.last_scraped_at) : 0;
+      const staleBefore = Date.now() - FAR_MIN_INTERVAL_MIN * 60_000;
+      const farStale = (farRows ?? [])
+        .filter((e) => scrapedAt(e) < staleBefore)
+        .sort((a, b) => scrapedAt(a) - scrapedAt(b));
+      // Rotate by hour: an event that fails before stamping last_scraped_at
+      // would otherwise be oldest forever and pin a slot.
+      const farSlots = Math.max(1, Math.ceil(farStale.length / FAR_PER_RUN));
+      const farOffset = (Math.floor(Date.now() / 3_600_000) % farSlots) * FAR_PER_RUN;
+      const far = farStale.slice(farOffset, farOffset + FAR_PER_RUN);
+
       const results: any[] = [];
-      for (const e of rows ?? []) {
+      // Far events go last so in-window events always refresh first.
+      for (const e of [...(rows ?? []), ...far]) {
         try {
           const r = await ingest(supabase, {
             season: e.season_id as string,
@@ -574,7 +614,15 @@ Deno.serve(async (req) => {
       }
       const failed = results.filter((r) => !r.ok).length;
       return new Response(
-        JSON.stringify({ ok: true, mode: 'dispatch-refresh', events: results.length, failed, results }),
+        JSON.stringify({
+          ok: true,
+          mode: 'dispatch-refresh',
+          events: results.length,
+          farWindow: farRows?.length ?? 0,
+          farRefreshed: far.length,
+          failed,
+          results,
+        }),
         { headers: { 'Content-Type': 'application/json' } },
       );
     }

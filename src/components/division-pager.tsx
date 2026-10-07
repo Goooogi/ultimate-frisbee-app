@@ -45,6 +45,9 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode 
 export interface DivisionPagerOption<V extends string> {
   value: V;
   label: string;
+  /** Screen-reader name; defaults to `${label} division`. For labels that
+   *  don't read as a division name ("All" → "All divisions"). */
+  ariaLabel?: string;
 }
 
 interface DivisionPagerProps<V extends string> {
@@ -65,6 +68,14 @@ interface DivisionPagerProps<V extends string> {
    *  and its scroller shrinks to the leftover width; without it, the control
    *  centers as before (Hunter's tournament-header layout, 2026-08-20). */
   tabRowLeading?: ReactNode;
+  /** Control-only headers (no tabRowLeading): stretch the control full width
+   *  with equal segments, the same as the event pages' control under the view
+   *  tabs on mobile widths — 16px above, 14px to the content. */
+  fill?: boolean;
+  /** false = tap-only: no swipe and no parked neighbor layers, so only the
+   *  active division is ever rendered. For long public lists where mounting
+   *  neighbors would double the page weight (Teams pages, Hunter 2026-10-06). */
+  swipe?: boolean;
 }
 
 // Swipe must travel this fraction of the container (or flick faster than
@@ -126,6 +137,8 @@ export function DivisionPager<V extends string>({
   renderDivision,
   contentClassName,
   tabRowLeading,
+  fill = false,
+  swipe = true,
 }: DivisionPagerProps<V>) {
   // Optimistic active. Screens hold `active` in the URL (?div= via
   // useViewParam → router.replace), so the prop updates FRAMES after
@@ -189,8 +202,8 @@ export function DivisionPager<V extends string>({
 
   // The parked neighbors are ALWAYS mounted (not spun up on first drag
   // movement) so a drag frame is pure transform work — see the header note.
-  const prevIndex = activeIndex > 0 ? activeIndex - 1 : null;
-  const nextIndex = activeIndex < count - 1 ? activeIndex + 1 : null;
+  const prevIndex = swipe && activeIndex > 0 ? activeIndex - 1 : null;
+  const nextIndex = swipe && activeIndex < count - 1 ? activeIndex + 1 : null;
   const parkedPrev = prevIndex != null ? divisions[prevIndex] : null;
   const parkedNext = nextIndex != null ? divisions[nextIndex] : null;
 
@@ -310,7 +323,7 @@ export function DivisionPager<V extends string>({
 
   const onTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
     const container = containerRef.current;
-    if (!container || transitioningRef.current || stateRef.current.count <= 1) return;
+    if (!swipe || !container || transitioningRef.current || stateRef.current.count <= 1) return;
     const t = e.touches[0];
     gestureRef.current = {
       startX: t.clientX,
@@ -426,6 +439,7 @@ export function DivisionPager<V extends string>({
   // With a leading view-tabs slot: full-width on its own line under the tabs
   // on mobile (the shared row overflowed the screen — Hunter, 2026-08-20),
   // right-aligned beside them on lg+. Centered on its own row otherwise.
+  const stretch = tabRowLeading != null || fill;
   const segmentScroller = (
       <div
         ref={tabRowRef}
@@ -433,13 +447,15 @@ export function DivisionPager<V extends string>({
           'flex overflow-x-auto scrollbar-none',
           tabRowLeading != null
             ? 'min-w-0 w-full lg:w-auto lg:flex-1 lg:justify-end'
-            : 'justify-center pb-2',
+            : fill
+              ? 'min-w-0 w-full'
+              : 'justify-center pb-2',
         ].join(' ')}
       >
         <div
           className={[
             'inline-flex items-center gap-0.5 p-[3px] rounded-card bg-ink/5 flex-shrink-0',
-            tabRowLeading != null ? 'min-w-full lg:min-w-0' : '',
+            stretch ? 'min-w-full lg:min-w-0' : '',
           ].join(' ')}
         >
           {divisions.map((d, i) => {
@@ -461,13 +477,13 @@ export function DivisionPager<V extends string>({
                 }}
                 role="tab"
                 aria-selected={isActive}
-                aria-label={`${d.label} division`}
+                aria-label={d.ariaLabel ?? `${d.label} division`}
                 className={[
                   'px-3.5 py-[5px] rounded-[15px] whitespace-nowrap',
                   'text-[11px] font-bold tracking-[0.06em] uppercase font-tight',
                   'transition-colors cursor-pointer',
                   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  tabRowLeading != null ? 'flex-1 lg:flex-none' : '',
+                  stretch ? 'flex-1 lg:flex-none' : '',
                   isActive ? 'bg-surface text-ink shadow-card' : 'text-muted hover:text-ink',
                 ].join(' ')}
               >
@@ -493,7 +509,11 @@ export function DivisionPager<V extends string>({
           {segmentScroller}
         </div>
       ) : (
-        <div className="sticky top-0 z-30 bg-bg pt-4 pb-2.5">{segmentScroller}</div>
+        <div
+          className={['sticky top-0 z-30 bg-bg pt-4', fill ? 'pb-3.5' : 'pb-2.5'].join(' ')}
+        >
+          {segmentScroller}
+        </div>
       )}
 
       {/* Edge-bleed the TOUCH surface, not the layout: PageShell's px-5 gutter

@@ -81,6 +81,35 @@ const EVENTS_PER_RUN = 16;
  */
 const CRON_INTERVAL_MIN = 3;
 
+/**
+ * EARLY TIER (Hunter, 2026-10-06: "pull event info AS SOON as USAU has it").
+ * USAU posts pools/seeds/schedules well before the 7-day lookahead — 2026 Club
+ * Nationals went up ~16 days out and sat unscraped. Events starting in
+ * (today+7d, today+EARLY_LOOKAHEAD_DAYS] get their own slow, capped check on
+ * the pre-start firings (~15 min Thu–Sun via job 20; every 30-min firing
+ * Mon–Wed via job 21, whose :00/:30 ticks always land on tick % 5 === 0 — a
+ * separate phase would never fire Mon–Wed), the
+ * EARLY_PER_RUN least-recently-scraped of them whose last scrape is older than
+ * EARLY_MIN_INTERVAL_MIN. Peak season puts ~100 events in this band, so the cap
+ * is what keeps it at ≤16 extra children/hour (the 2026-08-06 DB overload was
+ * ~160/hour). Kept OUT of the main slice rotation so it can't starve or swell
+ * the live/pre-start tiers. Constants, not body overrides — this endpoint is
+ * public (verify_jwt off).
+ */
+const EARLY_LOOKAHEAD_DAYS = 30;
+const EARLY_PER_RUN = 4;
+const EARLY_MIN_INTERVAL_MIN = 60;
+
+/** Series slugs name one gender ("…-Womens-Club-Regional-…"). Checking only that
+ *  division makes an early "nothing posted yet" probe one GET instead of three.
+ *  Null when the slug doesn't say (TCT, Nationals) → all divisions. */
+function divisionsForSlug(slug: string): ('Men' | 'Women' | 'Mixed')[] | null {
+  const m = slug.match(/(?:^|-)(Mens|Womens|Mixed)(?:-|$)/i);
+  if (!m) return null;
+  const g = m[1].toLowerCase();
+  return [g === 'mens' ? 'Men' : g === 'womens' ? 'Women' : 'Mixed'];
+}
+
 interface RequestBody {
   dryRun?: boolean;
   divisions?: ('Men' | 'Women' | 'Mixed')[];
@@ -243,6 +272,37 @@ async function run(body: RequestBody) {
     slice = [...eventList.slice(offset), ...eventList.slice(0, offset)].slice(0, perRun);
   }
 
+  const earlyDue = preStartDue;
+  let earlyWindowCount = 0;
+  let earlySlice: { usau_slug: string }[] = [];
+  if (earlyDue || body.dryRun) {
+    const earlyHorizon = new Date(Date.now() + EARLY_LOOKAHEAD_DAYS * 86400_000)
+      .toISOString()
+      .slice(0, 10);
+    const { data: early, error: earlyErr } = await db
+      .from('usau_events')
+      .select('usau_slug, last_scraped_at')
+      .in('competition_level', FLAGSHIP_LEVELS)
+      .gt('start_date', lookahead)
+      .lte('start_date', earlyHorizon)
+      .gte('end_date', today);
+    if (earlyErr) throw new Error(`load early events: ${stringifyErr(earlyErr)}`);
+    earlyWindowCount = early?.length ?? 0;
+    const scrapedAt = (e: { last_scraped_at: string | null }) =>
+      e.last_scraped_at ? Date.parse(e.last_scraped_at) : 0;
+    const staleBefore = Date.now() - EARLY_MIN_INTERVAL_MIN * 60_000;
+    const stale = (early ?? [])
+      .filter((e) => scrapedAt(e) < staleBefore)
+      .sort((a, b) => scrapedAt(a) - scrapedAt(b));
+    // Rotate by half-hour: a child that keeps failing never stamps
+    // last_scraped_at, so oldest-first alone would hand it a slot forever. A
+    // half-hour key advances by exactly 1 per Mon–Wed firing (a per-tick key
+    // would jump by 2 there and skip every other slot).
+    const earlySlots = Math.max(1, Math.ceil(stale.length / EARLY_PER_RUN));
+    const earlyOffset = (Math.floor(Date.now() / 60_000 / 30) % earlySlots) * EARLY_PER_RUN;
+    earlySlice = stale.slice(earlyOffset, earlyOffset + EARLY_PER_RUN);
+  }
+
   if (body.dryRun) {
     return {
       rowsProcessed: 0,
@@ -254,15 +314,27 @@ async function run(body: RequestBody) {
         offset,
         dispatching: slice.length,
         events: slice.map((e) => e.usau_slug),
+        earlyDue,
+        earlyWindowCount,
+        earlyNext: earlySlice.map((e) => e.usau_slug),
       },
     };
   }
+  if (!earlyDue) earlySlice = [];
 
   // Dispatch this slice with BOUNDED concurrency. Each child runs in its own
   // invocation with its own walltime budget — the orchestrator never does the
-  // heavy work, it just paces how many children exist at once.
-  const dispatches = await pooled(slice, concurrency, (e) =>
-    dispatchEventDetails(e.usau_slug, divisions),
+  // heavy work, it just paces how many children exist at once. Early events go
+  // last so live events always launch first.
+  const tasks = [
+    ...slice.map((e) => ({ slug: e.usau_slug as string, divisions })),
+    ...earlySlice.map((e) => ({
+      slug: e.usau_slug,
+      divisions: divisionsForSlug(e.usau_slug) ?? divisions,
+    })),
+  ];
+  const dispatches = await pooled(tasks, concurrency, (t) =>
+    dispatchEventDetails(t.slug, t.divisions),
   );
 
   const launched = dispatches.filter((d) => d.dispatched);
@@ -278,6 +350,8 @@ async function run(body: RequestBody) {
       offset,
       dispatched: launched.length,
       failedToDispatch: failed.length,
+      earlyWindowCount,
+      earlyDispatched: earlySlice.length,
       details: dispatches,
     },
   };

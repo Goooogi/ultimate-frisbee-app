@@ -150,7 +150,7 @@ function ScheduleForm({
           <TypeOption label="Auction" selected={type === 'auction'} onClick={() => setType('auction')} />
         </div>
 
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="grid grid-cols-2 items-end gap-3">
           <NumberField label="Rounds" value={rounds} onChange={setRounds} id="draft-rounds" min={1} max={30} />
           {type === 'snake' && (
             <PillField label="Pick clock" ariaLabel="Pick clock" value={pickSeconds} onChange={setPickSeconds} options={PICK_SECONDS_OPTIONS} />
@@ -159,11 +159,11 @@ function ScheduleForm({
 
         {type === 'auction' && (
           <>
-            <div className="flex flex-wrap items-end gap-3">
+            <div className="grid grid-cols-2 items-end gap-3">
               <NumberField label="Budget" value={budget} onChange={setBudget} id="draft-budget" min={50} max={1000} step={10} />
               <NumberField label="Min bid" value={minBid} onChange={setMinBid} id="draft-min-bid" min={1} max={10} />
             </div>
-            <div className="flex flex-wrap items-end gap-3">
+            <div className="grid grid-cols-2 items-end gap-3">
               <PillField
                 label="Nomination clock"
                 ariaLabel="Nomination clock"
@@ -196,19 +196,16 @@ function ScheduleForm({
           />
         )}
 
-        {belowMin && (
+        <div className="flex items-center justify-between gap-3">
           <p className="font-tight text-[12px] text-live">
-            Need {readiness.minTeams} teams to draft ({readiness.teamCount} so far).
+            {belowMin ? `Need ${readiness.minTeams} teams to draft (${readiness.teamCount} so far).` : ''}
           </p>
-        )}
-
-        <div>
           <button
             type="button"
             disabled={!canSchedule}
             onClick={schedule}
             className={[
-              'inline-flex items-center justify-center gap-2',
+              'inline-flex items-center justify-center gap-2 flex-shrink-0',
               'px-5 py-2.5 rounded-full min-h-[44px]',
               'font-tight text-[12px] font-bold tracking-[0.06em] uppercase transition-colors duration-150',
               !canSchedule
@@ -292,18 +289,17 @@ function ScheduledView({
 
         <form onSubmit={save} className="flex flex-col gap-4">
           <DateTimeField label="Reschedule" value={at} onChange={setAt} min={rescheduleFloor} max={readiness.lockAt} />
-          <div>
+          <div className="flex items-center justify-between gap-3">
+            <Link
+              href={`/fantasy/l/${contest.id}/draft`}
+              className="font-tight text-[12.5px] font-bold text-accent no-underline hover:underline"
+            >
+              Open draft room
+            </Link>
             <SaveButton disabled={!at || saving} saving={saving} label="Reschedule" savingLabel="Saving…" />
           </div>
         </form>
         <Feedback error={error} saved={false} />
-
-        <Link
-          href={`/fantasy/l/${contest.id}/draft`}
-          className="font-tight text-[12.5px] font-bold text-accent no-underline hover:underline self-start"
-        >
-          Open draft room
-        </Link>
       </div>
     </Card>
   );

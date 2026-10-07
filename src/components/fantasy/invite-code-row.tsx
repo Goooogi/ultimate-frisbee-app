@@ -4,12 +4,10 @@
 // "jump in" row. Members see the code (read-only reminder); the commissioner
 // also gets Regenerate. Web port of the mobile app's InviteCodeRow.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/InviteCodeRow.tsx).
-// Web has its own fuller LeagueMembersPanel invite UI (join link + email) —
-// this is the compact single-row version shown above it on the league page.
 
 import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '@/components/confirm-dialog';
-import { getLeagueCode, regenerateLeagueCode } from '@/lib/fantasy/leagues';
+import { getLeagueCode, regenerateLeagueCode, shareLeagueInvite } from '@/lib/fantasy/leagues';
 
 interface Props {
   leagueId: string;
@@ -23,6 +21,7 @@ export function InviteCodeRow({ leagueId, canRegenerate }: Props) {
   const [regenOpen, setRegenOpen] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [regenError, setRegenError] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,15 +34,17 @@ export function InviteCodeRow({ leagueId, canRegenerate }: Props) {
     };
   }, [leagueId]);
 
-  const handleCopy = async () => {
+  const handleShare = async () => {
     if (!code) return;
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    setShareError(null);
     try {
-      await navigator.clipboard.writeText(`${origin}/fantasy/join/${code}`);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // Clipboard API can fail in insecure contexts — non-fatal.
+      const result = await shareLeagueInvite(code);
+      if (result === 'copied') {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1800);
+      }
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : 'Could not share the code.');
     }
   };
 
@@ -78,11 +79,16 @@ export function InviteCodeRow({ leagueId, canRegenerate }: Props) {
             Join code
           </div>
           <div className="font-tight text-[18px] font-bold tracking-[0.1em] text-ink">{code}</div>
+          {shareError && (
+            <p role="alert" className="mt-1 font-tight text-[12px] text-live">
+              {shareError}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
             type="button"
-            onClick={handleCopy}
+            onClick={handleShare}
             className={[
               'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full min-h-[44px]',
               'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase',

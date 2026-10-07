@@ -83,7 +83,8 @@ const EVENT_DEFAULT: EventSettings = { mode: 'event', flex: 7 };
 
 /** Team-limit stepper bounds for the Settings → Teams/Limits card. */
 export const MIN_TEAMS = 4;
-export const DEFAULT_MAX_TEAMS = 8;
+// Matches the DB trigger's coalesce(maxTeams, 12) and mobile.
+export const DEFAULT_MAX_TEAMS = 12;
 
 export const COMPETITIONS: CompetitionDef[] = [
   {

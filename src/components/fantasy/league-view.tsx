@@ -36,7 +36,6 @@ import { formatWeekLabel } from '@/lib/fantasy/weeks';
 import type { FantasyWeek } from '@/lib/fantasy/weeks';
 import { MyContestTeamCta } from '@/components/fantasy/my-contest-team-cta';
 import { DraftCard } from '@/components/fantasy/draft-card';
-import { RecentActivityCard } from '@/components/fantasy/recent-activity-card';
 import { TradesCard } from '@/components/fantasy/trades/trades-card';
 import { WaiversCard } from '@/components/fantasy/waivers-card';
 import { H2HStandings } from '@/components/fantasy/h2h-standings';
@@ -122,9 +121,6 @@ export function LeagueView({ contest }: { contest: ContestView }) {
 
       {/* ── Draft card ─────────────────────────── */}
       <DraftCard contest={contest} leagueId={contest.leagueId} />
-
-      {/* ── Recent activity ────────────────────── */}
-      <RecentActivityCard contest={contest} />
 
       {/* ── Standings ──────────────────────────────────────────────────── */}
       <section aria-labelledby="standings-heading">

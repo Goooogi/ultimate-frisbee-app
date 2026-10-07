@@ -88,8 +88,8 @@ export function NameCard({ leagueId, initialName }: { leagueId: string; initialN
 
   return (
     <Card title="League name">
-      <form onSubmit={save} className="flex flex-col sm:flex-row sm:items-end gap-3 max-w-[520px]">
-        <div className="flex-1">
+      <form onSubmit={save} className="flex items-center gap-3 max-w-[520px]">
+        <div className="flex-1 min-w-0">
           <label htmlFor="league-settings-name" className="sr-only">
             League name
           </label>
@@ -155,26 +155,23 @@ export function RosterCard({ leagueId, contest }: { leagueId: string; contest: C
 
   return (
     <Card title={`Roster · ${contest.competitionDef.shortLabel} ${contest.seasonYear}`}>
-      <form onSubmit={save} className="flex flex-wrap items-end gap-3">
-        {isWeekly ? (
-          <>
+      {isWeekly ? (
+        <form onSubmit={save} className="flex flex-col gap-4">
+          <div className="flex items-end gap-3">
             <NumberField label="Offense" value={off} onChange={setOff} id={`off-${contest.id}`} />
             <NumberField label="Defense" value={def} onChange={setDef} id={`def-${contest.id}`} />
-            <span className="font-tight text-[12px] text-faint pb-3">
-              {off + def} starters each week
-            </span>
-          </>
-        ) : (
-          <>
-            <NumberField label="Players" value={flex} onChange={setFlex} id={`flex-${contest.id}`} />
-            <span className="font-tight text-[12px] text-faint pb-3">for the whole event</span>
-          </>
-        )}
-        <SaveButton disabled={!dirty || saving} saving={saving} />
-      </form>
-      <p className="mt-2 text-[11px] text-faint font-tight">
-        Slots can be added mid-season, but not removed once anyone has saved a lineup.
-      </p>
+          </div>
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-tight text-[12px] text-faint">{off + def} starters each week</span>
+            <SaveButton disabled={!dirty || saving} saving={saving} />
+          </div>
+        </form>
+      ) : (
+        <form onSubmit={save} className="flex items-end gap-3">
+          <NumberField label="Players" value={flex} onChange={setFlex} id={`flex-${contest.id}`} />
+          <SaveButton disabled={!dirty || saving} saving={saving} />
+        </form>
+      )}
       <Feedback error={error} saved={saved} />
     </Card>
   );
@@ -264,7 +261,7 @@ function SaveButton({ disabled, saving }: { disabled: boolean; saving: boolean }
       type="submit"
       disabled={disabled}
       className={[
-        'inline-flex items-center justify-center gap-2',
+        'inline-flex items-center justify-center gap-2 flex-shrink-0',
         'px-5 py-2.5 rounded-full min-h-[44px]',
         'font-tight text-[12px] font-bold tracking-[0.06em] uppercase transition-colors duration-150',
         disabled

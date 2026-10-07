@@ -5,8 +5,7 @@
 // (/fantasy/ufa/l/[id]) can surface commissioner tools without leaving the
 // game context, reusing the exact same RPCs/logic as the league umbrella
 // instead of duplicating them. Handles:
-//   (a) commissioner tools: invite panel (join code + copy, email invite,
-//       regenerate code), remove member
+//   (a) commissioner tools: email invite, remove member
 //   (b) member self-serve: leave league
 //   (c) signed-out / not-a-member: join CTA
 //
@@ -20,8 +19,6 @@ import { AuthModal } from '@/components/auth/auth-modal';
 import { ConfirmDialog } from '@/components/confirm-dialog';
 import {
   getMyLeagueRole,
-  getLeagueCode,
-  regenerateLeagueCode,
   createLeagueInvite,
   removeLeagueMember,
   leaveLeague,
@@ -79,7 +76,7 @@ export function LeagueMembersPanel({ leagueId, members, onLeaveRedirect = '/fant
         />
       </section>
 
-      {/* ── Commissioner: Invite panel ───────────────────────────────────── */}
+      {/* ── Commissioner: Email invite ───────────────────────────────────── */}
       {!loading && !roleLoading && isCommissioner && <InvitePanel leagueId={leagueId} />}
 
       {/* ── Member self-serve: leave league ──────────────────────────────── */}
@@ -241,50 +238,9 @@ function XGlyph() {
 // ─── Invite panel (commissioner) ──────────────────────────────────────────────
 
 function InvitePanel({ leagueId }: { leagueId: string }) {
-  const [code, setCode] = useState<string | null>(null);
-  const [codeLoading, setCodeLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const [regenOpen, setRegenOpen] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
-  const [regenError, setRegenError] = useState<string | null>(null);
-
   const [email, setEmail] = useState('');
   const [sending, setSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  useEffect(() => {
-    getLeagueCode(leagueId)
-      .then(setCode)
-      .catch(() => setCode(null))
-      .finally(() => setCodeLoading(false));
-  }, [leagueId]);
-
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  const joinLink = code ? `${origin}/fantasy/join/${code}` : '';
-
-  const handleCopy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    } catch {
-      // Clipboard API can fail in insecure contexts — non-fatal, no banner needed.
-    }
-  };
-
-  const handleRegenerate = async () => {
-    setRegenerating(true);
-    setRegenError(null);
-    try {
-      const next = await regenerateLeagueCode(leagueId);
-      setCode(next);
-      setRegenOpen(false);
-    } catch (err) {
-      setRegenError(err instanceof Error ? err.message : 'Could not regenerate the code.');
-    } finally {
-      setRegenerating(false);
-    }
-  };
 
   const handleSendInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -317,54 +273,6 @@ function InvitePanel({ leagueId }: { leagueId: string }) {
       </h2>
 
       <div className="space-y-5">
-        {/* Join code + link */}
-        <div>
-          <div className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
-            Join code
-          </div>
-          {codeLoading ? (
-            <div className="h-11 w-40 rounded-card-sm bg-ink/[0.06] animate-pulse" />
-          ) : code ? (
-            <div className="flex flex-col sm:flex-row gap-2">
-              <div className="flex-1 flex items-center gap-2 min-w-0">
-                <code className="px-3.5 py-2.5 rounded-card-sm bg-ink/5 font-tight text-[15px] font-bold tracking-[0.1em] text-ink">
-                  {code}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => handleCopy(joinLink)}
-                  className={[
-                    'flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-full min-h-[44px]',
-                    'bg-ink/5 text-ink hover:bg-ink/10 transition-colors duration-150 cursor-pointer',
-                    'font-tight text-[12px] font-bold tracking-[0.06em] uppercase truncate',
-                    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                  ].join(' ')}
-                >
-                  <CopyGlyph />
-                  {copied ? 'Copied!' : 'Copy join link'}
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRegenOpen(true)}
-                className={[
-                  'inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full min-h-[44px] flex-shrink-0',
-                  'text-muted hover:text-ink hover:bg-ink/5 transition-colors duration-150 cursor-pointer',
-                  'font-tight text-[11px] font-bold tracking-[0.06em] uppercase',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                ].join(' ')}
-              >
-                Regenerate
-              </button>
-            </div>
-          ) : (
-            <p className="text-[13px] text-muted font-tight">Could not load the join code.</p>
-          )}
-          <p className="mt-1.5 text-[11px] text-faint font-tight">
-            Anyone with this link can join the league.
-          </p>
-        </div>
-
         {/* Email invite */}
         <div>
           <div className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5">
@@ -411,28 +319,7 @@ function InvitePanel({ leagueId }: { leagueId: string }) {
           )}
         </div>
       </div>
-
-      <ConfirmDialog
-        open={regenOpen}
-        title="Regenerate join code?"
-        body="The old code and link will stop working immediately. Anyone you've already shared it with won't be able to join with it."
-        confirmLabel="Regenerate"
-        busyLabel="Regenerating…"
-        busy={regenerating}
-        error={regenError}
-        onConfirm={handleRegenerate}
-        onCancel={() => setRegenOpen(false)}
-      />
     </section>
-  );
-}
-
-function CopyGlyph() {
-  return (
-    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true" className="flex-shrink-0">
-      <rect x="5" y="5" width="7" height="7" rx="1.2" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M3 9V3a1 1 0 011-1h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
   );
 }
 

@@ -72,7 +72,7 @@ function normName(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-// ── Division / round context tracking ────────────────────────────────────────
+// ── Division / round context tracking ─────────────────────────────────────────
 // The games page is a flat stream of headers + game rows. We walk it top-to-
 // bottom, updating "current division" and "current pool/round" from header
 // markers, and attach each game to that context.

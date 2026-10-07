@@ -90,7 +90,7 @@ export function WaiversCard({ contest, onSaved }: Props) {
         </div>
 
         {mode === 'faab' && (
-          <div className="flex flex-wrap gap-6">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-2">
                 Budget
@@ -122,7 +122,7 @@ export function WaiversCard({ contest, onSaved }: Props) {
               <p className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-2">
                 Waiver window
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {HOUR_OPTIONS.map((h) => {
                   const selected = hours === h;
                   return (
@@ -133,7 +133,7 @@ export function WaiversCard({ contest, onSaved }: Props) {
                       aria-checked={selected}
                       onClick={() => setHours(h)}
                       className={[
-                        'px-3.5 py-2 rounded-full font-tight text-[13px] font-bold transition-colors duration-150 cursor-pointer',
+                        'px-2.5 py-2 rounded-full font-tight text-[13px] font-bold transition-colors duration-150 cursor-pointer',
                         selected ? 'bg-accent text-accent-ink' : 'bg-ink/[0.05] text-ink hover:bg-ink/10',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
                       ].join(' ')}
@@ -147,7 +147,7 @@ export function WaiversCard({ contest, onSaved }: Props) {
           </div>
         )}
 
-        <div>
+        <div className="flex justify-end">
           <SaveButton disabled={!dirty || saving} saving={saving} />
         </div>
       </form>
