@@ -43,6 +43,29 @@ function escapeIlike(needle: string): string {
   return needle.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+/** 0 = the name starts with the needle, 1 = a later word does, 2 = mid-word. */
+function matchRank(name: string, needle: string): number {
+  const hay = name.toLowerCase();
+  const q = needle.toLowerCase();
+  if (hay.startsWith(q)) return 0;
+  for (let i = hay.indexOf(q, 1); i > 0; i = hay.indexOf(q, i + 1)) {
+    if (/[\s'’.-]/.test(hay[i - 1])) return 1;
+  }
+  return 2;
+}
+
+/** One hit per player (first row wins), best match first, ties A–Z. */
+function rankHits(hits: FantasyPlayerHit[], needle: string, limit: number): FantasyPlayerHit[] {
+  const byId = new Map<string, { hit: FantasyPlayerHit; rank: number }>();
+  for (const hit of hits) {
+    if (!byId.has(hit.playerId)) byId.set(hit.playerId, { hit, rank: matchRank(hit.fullName, needle) });
+  }
+  return [...byId.values()]
+    .sort((a, b) => a.rank - b.rank || a.hit.fullName.localeCompare(b.hit.fullName, undefined, { sensitivity: 'base' }))
+    .slice(0, limit)
+    .map((r) => r.hit);
+}
+
 /** Roles valid for a contest mode. */
 export type ContestRole = FantasyRole | 'flex';
 
@@ -83,6 +106,9 @@ export async function searchContestPlayers(
   if (needle.length < 2) return [];
   const pat = `%${escapeIlike(needle)}%`;
   const league = contest.competitionDef.playerLeague;
+  // The DB LIMIT applies before ranking: fetch more than we show so mid-word
+  // matches can't crowd out names that start with the query.
+  const pool = Math.min(limit * 5, 200);
 
   if (league === 'ufa') {
     const { data, error } = await anon()
@@ -90,9 +116,9 @@ export async function searchContestPlayers(
       .select('id, full_name, current_team_id, ufa_teams:current_team_id (name, full_name)')
       .ilike('full_name', pat)
       .order('full_name')
-      .limit(limit);
+      .limit(pool);
     if (error) throw error;
-    return (data ?? []).map((r: Record<string, unknown>) => {
+    const hits = (data ?? []).map((r: Record<string, unknown>) => {
       const team = r.ufa_teams as { name?: string; full_name?: string } | null;
       return {
         playerId: r.id as string,
@@ -101,6 +127,7 @@ export async function searchContestPlayers(
         teamName: team?.full_name ?? team?.name ?? null,
       };
     });
+    return rankHits(hits, needle, limit);
   }
 
   if (league === 'pul' || league === 'wul') {
@@ -114,7 +141,7 @@ export async function searchContestPlayers(
       .ilike('player_name', pat)
       .order('player_name')
       .order('season', { ascending: false }) // dedup below keeps the newest team
-      .limit(limit * 2); // room for cross-team dupes before dedup
+      .limit(pool);
     if (error) throw error;
     const seen = new Set<string>();
     const hits: FantasyPlayerHit[] = [];
@@ -130,15 +157,14 @@ export async function searchContestPlayers(
         teamId: (r.team_id as string) ?? null,
         teamName: team?.name ?? [team?.city, team?.mascot].filter(Boolean).join(' ') ?? null,
       });
-      if (hits.length >= limit) break;
     }
-    return hits;
+    return rankHits(hits, needle, limit);
   }
 
   if (league === 'usau') {
     const eventId = contest.settings.mode === 'event' ? contest.settings.eventId : undefined;
     if (!eventId) return [];
-    // Teams entered in the event → their season rosters, name-searched.
+    // Teams entered in the event → their event rosters this season, name-searched.
     const { data: eventTeams, error: etErr } = await anon()
       .from('usau_event_teams')
       .select('team_id')
@@ -148,15 +174,21 @@ export async function searchContestPlayers(
     const teamIds = (eventTeams ?? []).map((t: Record<string, unknown>) => t.team_id as string);
     if (teamIds.length === 0) return [];
 
+    // Event-roster rows only (STRICT roster truth): legacy season-only rows
+    // are ghost twins of real ids that never get stats. Still ~4 rows per
+    // player (one per event), so a bigger pool; rankHits keeps one each.
+    // Roster-driven on purpose: driving from usau_players seq-scans its 400k
+    // rows on 2-char queries. No ORDER BY so broad queries stop at the LIMIT.
     const { data, error } = await anon()
       .from('usau_rosters')
       .select('player_id, team_id, usau_players!inner (display_name), usau_teams:team_id (name)')
       .in('team_id', teamIds)
       .eq('season', contest.seasonYear)
+      .not('event_id', 'is', null)
       .ilike('usau_players.display_name', pat)
-      .limit(limit);
+      .limit(pool * 4);
     if (error) throw error;
-    return (data ?? []).map((raw: Record<string, unknown>) => {
+    const hits = (data ?? []).map((raw: Record<string, unknown>) => {
       const p = raw.usau_players as { display_name?: string } | null;
       const t = raw.usau_teams as { name?: string } | null;
       return {
@@ -166,6 +198,7 @@ export async function searchContestPlayers(
         teamName: t?.name ?? null,
       };
     });
+    return rankHits(hits, needle, limit);
   }
 
   // wfdf / euf — roster rows ARE the player pool for the event.
@@ -179,9 +212,9 @@ export async function searchContestPlayers(
     .eq('event_id', eventId)
     .ilike('full_name', pat)
     .order('full_name')
-    .limit(limit);
+    .limit(pool);
   if (error) throw error;
-  return (data ?? []).map((raw: Record<string, unknown>) => {
+  const hits = (data ?? []).map((raw: Record<string, unknown>) => {
     const t = raw[teamsRel] as { name?: string; country_code?: string } | null;
     return {
       playerId: raw.id as string,
@@ -190,6 +223,7 @@ export async function searchContestPlayers(
       teamName: t?.name ?? t?.country_code ?? null,
     };
   });
+  return rankHits(hits, needle, limit);
 }
 
 // ─── Roster read (public) ────────────────────────────────────────────────────

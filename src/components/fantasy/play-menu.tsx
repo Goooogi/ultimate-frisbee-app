@@ -184,11 +184,14 @@ export function PlayMenu() {
                       type="text"
                       value={code}
                       onChange={(e) => {
-                        setCode(e.target.value.toUpperCase());
+                        setCode(e.target.value);
                         setError(null);
                       }}
-                      placeholder="e.g. FR0STY9"
-                      maxLength={16}
+                      placeholder="Paste invite code or link"
+                      autoComplete="off"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      spellCheck={false}
                       autoFocus
                       aria-label="League invite code"
                       className={[

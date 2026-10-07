@@ -447,20 +447,25 @@ export async function getLeagueCode(leagueId: string): Promise<string> {
   return data as string;
 }
 
-/** Native share sheet when available, else clipboard. A dismissed share sheet is not an error. */
+/**
+ * Native share sheet when available, else clipboard. A dismissed share sheet is not an error.
+ * The link is the acceptance (/fantasy/join/[code] auto-joins); the code sits alone on the
+ * last line. The URL rides inside `text` (no `url` field) because share targets order/drop
+ * `text` vs `url` inconsistently — this keeps the layout identical everywhere.
+ */
 export async function shareLeagueInvite(code: string): Promise<'shared' | 'copied' | 'cancelled'> {
-  const text = `Join my league on The Layout! Use code ${code} in Fantasy → My Leagues → Join.`;
   const url = `${window.location.origin}/fantasy/join/${code}`;
+  const text = `Join my fantasy league on The Layout! Tap to join:\n${url}\n\nOr paste this code in Fantasy → Join:\n${code}`;
   if (typeof navigator.share === 'function') {
     try {
-      await navigator.share({ text, url });
+      await navigator.share({ text });
       return 'shared';
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return 'cancelled';
       throw err;
     }
   }
-  await navigator.clipboard.writeText(`${text} ${url}`);
+  await navigator.clipboard.writeText(text);
   return 'copied';
 }
 
@@ -471,9 +476,12 @@ export async function regenerateLeagueCode(leagueId: string): Promise<string> {
   return data as string;
 }
 
-/** Join a league by its shareable code. Idempotent; returns the league id. */
+/** Join a league by its shareable code. Idempotent; returns the league id.
+ *  Accepts a pasted invite link or the whole shared message too — copying from
+ *  a text thread grabs the entire bubble, so pull the code out of the link. */
 export async function joinLeagueByCode(code: string): Promise<string> {
-  const c = code.trim();
+  const fromLink = code.match(/\/fantasy\/join\/([^\s/?#]+)/);
+  const c = fromLink ? fromLink[1] : code.trim();
   if (!c) throw new Error('Enter an invite code.');
   const { data, error } = await sessionClient().rpc('fantasy_join_league', { p_code: c });
   if (error) throw error;

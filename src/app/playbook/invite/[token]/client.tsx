@@ -13,11 +13,13 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
+import { deferOnboardingUntilHome } from '@/components/favorites/favorites-onboarding-modal';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { acceptInvite, previewInvite } from '@/lib/playbook/data';
 import { formatSupabaseError } from '@/lib/supabase/errors';
 
 export function InviteAcceptClient({ token }: { token: string }) {
+
   // Look up the email this invite was sent to so a new user's signup form is
   // prefilled (and AuthGate opens in create-account mode). null while loading
   // or for an invalid/expired token — the gate just won't prefill.
@@ -44,11 +46,18 @@ export function InviteAcceptClient({ token }: { token: string }) {
 }
 
 function Acceptor({ token }: { token: string }) {
+  // Signed in on the invite: the favorites picker waits for Home.
+  useEffect(() => deferOnboardingUntilHome(), []);
   const { user } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<'pending' | 'ok' | 'error'>('pending');
   const [error, setError] = useState<string | null>(null);
   const [teamName, setTeamName] = useState<string>('');
+  // Leaving before the "You're in" pause ends must not drag the user back.
+  const redirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (redirectRef.current) clearTimeout(redirectRef.current);
+  }, []);
 
   // The auto-run effect can fire more than once for a fresh signup (auth
   // provider re-renders as the session/profile settle; React Strict Mode
@@ -71,7 +80,7 @@ function Acceptor({ token }: { token: string }) {
       setTeamName(result.teamName);
       setState('ok');
       // Brief pause so the user sees confirmation, then route to teams.
-      setTimeout(() => router.push('/playbook/teams'), 1200);
+      redirectRef.current = setTimeout(() => router.push('/playbook/teams'), 1200);
     } catch (err) {
       // The accept RPC's P0001 RAISE messages flow through formatSupabaseError
       // as-is; friendlyError below translates those into longer copy.

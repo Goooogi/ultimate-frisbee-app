@@ -171,17 +171,21 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
   useEffect(() => {
     if (query.trim().length < 2) {
       setResults([]);
+      setSearching(false);
       return;
     }
+    // Responses can land out of order; only the latest query may write.
+    let cancelled = false;
     setSearching(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       searchContestPlayers(contest, query, 30)
-        .then(setResults)
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
+        .then((hits) => !cancelled && setResults(hits))
+        .catch(() => !cancelled && setResults([]))
+        .finally(() => !cancelled && setSearching(false));
     }, 200);
     return () => {
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

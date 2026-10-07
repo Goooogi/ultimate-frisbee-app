@@ -222,13 +222,14 @@ function JoinForm() {
             type="text"
             value={code}
             onChange={(e) => {
-              setCode(e.target.value.toUpperCase());
+              setCode(e.target.value);
               setError(null);
             }}
-            maxLength={16}
             autoComplete="off"
-            autoCapitalize="characters"
-            placeholder="e.g. FR0STY9"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
+            placeholder="Paste invite code or link"
             className={[
               'flex-1 min-w-0 px-3.5 py-2.5 rounded-card-sm bg-ink/5',
               'font-tight text-[16px] font-bold tracking-[0.08em] text-ink placeholder:text-faint placeholder:font-normal',

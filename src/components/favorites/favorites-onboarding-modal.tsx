@@ -7,10 +7,15 @@
 // arrives instantly (email-confirm off) or later (email-confirm on) — it keys
 // off "authed + empty + unseen", not the signup form. After this, favorites are
 // edited only in Settings.
+//
+// Invite links (fantasy join/invite, playbook invite) defer it until the user
+// reaches Home, so someone signing up mid-invite lands in the league/team they
+// were invited to without a preferences picker on top of it (Hunter, 2026-10-07).
 
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import {
   getMyFavorites,
@@ -22,9 +27,20 @@ import { FavoritesPicker } from '@/components/settings/favorites-picker';
 import { FOR_YOU_ENABLED } from '@/lib/for-you/leagues';
 
 const SEEN_KEY = 'favorites-onboarding-seen';
+const DEFER_KEY = 'favorites-onboarding-defer';
+
+/** Called by invite pages on mount: hold the onboarding picker until Home. */
+export function deferOnboardingUntilHome() {
+  try {
+    localStorage.setItem(DEFER_KEY, '1');
+  } catch {
+    // private mode — the picker just shows as it did before
+  }
+}
 
 export function FavoritesOnboardingModal() {
   const { user, loading: authLoading } = useAuth();
+  const pathname = usePathname();
   const [phase, setPhase] = useState<'idle' | 'checking' | 'open' | 'done'>('idle');
   const [initial, setInitial] = useState<{
     leagues: FavoriteLeague[];
@@ -40,11 +56,21 @@ export function FavoritesOnboardingModal() {
     // while that page is hidden (2026-07-10). Flip FOR_YOU_ENABLED to restore.
     if (!FOR_YOU_ENABLED) return;
     if (authLoading || phase === 'done' || phase === 'open') return;
+    // Reaching Home ends any invite deferral, signed in or not.
+    if (pathname === '/') {
+      try {
+        localStorage.removeItem(DEFER_KEY);
+      } catch {
+        // private mode — nothing was stored
+      }
+    }
     if (!user) return; // no session → nothing to onboard
     if (typeof window !== 'undefined' && localStorage.getItem(SEEN_KEY) === '1') {
       setPhase('done');
       return;
     }
+    // Deferred by an invite link — re-runs on navigation and opens on Home.
+    if (pathname !== '/' && localStorage.getItem(DEFER_KEY) === '1') return;
     let cancelled = false;
     setPhase('checking');
     getMyFavorites()
@@ -66,11 +92,12 @@ export function FavoritesOnboardingModal() {
     return () => {
       cancelled = true;
     };
-  }, [user, authLoading, phase]);
+  }, [user, authLoading, phase, pathname]);
 
   function markSeen() {
     try {
       localStorage.setItem(SEEN_KEY, '1');
+      localStorage.removeItem(DEFER_KEY);
     } catch {
       // private mode — best effort; the empty-favorites check still gates re-show
     }

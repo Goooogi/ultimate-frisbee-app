@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
+import { deferOnboardingUntilHome } from '@/components/favorites/favorites-onboarding-modal';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { previewLeagueInvite, acceptLeagueInvite } from '@/lib/fantasy/leagues';
 
@@ -24,6 +25,7 @@ export function LeagueInviteAcceptClient({ token }: { token: string }) {
 
   return (
     <AuthGate
+      eyebrow="League invite"
       headline={preview ? `Join ${preview.leagueName}.` : "You've been invited."}
       subhead="Sign in or create an account with the same email the invite was sent to."
       initialEmail={preview?.email ?? undefined}
@@ -34,11 +36,18 @@ export function LeagueInviteAcceptClient({ token }: { token: string }) {
 }
 
 function Acceptor({ token, leagueName }: { token: string; leagueName: string | null }) {
+  // Signed in on the invite: the favorites picker waits for Home.
+  useEffect(() => deferOnboardingUntilHome(), []);
   const { user } = useAuth();
   const router = useRouter();
   const [state, setState] = useState<'pending' | 'ok' | 'error'>('pending');
   const [error, setError] = useState<string | null>(null);
   const [joinedLeagueId, setJoinedLeagueId] = useState<string | null>(null);
+  // Leaving before the "You're in" pause ends must not drag the user back.
+  const redirectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (redirectRef.current) clearTimeout(redirectRef.current);
+  }, []);
 
   // Guards against the double-fire a fresh signup's re-renders can cause —
   // same reasoning as playbook's autoRanRef (2nd call would hit an
@@ -56,7 +65,7 @@ function Acceptor({ token, leagueName }: { token: string; leagueName: string | n
       const leagueId = await acceptLeagueInvite(token);
       setJoinedLeagueId(leagueId);
       setState('ok');
-      setTimeout(() => router.push(`/fantasy/leagues/${leagueId}`), 1200);
+      redirectRef.current = setTimeout(() => router.push(`/fantasy/leagues/${leagueId}`), 1200);
     } catch (err) {
       setError(friendlyError(err instanceof Error ? err.message : 'Something went wrong.'));
       setState('error');

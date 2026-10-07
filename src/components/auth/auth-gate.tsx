@@ -20,6 +20,8 @@ import { useTheme } from '@/lib/use-theme';
 import { AuthModal } from './auth-modal';
 
 interface AuthGateProps {
+  /** Small label above the headline. */
+  eyebrow?: string;
   /** Headline on the gate landing + (when opened) the modal. */
   headline?: string;
   /** Subhead shown on the landing. */
@@ -32,6 +34,7 @@ interface AuthGateProps {
 }
 
 export function AuthGate({
+  eyebrow = 'The Playbook · Beta',
   headline = 'Pull up your playbook.',
   subhead = 'Sign in to save plays, switch teams, and pick up exactly where you left off.',
   initialEmail,
@@ -87,7 +90,7 @@ export function AuthGate({
       <main className="flex-1 flex items-center justify-center px-5 py-12 lg:py-20">
         <div className="text-center flex flex-col items-center gap-5 max-w-[560px]">
           <span className="text-[11px] font-bold tracking-[0.18em] uppercase text-accent font-tight">
-            The Playbook · Beta
+            {eyebrow}
           </span>
           <h1 className="m-0 font-display italic font-bold text-[44px] lg:text-[64px] leading-[0.92] tracking-[-0.04em] text-ink">
             {headline}

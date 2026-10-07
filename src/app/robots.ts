@@ -15,7 +15,15 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: ['Googlebot', 'Bingbot'],
         allow: '/',
-        disallow: ['/wfdf/players/by-name/', '/euf/players/by-name/', '/admin', '/api/'],
+        disallow: [
+          '/wfdf/players/by-name/',
+          '/euf/players/by-name/',
+          '/admin',
+          '/api/',
+          '/fantasy/join/',
+          '/fantasy/invite/',
+          '/playbook/invite/',
+        ],
         crawlDelay: 10,
       },
       {
