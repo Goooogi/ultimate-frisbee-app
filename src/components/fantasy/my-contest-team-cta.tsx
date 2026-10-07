@@ -1,11 +1,10 @@
 'use client';
 
-// Contest page's "my team" CTA — client island. If the signed-in user already
-// has a team in this contest, link to the roster page. Otherwise, a team-name
+// Contest page's "build your team" CTA — client island. Renders nothing if the
+// signed-in user already has a team in this contest. Otherwise, a team-name
 // input + createContestTeam (auth-gated via AuthModal on write attempt).
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import { AuthModal } from '@/components/auth/auth-modal';
@@ -37,37 +36,8 @@ export function MyContestTeamCta({ contest }: { contest: ContestView }) {
       .finally(() => setTeamLoading(false));
   }, [user, contest.id]);
 
-  if (loading || teamLoading) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-6">
-        <div className="h-11 w-48 rounded-card-sm bg-ink/[0.06] animate-pulse" />
-      </div>
-    );
-  }
-
-  if (myTeam) {
-    return (
-      <div className="bg-surface rounded-card-lg shadow-card p-5 lg:p-6 flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1">
-            Your team
-          </div>
-          <div className="font-tight text-[16px] font-bold text-ink truncate">{myTeam.teamName}</div>
-        </div>
-        <Link
-          href={`/fantasy/l/${contest.id}/team`}
-          className={[
-            'flex-shrink-0 inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full min-h-[44px]',
-            'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.08em] uppercase',
-            'hover:opacity-90 transition-opacity duration-150',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-          ].join(' ')}
-        >
-          Manage roster
-        </Link>
-      </div>
-    );
-  }
+  // No card for an existing team — the Team tab and standings already cover it.
+  if (loading || teamLoading || myTeam) return null;
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
