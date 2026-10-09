@@ -46,6 +46,9 @@ export interface WeeklyStatsSettings {
    *  pool. Mirrors the DB's settings->>'draft' jsonb flag (see
    *  fantasy_add_drop, fantasy_save_contest_roster migrations). */
   draft?: boolean;
+  /** The commissioner's create-time pick. It preselects the draft setup form;
+   *  once a fantasy_drafts row exists, that row's draft_type is authoritative. */
+  draftType?: 'snake' | 'auction';
 }
 
 export interface EventSettings {
@@ -58,6 +61,8 @@ export interface EventSettings {
   unlimitedTeams?: boolean;
   /** See WeeklyStatsSettings.draft. */
   draft?: boolean;
+  /** See WeeklyStatsSettings.draftType. */
+  draftType?: 'snake' | 'auction';
 }
 
 export type ContestSettings = WeeklyStatsSettings | EventSettings;
@@ -81,10 +86,30 @@ export interface CompetitionDef {
 const WEEKLY_DEFAULT: WeeklyStatsSettings = { mode: 'weekly-stats', offenders: 4, defenders: 3, format: 'h2h' };
 const EVENT_DEFAULT: EventSettings = { mode: 'event', flex: 7 };
 
-/** Team-limit stepper bounds for the Settings → Teams/Limits card. */
+/** Weekly lineups start exactly 4 offense + 3 defense — fixed by the game, not
+ *  a commissioner setting (Hunter, 2026-10-08; fantasy_update_contest_roster
+ *  enforces it). */
+export const WEEKLY_OFFENSE = 4;
+export const WEEKLY_DEFENSE = 3;
+export const WEEKLY_STARTERS = WEEKLY_OFFENSE + WEEKLY_DEFENSE;
+
+/** Players per team = draft rounds, fixed by the game (Hunter, 2026-10-07):
+ *  weekly 12 (7 starters + 5 bench), event 7 (no bench — drafted once, set
+ *  for the whole event). fantasy_schedule_draft enforces the same numbers. */
+export function teamSize(settings: ContestSettings): number {
+  return settings.mode === 'event' ? 7 : 12;
+}
+
+/** Team-limit stepper bounds for Create a League and Settings → Teams. */
 export const MIN_TEAMS = 4;
+export const MAX_TEAMS = 16;
 // Matches the DB trigger's coalesce(maxTeams, 12) and mobile.
 export const DEFAULT_MAX_TEAMS = 12;
+
+/** Team-cap stops for Create a League → Total teams and Settings → Teams. The
+ *  last, ∞, is stored as unlimitedTeams with maxTeams DEFAULT_MAX_TEAMS
+ *  (fantasy_set_contest_limits range-checks maxTeams even when unlimited). */
+export const TEAM_LIMIT_STOPS = [4, 5, 6, 7, 8, 9, 10, 12, 16, Infinity];
 
 export const COMPETITIONS: CompetitionDef[] = [
   {
@@ -184,6 +209,7 @@ export function contestFormat(settings: ContestSettings): 'h2h' | 'points' {
  *  trigger is the write-side enforcer). */
 export function parseContestSettings(def: CompetitionDef, raw: unknown): ContestSettings {
   const obj = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null;
+  const draftType = obj?.draftType === 'snake' || obj?.draftType === 'auction' ? obj.draftType : undefined;
   if (obj?.mode === 'weekly-stats') {
     return {
       mode: 'weekly-stats',
@@ -197,6 +223,7 @@ export function parseContestSettings(def: CompetitionDef, raw: unknown): Contest
           ? (obj.schedule as WeeklyStatsSettings['schedule'])
           : undefined,
       draft: obj.draft === true,
+      draftType,
     };
   }
   if (obj?.mode === 'event') {
@@ -207,6 +234,7 @@ export function parseContestSettings(def: CompetitionDef, raw: unknown): Contest
       maxTeams: typeof obj.maxTeams === 'number' ? obj.maxTeams : undefined,
       unlimitedTeams: typeof obj.unlimitedTeams === 'boolean' ? obj.unlimitedTeams : undefined,
       draft: obj.draft === true,
+      draftType,
     };
   }
   return def.defaultSettings;

@@ -5,9 +5,9 @@
 // mobile hub's My Leagues card (altiusapps/mobileapp-thelayout ·
 // app/(app)/fantasy/index.tsx) — same status-chip logic, same row shape.
 //
-// Signed out / empty states link straight into the create/join flows rather
-// than duplicating the header's PlayMenu here — one obvious way to start a
-// league, not two.
+// Empty and load-failed states are plain rows, not links (Hunter, 2026-10-07):
+// creating starts from Start a League below, joining from the header's Join
+// league button. A failed load says so rather than claiming "No leagues yet".
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -73,8 +73,10 @@ export function MyLeaguesList() {
   const [authOpen, setAuthOpen] = useState(false);
   const [leagues, setLeagues] = useState<MyLeagueRow[]>([]);
   const [leaguesLoading, setLeaguesLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
+    setLoadFailed(false);
     if (!user) {
       setLeagues([]);
       setLeaguesLoading(false);
@@ -83,7 +85,10 @@ export function MyLeaguesList() {
     setLeaguesLoading(true);
     getMyLeagues()
       .then(setLeagues)
-      .catch(() => setLeagues([]))
+      .catch(() => {
+        setLeagues([]);
+        setLoadFailed(true);
+      })
       .finally(() => setLeaguesLoading(false));
   }, [user]);
 
@@ -125,25 +130,18 @@ export function MyLeaguesList() {
             </span>
             <ChevronGlyph />
           </button>
+        ) : loadFailed ? (
+          <div role="alert" className="px-5 py-4">
+            <p className="font-tight text-[14px] font-semibold text-ink">Couldn&apos;t load your leagues</p>
+            <p className="font-tight text-[11px] text-muted mt-0.5">Check your connection and try again.</p>
+          </div>
         ) : rows.length === 0 ? (
-          <Link
-            href="/fantasy/leagues/new"
-            className={[
-              'flex items-center gap-3 px-5 py-4',
-              'no-underline transition-colors duration-150 hover:bg-surface-hi',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
-            ].join(' ')}
-          >
-            <span className="min-w-0 flex-1">
-              <span className="block font-tight text-[14px] font-semibold text-ink">
-                Create or join a league
-              </span>
-              <span className="block font-tight text-[11px] text-muted mt-0.5">
-                Start one and invite friends, or join with an invite code.
-              </span>
-            </span>
-            <ChevronGlyph />
-          </Link>
+          <div className="px-5 py-4">
+            <p className="font-tight text-[14px] font-semibold text-ink">No leagues yet</p>
+            <p className="font-tight text-[11px] text-muted mt-0.5">
+              Create one below, or join a friend&apos;s with an invite code.
+            </p>
+          </div>
         ) : (
           <ul aria-label="Your leagues">
             {rows.map((r, idx) => {

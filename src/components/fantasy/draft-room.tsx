@@ -20,9 +20,11 @@
 //   complete → summary: each team's haul (+ auction prices) + link back.
 //
 // Clock resolution: any open client can call resolveDraftClock() /
-// resolveAuction() when a clock hits 0 — server-side first-caller-wins, so no
-// coordination is needed beyond a small random jitter to avoid every open tab
-// firing at once.
+// resolveAuction() once a clock is CLOCK_GRACE_MS past 0 (the server's own
+// grace; earlier calls are told "not yet") — server-side first-caller-wins, so
+// no coordination is needed beyond a small random jitter to avoid every open
+// tab firing at once. A 10-second server tick backs this up, so drafts run on
+// with nobody in the room. There is no pause (Hunter, 2026-10-08).
 //
 // Realtime: subscribeDraft() (snake) or subscribeAuction() (auction)
 // refetches on relevant table changes; also refetches on window focus and
@@ -43,6 +45,7 @@ import {
   getOpenNomination,
   getNominations,
   getDraftPrices,
+  getAutodraftTeamIds,
   startDraft,
   makeDraftPick,
   resolveDraftClock,
@@ -53,6 +56,7 @@ import {
   unsubscribeDraft,
   teamOnClock,
   roundOf,
+  CLOCK_GRACE_MS,
   type Draft,
   type DraftPick,
   type DraftRef,
@@ -65,6 +69,7 @@ import { getMyContestTeam, type ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import { AuctionRoom } from './draft/auction-room';
 import { CommissionerBar } from './draft/commissioner-bar';
+import { AutoBadge, AutodraftToggle } from './draft/autodraft';
 
 interface TeamInfo {
   id: string;
@@ -105,6 +110,9 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   const [openNomination, setOpenNomination] = useState<DraftNomination | null>(null);
   const [nominations, setNominations] = useState<DraftNomination[]>([]);
   const [prices, setPrices] = useState<DraftPrice[]>([]);
+  // Teams on autodraft. The teams prop is static, so this is re-read with
+  // every refetch.
+  const [autodraftTeamIds, setAutodraftTeamIds] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<DraftReadiness | null>(null);
@@ -123,6 +131,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   const refetch = useCallback(async () => {
     try {
       const d = await getDraft(contest.id);
+      setLoadError(null);
       setDraft(d);
       if (!d) {
         setPicks([]);
@@ -131,14 +140,16 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
         return;
       }
       const isAuction = d.draftType === 'auction';
-      const [p, open, noms] = await Promise.all([
+      const [p, open, noms, auto] = await Promise.all([
         getDraftPicks(d.id),
         isAuction ? getOpenNomination(d.id) : Promise.resolve(null),
         isAuction ? getNominations(d.id) : Promise.resolve([]),
+        getAutodraftTeamIds(contest.id),
       ]);
       setPicks(p);
       setOpenNomination(open);
       setNominations(noms);
+      setAutodraftTeamIds(auto);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : 'Could not load the draft.');
     }
@@ -156,15 +167,17 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
         setDraft(d);
         if (d) {
           const isAuction = d.draftType === 'auction';
-          const [p, open, noms] = await Promise.all([
+          const [p, open, noms, auto] = await Promise.all([
             getDraftPicks(d.id),
             isAuction ? getOpenNomination(d.id) : Promise.resolve(null),
             isAuction ? getNominations(d.id) : Promise.resolve([]),
+            getAutodraftTeamIds(contest.id),
           ]);
           if (cancelled) return;
           setPicks(p);
           setOpenNomination(open);
           setNominations(noms);
+          setAutodraftTeamIds(auto);
         }
       } catch (err) {
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Could not load the draft.');
@@ -248,10 +261,20 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   useEffect(() => {
     if (!draft) return;
     const isAuction = draft.draftType === 'auction';
-    const channel = isAuction ? subscribeAuction(draft.id, () => refetch()) : subscribeDraft(draft.id, () => refetch());
+    // An autodraft run lands several picks at once; refetch once per burst.
+    let pending: ReturnType<typeof setTimeout> | null = null;
+    const onChange = () => {
+      if (pending) clearTimeout(pending);
+      pending = setTimeout(() => {
+        pending = null;
+        refetch();
+      }, 250);
+    };
+    const channel = isAuction ? subscribeAuction(draft.id, onChange) : subscribeDraft(draft.id, onChange);
     const onFocus = () => refetch();
     window.addEventListener('focus', onFocus);
     return () => {
+      if (pending) clearTimeout(pending);
       unsubscribeDraft(channel);
       window.removeEventListener('focus', onFocus);
     };
@@ -265,64 +288,33 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
     return () => clearInterval(id);
   }, [draft?.status, refetch]);
 
-  // ── Snake clock resolution ───────────────────────────────────────────────
-  const snakeRemainingMs = useClockRemaining(
-    draft?.draftType === 'snake' && draft.status === 'live' ? draft.currentStartedAt : null,
-    draft?.pickSeconds ?? 60,
-  );
-  const snakeResolvedKeyRef = useRef<string | null>(null);
+  // ── Clock resolution (snake pick, auction nomination or bid) ────────────
+  // One timer per running clock, set for its deadline + the server's grace + a
+  // little jitter. It re-arms only when the clock itself changes (a new pick,
+  // a bid that pushes the deadline), never on a render tick — a timer that
+  // re-arms every tick gets cancelled before it fires.
+  const clockDeadline =
+    !draft || draft.status !== 'live'
+      ? null
+      : draft.draftType === 'auction'
+        ? openNomination
+          ? new Date(openNomination.endsAt).getTime()
+          : draft.currentStartedAt
+            ? new Date(draft.currentStartedAt).getTime() + draft.nominationSeconds * 1000
+            : null
+        : draft.currentStartedAt
+          ? new Date(draft.currentStartedAt).getTime() + draft.pickSeconds * 1000
+          : null;
+  const liveDraftId = draft?.id ?? null;
+  const isAuctionDraft = draft?.draftType === 'auction';
   useEffect(() => {
-    if (!draft || draft.draftType !== 'snake' || draft.status !== 'live' || draft.pausedAt) return;
-    if (snakeRemainingMs === null || snakeRemainingMs > 0) return;
-    const key = `${draft.currentOverall}:${draft.currentStartedAt}`;
-    if (snakeResolvedKeyRef.current === key) return;
-    snakeResolvedKeyRef.current = key;
-    const jitter = 200 + Math.random() * 800;
+    if (!liveDraftId || clockDeadline === null) return;
+    const fireIn = clockDeadline + CLOCK_GRACE_MS + 200 + Math.random() * 800 - Date.now();
     const t = setTimeout(() => {
-      resolveDraftClock(draft.id).then(refetch).catch(() => {});
-    }, jitter);
+      (isAuctionDraft ? resolveAuction(liveDraftId) : resolveDraftClock(liveDraftId)).then(refetch).catch(() => {});
+    }, Math.max(0, fireIn));
     return () => clearTimeout(t);
-  }, [snakeRemainingMs, draft, refetch]);
-
-  // ── Auction clock resolution (bidding + nominating) ──────────────────────
-  const nominationDeadline = useMemo(() => {
-    if (!draft || draft.draftType !== 'auction' || draft.status !== 'live') return null;
-    return draft.currentStartedAt
-      ? new Date(draft.currentStartedAt).getTime() + draft.nominationSeconds * 1000
-      : null;
-  }, [draft]);
-  const [auctionNow, setAuctionNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (draft?.draftType !== 'auction' || draft?.status !== 'live') return;
-    const id = setInterval(() => setAuctionNow(Date.now()), 250);
-    return () => clearInterval(id);
-  }, [draft?.draftType, draft?.status]);
-
-  const auctionResolvedKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!draft || draft.draftType !== 'auction' || draft.status !== 'live' || draft.pausedAt) return;
-    let expired = false;
-    let key: string | null = null;
-    if (openNomination) {
-      const remaining = new Date(openNomination.endsAt).getTime() - auctionNow;
-      if (remaining <= 0) {
-        expired = true;
-        key = `bid:${openNomination.id}`;
-      }
-    } else if (nominationDeadline !== null) {
-      if (nominationDeadline - auctionNow <= 0) {
-        expired = true;
-        key = `nom:${draft.currentOverall}:${draft.currentStartedAt}`;
-      }
-    }
-    if (!expired || key === null || auctionResolvedKeyRef.current === key) return;
-    auctionResolvedKeyRef.current = key;
-    const jitter = 200 + Math.random() * 800;
-    const t = setTimeout(() => {
-      resolveAuction(draft.id).then(refetch).catch(() => {});
-    }, jitter);
-    return () => clearTimeout(t);
-  }, [draft, openNomination, nominationDeadline, auctionNow, refetch]);
+  }, [liveDraftId, isAuctionDraft, clockDeadline, refetch]);
 
   const bidRemainingMs = useDeadlineRemaining(openNomination?.endsAt ?? null);
   const nominationRemainingMs = useClockRemaining(
@@ -333,9 +325,9 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
   // ── document.title prefix — on the clock (snake), nominating, or high
   // bidder (auction) ────────────────────────────────────────────────────────
   const onClockTeamId = draft && draft.status === 'live' && draft.draftType === 'snake' ? teamOnClock(draft) : null;
-  const isMyClock = !!myTeam && onClockTeamId === myTeam.id && !draft?.pausedAt;
+  const isMyClock = !!myTeam && onClockTeamId === myTeam.id;
   const nominatingTeamId = draft && draft.status === 'live' && draft.draftType === 'auction' ? draft.draftOrder[((draft.currentOverall - 1) % Math.max(draft.draftOrder.length, 1) + draft.draftOrder.length) % Math.max(draft.draftOrder.length, 1)] : null;
-  const isMyNominateTurn = !!myTeam && !openNomination && nominatingTeamId === myTeam.id && !draft?.pausedAt;
+  const isMyNominateTurn = !!myTeam && !openNomination && nominatingTeamId === myTeam.id;
   const isMyHighBid = !!myTeam && !!openNomination && openNomination.highTeamId === myTeam.id;
   const titlePrefix = isMyClock
     ? '● Your pick'
@@ -370,10 +362,10 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
         <p className="text-muted font-tight text-[14px]">No draft scheduled yet.</p>
         {isCommissioner && (
           <Link
-            href={`${basePath}/settings`}
+            href={`${basePath}/draft/setup`}
             className="inline-flex items-center gap-1.5 mt-4 text-accent font-tight text-[13px] font-bold hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded"
           >
-            Schedule it in League settings
+            Set up the draft
           </Link>
         )}
       </div>
@@ -406,10 +398,20 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
         <CommissionerBar draft={draft} pickCount={picks.length} refetch={refetch} />
       )}
 
-      {draft.status === 'live' && draft.pausedAt && (
-        <p role="status" className="px-4 py-3 rounded-card-sm bg-accent/10 text-accent font-tight text-[12.5px] text-center">
-          Draft paused by the commissioner
-        </p>
+      {myTeam && (draft.status === 'scheduled' || draft.status === 'live') && (
+        <AutodraftToggle
+          draftId={draft.id}
+          on={autodraftTeamIds.has(myTeam.id)}
+          onChanged={(next) => {
+            setAutodraftTeamIds((prev) => {
+              const updated = new Set(prev);
+              if (next) updated.add(myTeam.id);
+              else updated.delete(myTeam.id);
+              return updated;
+            });
+            refetch();
+          }}
+        />
       )}
 
       {draft.status === 'live' && draft.draftType === 'auction' && (
@@ -426,6 +428,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           prices={prices}
           bidRemainingMs={bidRemainingMs}
           nominationRemainingMs={nominationRemainingMs}
+          autodraftTeamIds={autodraftTeamIds}
           onRequireAuth={() => setAuthOpen(true)}
           refetch={refetch}
         />
@@ -441,6 +444,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           draftedByKey={draftedByKey}
           myTeam={myTeam}
           isMyClock={isMyClock}
+          autodraftTeamIds={autodraftTeamIds}
           queue={queue}
           setQueue={setQueue}
           tab={tab}
@@ -620,6 +624,7 @@ function LiveRoom({
   draftedByKey,
   myTeam,
   isMyClock,
+  autodraftTeamIds,
   queue,
   setQueue,
   tab,
@@ -635,6 +640,7 @@ function LiveRoom({
   draftedByKey: Map<string, string>;
   myTeam: TeamInfo | null;
   isMyClock: boolean;
+  autodraftTeamIds: Set<string>;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
   tab: RoomTab;
@@ -646,23 +652,8 @@ function LiveRoom({
   const onClockTeam = onClockTeamId ? teamById.get(onClockTeamId) : null;
   const round = roundOf(draft.currentOverall, draft.draftOrder.length);
 
-  // ── Clock: resolve when expired, jittered so simultaneous clients don't
-  // stampede the RPC — the server no-ops for every caller after the first,
-  // so this only shaves a bit of redundant traffic. ──
-  const resolvedRef = useRef(false);
+  // Display only — DraftRoom's clock timer resolves an expired pick.
   const remainingMs = useClockRemaining(draft.currentStartedAt, draft.pickSeconds);
-  useEffect(() => {
-    resolvedRef.current = false;
-  }, [draft.currentOverall, draft.currentStartedAt]);
-  useEffect(() => {
-    if (remainingMs === null || remainingMs > 0 || resolvedRef.current || draft.pausedAt) return;
-    resolvedRef.current = true;
-    const jitter = 200 + Math.random() * 800;
-    const t = setTimeout(() => {
-      resolveDraftClock(draft.id).then(refetch).catch(() => {});
-    }, jitter);
-    return () => clearTimeout(t);
-  }, [remainingMs, draft.id, draft.pausedAt, refetch]);
 
   const tabs: FloatingTab[] = [
     { id: 'players', label: 'Players', icon: PlayersIcon },
@@ -685,11 +676,14 @@ function LiveRoom({
             <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1">
               R{round} &middot; Pick {draft.currentOverall}
             </div>
-            <div className="font-tight text-[16px] font-bold text-ink truncate">
-              {isMyClock ? "You're on the clock" : `${onClockTeam?.teamName ?? 'Team'} is on the clock`}
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-tight text-[16px] font-bold text-ink truncate">
+                {isMyClock ? "You're on the clock" : `${onClockTeam?.teamName ?? 'Team'} is on the clock`}
+              </span>
+              {onClockTeamId && autodraftTeamIds.has(onClockTeamId) && <AutoBadge />}
             </div>
           </div>
-          <ClockDial remainingMs={remainingMs} pickSeconds={draft.pickSeconds} urgent={isMyClock} paused={Boolean(draft.pausedAt)} />
+          <ClockDial remainingMs={remainingMs} pickSeconds={draft.pickSeconds} urgent={isMyClock} />
         </div>
       </div>
 
@@ -709,7 +703,7 @@ function LiveRoom({
             refetch={refetch}
           />
         )}
-        {tab === 'board' && <BoardPanel draft={draft} picks={picks} teams={teams} />}
+        {tab === 'board' && <BoardPanel draft={draft} picks={picks} teams={teams} autodraftTeamIds={autodraftTeamIds} />}
         {tab === 'queue' && (
           <QueuePanel draft={draft} myTeam={myTeam} queue={queue} setQueue={setQueue} onRequireAuth={onRequireAuth} />
         )}
@@ -720,7 +714,7 @@ function LiveRoom({
 
       <div className="hidden lg:grid grid-cols-3 gap-6">
         <div className="col-span-2">
-          <BoardPanel draft={draft} picks={picks} teams={teams} />
+          <BoardPanel draft={draft} picks={picks} teams={teams} autodraftTeamIds={autodraftTeamIds} />
         </div>
         <div>
           <DesktopRail
@@ -829,24 +823,22 @@ function ClockDial({
   remainingMs,
   pickSeconds,
   urgent,
-  paused = false,
 }: {
   remainingMs: number | null;
   pickSeconds: number;
   urgent: boolean;
-  paused?: boolean;
 }) {
   const sec = remainingMs === null ? pickSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
-  const low = !paused && sec <= 10;
+  const low = sec <= 10;
   return (
     <div
       className={[
         'flex-shrink-0 flex items-center justify-center w-16 h-16 rounded-full font-tight text-[20px] font-bold tabular',
-        low ? 'bg-live/10 text-live' : urgent && !paused ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
+        low ? 'bg-live/10 text-live' : urgent ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
       ].join(' ')}
-      aria-label={paused ? 'Draft paused' : `${sec} seconds remaining`}
+      aria-label={`${sec} seconds remaining`}
     >
-      {paused ? 'II' : sec}
+      {sec}
     </div>
   );
 }
@@ -889,20 +881,26 @@ function PlayersPanel({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (query.trim().length < 2) {
       setResults([]);
+      setSearching(false);
       return;
     }
+    // Responses can land out of order; only the latest query may write. The
+    // spinner starts now, not after the debounce, so "No players found." can't
+    // flash first.
+    let cancelled = false;
+    setSearching(true);
     debounceRef.current = setTimeout(async () => {
-      setSearching(true);
       try {
         const hits = await searchContestPlayers(contest, query, 30);
-        setResults(hits);
+        if (!cancelled) setResults(hits);
       } catch {
-        setResults([]);
+        if (!cancelled) setResults([]);
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, 200);
     return () => {
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1087,7 +1085,17 @@ function PlayerListSkeleton() {
 
 // ─── Board panel ────────────────────────────────────────────────────────────
 
-function BoardPanel({ draft, picks, teams }: { draft: Draft; picks: DraftPick[]; teams: TeamInfo[] }) {
+function BoardPanel({
+  draft,
+  picks,
+  teams,
+  autodraftTeamIds,
+}: {
+  draft: Draft;
+  picks: DraftPick[];
+  teams: TeamInfo[];
+  autodraftTeamIds: Set<string>;
+}) {
   const n = draft.draftOrder.length;
   if (n === 0) {
     return (
@@ -1113,7 +1121,10 @@ function BoardPanel({ draft, picks, teams }: { draft: Draft; picks: DraftPick[];
                   key={t?.id ?? i}
                   className="px-3 py-2.5 text-[10px] font-bold tracking-[0.1em] uppercase text-faint font-tight text-left border-b border-hairline whitespace-nowrap"
                 >
-                  {t?.teamName ?? 'Team'}
+                  <span className="inline-flex items-center gap-1.5">
+                    {t?.teamName ?? 'Team'}
+                    {t && draft.status === 'live' && autodraftTeamIds.has(t.id) && <AutoBadge />}
+                  </span>
                 </th>
               ))}
             </tr>

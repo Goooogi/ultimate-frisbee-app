@@ -1,7 +1,11 @@
 'use client';
 
-// Create-league form — auth-gated. name + game → createLeague + createContest
-// → revalidate → redirect into the league.
+// Create-league form — auth-gated, create-only (joining moved to the hub's
+// Join league button, Hunter 2026-10-07). name + game + total teams + draft
+// type → createLeague + createContest (setup in the contest's single INSERT)
+// → revalidate → redirect into the league. Total teams and draft type stay
+// commissioner-editable in League Settings until the draft goes live.
+// Players per team isn't asked: it's fixed by the game (teamSize).
 //
 // The game is chosen HERE (2026-08-27, Hunter): a league is created FOR a game.
 // It used to be a bare name, with a separate "enter this league into another
@@ -13,11 +17,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AuthGate } from '@/components/auth/auth-gate';
 import { PillSelect, type PillSelectOption } from '@/components/pill-select';
-import { createLeague, createContest, joinLeagueByCode, getLeagueContests } from '@/lib/fantasy/leagues';
+import { StepButton, stepTeams } from '@/components/fantasy/settings/limits-card';
+import { TypeOption } from '@/components/fantasy/settings/draft-settings-card';
+import { createLeague, createContest } from '@/lib/fantasy/leagues';
 import { nextStartForGame, type GameStartMap } from '@/lib/fantasy/game-dates';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
-import { friendlyJoinError } from '@/components/fantasy/play-menu';
-import type { CompetitionId } from '@/lib/fantasy/competitions';
+import { DEFAULT_MAX_TEAMS, MIN_TEAMS, type CompetitionId } from '@/lib/fantasy/competitions';
+import type { DraftType } from '@/lib/fantasy/draft-room';
 import { GAMES } from '@/lib/fantasy/games';
 
 interface CreateLeagueFormProps {
@@ -33,15 +39,11 @@ interface CreateLeagueFormProps {
 export function CreateLeagueForm({ initialGameId, starts }: CreateLeagueFormProps) {
   return (
     <AuthGate
-      headline="Sign in to create or join a league."
-      subhead="Leagues are free — start one for your friends, or join with an invite code."
+      headline="Sign in to create a league."
+      subhead="Leagues are free — start one and invite your friends."
     >
-      {/* Create + join stacked so the hub's "Create or join a league" row
-          lands on both (it used to offer create only). Spacing is tightened on
-          mobile so the pair fits one phone screen without scrolling. */}
-      <div className="max-w-[480px] flex flex-col gap-3">
+      <div className="max-w-[480px]">
         <Form initialGameId={initialGameId} starts={starts} />
-        <JoinForm />
       </div>
     </AuthGate>
   );
@@ -64,6 +66,8 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
   const [gameId, setGameId] = useState<GameChoice>(
     initialGameId && isStartable(initialGameId, starts) ? initialGameId : '',
   );
+  const [maxTeams, setMaxTeams] = useState(DEFAULT_MAX_TEAMS);
+  const [draftType, setDraftType] = useState<DraftType>('snake');
   // Set once createLeague succeeds, so a retry after a failed contest step
   // reuses that league instead of creating a second one.
   const [leagueId, setLeagueId] = useState<string | null>(null);
@@ -99,7 +103,7 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
       }
       const id = leagueId ?? (await createLeague(trimmed));
       setLeagueId(id);
-      const contestId = await createContest(id, gameId, seasonYear);
+      const contestId = await createContest(id, gameId, seasonYear, undefined, { maxTeams, draftType });
       await revalidateFantasyLeague(id, contestId).catch(() => null);
       router.push(`/fantasy/l/${contestId}`);
     } catch (err) {
@@ -148,6 +152,51 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
           </p>
         </div>
 
+        <div className="mt-4 lg:mt-5">
+          <span
+            id="total-teams-label"
+            className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
+          >
+            Total teams
+          </span>
+          <div role="group" aria-labelledby="total-teams-label" className="flex items-center gap-2.5">
+            <StepButton
+              label="Fewer teams"
+              disabled={maxTeams !== Infinity && maxTeams <= MIN_TEAMS}
+              onClick={() => setMaxTeams((v) => stepTeams(v, -1))}
+            >
+              −
+            </StepButton>
+            <span aria-live="polite" className="min-w-[40px] text-center font-tight text-[15px] font-bold text-ink tabular">
+              {maxTeams === Infinity ? '∞' : maxTeams}
+            </span>
+            <StepButton
+              label="More teams"
+              disabled={maxTeams === Infinity}
+              onClick={() => setMaxTeams((v) => stepTeams(v, 1))}
+            >
+              +
+            </StepButton>
+          </div>
+          <p className="mt-1.5 text-[11px] text-faint font-tight">Minimum {MIN_TEAMS} teams to draft.</p>
+        </div>
+
+        <div className="mt-4 lg:mt-5">
+          <span
+            id="draft-type-label"
+            className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
+          >
+            Draft
+          </span>
+          <div role="radiogroup" aria-labelledby="draft-type-label" className="flex gap-2">
+            <TypeOption label="Snake" selected={draftType === 'snake'} onClick={() => setDraftType('snake')} />
+            <TypeOption label="Auction" selected={draftType === 'auction'} onClick={() => setDraftType('auction')} />
+          </div>
+          <p className="mt-1.5 text-[11px] text-faint font-tight">
+            You&apos;ll set the draft time later in League Settings.
+          </p>
+        </div>
+
         {error && (
           <div className="mt-4 px-4 py-3 rounded-card-sm bg-live/[0.08]">
             <span className="font-tight text-[13px] text-ink">{error}</span>
@@ -176,95 +225,6 @@ function Form({ initialGameId, starts }: CreateLeagueFormProps) {
           )}
           {saving ? 'Creating…' : 'Create league'}
         </button>
-      </div>
-    </form>
-  );
-}
-
-// Join by invite code — same flow as the hub's PlayMenu join sheet: join, then
-// land in the league's first contest (or the league page if it has none).
-function JoinForm() {
-  const router = useRouter();
-  const [code, setCode] = useState('');
-  const [joining, setJoining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const trimmed = code.trim();
-  const canJoin = trimmed.length > 0 && !joining;
-
-  const handleJoin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!canJoin) return;
-    setJoining(true);
-    setError(null);
-    try {
-      const leagueId = await joinLeagueByCode(trimmed);
-      const contests = await getLeagueContests(leagueId).catch(() => []);
-      router.push(contests[0] ? `/fantasy/l/${contests[0].id}` : `/fantasy/leagues/${leagueId}`);
-    } catch (err) {
-      setError(err instanceof Error ? friendlyJoinError(err.message) : 'Could not join with that code.');
-      setJoining(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleJoin}>
-      <div className="bg-surface rounded-card shadow-card p-4 lg:p-6">
-        <label
-          htmlFor="invite-code"
-          className="block text-[11px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
-        >
-          Have an invite code?
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="invite-code"
-            type="text"
-            value={code}
-            onChange={(e) => {
-              setCode(e.target.value);
-              setError(null);
-            }}
-            autoComplete="off"
-            autoCapitalize="off"
-            autoCorrect="off"
-            spellCheck={false}
-            placeholder="Paste invite code or link"
-            className={[
-              'flex-1 min-w-0 px-3.5 py-2.5 rounded-card-sm bg-ink/5',
-              'font-tight text-[16px] font-bold tracking-[0.08em] text-ink placeholder:text-faint placeholder:font-normal',
-              'focus:outline-none focus:ring-2 focus:ring-accent',
-              'min-h-[44px]',
-            ].join(' ')}
-          />
-          <button
-            type="submit"
-            disabled={!canJoin}
-            className={[
-              'flex-shrink-0 inline-flex items-center justify-center gap-2',
-              'px-5 rounded-full min-h-[44px]',
-              'font-tight text-[13px] font-bold tracking-[0.06em] uppercase',
-              'transition-all duration-150',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-              canJoin
-                ? 'bg-ink text-bg hover:opacity-90 cursor-pointer'
-                : 'bg-ink/[0.08] text-faint cursor-not-allowed',
-            ].join(' ')}
-          >
-            {joining && (
-              <span
-                className="w-4 h-4 rounded-full border-2 border-current/30 border-t-current animate-spin"
-                aria-hidden="true"
-              />
-            )}
-            {joining ? 'Joining…' : 'Join'}
-          </button>
-        </div>
-        {error && (
-          <p role="alert" className="mt-2 text-[12px] text-live font-tight">
-            {error}
-          </p>
-        )}
       </div>
     </form>
   );

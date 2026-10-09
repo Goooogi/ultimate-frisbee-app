@@ -1,12 +1,13 @@
 'use client';
 
-// CommissionerBar — commissioner-only draft controls (pause/resume, undo,
-// skip clock). Rendered by DraftRoom above the room content while the draft
-// is live. Destructive actions (undo, skip) confirm before calling.
+// CommissionerBar — commissioner-only draft controls (undo, skip clock).
+// Rendered by DraftRoom above the room content while the draft is live. There
+// is no pause: once a draft starts it runs to the end (Hunter, 2026-10-08).
+// Destructive actions (undo, skip) confirm before calling.
 // Ported from mobile CommissionerBar.tsx by intent.
 
 import { useState } from 'react';
-import { pauseDraft, resumeDraft, undoLastPick, skipClock, type Draft } from '@/lib/fantasy/draft-room';
+import { undoLastPick, skipClock, type Draft } from '@/lib/fantasy/draft-room';
 
 interface CommissionerBarProps {
   draft: Draft;
@@ -17,8 +18,6 @@ interface CommissionerBarProps {
 export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const isPaused = Boolean(draft.pausedAt);
 
   const showError = (err: unknown, fallback: string) => {
     setError(err instanceof Error ? err.message : fallback);
@@ -38,21 +37,13 @@ export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarPr
     }
   };
 
-  const handleTogglePause = () => {
-    if (isPaused) {
-      run(() => resumeDraft(draft.id), 'Could not resume the draft.');
-    } else {
-      run(() => pauseDraft(draft.id), 'Could not pause the draft.');
-    }
-  };
-
   const confirmUndo = () => {
     if (!window.confirm('Undo last pick? This reverts the most recent pick and restarts the clock.')) return;
     run(() => undoLastPick(draft.id), 'Could not undo the last pick.');
   };
 
   const confirmSkip = () => {
-    if (!window.confirm('Skip the clock? The team on the clock will be autopicked right now.')) return;
+    if (!window.confirm('Skip the clock? The team on the clock is autopicked right now and switched to autodraft.')) return;
     run(() => skipClock(draft.id), 'Could not skip the clock.');
   };
 
@@ -62,18 +53,6 @@ export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarPr
         Commissioner
       </div>
       <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={handleTogglePause}
-          disabled={busy}
-          className={[
-            'px-3.5 py-2 rounded-full min-h-[36px] border-[1.5px] border-ink/15',
-            'font-tight text-[11px] font-bold tracking-[0.08em] uppercase text-ink transition-opacity duration-150',
-            'hover:opacity-80 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed',
-          ].join(' ')}
-        >
-          {isPaused ? 'Resume' : 'Pause'}
-        </button>
         <button
           type="button"
           onClick={confirmUndo}
@@ -89,7 +68,7 @@ export function CommissionerBar({ draft, pickCount, refetch }: CommissionerBarPr
         <button
           type="button"
           onClick={confirmSkip}
-          disabled={busy || isPaused}
+          disabled={busy}
           className={[
             'px-3.5 py-2 rounded-full min-h-[36px] border-[1.5px] border-ink/15',
             'font-tight text-[11px] font-bold tracking-[0.08em] uppercase text-ink transition-opacity duration-150',

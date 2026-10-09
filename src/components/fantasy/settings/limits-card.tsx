@@ -1,26 +1,22 @@
 'use client';
 
 // LimitsCard — Settings → Teams. Commissioner-only team cap: a stepper through
-// TEAM_STEPS (4–16, then ∞ = unlimited) for every competition (web port of
-// mobile's LimitsCard.tsx). Mirrors NameCard/RosterCard's save/dirty/Feedback
-// shape so the whole Settings screen reads as one system.
+// TEAM_LIMIT_STOPS (4–16, then ∞ = unlimited) for every competition (web port
+// of mobile's LimitsCard.tsx). Mirrors NameCard/RosterCard's save/dirty/Feedback
+// shape so the whole Settings screen reads as one system. stepTeams +
+// StepButton are shared with Create a League's Total teams.
 
 import { useState } from 'react';
 import { setContestLimits, type ContestView } from '@/lib/fantasy/leagues';
-import { MIN_TEAMS, DEFAULT_MAX_TEAMS } from '@/lib/fantasy/competitions';
+import { MIN_TEAMS, DEFAULT_MAX_TEAMS, TEAM_LIMIT_STOPS } from '@/lib/fantasy/competitions';
 import { Card, SaveButton, Feedback } from './shared';
 
-const TEAM_STEPS = [4, 5, 6, 7, 8, 9, 10, 12, 16] as const;
 const UNLIMITED = Infinity;
 
-/** Next listed value in `dir`; an off-list stored value (e.g. 11) steps to the nearest listed one that way. */
-function stepTeams(current: number, dir: 1 | -1): number {
-  if (dir === 1) {
-    if (current === UNLIMITED) return UNLIMITED;
-    return TEAM_STEPS.find((n) => n > current) ?? UNLIMITED;
-  }
-  if (current === UNLIMITED) return TEAM_STEPS[TEAM_STEPS.length - 1];
-  return [...TEAM_STEPS].reverse().find((n) => n < current) ?? current;
+/** Next stop in `dir` (∞ is the last); an off-list stored value (e.g. 11) steps to the nearest stop that way. */
+export function stepTeams(current: number, dir: 1 | -1): number {
+  if (dir === 1) return TEAM_LIMIT_STOPS.find((n) => n > current) ?? current;
+  return [...TEAM_LIMIT_STOPS].reverse().find((n) => n < current) ?? current;
 }
 
 interface Props {
@@ -98,7 +94,7 @@ export function LimitsCard({ contest, onSaved }: Props) {
   );
 }
 
-function StepButton({
+export function StepButton({
   label,
   disabled,
   onClick,

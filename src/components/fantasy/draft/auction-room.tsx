@@ -22,6 +22,7 @@ import {
 import { searchContestPlayers } from '@/lib/fantasy/draft';
 import type { ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
+import { AutoBadge } from './autodraft';
 import { BudgetsPanel } from './budgets-panel';
 import { NominateSheet } from './nominate-sheet';
 
@@ -50,6 +51,7 @@ export function AuctionRoom({
   prices,
   bidRemainingMs,
   nominationRemainingMs,
+  autodraftTeamIds,
   onRequireAuth,
   refetch,
 }: {
@@ -65,6 +67,8 @@ export function AuctionRoom({
   prices: DraftPrice[];
   bidRemainingMs: number | null;
   nominationRemainingMs: number | null;
+  /** Teams on autodraft — they nominate the moment they're up. */
+  autodraftTeamIds: Set<string>;
   onRequireAuth: () => void;
   refetch: () => void;
 }) {
@@ -72,10 +76,9 @@ export function AuctionRoom({
   const [actionError, setActionError] = useState<string | null>(null);
   const [nominateSheet, setNominateSheet] = useState<FantasyPlayerHit | null>(null);
 
-  const isPaused = Boolean(draft.pausedAt);
   const myState = myTeam ? auctionTeamState(draft, picks, myTeam.id) : null;
   const nominatingTeamId = teamToNominate(draft);
-  const isMyNominateTurn = Boolean(myTeam) && nominatingTeamId === myTeam?.id && !openNomination && !isPaused;
+  const isMyNominateTurn = Boolean(myTeam) && nominatingTeamId === myTeam?.id && !openNomination;
 
   const draftedByKey = new Map(picks.map((p) => [`${p.playerLeague}:${p.playerId}`, p.teamId]));
 
@@ -164,7 +167,6 @@ export function AuctionRoom({
           myState={myState}
           onBid={handleBid}
           error={actionError}
-          paused={isPaused}
         />
       ) : (
         <NominatingHeader
@@ -172,7 +174,7 @@ export function AuctionRoom({
           isMine={isMyNominateTurn}
           remainingMs={nominationRemainingMs}
           nominationSeconds={draft.nominationSeconds}
-          paused={isPaused}
+          auto={Boolean(nominatingTeamId && autodraftTeamIds.has(nominatingTeamId))}
         />
       )}
 
@@ -244,24 +246,22 @@ function ClockDial({
   remainingMs,
   totalSeconds,
   urgent,
-  paused = false,
 }: {
   remainingMs: number | null;
   totalSeconds: number;
   urgent: boolean;
-  paused?: boolean;
 }) {
   const sec = remainingMs === null ? totalSeconds : Math.max(0, Math.ceil(remainingMs / 1000));
-  const low = !paused && sec <= 10;
+  const low = sec <= 10;
   return (
     <div
       className={[
         'flex-shrink-0 flex items-center justify-center w-16 h-16 rounded-full font-tight text-[20px] font-bold tabular',
-        low ? 'bg-live/10 text-live' : urgent && !paused ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
+        low ? 'bg-live/10 text-live' : urgent ? 'bg-accent/10 text-accent' : 'bg-ink/5 text-ink',
       ].join(' ')}
-      aria-label={paused ? 'Draft paused' : `${sec} seconds remaining`}
+      aria-label={`${sec} seconds remaining`}
     >
-      {paused ? 'II' : sec}
+      {sec}
     </div>
   );
 }
@@ -271,13 +271,13 @@ function NominatingHeader({
   isMine,
   remainingMs,
   nominationSeconds,
-  paused,
+  auto,
 }: {
   teamName: string;
   isMine: boolean;
   remainingMs: number | null;
   nominationSeconds: number;
-  paused: boolean;
+  auto: boolean;
 }) {
   return (
     <div
@@ -291,11 +291,14 @@ function NominatingHeader({
           <div className="text-[10.5px] font-bold tracking-[0.16em] uppercase text-faint font-tight mb-1">
             Nominating
           </div>
-          <div className="font-tight text-[16px] font-bold text-ink truncate">
-            {isMine ? "You're nominating" : `${teamName} is nominating`}
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-tight text-[16px] font-bold text-ink truncate">
+              {isMine ? "You're nominating" : `${teamName} is nominating`}
+            </span>
+            {auto && <AutoBadge />}
           </div>
         </div>
-        <ClockDial remainingMs={remainingMs} totalSeconds={nominationSeconds} urgent={isMine} paused={paused} />
+        <ClockDial remainingMs={remainingMs} totalSeconds={nominationSeconds} urgent={isMine} />
       </div>
     </div>
   );
@@ -310,7 +313,6 @@ function BiddingHeader({
   myState,
   onBid,
   error,
-  paused,
 }: {
   nomination: DraftNomination;
   teamById: Map<string, TeamInfo>;
@@ -320,13 +322,12 @@ function BiddingHeader({
   myState: ReturnType<typeof auctionTeamState> | null;
   onBid: (amount: number) => Promise<void>;
   error: string | null;
-  paused: boolean;
 }) {
   const [customAmount, setCustomAmount] = useState('');
   const [bidding, setBidding] = useState(false);
 
   const isHighBidder = Boolean(myTeam) && nomination.highTeamId === myTeam?.id;
-  const canBid = !paused && Boolean(myTeam) && !isHighBidder && Boolean(myState) && myState!.maxBid > nomination.highBid;
+  const canBid = Boolean(myTeam) && !isHighBidder && Boolean(myState) && myState!.maxBid > nomination.highBid;
 
   const submit = async (amount: number) => {
     if (!myState || amount > myState.maxBid || amount <= nomination.highBid) return;
@@ -353,7 +354,7 @@ function BiddingHeader({
             High bid ${nomination.highBid} &middot; {teamById.get(nomination.highTeamId)?.teamName ?? 'Team'}
           </div>
         </div>
-        <ClockDial remainingMs={remainingMs} totalSeconds={bidSeconds} urgent={canBid} paused={paused} />
+        <ClockDial remainingMs={remainingMs} totalSeconds={bidSeconds} urgent={canBid} />
       </div>
 
       {myState && (
@@ -394,7 +395,6 @@ function BiddingHeader({
           onChange={(e) => setCustomAmount(e.target.value.replace(/[^0-9]/g, ''))}
           placeholder="Amount"
           aria-label="Custom bid amount"
-          disabled={paused}
           className="min-h-[36px] min-w-[72px] px-3 rounded-full bg-ink/[0.05] font-tight text-[13px] text-ink placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-50 disabled:cursor-not-allowed"
         />
         <button
@@ -442,22 +442,27 @@ function AuctionPlayersPanel({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const league = contest.competitionDef.playerLeague;
 
+  // Responses can land out of order; only the latest search may write.
+  const searchSeq = useRef(0);
   const runSearch = useCallback(
     (q: string) => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
+      const seq = ++searchSeq.current;
       if (q.trim().length < 2) {
         setResults([]);
+        setSearching(false);
         return;
       }
+      // Spinner now, not after the debounce, so "No players found." can't flash first.
+      setSearching(true);
       debounceRef.current = setTimeout(async () => {
-        setSearching(true);
         try {
           const hits = await searchContestPlayers(contest, q, 30);
-          setResults(hits);
+          if (seq === searchSeq.current) setResults(hits);
         } catch {
-          setResults([]);
+          if (seq === searchSeq.current) setResults([]);
         } finally {
-          setSearching(false);
+          if (seq === searchSeq.current) setSearching(false);
         }
       }, 200);
     },

@@ -1,6 +1,7 @@
 // /fantasy — Fantasy hub. Server Component, public + ISR. Sleeper-style
-// front door: My Leagues → Start a League, with a "+ Play"
-// menu (create / join) in the header. Replaces the old "pick a game" card
+// front door: My Leagues → Start a League, with a "Join league" button in the
+// header (signed in, every width). Creating starts only from a Start a League
+// row's Create pill (Hunter, 2026-10-07). Replaces the old "pick a game" card
 // grid — game selection now happens inside league creation (Start a League /
 // create-league form), not as the hub's primary landing.
 // Port of the mobile app's fantasy hub (altiusapps/mobileapp-thelayout ·

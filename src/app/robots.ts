@@ -15,15 +15,11 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: ['Googlebot', 'Bingbot'],
         allow: '/',
-        disallow: [
-          '/wfdf/players/by-name/',
-          '/euf/players/by-name/',
-          '/admin',
-          '/api/',
-          '/fantasy/join/',
-          '/fantasy/invite/',
-          '/playbook/invite/',
-        ],
+        // Invite links (/fantasy/join, /fantasy/invite, /playbook/invite) are
+        // deliberately NOT disallowed: their pages send noindex, which a
+        // crawler only sees if it may fetch them; a blocked URL that's linked
+        // somewhere public can still be listed — code and all.
+        disallow: ['/wfdf/players/by-name/', '/euf/players/by-name/', '/admin', '/api/'],
         crawlDelay: 10,
       },
       {

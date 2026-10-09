@@ -20,6 +20,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import {
+  DRAFT_CLOCK_SECONDS,
   scheduleDraft,
   scheduleAuctionDraft,
   rescheduleDraft,
@@ -28,6 +29,7 @@ import {
   type DraftType,
 } from '@/lib/fantasy/draft-room';
 import type { ContestView } from '@/lib/fantasy/leagues';
+import { teamSize } from '@/lib/fantasy/competitions';
 import { PillSelect } from '@/components/pill-select';
 import { Card, SaveButton, Feedback, NumberField, ToggleSwitch, isoToLocalInput, localInputToIso } from './shared';
 
@@ -39,8 +41,6 @@ interface Props {
   onSaved: () => void;
 }
 
-const PICK_SECONDS_OPTIONS = [30, 60, 90, 120].map((s) => ({ value: s, label: `${s}s` }));
-const NOMINATION_SECONDS_OPTIONS = [15, 30, 45, 60].map((s) => ({ value: s, label: `${s}s` }));
 const BID_SECONDS_OPTIONS = [10, 15, 20, 30].map((s) => ({ value: s, label: `${s}s` }));
 
 function formatScheduled(iso: string | null): string {
@@ -92,11 +92,11 @@ function ScheduleForm({
   readiness: DraftReadiness;
   onSaved: () => void;
 }) {
-  const [type, setType] = useState<DraftType>('snake');
-  const [rounds, setRounds] = useState(12);
-  const [pickSeconds, setPickSeconds] = useState(60);
+  // Preselects the commissioner's Create a League pick; still changeable here.
+  const [type, setType] = useState<DraftType>(contest.settings.draftType ?? 'snake');
+  // Fixed by the game, not the commissioner (weekly 12, event 7).
+  const rounds = teamSize(contest.settings);
   const [budget, setBudget] = useState(200);
-  const [nominationSeconds, setNominationSeconds] = useState(30);
   const [bidSeconds, setBidSeconds] = useState(15);
   const [minBid, setMinBid] = useState(1);
   const [manual, setManual] = useState(readiness.defaultAt == null);
@@ -114,14 +114,13 @@ function ScheduleForm({
     setError(null);
     try {
       if (type === 'snake') {
-        await scheduleDraft({ contestId: contest.id, at: manual ? null : at, pickSeconds, rounds });
+        await scheduleDraft({ contestId: contest.id, at: manual ? null : at, rounds });
       } else {
         await scheduleAuctionDraft({
           contestId: contest.id,
           at: manual ? null : at,
           rounds,
           budget,
-          nominationSeconds,
           bidSeconds,
           minBid,
         });
@@ -150,12 +149,12 @@ function ScheduleForm({
           <TypeOption label="Auction" selected={type === 'auction'} onClick={() => setType('auction')} />
         </div>
 
-        <div className="grid grid-cols-2 items-end gap-3">
-          <NumberField label="Rounds" value={rounds} onChange={setRounds} id="draft-rounds" min={1} max={30} />
-          {type === 'snake' && (
-            <PillField label="Pick clock" ariaLabel="Pick clock" value={pickSeconds} onChange={setPickSeconds} options={PICK_SECONDS_OPTIONS} />
-          )}
-        </div>
+        <p className="font-tight text-[12px] text-faint">
+          {rounds} rounds ·{' '}
+          {contest.settings.mode === 'event' ? '7 players, no bench — set for the whole event' : '7 starters each week + 5 bench'}
+          {' · '}
+          {type === 'snake' ? `${DRAFT_CLOCK_SECONDS}-second pick clock` : `${DRAFT_CLOCK_SECONDS} seconds to nominate`}
+        </p>
 
         {type === 'auction' && (
           <>
@@ -164,13 +163,6 @@ function ScheduleForm({
               <NumberField label="Min bid" value={minBid} onChange={setMinBid} id="draft-min-bid" min={1} max={10} />
             </div>
             <div className="grid grid-cols-2 items-end gap-3">
-              <PillField
-                label="Nomination clock"
-                ariaLabel="Nomination clock"
-                value={nominationSeconds}
-                onChange={setNominationSeconds}
-                options={NOMINATION_SECONDS_OPTIONS}
-              />
               <PillField label="Bid clock" ariaLabel="Bid clock" value={bidSeconds} onChange={setBidSeconds} options={BID_SECONDS_OPTIONS} />
             </div>
           </>
@@ -332,7 +324,7 @@ function ReadOnlyView({ contest, draft }: { contest: ContestView; draft: Draft }
 
 // ─── Shared bits ────────────────────────────────────────────────────────────
 
-function TypeOption({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
+export function TypeOption({ label, selected, onClick }: { label: string; selected: boolean; onClick: () => void }) {
   return (
     <button
       type="button"

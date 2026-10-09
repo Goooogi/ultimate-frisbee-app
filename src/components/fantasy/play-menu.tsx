@@ -1,18 +1,18 @@
 'use client';
 
-// "+ Play" menu — the fantasy hub's create/join entry point (Sleeper's PLAY
-// button). Self-contained: owns its own open/close state and trigger button,
-// so any page can drop it in (currently just the hub's PageShell controls).
-// Visual weight matches FantasyRulesModal: portal to body, dark scrim,
-// bg-surface rounded-card-lg shadow-hero card. Two states: 'menu' (create /
-// join) and 'join' (invite-code form), mirroring the mobile app's PlaySheet.
+// "Join league" — the fantasy hub's join-by-invite-code entry point, at every
+// width, signed in only. Join-only since 2026-10-07 (Hunter): creating starts
+// from a Start a League row's Create pill, so this opens the invite-code form
+// directly (mirrors the mobile app's PlaySheet). Self-contained: owns its own
+// open/close state and trigger button (currently just the hub's PageShell
+// controls). Visual weight matches FantasyRulesModal: portal to body, dark
+// scrim, bg-surface rounded-card-lg shadow-hero card.
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/lib/auth/auth-provider';
 import { joinLeagueByCode, getLeagueContests } from '@/lib/fantasy/leagues';
-
-type Mode = 'menu' | 'join';
 
 export function friendlyJoinError(raw: string): string {
   const r = raw.toLowerCase();
@@ -26,9 +26,9 @@ export function friendlyJoinError(raw: string): string {
 
 export function PlayMenu() {
   const router = useRouter();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
-  const [mode, setMode] = useState<Mode>('menu');
   const [code, setCode] = useState('');
   const [joining, setJoining] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +37,6 @@ export function PlayMenu() {
 
   const close = useCallback(() => {
     setOpen(false);
-    setMode('menu');
     setCode('');
     setError(null);
   }, []);
@@ -55,11 +54,6 @@ export function PlayMenu() {
       document.body.style.overflow = prevOverflow;
     };
   }, [open, close]);
-
-  const handleCreate = () => {
-    close();
-    router.push('/fantasy/leagues/new');
-  };
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,23 +75,24 @@ export function PlayMenu() {
 
   const canJoin = code.trim().length > 0 && !joining;
 
+  if (!user) return null;
+
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
-        // Desktop only — removed from the mobile hub header (Hunter, 2026-09-12).
+        // Secondary (not accent) so it doesn't outrank the Create pills below.
         className={[
-          'hidden lg:inline-flex items-center justify-center gap-1.5',
-          'px-5 py-2.5 rounded-full min-h-[40px]',
-          'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.1em] uppercase',
-          'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
+          'inline-flex items-center justify-center',
+          'px-4 py-2 rounded-full min-h-[40px] border border-hairline',
+          'text-ink font-tight text-[11px] font-bold tracking-[0.1em] uppercase whitespace-nowrap',
+          'hover:bg-ink/5 transition-colors duration-150 cursor-pointer',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
         ].join(' ')}
       >
-        <PlusGlyph />
-        Play
+        Join league
       </button>
 
       {mounted &&
@@ -118,7 +113,7 @@ export function PlayMenu() {
                   id="play-menu-title"
                   className="text-[10px] font-bold tracking-[0.18em] uppercase text-accent font-tight pt-1"
                 >
-                  {mode === 'menu' ? 'Play' : 'Join a league'}
+                  Join a league
                 </span>
                 <button
                   type="button"
@@ -138,137 +133,63 @@ export function PlayMenu() {
               </div>
 
               <div className="px-6 pb-6">
-                {mode === 'menu' ? (
-                  <div className="flex flex-col mt-3">
-                    <button
-                      type="button"
-                      onClick={handleCreate}
-                      className={[
-                        'flex items-center gap-3.5 py-3.5 text-left cursor-pointer',
-                        'border-b border-hairline',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-                      ].join(' ')}
-                    >
-                      <span className="flex-shrink-0 w-9 h-9 rounded-card-sm bg-accent/10 flex items-center justify-center">
-                        <PlusGlyph className="text-accent" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-tight text-[14px] font-bold text-ink">Create a league</span>
-                        <span className="block font-tight text-[12px] text-muted leading-snug mt-0.5">
-                          You&apos;re the commissioner. Pick the game, invite friends.
-                        </span>
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMode('join')}
-                      className={[
-                        'flex items-center gap-3.5 py-3.5 text-left cursor-pointer',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded',
-                      ].join(' ')}
-                    >
-                      <span className="flex-shrink-0 w-9 h-9 rounded-card-sm bg-accent/10 flex items-center justify-center">
-                        <KeyGlyph className="text-accent" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block font-tight text-[14px] font-bold text-ink">Join with a code</span>
-                        <span className="block font-tight text-[12px] text-muted leading-snug mt-0.5">
-                          Got an invite code from a friend? Enter it here.
-                        </span>
-                      </span>
-                    </button>
-                  </div>
-                ) : (
-                  <form onSubmit={handleJoin} className="flex flex-col gap-2.5 mt-3">
-                    <input
-                      type="text"
-                      value={code}
-                      onChange={(e) => {
-                        setCode(e.target.value);
-                        setError(null);
-                      }}
-                      placeholder="Paste invite code or link"
-                      autoComplete="off"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      autoFocus
-                      aria-label="League invite code"
-                      className={[
-                        'w-full px-3.5 py-2.5 rounded-card-sm bg-ink/5',
-                        'font-tight text-[16px] text-ink placeholder:text-faint tracking-[0.08em] font-bold',
-                        'focus:outline-none focus:ring-2 focus:ring-accent',
-                        'min-h-[44px]',
-                      ].join(' ')}
-                    />
-                    {error && (
-                      <p role="alert" className="text-[12px] text-live font-tight">
-                        {error}
-                      </p>
+                <p className="font-tight text-[12px] text-muted leading-snug mt-1">
+                  Got an invite from a friend? Paste the code or link here.
+                </p>
+                <form onSubmit={handleJoin} className="flex flex-col gap-2.5 mt-3">
+                  <input
+                    type="text"
+                    value={code}
+                    onChange={(e) => {
+                      setCode(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="Paste invite code or link"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    autoFocus
+                    aria-label="League invite code"
+                    className={[
+                      'w-full px-3.5 py-2.5 rounded-card-sm bg-ink/5',
+                      'font-tight text-[16px] text-ink placeholder:text-faint tracking-[0.08em] font-bold',
+                      'focus:outline-none focus:ring-2 focus:ring-accent',
+                      'min-h-[44px]',
+                    ].join(' ')}
+                  />
+                  {error && (
+                    <p role="alert" className="text-[12px] text-live font-tight">
+                      {error}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={!canJoin}
+                    className={[
+                      'inline-flex items-center justify-center gap-2 px-4 py-3 rounded-full min-h-[44px]',
+                      'font-tight text-[12px] font-bold tracking-[0.1em] uppercase transition-colors duration-150',
+                      canJoin
+                        ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer'
+                        : 'bg-ink/[0.08] text-faint cursor-not-allowed',
+                      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+                    ].join(' ')}
+                  >
+                    {joining ? (
+                      <>
+                        <span className="w-3.5 h-3.5 rounded-full border-2 border-current/30 border-t-current animate-spin" aria-hidden="true" />
+                        Joining…
+                      </>
+                    ) : (
+                      'Join league'
                     )}
-                    <button
-                      type="submit"
-                      disabled={!canJoin}
-                      className={[
-                        'inline-flex items-center justify-center gap-2 px-4 py-3 rounded-full min-h-[44px]',
-                        'font-tight text-[12px] font-bold tracking-[0.1em] uppercase transition-colors duration-150',
-                        canJoin
-                          ? 'bg-accent text-accent-ink hover:opacity-90 cursor-pointer'
-                          : 'bg-ink/[0.08] text-faint cursor-not-allowed',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-                      ].join(' ')}
-                    >
-                      {joining ? (
-                        <>
-                          <span className="w-3.5 h-3.5 rounded-full border-2 border-current/30 border-t-current animate-spin" aria-hidden="true" />
-                          Joining…
-                        </>
-                      ) : (
-                        'Join league'
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMode('menu');
-                        setError(null);
-                      }}
-                      className={[
-                        'mx-auto mt-1 text-[11px] font-bold tracking-[0.14em] uppercase text-faint hover:text-ink font-tight transition-colors',
-                        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent rounded-sm',
-                      ].join(' ')}
-                    >
-                      Back
-                    </button>
-                  </form>
-                )}
+                  </button>
+                </form>
               </div>
             </div>
           </div>,
           document.body,
         )}
     </>
-  );
-}
-
-function PlusGlyph({ className }: { className?: string }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" className={className}>
-      <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function KeyGlyph({ className }: { className?: string }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className={className}>
-      <path
-        d="M14 10a4 4 0 10-3.46 3.96L12 15.5v2h2v2h2v2h2.5l1-1v-3.5L14 12.5V10z"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinejoin="round"
-      />
-      <path d="M10.5 7.5h.01" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
-    </svg>
   );
 }

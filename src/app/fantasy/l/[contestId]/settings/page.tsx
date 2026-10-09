@@ -8,7 +8,6 @@
 
 import { notFound } from 'next/navigation';
 import { getContest, getLeague } from '@/lib/fantasy/leagues';
-import { getDraft, getDraftReadiness } from '@/lib/fantasy/draft-room';
 import { SettingsContent } from '@/components/fantasy/settings/settings-content';
 
 export const revalidate = 0;
@@ -22,16 +21,12 @@ export default async function FantasyLeagueSettingsPage({
   const contest = await getContest(params.contestId);
   if (!contest) notFound();
 
-  const [league, draft, readiness] = await Promise.all([
-    getLeague(contest.leagueId).catch(() => null),
-    getDraft(contest.id).catch(() => null),
-    getDraftReadiness(contest.id).catch(() => null),
-  ]);
+  const league = await getLeague(contest.leagueId).catch(() => null);
 
   // Role isn't fetched here — resolved client-side in SettingsContent (same
   // pattern as league-home-client.tsx), since this is a gated, interactive
   // screen and every write RPC re-checks commissioner status server-side
   // regardless.
 
-  return <SettingsContent contest={contest} league={league} draft={draft} readiness={readiness} />;
+  return <SettingsContent contest={contest} league={league} />;
 }

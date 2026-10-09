@@ -113,7 +113,11 @@ export function TeamTabClient({ contest }: { contest: ContestView }) {
 
   return (
     <div className="space-y-6">
-      <FantasyRulesModal label="How scoring works" autoOpenOnceKey="fantasy_rules_seen_v1" />
+      <FantasyRulesModal
+        label="How scoring works"
+        mode={contest.settings.mode}
+        playerLeague={contest.competitionDef.playerLeague}
+      />
 
       <ContestRosterBuilder contest={contest} pool={pool} />
 

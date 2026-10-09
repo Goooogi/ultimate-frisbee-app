@@ -557,6 +557,7 @@ function PlayerTypeahead({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
 
   const search = useCallback(async (q: string) => {
     if (pool) {
@@ -568,20 +569,24 @@ function PlayerTypeahead({
       setOpen(true);
       return;
     }
+    // Responses can land out of order; only the latest search may write.
+    const seq = ++searchSeq.current;
     if (q.length < 2) {
       setResults([]);
       setOpen(false);
+      setLoading(false);
       return;
     }
     setLoading(true);
     try {
       const hits = await searchContestPlayers(contest, q, 12);
+      if (seq !== searchSeq.current) return;
       setResults(hits.filter((h) => !usedPlayerIds.has(h.playerId)));
       setOpen(true);
     } catch {
-      setResults([]);
+      if (seq === searchSeq.current) setResults([]);
     } finally {
-      setLoading(false);
+      if (seq === searchSeq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contest, usedPlayerIds, pool]);

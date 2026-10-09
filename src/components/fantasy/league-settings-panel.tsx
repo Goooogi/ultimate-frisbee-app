@@ -12,13 +12,13 @@
 //   • Scoring — a fixed matrix mirrored across TS + Deno + SQL. Per-league
 //     divergence would break the mirror and every stored score. Shown
 //     read-only, with the existing rules modal as the explainer.
-// What IS real and DB-enforced: the league's name, and roster composition
-// (fantasy_enforce_roster_composition reads contest.settings on every slot
-// write, so a change binds immediately).
+// What IS real and DB-enforced: the league's name. Roster shape is fixed by
+// the game and shown read-only (weekly 4 O + 3 D + 5 bench; event 7).
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { renameLeague, updateContestRoster, type ContestView } from '@/lib/fantasy/leagues';
+import { renameLeague, type ContestView } from '@/lib/fantasy/leagues';
+import { WEEKLY_DEFENSE, WEEKLY_OFFENSE, WEEKLY_STARTERS, teamSize } from '@/lib/fantasy/competitions';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
 import { FantasyRulesModal } from '@/components/fantasy/fantasy-rules-modal';
 
@@ -47,7 +47,7 @@ export function LeagueSettingsPanel({ leagueId, leagueName, contests, isCommissi
       <NameCard leagueId={leagueId} initialName={leagueName} />
 
       {contests.map((c) => (
-        <RosterCard key={c.id} leagueId={leagueId} contest={c} />
+        <RosterCard key={c.id} contest={c} />
       ))}
 
       <ScoringCard contests={contests} />
@@ -119,60 +119,18 @@ export function NameCard({ leagueId, initialName }: { leagueId: string; initialN
 
 // ─── Roster composition (per contest) ─────────────────────────────────────────
 
-export function RosterCard({ leagueId, contest }: { leagueId: string; contest: ContestView }) {
-  const router = useRouter();
+export function RosterCard({ contest }: { contest: ContestView }) {
+  // Team shape is fixed by the game, so this is read-only: weekly lineups
+  // start 4 offense + 3 defense with a 5-player bench (Hunter, 2026-10-08),
+  // event teams are 7 with no bench.
   const s = contest.settings;
-  const isWeekly = s.mode === 'weekly-stats';
-
-  const [off, setOff] = useState(isWeekly ? s.offenders : 0);
-  const [def, setDef] = useState(isWeekly ? s.defenders : 0);
-  const [flex, setFlex] = useState(!isWeekly ? s.flex : 0);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  const dirty = isWeekly
-    ? off !== s.offenders || def !== s.defenders
-    : flex !== s.flex;
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!dirty || saving) return;
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await updateContestRoster(contest.id, isWeekly ? { offenders: off, defenders: def } : { flex });
-      await revalidateFantasyLeague(leagueId, contest.id).catch(() => null);
-      setSaved(true);
-      router.refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not update the roster settings.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   return (
     <Card title={`Roster · ${contest.competitionDef.shortLabel} ${contest.seasonYear}`}>
-      {isWeekly ? (
-        <form onSubmit={save} className="flex flex-col gap-4">
-          <div className="flex items-end gap-3">
-            <NumberField label="Offense" value={off} onChange={setOff} id={`off-${contest.id}`} />
-            <NumberField label="Defense" value={def} onChange={setDef} id={`def-${contest.id}`} />
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="font-tight text-[12px] text-faint">{off + def} starters each week</span>
-            <SaveButton disabled={!dirty || saving} saving={saving} />
-          </div>
-        </form>
-      ) : (
-        <form onSubmit={save} className="flex items-end gap-3">
-          <NumberField label="Players" value={flex} onChange={setFlex} id={`flex-${contest.id}`} />
-          <SaveButton disabled={!dirty || saving} saving={saving} />
-        </form>
-      )}
-      <Feedback error={error} saved={saved} />
+      <p className="font-tight text-[13px] text-ink">
+        {s.mode === 'weekly-stats'
+          ? `${WEEKLY_STARTERS} starters each week (${WEEKLY_OFFENSE} offense + ${WEEKLY_DEFENSE} defense) + ${teamSize(s) - WEEKLY_STARTERS} bench`
+          : `${teamSize(s)} players · drafted once, set for the whole event`}
+      </p>
     </Card>
   );
 }
@@ -214,43 +172,6 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
         {title}
       </h3>
       {children}
-    </div>
-  );
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  id,
-}: {
-  label: string;
-  value: number;
-  onChange: (n: number) => void;
-  id: string;
-}) {
-  return (
-    <div>
-      <label
-        htmlFor={id}
-        className="block text-[10.5px] font-bold tracking-[0.14em] uppercase text-faint font-tight mb-1.5"
-      >
-        {label}
-      </label>
-      <input
-        id={id}
-        type="number"
-        inputMode="numeric"
-        min={1}
-        max={20}
-        value={value}
-        onChange={(e) => onChange(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-        className={[
-          'w-20 px-3.5 py-2.5 rounded-card-sm bg-ink/5',
-          'font-tight text-[14px] text-ink tabular',
-          'focus:outline-none focus:ring-2 focus:ring-accent min-h-[44px]',
-        ].join(' ')}
-      />
     </div>
   );
 }

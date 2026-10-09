@@ -88,12 +88,15 @@ async function leagueMemberIds(sb: SupabaseClient, leagueId: string): Promise<st
   return (data ?? []).map((r: Record<string, unknown>) => r.user_id as string);
 }
 
-async function teamOwners(sb: SupabaseClient, teamIds: string[]): Promise<Map<string, { ownerId: string; teamName: string }>> {
-  const out = new Map<string, { ownerId: string; teamName: string }>();
+async function teamOwners(
+  sb: SupabaseClient,
+  teamIds: string[],
+): Promise<Map<string, { ownerId: string; teamName: string; autodraft: boolean }>> {
+  const out = new Map<string, { ownerId: string; teamName: string; autodraft: boolean }>();
   if (teamIds.length === 0) return out;
-  const { data } = await sb.from('fantasy_teams').select('id, owner_id, team_name').in('id', teamIds);
+  const { data } = await sb.from('fantasy_teams').select('id, owner_id, team_name, autodraft').in('id', teamIds);
   for (const r of data ?? []) {
-    out.set(r.id as string, { ownerId: r.owner_id as string, teamName: r.team_name as string });
+    out.set(r.id as string, { ownerId: r.owner_id as string, teamName: r.team_name as string, autodraft: Boolean(r.autodraft) });
   }
   return out;
 }
@@ -251,7 +254,8 @@ async function draftPushes(sb: SupabaseClient, ev: DraftEvent): Promise<Push[]> 
     if (teamId) {
       const owners = await teamOwners(sb, [teamId]);
       const owner = owners.get(teamId);
-      if (owner) {
+      // An autodraft team is picked for the moment it's up — no "on the clock" ping.
+      if (owner && !owner.autodraft) {
         const n = Math.max(draftOrder.length, 1);
         const round = Math.floor((ev.currentOverall - 1) / n) + 1;
         out.push({

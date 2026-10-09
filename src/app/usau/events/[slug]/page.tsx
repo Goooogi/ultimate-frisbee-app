@@ -25,6 +25,7 @@ import type { NationalsFieldState } from '@/components/usau/nationals-field';
 import { usauEventHref } from '@/lib/usau/event-href';
 import { usauToday } from '@/lib/today';
 import { UsauMemberSourceLink } from '@/components/usau/usau-member-source-link';
+import { EventVenue, UsauEventVenue } from '@/components/usau/usau-event-venue';
 import { UsauSeriesFavoriteStar } from '@/components/usau/usau-series-favorite-star';
 import { findWorldsTwinSlug } from '@/lib/wfdf/data';
 import { UsauEventDetail } from '@/components/usau/usau-event-detail';
@@ -116,6 +117,10 @@ export default async function UsauEventPage({ params }: Props) {
     ? (event.competitionLevel as UsauLevel)
     : null;
   const gamesHref = `/scores${buildLeagueQs('usau', null, eventLevel)}`;
+  // The venue the default division shows (UsauEventVenue's rule): a merged
+  // series event uses its first member's, any other event its own.
+  const mergedSeries = event.members.length > 0 && event.members.every((m) => m.division != null);
+  const fallbackVenue = mergedSeries ? (event.members[0]?.venue ?? null) : event.venue;
   // A series tournament backs out to its stage's list (the "2026 USAU
   // Sectionals" page it's opened from): Scores once it's underway, Schedule
   // before. Without this crumb a fresh load backed out to The Games.
@@ -141,7 +146,7 @@ export default async function UsauEventPage({ params }: Props) {
       // (Hunter, 2026-08-22).
       controls={
         (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-x-1 gap-y-2">
             {event.members.length > 0 ? (
               // A merged event links the USAU page of the division being viewed.
               <Suspense
@@ -192,6 +197,14 @@ export default async function UsauEventPage({ params }: Props) {
                   }}
                 />
               )}
+            {/* Venue shares this row (Hunter, 2026-10-07). Fallback = what the
+                default division shows, so the first paint doesn't jump. */}
+            <Suspense fallback={fallbackVenue ? <EventVenue venue={fallbackVenue} /> : null}>
+              <UsauEventVenue
+                venue={event.venue}
+                members={event.members.map((m) => ({ division: m.division, venue: m.venue }))}
+              />
+            </Suspense>
           </div>
         )
       }

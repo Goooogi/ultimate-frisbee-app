@@ -44,7 +44,7 @@ export function FantasyRulesContent({
           <br className="hidden sm:block" /> Compete against your league.
         </h2>
         <p className="text-muted font-tight text-[14px] lg:text-[15px] leading-relaxed max-w-[560px]">
-          Fill your lineup from your league&apos;s player pool. The role you assign each
+          Your team is 12 players: 7 start each week (4 offense + 3 defense) and the other 5 sit on the bench. The role you assign each
           player skews how their stats score — a defender&apos;s block pays{' '}
           <span className="text-ink font-semibold">{SCORING.defender.block} pts</span> vs{' '}
           <span className="text-ink font-semibold">{SCORING.offender.block} pts</span> as an
@@ -138,9 +138,9 @@ function EventRulesContent({
           <br className="hidden sm:block" /> Score on the totals.
         </h2>
         <p className="text-muted font-tight text-[14px] lg:text-[15px] leading-relaxed max-w-[560px]">
-          Build a flex roster from the event&apos;s team rosters — no positions. Your roster
-          locks when the event starts, and each player scores once from their
-          event totals, plus a bonus for how far their team finishes.
+          Draft a 7-player team from the event&apos;s rosters — no positions, no bench. Your team
+          is set for the whole event: it locks when the event starts, and each player scores
+          once from their event totals, plus a bonus for how far their team finishes.
         </p>
       </div>
 

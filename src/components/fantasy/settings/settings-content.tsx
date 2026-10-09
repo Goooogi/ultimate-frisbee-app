@@ -3,14 +3,15 @@
 // Settings — commissioner-gated content for /fantasy/l/[contestId]/settings.
 // Rendered inside the shared league layout (AppShell + header/nav already
 // wrap this), so this owns ONLY the heading + cards, in mobile's order:
-// Name → Logo → Teams/Limits → Format (weekly-stats only) → Roster → Draft →
-// Player prices (auction + scheduled only) → Scoring.
+// Name → Logo → Teams/Limits → Format + Waivers (weekly-stats only) → Roster →
+// Draft (a link: draft setup is its own page, ../draft/setup).
 //
 // Gating: non-commissioners see a locked-out message. Role is resolved
 // client-side (same pattern as league-home-client.tsx) since this is the
 // commissioner-only screen and the RPCs re-check server-side regardless.
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-provider';
 import {
@@ -20,16 +21,14 @@ import {
   type LeagueRole,
 } from '@/lib/fantasy/leagues';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
-import type { Draft, DraftReadiness } from '@/lib/fantasy/draft-room';
 import { getGame } from '@/lib/fantasy/games';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
 import { LeagueLogoPicker } from '@/components/fantasy/league-logo-picker';
-import { NameCard, RosterCard, ScoringCard } from '@/components/fantasy/league-settings-panel';
+import { NameCard, RosterCard } from '@/components/fantasy/league-settings-panel';
 import { LimitsCard } from './limits-card';
 import { FormatCard } from './format-card';
 import { WaiversCard } from './waivers-card';
-import { DraftSettingsCard } from './draft-settings-card';
-import { PricesCard } from './prices-card';
+import { DeleteLeagueCard } from './delete-league-card';
 
 const HEADING_CLASS =
   'font-display italic text-[22px] lg:text-[26px] font-bold tracking-[-0.02em] leading-[0.95] text-ink';
@@ -37,11 +36,9 @@ const HEADING_CLASS =
 interface Props {
   contest: ContestView;
   league: FantasyLeagueSummary | null;
-  draft: Draft | null;
-  readiness: DraftReadiness | null;
 }
 
-export function SettingsContent({ contest, league, draft, readiness }: Props) {
+export function SettingsContent({ contest, league }: Props) {
   const router = useRouter();
   const { user } = useAuth();
 
@@ -101,7 +98,6 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
   }
 
   const leagueName = league?.name ?? contest.name;
-  const showPrices = draft?.draftType === 'auction' && draft.status === 'scheduled';
 
   return (
     <section aria-labelledby="league-settings-heading" className="space-y-4">
@@ -148,19 +144,28 @@ export function SettingsContent({ contest, league, draft, readiness }: Props) {
 
       {contest.settings.mode === 'weekly-stats' && <WaiversCard contest={contest} onSaved={onSaved} />}
 
-      <RosterCard leagueId={contest.leagueId} contest={contest} />
+      <RosterCard contest={contest} />
 
-      <DraftSettingsCard
-        contest={contest}
-        draft={draft}
-        readiness={readiness}
-        loading={false}
-        onSaved={onSaved}
-      />
+      <Link
+        href={`/fantasy/l/${contest.id}/draft/setup`}
+        className={[
+          'flex items-center gap-3 bg-surface rounded-card-lg shadow-card p-5 lg:p-6',
+          'no-underline transition-colors duration-150 hover:bg-surface-hi',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',
+        ].join(' ')}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block text-[11px] font-bold tracking-[0.16em] uppercase text-muted font-tight">
+            Draft
+          </span>
+          <span className="block font-tight text-[13.5px] text-ink mt-1.5">Set up the draft — type, time and clock</span>
+        </span>
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" aria-hidden="true" className="flex-shrink-0 text-faint">
+          <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </Link>
 
-      {showPrices && draft && <PricesCard contest={contest} draft={draft} onSaved={onSaved} />}
-
-      <ScoringCard contests={[contest]} />
+      {league && user?.id === league.ownerId && <DeleteLeagueCard leagueId={contest.leagueId} contestId={contest.id} leagueName={leagueName} />}
 
       <LeagueLogoPicker
         open={logoPickerOpen}

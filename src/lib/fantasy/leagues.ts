@@ -13,12 +13,15 @@
 // the commissioner RPC.
 
 import { createClient as createSessionClient } from '@/lib/supabase/client';
-import { createClient as createAnonClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient as createAnonClient, isAuthSessionMissingError, type SupabaseClient } from '@supabase/supabase-js';
 import { supabaseUrl, supabaseAnonKey } from '@/lib/supabase/env';
 import { moderateName } from '@/lib/moderation';
 import { usauToday } from '@/lib/today';
 import { roundPoints } from './scoring';
 import {
+  DEFAULT_MAX_TEAMS,
+  MAX_TEAMS,
+  MIN_TEAMS,
   getCompetition,
   parseContestSettings,
   type CompetitionDef,
@@ -311,12 +314,16 @@ export interface MyLeagueRow {
   contests: MyLeagueContestRow[];
 }
 
-/** Leagues the signed-in user belongs to. [] when signed out. */
+/** Leagues the signed-in user belongs to. [] when signed out; throws when the
+ *  auth check itself fails (offline), so the hub can say "Couldn't load"
+ *  instead of "No leagues yet". */
 export async function getMyLeagues(): Promise<MyLeagueRow[]> {
   const supabase = sessionClient();
   const {
     data: { user },
+    error: authError,
   } = await supabase.auth.getUser();
+  if (authError && !isAuthSessionMissingError(authError)) throw authError;
   if (!user) return [];
 
   const { data, error } = await supabase
@@ -478,10 +485,14 @@ export async function regenerateLeagueCode(leagueId: string): Promise<string> {
 
 /** Join a league by its shareable code. Idempotent; returns the league id.
  *  Accepts a pasted invite link or the whole shared message too — copying from
- *  a text thread grabs the entire bubble, so pull the code out of the link. */
+ *  a text thread grabs the entire bubble, so pull the code out of the link, or
+ *  take the long token when the paste has no link (e.g. mobile's share). */
 export async function joinLeagueByCode(code: string): Promise<string> {
   const fromLink = code.match(/\/fantasy\/join\/([^\s/?#]+)/);
-  const c = fromLink ? fromLink[1] : code.trim();
+  // Codes are 43-char base64url tokens: in pasted prose, take the long token
+  // ("…this code in Fantasy → Join:\nXYZ…" must not yield "in").
+  const fromText = code.match(/[A-Za-z0-9_-]{20,}/);
+  const c = fromLink ? fromLink[1] : fromText ? fromText[0] : code.trim();
   if (!c) throw new Error('Enter an invite code.');
   const { data, error } = await sessionClient().rpc('fantasy_join_league', { p_code: c });
   if (error) throw error;
@@ -534,21 +545,6 @@ export async function renameLeague(leagueId: string, name: string): Promise<stri
   return n;
 }
 
-/** Roster composition for one contest (commissioner-only; RPC enforces).
- *  weekly-stats games pass offenders+defenders, event games pass flex. */
-export async function updateContestRoster(
-  contestId: string,
-  input: { offenders?: number; defenders?: number; flex?: number },
-): Promise<void> {
-  const { error } = await sessionClient().rpc('fantasy_update_contest_roster', {
-    p_contest: contestId,
-    p_offenders: input.offenders ?? null,
-    p_defenders: input.defenders ?? null,
-    p_flex: input.flex ?? null,
-  });
-  if (error) throw error;
-}
-
 /** Remove a member (commissioner-only; owner can't be removed). */
 export async function removeLeagueMember(leagueId: string, userId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_remove_league_member', {
@@ -558,41 +554,39 @@ export async function removeLeagueMember(leagueId: string, userId: string): Prom
   if (error) throw error;
 }
 
-/** Leave a league (owner can't leave their own league). */
+/** Leave a league. An owner's league passes to another member first
+ *  (fantasy_hand_off_league); a sole member must delete it instead. */
 export async function leaveLeague(leagueId: string): Promise<void> {
   const { error } = await sessionClient().rpc('fantasy_leave_league', { p_league: leagueId });
   if (error) throw error;
 }
 
-// ─── Account-deletion pre-flight (owner → transfer) ──────────────────────────
-
-export interface BlockingLeague {
-  leagueId: string;
-  leagueName: string;
-  otherMemberCount: number;
+/** Owner-only: deletes the league and everything in it (contests, teams,
+ *  rosters, drafts, chat) for every member. Refused during a live draft. */
+export async function deleteLeague(leagueId: string): Promise<void> {
+  const { error } = await sessionClient().rpc('fantasy_delete_league', { p_league: leagueId });
+  if (error) throw error;
 }
 
-/** Leagues the signed-in user owns that still have other members — deleting
- *  the account would delete these leagues out from under everyone else.
- *  Called before account deletion; [] means nothing blocks it. */
-export async function getLeaguesBlockingAccountDeletion(): Promise<BlockingLeague[]> {
-  const { data, error } = await sessionClient().rpc('fantasy_leagues_blocking_account_deletion');
+// ─── Account-deletion pre-flight (live drafts) ───────────────────────────────
+
+export interface DraftBlockingDeletion {
+  leagueId: string;
+  leagueName: string;
+  contestId: string;
+}
+
+/** Live drafts the signed-in user has a team in. Account deletion is refused
+ *  until they're over (Hunter, 2026-10-07); [] means nothing blocks it. Owned
+ *  leagues never block — they pass to another member. */
+export async function getDraftsBlockingAccountDeletion(): Promise<DraftBlockingDeletion[]> {
+  const { data, error } = await sessionClient().rpc('fantasy_drafts_blocking_account_deletion');
   if (error) throw error;
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     leagueId: r.league_id as string,
     leagueName: r.league_name as string,
-    otherMemberCount: r.other_member_count as number,
+    contestId: r.contest_id as string,
   }));
-}
-
-/** Hand league ownership to another member (caller must be the current
- *  owner; RPC enforces). Used to unblock account deletion. */
-export async function transferLeagueOwnership(leagueId: string, newOwnerId: string): Promise<void> {
-  const { error } = await sessionClient().rpc('fantasy_transfer_league_ownership', {
-    p_league: leagueId,
-    p_new_owner: newOwnerId,
-  });
-  if (error) throw error;
 }
 
 // ─── Contest creation ────────────────────────────────────────────────────────
@@ -688,19 +682,54 @@ export async function resolveEventForCompetition(
   return null; // season competitions don't bind to a single event
 }
 
+/** The commissioner's picks on Create a League. No roster keys: players per
+ *  team is fixed by the game (teamSize, Hunter 2026-10-07), so the defaults
+ *  already in defaultSettings stand. */
+export interface ContestSetup {
+  /** 4–16, or Infinity for no cap (stored like Settings → Teams' ∞). */
+  maxTeams?: number;
+  draftType?: 'snake' | 'auction';
+}
+
+/** The settings keys `setup` contributes, after checking them against the same
+ *  ranges the Settings RPCs enforce. Throws on anything else: settings is
+ *  unchecked jsonb and the INSERT policy only checks the commissioner, so this
+ *  is the only guard on create-time values. */
+function setupSettings(setup: ContestSetup): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (setup.maxTeams !== undefined) {
+    const unlimited = setup.maxTeams === Infinity;
+    if (!unlimited && !(Number.isInteger(setup.maxTeams) && setup.maxTeams >= MIN_TEAMS && setup.maxTeams <= MAX_TEAMS)) {
+      throw new Error(`Total teams must be ${MIN_TEAMS}–${MAX_TEAMS}, or unlimited.`);
+    }
+    out.maxTeams = unlimited ? DEFAULT_MAX_TEAMS : setup.maxTeams;
+    out.unlimitedTeams = unlimited;
+  }
+  if (setup.draftType !== undefined) {
+    if (setup.draftType !== 'snake' && setup.draftType !== 'auction') {
+      throw new Error('Draft type must be snake or auction.');
+    }
+    out.draftType = setup.draftType;
+  }
+  return out;
+}
+
 /**
  * Create a contest inside a league (commissioner-only via RLS). Settings are a
  * frozen snapshot of the competition defaults (+ the resolved eventId for
- * event-mode competitions). Returns the contest id.
+ * event-mode competitions), with the Create a League `setup` merged into the
+ * same INSERT so a contest never exists half-configured. Returns the contest id.
  */
 export async function createContest(
   leagueId: string,
   competition: CompetitionId,
   seasonYear: number,
   name?: string,
+  setup?: ContestSetup,
 ): Promise<string> {
   const def = getCompetition(competition);
   if (!def) throw new Error('Unknown competition.');
+  const picked = setup ? setupSettings(setup) : {};
 
   const supabase = sessionClient();
   const {
@@ -708,7 +737,7 @@ export async function createContest(
   } = await supabase.auth.getUser();
   if (!user) throw new Error('Not signed in.');
 
-  const settings: Record<string, unknown> = { ...def.defaultSettings };
+  const settings: Record<string, unknown> = { ...def.defaultSettings, ...picked };
   if (def.mode === 'event') {
     // Startable events only — the same resolver the hub and create page use.
     const ev = await resolveEventForCompetition(competition, seasonYear);

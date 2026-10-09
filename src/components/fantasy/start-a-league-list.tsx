@@ -1,7 +1,7 @@
 // "Start a League" — every hub game ordered by soonest start, server-
 // rendered from props resolved in the page (getGameStartDates +
 // sortGamesBySoonest). Live games link into league creation preseeded with
-// that game; every other row renders dimmed with a disabled Play pill.
+// that game; every other row renders dimmed with a disabled Create pill.
 //
 // Playable requires BOTH `status === 'live'` AND `startable` (game-dates.ts):
 // the next season/event still has its first lock ahead, so a league founded
@@ -67,7 +67,7 @@ export function StartALeagueList({ games, starts }: StartALeagueListProps) {
                     playable ? 'bg-accent text-accent-ink' : 'bg-ink/[0.06] text-faint',
                   ].join(' ')}
                 >
-                  Play
+                  Create
                   {/* The dimmed pill is the only visual cue that a row is
                       unavailable; name the reason for screen readers, which
                       can't see it. */}
@@ -81,6 +81,7 @@ export function StartALeagueList({ games, starts }: StartALeagueListProps) {
                 {playable ? (
                   <Link
                     href={`/fantasy/leagues/new?game=${game.id}`}
+                    aria-label={`Create a ${name} league`}
                     className={[
                       'block no-underline transition-colors duration-150 hover:bg-surface-hi',
                       'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent',

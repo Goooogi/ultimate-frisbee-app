@@ -5,8 +5,9 @@
 // Renders a compact trigger button; clicking it opens a dismissible modal that
 // hosts the shared FantasyRulesContent (rules + scoring table). Used on the
 // league, team and settings tabs so the rules are one tap away without occupying the
-// page. Visual language matches AuthModal: portal to <body>, dark scrim,
-// bg-bg card, Esc / backdrop / close-button to dismiss.
+// page. Never opens on its own (Hunter, 2026-10-07 — the League tab shows an
+// "i" icon instead). Visual language matches AuthModal: portal to <body>, dark
+// scrim, bg-bg card, Esc / backdrop / close-button to dismiss.
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -18,14 +19,11 @@ interface FantasyRulesModalProps {
    *  role matrix. Defaults to weekly. */
   mode?: ContestMode;
   playerLeague?: FantasyPlayerLeague;
-  /** Button label. Defaults to "Rules". */
+  /** Button label (the aria-label for `icon`). Defaults to "Rules". */
   label?: string;
-  /** Visual weight of the trigger. `ghost` = bordered subtle; `link` = text. */
-  variant?: 'ghost' | 'link';
-  /** When set, auto-opens the modal ONCE per browser (first visit to Fantasy),
-   *  keyed by this localStorage flag. Subsequent visits don't auto-open — the
-   *  button still works. */
-  autoOpenOnceKey?: string;
+  /** Visual weight of the trigger. `ghost` = bordered subtle; `link` = text;
+   *  `icon` = the info glyph alone. */
+  variant?: 'ghost' | 'link' | 'icon';
 }
 
 export function FantasyRulesModal({
@@ -33,25 +31,10 @@ export function FantasyRulesModal({
   playerLeague,
   label = 'Rules',
   variant = 'ghost',
-  autoOpenOnceKey,
 }: FantasyRulesModalProps) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  // First-visit auto-open: if the flag hasn't been set, open the modal and set
-  // it so it only ever happens once. Wrapped in try/catch — private-mode / SSR
-  // safe (localStorage can throw or be absent).
-  useEffect(() => {
-    if (!autoOpenOnceKey) return;
-    try {
-      if (localStorage.getItem(autoOpenOnceKey)) return;
-      localStorage.setItem(autoOpenOnceKey, '1');
-      setOpen(true);
-    } catch {
-      /* localStorage unavailable — skip the auto-open, button still works */
-    }
-  }, [autoOpenOnceKey]);
 
   const close = useCallback(() => setOpen(false), []);
 
@@ -71,7 +54,13 @@ export function FantasyRulesModal({
   }, [open, close]);
 
   const triggerClass =
-    variant === 'link'
+    variant === 'icon'
+      ? [
+          'flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full',
+          'text-muted hover:text-ink hover:bg-ink/5 transition-colors duration-150 cursor-pointer',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+        ].join(' ')
+      : variant === 'link'
       ? [
           'inline-flex items-center gap-1.5 text-accent font-tight text-[13px] font-bold tracking-[0.04em]',
           'hover:opacity-80 transition-opacity duration-150 cursor-pointer',
@@ -86,13 +75,25 @@ export function FantasyRulesModal({
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className={triggerClass} aria-haspopup="dialog">
-        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={triggerClass}
+        aria-haspopup="dialog"
+        aria-label={variant === 'icon' ? label : undefined}
+      >
+        <svg
+          width={variant === 'icon' ? 18 : 13}
+          height={variant === 'icon' ? 18 : 13}
+          viewBox="0 0 16 16"
+          fill="none"
+          aria-hidden="true"
+        >
           <circle cx="8" cy="8" r="6.25" stroke="currentColor" strokeWidth="1.4" />
           <path d="M8 7.25v3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           <circle cx="8" cy="5.1" r="0.85" fill="currentColor" />
         </svg>
-        {label}
+        {variant !== 'icon' && label}
       </button>
 
       {mounted &&

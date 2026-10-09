@@ -758,42 +758,23 @@ function EventTabsView(props: {
       ? tabRequested
       : defaultTab;
 
-  // A merged event's divisions can play at different sites — show the one
-  // being viewed.
-  // Never borrow a sibling division's venue: a merged event's event-level venue
-  // is only set when every member with a venue agrees.
-  const activeMember = event.members.find((m) => m.division === effectiveDivision);
-  const venue = isMergedSeries(event) ? (activeMember?.venue ?? null) : event.venue;
-
   return (
     <>
-      {/* Row 1 — venue (left) + Level select (right). One compact header row
-          on mobile. Level only renders when the event fielded 2+ (combined
-          masters championships; writes the URL param read via useLevel()
-          above). The Division switcher moved below the view tabs as centered
-          pills (DivisionPager), mirroring the mobile app's layout.
-          The source link left this row for the page header's controls slot
-          (Hunter, 2026-08-22) — see the SourceLink in the route file. */}
-      {(venue || availableLevels.length > 1) && (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-          {venue ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <EventVenue venue={venue} />
-            </div>
-          ) : (
-            <span />
-          )}
-          {availableLevels.length > 1 && (
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
-                Level
-              </span>
-              <UsauLevelSelect
-                restrictTo={availableLevels}
-                value={level || undefined}
-              />
-            </div>
-          )}
+      {/* Row 1 — Level select (right), only when the event fielded 2+
+          (combined masters championships; writes the URL param read via
+          useLevel() above). The Division switcher moved below the view tabs as
+          centered pills (DivisionPager), mirroring the mobile app's layout.
+          The source link and the venue live in the page header's controls
+          slot (Hunter, 2026-08-22 / 2026-10-07) — see the route file. */}
+      {availableLevels.length > 1 && (
+        <div className="mb-6 flex items-center justify-end gap-3">
+          <span className="text-[10px] font-bold tracking-[0.18em] uppercase text-muted font-tight">
+            Level
+          </span>
+          <UsauLevelSelect
+            restrictTo={availableLevels}
+            value={level || undefined}
+          />
         </div>
       )}
 
@@ -1284,22 +1265,6 @@ function PlacementTree({
       </h3>
       <UsauPlacementBracketTree games={games} venueState={venueState} season={season} />
     </div>
-  );
-}
-
-/** Venue name, derived from the field names on the event's games. Non-interactive
- *  (it's a fact, not a link). Only renders when we resolved a venue; roughly
- *  half of events record only a bare field number, and the header subtitle
- *  already carries the city/state. */
-function EventVenue({ venue }: { venue: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-full text-[11px] font-bold tracking-[0.14em] uppercase font-tight bg-ink/5 text-muted">
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M5 9s3-2.9 3-5.1A3 3 0 0 0 2 3.9C2 6.1 5 9 5 9Z" />
-        <circle cx="5" cy="3.9" r="1.05" />
-      </svg>
-      {venue}
-    </span>
   );
 }
 

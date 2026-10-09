@@ -93,14 +93,17 @@ export function PricesCard({ contest, draft, onSaved }: Props) {
       setSearching(false);
       return;
     }
+    // Responses can land out of order; only the latest query may write.
+    let cancelled = false;
     setSearching(true);
     debounceRef.current = setTimeout(() => {
       searchContestPlayers(contest, q, 20)
-        .then(setResults)
-        .catch(() => setResults([]))
-        .finally(() => setSearching(false));
+        .then((hits) => !cancelled && setResults(hits))
+        .catch(() => !cancelled && setResults([]))
+        .finally(() => !cancelled && setSearching(false));
     }, SEARCH_DEBOUNCE_MS);
     return () => {
+      cancelled = true;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query, contest]);

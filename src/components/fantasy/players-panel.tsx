@@ -272,7 +272,9 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
       {filteredRows.length === 0 ? (
         <p className="text-center font-tight text-[13px] text-faint py-8">
           {hasQuery
-            ? `No players found for "${query.trim()}"`
+            ? searching
+              ? 'Searching…'
+              : `No players found for "${query.trim()}"`
             : showMyTeamDefault
               ? 'No players on your team yet.'
               : `Search the ${contest.competitionDef.shortLabel} player pool`}

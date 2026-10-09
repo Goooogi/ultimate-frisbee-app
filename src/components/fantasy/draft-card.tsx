@@ -104,7 +104,7 @@ export function DraftCard({ contest, leagueId }: { contest: ContestView; leagueI
   if (contest.status === 'complete' && draft?.status !== 'complete') return null;
 
   const roomPath = `/fantasy/l/${contest.id}/draft`;
-  const settingsPath = `/fantasy/l/${contest.id}/settings`;
+  const setupPath = `/fantasy/l/${contest.id}/draft/setup`;
   const teamCountCaption = `${readiness.teamCount}/${readiness.maxTeams ?? '∞'} teams · min ${readiness.minTeams}`;
 
   // ── No draft scheduled ──────────────────────────────────────────────────
@@ -120,7 +120,7 @@ export function DraftCard({ contest, leagueId }: { contest: ContestView; leagueI
               No draft scheduled
             </h3>
             <Link
-              href={settingsPath}
+              href={setupPath}
               className={[
                 'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full min-h-[44px]',
                 'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase',

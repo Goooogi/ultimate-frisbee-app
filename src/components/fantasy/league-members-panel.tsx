@@ -79,9 +79,11 @@ export function LeagueMembersPanel({ leagueId, members, onLeaveRedirect = '/fant
       {/* ── Commissioner: Email invite ───────────────────────────────────── */}
       {!loading && !roleLoading && isCommissioner && <InvitePanel leagueId={leagueId} />}
 
-      {/* ── Member self-serve: leave league ──────────────────────────────── */}
-      {!loading && !roleLoading && isMember && !isCommissioner && (
-        <LeaveLeagueSection leagueId={leagueId} redirectTo={onLeaveRedirect} />
+      {/* ── Self-serve: leave league. The owner can leave too once someone
+             else is in it — the league passes to another member (DB:
+             fantasy_hand_off_league); a sole owner deletes it in Settings. */}
+      {!loading && !roleLoading && isMember && (!isCommissioner || members.length > 1) && (
+        <LeaveLeagueSection leagueId={leagueId} redirectTo={onLeaveRedirect} isOwner={isCommissioner} />
       )}
 
       {/* ── Signed out / not a member: join CTA ──────────────────────────── */}
@@ -325,7 +327,15 @@ function InvitePanel({ leagueId }: { leagueId: string }) {
 
 // ─── Leave league (member self-serve) ─────────────────────────────────────────
 
-function LeaveLeagueSection({ leagueId, redirectTo }: { leagueId: string; redirectTo: string }) {
+function LeaveLeagueSection({
+  leagueId,
+  redirectTo,
+  isOwner,
+}: {
+  leagueId: string;
+  redirectTo: string;
+  isOwner: boolean;
+}) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -346,7 +356,9 @@ function LeaveLeagueSection({ leagueId, redirectTo }: { leagueId: string; redire
 
   return (
     <section className="bg-surface rounded-card-lg shadow-soft p-5 lg:p-6 flex items-center justify-between gap-4">
-      <p className="text-muted font-tight text-[13px]">You&apos;re a member of this league.</p>
+      <p className="text-muted font-tight text-[13px]">
+        {isOwner ? 'You’re the commissioner of this league.' : 'You’re a member of this league.'}
+      </p>
       <button
         type="button"
         onClick={() => setConfirmOpen(true)}
@@ -363,7 +375,11 @@ function LeaveLeagueSection({ leagueId, redirectTo }: { leagueId: string; redire
       <ConfirmDialog
         open={confirmOpen}
         title="Leave this league?"
-        body="You'll lose access to its contests and standings. The commissioner can re-invite you later."
+        body={
+          isOwner
+            ? 'The league passes to another member automatically — someone with a team first, then the longest-standing member. You’ll lose access to its contests and standings.'
+            : "You'll lose access to its contests and standings. The commissioner can re-invite you later."
+        }
         confirmLabel="Leave"
         busyLabel="Leaving…"
         busy={leaving}

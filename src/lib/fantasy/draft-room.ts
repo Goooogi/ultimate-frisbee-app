@@ -6,9 +6,10 @@
 // here; the backend pass implements the RPCs these wrappers call and may
 // adjust internals but NOT these signatures without updating both sides.
 //
-// Rules (Hunter, 2026-08-27): snake or auction (2026-09-08); 12 rounds (7
-// starters 4O/3D + 5 bench for UFA weekly; event games draft their flex count
-// then bench); 60s default pick clock for snake (commissioner-configurable);
+// Rules (Hunter, 2026-08-27): snake or auction (2026-09-08); rounds = team
+// size, fixed by the game since 2026-10-07 (teamSize in competitions.ts):
+// weekly 12 (7 starters + 5 bench), event 7 (no bench); 60s default pick
+// clock for snake (commissioner-configurable);
 // drafted leagues are owner-exclusive (a player belongs to ONE team per
 // contest, tracked in fantasy_team_players — moves on add/drop).
 //
@@ -40,6 +41,14 @@ function client(): AnyClient {
 }
 
 export type DraftStatus = 'scheduled' | 'live' | 'complete';
+
+/** The snake pick clock and the auction nomination clock are both 90 seconds,
+ *  fixed by the game (Hunter, 2026-10-08). The server ignores what's sent. */
+export const DRAFT_CLOCK_SECONDS = 90;
+
+/** The server resolves an expired clock only this long after it hits 0, so a
+ *  client resolving right at 0 would always be told "not yet". */
+export const CLOCK_GRACE_MS = 3000;
 export type DraftType = 'snake' | 'auction';
 
 export interface DraftRef {
@@ -72,8 +81,6 @@ export interface Draft {
    *  anchor the missed-draft reschedule floor is measured from. */
   originalScheduledAt: string | null;
   rescheduleCount: number;
-  /** Commissioner pause flag (null = running). Clocks are frozen while set. */
-  pausedAt: string | null;
 }
 
 export interface DraftPick {
@@ -202,7 +209,6 @@ function mapDraft(row: Record<string, unknown>): Draft {
     minBid: (row.min_bid as number) ?? 1,
     originalScheduledAt: (row.original_scheduled_at as string | null) ?? null,
     rescheduleCount: (row.reschedule_count as number) ?? 0,
-    pausedAt: (row.paused_at as string | null) ?? null,
   };
 }
 
@@ -293,14 +299,13 @@ export async function getDraftPicks(draftId: string): Promise<DraftPick[]> {
 export async function scheduleDraft(input: {
   contestId: string;
   at: string | null; // ISO; null = "manual start whenever"
-  pickSeconds?: number;
   rounds?: number;
 }): Promise<Draft> {
   const supabase = client();
   const { data, error } = await supabase.rpc('fantasy_schedule_draft', {
     p_contest: input.contestId,
     p_at: input.at,
-    p_pick_seconds: input.pickSeconds ?? 60,
+    p_pick_seconds: DRAFT_CLOCK_SECONDS,
     p_rounds: input.rounds ?? 12,
   });
   if (error) throw error;
@@ -347,6 +352,26 @@ export async function saveDraftQueue(draftId: string, entries: DraftRef[]): Prom
   if (error) throw error;
 }
 
+/** Teams in the contest on autodraft: picked for (or nominate) the moment
+ *  they're up. A missed pick turns it on; a manager can toggle their own. */
+export async function getAutodraftTeamIds(contestId: string): Promise<Set<string>> {
+  const { data, error } = await client()
+    .from('fantasy_teams')
+    .select('id')
+    .eq('contest_id', contestId)
+    .eq('autodraft', true);
+  if (error) throw error;
+  return new Set(((data ?? []) as { id: string }[]).map((r) => r.id));
+}
+
+/** Put the caller's own team on or off autodraft. Turning it on while the team
+ *  is on the clock picks (or nominates) right away. */
+export async function setAutodraft(draftId: string, on: boolean): Promise<boolean> {
+  const { data, error } = await client().rpc('fantasy_set_autodraft', { p_draft: draftId, p_on: on });
+  if (error) throw error;
+  return Boolean(data);
+}
+
 /** The caller's queue ([] when none). */
 export async function getMyDraftQueue(draftId: string): Promise<DraftRef[]> {
   const supabase = client();
@@ -390,7 +415,6 @@ export async function scheduleAuctionDraft(input: {
   at: string | null;
   rounds?: number;
   budget?: number;
-  nominationSeconds?: number;
   bidSeconds?: number;
   minBid?: number;
 }): Promise<Draft> {
@@ -400,7 +424,7 @@ export async function scheduleAuctionDraft(input: {
     p_at: input.at,
     p_rounds: input.rounds ?? 12,
     p_budget: input.budget ?? 200,
-    p_nomination_seconds: input.nominationSeconds ?? 30,
+    p_nomination_seconds: DRAFT_CLOCK_SECONDS,
     p_bid_seconds: input.bidSeconds ?? 15,
     p_min_bid: input.minBid ?? 1,
   });
@@ -516,20 +540,6 @@ export function subscribeAuction(draftId: string, onChange: () => void): Realtim
 }
 
 // ── Commissioner draft controls ─────────────────────────────────────────────
-
-/** Freeze every clock; picks/nominations/bids are refused until resumed. */
-export async function pauseDraft(draftId: string): Promise<Draft> {
-  const { data, error } = await client().rpc('fantasy_pause_draft', { p_draft: draftId });
-  if (error) throw error;
-  return mapDraft(data as Record<string, unknown>);
-}
-
-/** Restart the clocks from now. */
-export async function resumeDraft(draftId: string): Promise<Draft> {
-  const { data, error } = await client().rpc('fantasy_resume_draft', { p_draft: draftId });
-  if (error) throw error;
-  return mapDraft(data as Record<string, unknown>);
-}
 
 /** Revert the latest pick (snake) / latest won nomination (auction). */
 export async function undoLastPick(draftId: string): Promise<Draft> {
