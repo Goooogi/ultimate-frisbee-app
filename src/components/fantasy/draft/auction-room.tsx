@@ -5,7 +5,7 @@
 // player is up) vs NOMINATING (waiting for the next team to put one up).
 // Ported from mobile AuctionRoom.tsx by intent.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { FloatingTabBar, type FloatingTab } from '@/components/floating-tab-bar';
 import {
   auctionTeamState,
@@ -22,6 +22,15 @@ import {
 import { searchContestPlayers } from '@/lib/fantasy/draft';
 import type { ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
+import { ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
+import {
+  RANKED_PAGE_SIZE,
+  RankingsHeader,
+  RatingLine,
+  RatingRowLine,
+  ShowMoreButton,
+  ratingToHit,
+} from '@/components/fantasy/player-rating';
 import { AutoBadge } from './autodraft';
 import { BudgetsPanel } from './budgets-panel';
 import { NominateSheet } from './nominate-sheet';
@@ -46,6 +55,7 @@ export function AuctionRoom({
   myTeam,
   queue,
   setQueue,
+  ratings,
   openNomination,
   nominations,
   prices,
@@ -62,6 +72,7 @@ export function AuctionRoom({
   myTeam: TeamInfo | null;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
+  ratings: PlayerRating[];
   openNomination: DraftNomination | null;
   nominations: DraftNomination[];
   prices: DraftPrice[];
@@ -80,7 +91,10 @@ export function AuctionRoom({
   const nominatingTeamId = teamToNominate(draft);
   const isMyNominateTurn = Boolean(myTeam) && nominatingTeamId === myTeam?.id && !openNomination;
 
-  const draftedByKey = new Map(picks.map((p) => [`${p.playerLeague}:${p.playerId}`, p.teamId]));
+  const draftedByKey = useMemo(
+    () => new Map(picks.map((p) => [`${p.playerLeague}:${p.playerId}`, p.teamId])),
+    [picks],
+  );
 
   const handleQueue = (ref: DraftRef) => {
     if (queue.some((q) => q.playerId === ref.playerId && q.playerLeague === ref.playerLeague)) return;
@@ -141,6 +155,7 @@ export function AuctionRoom({
         contest={contest}
         draftedByKey={draftedByKey}
         teamById={teamById}
+        ratings={ratings}
         queue={queue}
         onQueue={handleQueue}
         canNominate={isMyNominateTurn}
@@ -151,7 +166,14 @@ export function AuctionRoom({
     budgets: <BudgetsPanel draft={draft} picks={picks} teamById={teamById} />,
     results: <ResultsPanel wonResults={wonResults} teamById={teamById} />,
     queue: (
-      <AuctionQueuePanel draftId={draft.id} myTeam={myTeam} queue={queue} setQueue={setQueue} onRequireAuth={onRequireAuth} />
+      <AuctionQueuePanel
+        draftId={draft.id}
+        myTeam={myTeam}
+        queue={queue}
+        setQueue={setQueue}
+        ratings={ratings}
+        onRequireAuth={onRequireAuth}
+      />
     ),
   };
 
@@ -421,6 +443,7 @@ function AuctionPlayersPanel({
   contest,
   draftedByKey,
   teamById,
+  ratings,
   queue,
   onQueue,
   canNominate,
@@ -430,6 +453,7 @@ function AuctionPlayersPanel({
   contest: ContestView;
   draftedByKey: Map<string, string>;
   teamById: Map<string, TeamInfo>;
+  ratings: PlayerRating[];
   queue: DraftRef[];
   onQueue: (ref: DraftRef) => void;
   canNominate: boolean;
@@ -441,6 +465,16 @@ function AuctionPlayersPanel({
   const [searching, setSearching] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const league = contest.competitionDef.playerLeague;
+
+  const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
+  const available = useMemo(
+    () => ratings.filter((r) => !draftedByKey.has(ratingKey(r.playerLeague, r.playerId))),
+    [ratings, draftedByKey],
+  );
+  const [shown, setShown] = useState(RANKED_PAGE_SIZE);
+  // Nothing typed yet: the best players still on the board instead of a blank prompt.
+  const showRanked = query.trim().length < 2 && available.length > 0;
+  const listHits = showRanked ? available.slice(0, shown).map(ratingToHit) : results;
 
   // Responses can land out of order; only the latest search may write.
   const searchSeq = useRef(0);
@@ -491,31 +525,40 @@ function AuctionPlayersPanel({
         </p>
       )}
 
-      {query.trim().length < 2 ? (
+      {ratings.length > 0 && (
+        <RankingsHeader
+          competition={contest.competition}
+          title={showRanked ? 'Best available' : undefined}
+          className="mb-2"
+        />
+      )}
+
+      {query.trim().length < 2 && !showRanked ? (
         <p className="text-faint font-tight text-[13px] py-6 text-center">
           Search the player pool to nominate or queue someone.
         </p>
-      ) : searching ? (
+      ) : searching && !showRanked ? (
         <div className="space-y-2" aria-busy="true">
           <span className="sr-only">Loading…</span>
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-11 rounded-card-sm bg-ink/[0.06] animate-pulse" aria-hidden="true" />
           ))}
         </div>
-      ) : results.length === 0 ? (
+      ) : listHits.length === 0 ? (
         <p className="text-faint font-tight text-[13px] py-6 text-center">No players found.</p>
       ) : (
         <ul className="space-y-1.5">
-          {results.map((hit) => {
+          {listHits.map((hit) => {
             const key = `${league}:${hit.playerId}`;
             const draftedTeamId = draftedByKey.get(key) ?? null;
             const drafted = draftedTeamId !== null;
             const queued = queue.some((q) => q.playerId === hit.playerId && q.playerLeague === league);
+            const rating = ratingMap.get(key);
             return (
               <li
                 key={hit.playerId}
                 className={[
-                  'flex items-center gap-2 px-3 py-2.5 rounded-card-sm',
+                  'flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2.5 rounded-card-sm',
                   drafted ? 'opacity-45' : 'hover:bg-surface-hi transition-colors duration-150',
                 ].join(' ')}
               >
@@ -555,9 +598,15 @@ function AuctionPlayersPanel({
                     </button>
                   </div>
                 )}
+                <RatingRowLine rating={rating} />
               </li>
             );
           })}
+          {showRanked && shown < available.length && (
+            <li className="pt-2">
+              <ShowMoreButton onClick={() => setShown((n) => n + RANKED_PAGE_SIZE)} />
+            </li>
+          )}
         </ul>
       )}
     </div>
@@ -620,22 +669,29 @@ function AuctionQueuePanel({
   myTeam,
   queue,
   setQueue,
+  ratings,
   onRequireAuth,
 }: {
   draftId: string;
   myTeam: TeamInfo | null;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
+  ratings: PlayerRating[];
   onRequireAuth: () => void;
 }) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
 
   const persist = useCallback(
     (next: DraftRef[]) => {
       setQueue(next);
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      // Save the newest queue, not this call's: an add from the Players tab
+      // saves at once, and a stale timer would overwrite it.
       saveTimer.current = setTimeout(() => {
-        saveDraftQueue(draftId, next).catch(() => {});
+        saveDraftQueue(draftId, queueRef.current).catch(() => {});
       }, 400);
     },
     [draftId, setQueue],
@@ -660,7 +716,8 @@ function AuctionQueuePanel({
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
         <p className="text-muted font-tight text-[13px]">
-          Your queue is empty. Add players from the PLAYERS tab.
+          Your queue is empty. Add players from the PLAYERS tab. If your nomination clock runs out, autodraft nominates
+          for you: your queue first, then the top-ranked player left.
         </p>
       </div>
     );
@@ -687,9 +744,10 @@ function AuctionQueuePanel({
             className={['flex items-center gap-2 px-4 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
           >
             <span className="font-tight text-[11px] font-bold text-faint tabular w-5">{idx + 1}</span>
-            <span className="flex-1 min-w-0 font-tight text-[13.5px] font-semibold text-ink truncate">
-              {entry.playerName}
-            </span>
+            <div className="flex-1 min-w-0">
+              <div className="font-tight text-[13.5px] font-semibold text-ink truncate">{entry.playerName}</div>
+              <RatingLine rating={ratingMap.get(ratingKey(entry.playerLeague, entry.playerId))} compact />
+            </div>
             <div className="flex items-center gap-0.5 flex-shrink-0">
               <button
                 type="button"

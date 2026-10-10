@@ -18,7 +18,15 @@ export default async function ContestTradesPage({ params }: { params: { contestI
   const draft = isDrafted ? await getDraft(contest.id).catch(() => null) : null;
   const draftComplete = draft?.status === 'complete';
 
-  if (!isWeekly || !isDrafted || !draftComplete) {
+  if (!isWeekly) {
+    return (
+      <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
+        <p className="font-tight text-[14px] text-muted">Single-event leagues don&apos;t have trades.</p>
+      </div>
+    );
+  }
+
+  if (!isDrafted || !draftComplete) {
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-10 text-center">
         <p className="font-tight text-[14px] text-muted">Trades open once the draft is complete.</p>

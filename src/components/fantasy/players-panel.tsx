@@ -4,10 +4,15 @@
 // chars) + filter (All | Available | My team) + rows (name · team · season
 // preview points (UFA only) · ownership label). Drafted weekly-stats
 // contests with a complete draft and a signed-in team get an Add action on
-// available rows → modal to pick who to drop, and a Trade action on other
-// teams' rostered rows → propose-trade dialog pre-seeded with that team +
-// player. Web port of the mobile app's PlayersList.tsx
+// available rows → modal to pick who to drop, and a View team link on other
+// teams' rostered rows → that team's profile, where trades are proposed
+// (Hunter, 2026-10-09). Web port of the mobile app's PlayersList.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/PlayersList.tsx).
+//
+// Event contests with player ratings (USAU Nationals) list the ranked players
+// when nothing is typed, until the draft completes and rosters exist, and show
+// rank + Proj on every rated row (src/lib/fantasy/ratings.ts). While a draft
+// runs, its picks mark players as owned, so Available drops them live.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -21,15 +26,22 @@ import {
   waiverSettings,
   type ContestView,
 } from '@/lib/fantasy/leagues';
-import { getDraft } from '@/lib/fantasy/draft-room';
+import type { RealtimeChannel } from '@supabase/supabase-js';
+import { getDraft, getDraftPicks, subscribeDraft, unsubscribeDraft, type DraftPick } from '@/lib/fantasy/draft-room';
 import { searchContestPlayers } from '@/lib/fantasy/draft';
 import { playerSeasonPreview } from '@/lib/fantasy/data';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
 import { revalidateFantasyLeague } from '@/app/fantasy/leagues/actions';
-import { ProposeTradeDialog } from '@/components/fantasy/trades/propose-trade-dialog';
 import { WaiverClaimDialog } from '@/components/fantasy/waivers/waiver-claim-dialog';
-import { getContestStandings } from '@/lib/fantasy/leagues';
+import {
+  RANKED_PAGE_SIZE,
+  RankingsHeader,
+  RatingLine,
+  ShowMoreButton,
+  ratingToHit,
+} from '@/components/fantasy/player-rating';
 import { getProjections, projectedPoints, projectionKey, type ProjectionMap } from '@/lib/fantasy/projections';
+import { getContestRatings, ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
 
 type Filter = 'all' | 'available' | 'mine';
 
@@ -52,6 +64,7 @@ interface Row {
   isAvailable: boolean;
   ownerTeamId: string | null;
   waiverAvailableAt: string | null;
+  rating: PlayerRating | undefined;
 }
 
 export function PlayersPanel({ contest }: { contest: ContestView }) {
@@ -59,6 +72,7 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
   const isUfa = contest.competitionDef.playerLeague === 'ufa';
   const isDrafted = contest.settings.draft === true;
   const isWeekly = contest.settings.mode === 'weekly-stats';
+  const isEvent = contest.settings.mode === 'event';
 
   const [projections, setProjections] = useState<ProjectionMap | undefined>(undefined);
   useEffect(() => {
@@ -75,25 +89,65 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
     };
   }, [contest.id, isWeekly]);
 
+  const [ratings, setRatings] = useState<PlayerRating[]>([]);
+  useEffect(() => {
+    if (!isEvent) {
+      setRatings([]);
+      return;
+    }
+    let cancelled = false;
+    getContestRatings(contest)
+      .then((r) => !cancelled && setRatings(r))
+      .catch(() => !cancelled && setRatings([]));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contest.id, isEvent]);
+  const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
+  const [rankedShown, setRankedShown] = useState(RANKED_PAGE_SIZE);
+
   const [myTeam, setMyTeam] = useState<{ id: string; teamName: string } | null>(null);
   const [allOwnership, setAllOwnership] = useState<{ playerId: string; teamId: string }[]>([]);
   const [myOwnership, setMyOwnership] = useState<{ playerId: string; playerName: string }[]>([]);
   const [draftComplete, setDraftComplete] = useState(false);
+  // Rosters are only seeded when the draft completes, so until then ownership
+  // comes from the picks, kept live while the draft runs.
+  const [draftPicks, setDraftPicks] = useState<DraftPick[]>([]);
 
   useEffect(() => {
     let cancelled = false;
+    let channel: RealtimeChannel | null = null;
     if (isDrafted) {
       getTeamPlayers(contest.id)
         .then((rows) => !cancelled && setAllOwnership(rows.map((r) => ({ playerId: r.playerId, teamId: r.teamId }))))
         .catch(() => !cancelled && setAllOwnership([]));
     }
     getDraft(contest.id)
-      .then((d) => !cancelled && setDraftComplete(d?.status === 'complete'))
+      .then((d) => {
+        if (cancelled) return;
+        setDraftComplete(d?.status === 'complete');
+        if (!d || d.status === 'complete') return;
+        const loadPicks = () =>
+          getDraftPicks(d.id)
+            .then((p) => !cancelled && setDraftPicks(p))
+            .catch(() => {});
+        loadPicks();
+        // Completion flips draftComplete, which re-runs this effect (and the
+        // My team one) to read the seeded rosters instead.
+        channel = subscribeDraft(d.id, () => {
+          loadPicks();
+          getDraft(contest.id)
+            .then((nd) => !cancelled && nd?.status === 'complete' && setDraftComplete(true))
+            .catch(() => {});
+        });
+      })
       .catch(() => !cancelled && setDraftComplete(false));
     return () => {
       cancelled = true;
+      if (channel) unsubscribeDraft(channel);
     };
-  }, [contest.id, isDrafted]);
+  }, [contest.id, isDrafted, draftComplete]);
 
   useEffect(() => {
     if (!user) {
@@ -121,10 +175,10 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
     return () => {
       cancelled = true;
     };
-  }, [contest.id, myTeam, isDrafted]);
+  }, [contest.id, myTeam, isDrafted, draftComplete]);
 
   const canAddDrop = isWeekly && isDrafted && draftComplete && Boolean(myTeam);
-  const canTrade = isWeekly && isDrafted && draftComplete && Boolean(myTeam);
+  const canViewOwner = isWeekly && isDrafted && draftComplete;
 
   const isFaab = waiverSettings(contest.settings).mode === 'faab';
   const [waiverByPlayer, setWaiverByPlayer] = useState<Map<string, string>>(new Map());
@@ -149,18 +203,6 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
       cancelled = true;
     };
   }, [contest.id, isFaab, canAddDrop]);
-
-  const [standings, setStandings] = useState<{ teamId: string; teamName: string }[]>([]);
-  useEffect(() => {
-    if (!canTrade) return;
-    let cancelled = false;
-    getContestStandings(contest.id)
-      .then((rows) => !cancelled && setStandings(rows.map((r) => ({ teamId: r.teamId, teamName: r.teamName }))))
-      .catch(() => !cancelled && setStandings([]));
-    return () => {
-      cancelled = true;
-    };
-  }, [contest.id, canTrade]);
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
@@ -194,19 +236,29 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
   const ownerByPlayer = useMemo(() => {
     const m = new Map<string, string>();
     for (const t of allOwnership) m.set(t.playerId, t.teamId);
+    if (!draftComplete) for (const p of draftPicks) m.set(p.playerId, p.teamId);
     return m;
-  }, [allOwnership]);
+  }, [allOwnership, draftPicks, draftComplete]);
 
-  const myPlayerIds = useMemo(() => new Set(myOwnership.map((t) => t.playerId)), [myOwnership]);
+  const myPlayerIds = useMemo(() => {
+    const s = new Set(myOwnership.map((t) => t.playerId));
+    if (!draftComplete && myTeam) for (const p of draftPicks) if (p.teamId === myTeam.id) s.add(p.playerId);
+    return s;
+  }, [myOwnership, draftPicks, draftComplete, myTeam]);
 
   const hasQuery = query.trim().length >= 2;
-  const showMyTeamDefault = !hasQuery && isDrafted;
+  // Scheduling a draft sets settings.draft, but rosters are only seeded when the
+  // draft completes, so a rated pool keeps its ranked list until then.
+  const showMyTeamDefault = !hasQuery && isDrafted && (draftComplete || ratings.length === 0);
+  const showRanked = !hasQuery && !showMyTeamDefault && ratings.length > 0;
 
   const baseHits: FantasyPlayerHit[] = hasQuery
     ? results
     : showMyTeamDefault
       ? myOwnership.map((t) => ({ playerId: t.playerId, fullName: t.playerName, teamId: null, teamName: null }))
-      : [];
+      : showRanked
+        ? ratings.map(ratingToHit)
+        : [];
 
   const rows: Row[] = baseHits.map((hit) => {
     const ownerId = ownerByPlayer.get(hit.playerId);
@@ -222,19 +274,22 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
       isAvailable,
       ownerTeamId: ownerId ?? null,
       waiverAvailableAt: waiverByPlayer.get(hit.playerId) ?? null,
+      rating: ratingMap.get(ratingKey(contest.competitionDef.playerLeague, hit.playerId)),
     };
   });
 
-  const filteredRows = rows.filter((r) => {
+  const matchingRows = rows.filter((r) => {
     if (filter === 'available') return r.isAvailable;
     if (filter === 'mine') return r.isMine;
     return true;
   });
+  // The ranked list pages after filtering, so Available keeps filling as the
+  // top of the list is drafted.
+  const filteredRows = showRanked ? matchingRows.slice(0, rankedShown) : matchingRows;
 
   const showAvailableFilter = isDrafted;
 
   const [dropSheetPlayer, setDropSheetPlayer] = useState<{ playerId: string; playerName: string } | null>(null);
-  const [tradeTarget, setTradeTarget] = useState<{ teamId: string; playerId: string } | null>(null);
   const [claimPlayer, setClaimPlayer] = useState<{ playerId: string; playerName: string } | null>(null);
 
   return (
@@ -275,17 +330,24 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
             ? searching
               ? 'Searching…'
               : `No players found for "${query.trim()}"`
-            : showMyTeamDefault
+            : showMyTeamDefault || (showRanked && filter === 'mine')
               ? 'No players on your team yet.'
               : `Search the ${contest.competitionDef.shortLabel} player pool`}
         </p>
       ) : (
         <div className="bg-surface rounded-card-lg shadow-card overflow-hidden">
+          {ratings.length > 0 && (
+            <RankingsHeader
+              competition={contest.competition}
+              title={showRanked ? 'Ranked players' : undefined}
+              className="px-5 pt-1.5 pb-1"
+            />
+          )}
           {filteredRows.map((row, idx) => (
             <PlayerRow
               key={row.playerId}
               row={row}
-              first={idx === 0}
+              first={idx === 0 && ratings.length === 0}
               isUfa={isUfa}
               seasonYear={contest.seasonYear}
               playerLeague={contest.competitionDef.playerLeague}
@@ -294,27 +356,19 @@ export function PlayersPanel({ contest }: { contest: ContestView }) {
               onOpenAdd={(playerId, playerName) => setDropSheetPlayer({ playerId, playerName })}
               canClaim={canAddDrop && row.waiverAvailableAt != null}
               onOpenClaim={(playerId, playerName) => setClaimPlayer({ playerId, playerName })}
-              canTrade={canTrade && !row.isMine && row.ownerTeamId != null}
-              onOpenTrade={(playerId, teamId) => setTradeTarget({ teamId, playerId })}
+              ownerHref={
+                canViewOwner && !row.isMine && row.ownerTeamId != null
+                  ? `/fantasy/l/${contest.id}/t/${row.ownerTeamId}`
+                  : null
+              }
             />
           ))}
+          {showRanked && rankedShown < matchingRows.length && (
+            <div className="border-t border-hairline px-5 py-3">
+              <ShowMoreButton onClick={() => setRankedShown((n) => n + RANKED_PAGE_SIZE)} />
+            </div>
+          )}
         </div>
-      )}
-
-      {/* ── Propose trade dialog ──────────────────────────────────────── */}
-      {tradeTarget && myTeam && (
-        <ProposeTradeDialog
-          contest={contest}
-          myTeam={{ teamId: myTeam.id, teamName: myTeam.teamName }}
-          otherTeams={standings.filter((s) => s.teamId !== myTeam.id)}
-          initialTeamId={tradeTarget.teamId}
-          initialGetPlayerId={tradeTarget.playerId}
-          onClose={() => setTradeTarget(null)}
-          onDone={async () => {
-            setTradeTarget(null);
-            await revalidateFantasyLeague(contest.leagueId, contest.id).catch(() => null);
-          }}
-        />
       )}
 
       {/* ── Add/Drop modal ────────────────────────────────────────────── */}
@@ -382,8 +436,7 @@ function PlayerRow({
   onOpenAdd,
   canClaim,
   onOpenClaim,
-  canTrade,
-  onOpenTrade,
+  ownerHref,
 }: {
   row: Row;
   first: boolean;
@@ -395,8 +448,8 @@ function PlayerRow({
   onOpenAdd: (playerId: string, playerName: string) => void;
   canClaim: boolean;
   onOpenClaim: (playerId: string, playerName: string) => void;
-  canTrade: boolean;
-  onOpenTrade: (playerId: string, teamId: string) => void;
+  /** The owning team's profile (proposing a trade happens there). */
+  ownerHref: string | null;
 }) {
   const [preview, setPreview] = useState<number | null>(null);
 
@@ -429,6 +482,7 @@ function PlayerRow({
         <span className="block font-tight text-[14px] font-semibold text-ink truncate">{row.fullName}</span>
       )}
       {row.teamName && <span className="block font-tight text-[11.5px] text-muted truncate">{row.teamName}</span>}
+      <RatingLine rating={row.rating} />
       <span className="block font-tight text-[10.5px] text-faint mt-0.5">{row.ownerLabel}</span>
       {row.waiverAvailableAt && (
         <span className="block font-tight text-[10.5px] text-faint mt-0.5">
@@ -480,19 +534,18 @@ function PlayerRow({
           Claim
         </button>
       )}
-      {canTrade && row.ownerTeamId && (
-        <button
-          type="button"
-          onClick={() => onOpenTrade(row.playerId, row.ownerTeamId as string)}
+      {ownerHref && (
+        <Link
+          href={ownerHref}
           className={[
-            'flex-shrink-0 px-4 py-2 rounded-full min-h-[36px]',
+            'flex-shrink-0 inline-flex items-center px-4 py-2 rounded-full min-h-[36px] no-underline',
             'bg-ink/5 text-ink font-tight text-[11px] font-bold tracking-[0.04em] uppercase',
             'hover:bg-ink/10 transition-colors duration-150 cursor-pointer',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
           ].join(' ')}
         >
-          Trade
-        </button>
+          View team
+        </Link>
       )}
     </div>
   );

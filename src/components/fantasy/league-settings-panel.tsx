@@ -155,6 +155,7 @@ export function ScoringCard({ contests }: { contests: ContestView[] }) {
               label={kinds.length > 1 ? `${c.settings.mode === 'event' ? 'Event' : 'Season'} scoring` : 'View scoring'}
               mode={c.settings.mode}
               playerLeague={c.competitionDef.playerLeague}
+              competition={c.competition}
             />
           ))}
         </div>

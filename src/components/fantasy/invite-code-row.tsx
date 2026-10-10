@@ -1,28 +1,23 @@
 'use client';
 
-// InviteCodeRow — compact join-code chip + copy/share for the league page's
-// "jump in" row. Members see the code (read-only reminder); the commissioner
-// also gets Regenerate. Web port of the mobile app's InviteCodeRow.tsx
+// InviteCodeRow — compact join-code chip + copy, and the Invite button
+// (InviteMenu: Email invite or Text message). Commissioner-only: the code RPC
+// refuses everyone else, so the row renders nothing for them. The code no
+// longer regenerates on web (Hunter, 2026-10-09). Web port of the mobile app's InviteCodeRow.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/InviteCodeRow.tsx).
 
 import { useEffect, useState } from 'react';
-import { ConfirmDialog } from '@/components/confirm-dialog';
-import { getLeagueCode, regenerateLeagueCode, shareLeagueInvite } from '@/lib/fantasy/leagues';
+import { getLeagueCode } from '@/lib/fantasy/leagues';
+import { InviteMenu } from '@/components/fantasy/invite-menu';
 
 interface Props {
   leagueId: string;
-  canRegenerate: boolean;
 }
 
-export function InviteCodeRow({ leagueId, canRegenerate }: Props) {
+export function InviteCodeRow({ leagueId }: Props) {
   const [code, setCode] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [copied, setCopied] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
-  const [regenOpen, setRegenOpen] = useState(false);
-  const [regenerating, setRegenerating] = useState(false);
-  const [regenError, setRegenError] = useState<string | null>(null);
-  const [shareError, setShareError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,39 +30,11 @@ export function InviteCodeRow({ leagueId, canRegenerate }: Props) {
     };
   }, [leagueId]);
 
-  const handleShare = async () => {
-    if (!code) return;
-    setShareError(null);
-    try {
-      const result = await shareLeagueInvite(code);
-      if (result === 'copied') {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1800);
-      }
-    } catch (err) {
-      setShareError(err instanceof Error ? err.message : 'Could not share the code.');
-    }
-  };
-
   const handleCopyCode = async () => {
     if (!code) return;
     await navigator.clipboard.writeText(code);
     setCodeCopied(true);
     setTimeout(() => setCodeCopied(false), 1800);
-  };
-
-  const handleRegenerate = async () => {
-    setRegenerating(true);
-    setRegenError(null);
-    try {
-      const next = await regenerateLeagueCode(leagueId);
-      setCode(next);
-      setRegenOpen(false);
-    } catch (err) {
-      setRegenError(err instanceof Error ? err.message : 'Could not regenerate the code.');
-    } finally {
-      setRegenerating(false);
-    }
   };
 
   if (loading) {
@@ -110,54 +77,9 @@ export function InviteCodeRow({ leagueId, canRegenerate }: Props) {
               )}
             </button>
           </div>
-          {shareError && (
-            <p role="alert" className="mt-1 font-tight text-[12px] text-live">
-              {shareError}
-            </p>
-          )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <button
-            type="button"
-            onClick={handleShare}
-            className={[
-              'inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full min-h-[44px]',
-              'bg-accent text-accent-ink font-tight text-[12px] font-bold tracking-[0.06em] uppercase',
-              'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2',
-            ].join(' ')}
-          >
-            {copied ? 'Copied!' : 'Share'}
-          </button>
-          {canRegenerate && (
-            <button
-              type="button"
-              onClick={() => setRegenOpen(true)}
-              aria-label="Regenerate join code"
-              className={[
-                'w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0',
-                'text-muted hover:text-ink hover:bg-ink/5 transition-colors duration-150 cursor-pointer',
-                'font-tight text-[9.5px] font-bold',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-              ].join(' ')}
-            >
-              REGEN
-            </button>
-          )}
-        </div>
+        <InviteMenu leagueId={leagueId} code={code} trigger="pill" />
       </div>
-
-      <ConfirmDialog
-        open={regenOpen}
-        title="Regenerate join code?"
-        body="The old code will stop working immediately. Anyone you've already shared it with won't be able to join with it."
-        confirmLabel="Regenerate"
-        busyLabel="Regenerating…"
-        busy={regenerating}
-        error={regenError}
-        onConfirm={handleRegenerate}
-        onCancel={() => setRegenOpen(false)}
-      />
     </>
   );
 }

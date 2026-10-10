@@ -1,14 +1,15 @@
 'use client';
 
-// Settings — commissioner-gated content for /fantasy/l/[contestId]/settings.
+// Settings for /fantasy/l/[contestId]/settings. The commissioner gets every
+// card; any other member gets Leave league (Hunter, 2026-10-09).
 // Rendered inside the shared league layout (AppShell + header/nav already
 // wrap this), so this owns ONLY the heading + cards, in mobile's order:
 // Name → Logo → Teams/Limits → Format + Waivers (weekly-stats only) → Roster →
 // Draft (a link: draft setup is its own page, ../draft/setup).
 //
-// Gating: non-commissioners see a locked-out message. Role is resolved
-// client-side (same pattern as league-home-client.tsx) since this is the
-// commissioner-only screen and the RPCs re-check server-side regardless.
+// Gating: non-members see a locked-out message. Role is resolved client-side
+// (same pattern as league-home-client.tsx); the RPCs re-check server-side
+// regardless.
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -29,6 +30,7 @@ import { LimitsCard } from './limits-card';
 import { FormatCard } from './format-card';
 import { WaiversCard } from './waivers-card';
 import { DeleteLeagueCard } from './delete-league-card';
+import { LeaveLeagueCard } from './leave-league-card';
 
 const HEADING_CLASS =
   'font-display italic text-[22px] lg:text-[26px] font-bold tracking-[-0.02em] leading-[0.95] text-ink';
@@ -91,8 +93,13 @@ export function SettingsContent({ contest, league }: Props) {
           Settings
         </h2>
         <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
-          <p className="text-muted font-tight text-[14px]">Only the commissioner can change settings.</p>
+          <p className="text-muted font-tight text-[14px]">
+            {myRole === 'member'
+              ? 'League settings are managed by the commissioner.'
+              : 'Only the commissioner can change settings.'}
+          </p>
         </div>
+        {myRole === 'member' && <LeaveLeagueCard leagueId={contest.leagueId} isOwner={false} />}
       </section>
     );
   }
@@ -164,6 +171,9 @@ export function SettingsContent({ contest, league }: Props) {
           <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </Link>
+
+      {/* A sole owner can't leave (nobody to hand the league to); they delete it. */}
+      {(league?.memberCount ?? 0) > 1 && <LeaveLeagueCard leagueId={contest.leagueId} isOwner />}
 
       {league && user?.id === league.ownerId && <DeleteLeagueCard leagueId={contest.leagueId} contestId={contest.id} leagueName={leagueName} />}
 

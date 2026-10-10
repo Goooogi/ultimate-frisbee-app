@@ -12,13 +12,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { FantasyRulesContent } from './fantasy-rules';
-import type { ContestMode, FantasyPlayerLeague } from '@/lib/fantasy/competitions';
+import type { CompetitionId, ContestMode, FantasyPlayerLeague } from '@/lib/fantasy/competitions';
 
 interface FantasyRulesModalProps {
   /** Event contests score event totals + placement bonus, not the weekly
    *  role matrix. Defaults to weekly. */
   mode?: ContestMode;
   playerLeague?: FantasyPlayerLeague;
+  /** Picks the club vs college wording of the event player-ranking section. */
+  competition?: CompetitionId;
   /** Button label (the aria-label for `icon`). Defaults to "Rules". */
   label?: string;
   /** Visual weight of the trigger. `ghost` = bordered subtle; `link` = text;
@@ -29,6 +31,7 @@ interface FantasyRulesModalProps {
 export function FantasyRulesModal({
   mode,
   playerLeague,
+  competition,
   label = 'Rules',
   variant = 'ghost',
 }: FantasyRulesModalProps) {
@@ -132,7 +135,12 @@ export function FantasyRulesModal({
               </div>
 
               <div className="px-6 pb-6">
-                <FantasyRulesContent headingId="fantasy-rules-modal-title" mode={mode} playerLeague={playerLeague} />
+                <FantasyRulesContent
+                  headingId="fantasy-rules-modal-title"
+                  mode={mode}
+                  playerLeague={playerLeague}
+                  competition={competition}
+                />
               </div>
             </div>
           </div>,

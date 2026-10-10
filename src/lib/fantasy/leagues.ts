@@ -254,6 +254,7 @@ export interface ContestTeamView {
   id: string;
   contestId: string;
   teamName: string;
+  ownerId: string;
   ownerDisplayName: string | null;
   ownerUsername: string | null;
   totalPoints: number;
@@ -265,7 +266,7 @@ export interface ContestTeamView {
 export async function getContestTeam(teamId: string): Promise<ContestTeamView | null> {
   const { data: team, error } = await anon()
     .from('fantasy_teams')
-    .select('id, contest_id, team_name, owner_display_name, owner_username')
+    .select('id, contest_id, team_name, owner_id, owner_display_name, owner_username')
     .eq('id', teamId)
     .maybeSingle();
   if (error) throw error;
@@ -284,6 +285,7 @@ export async function getContestTeam(teamId: string): Promise<ContestTeamView | 
     id: team.id as string,
     contestId: team.contest_id as string,
     teamName: team.team_name as string,
+    ownerId: team.owner_id as string,
     ownerDisplayName: (team.owner_display_name as string) ?? null,
     ownerUsername: (team.owner_username as string) ?? null,
     totalPoints: roundPoints(weekly.reduce((acc, w) => acc + w.points, 0)),
@@ -454,33 +456,11 @@ export async function getLeagueCode(leagueId: string): Promise<string> {
   return data as string;
 }
 
-/**
- * Native share sheet when available, else clipboard. A dismissed share sheet is not an error.
- * The link is the acceptance (/fantasy/join/[code] auto-joins); the code sits alone on the
- * last line. The URL rides inside `text` (no `url` field) because share targets order/drop
- * `text` vs `url` inconsistently — this keeps the layout identical everywhere.
- */
-export async function shareLeagueInvite(code: string): Promise<'shared' | 'copied' | 'cancelled'> {
+/** The invite message for a text message or email body. The link is the acceptance
+ *  (/fantasy/join/[code] auto-joins); the code sits alone on the last line. Browser only. */
+export function leagueInviteText(code: string): string {
   const url = `${window.location.origin}/fantasy/join/${code}`;
-  const text = `Join my fantasy league on The Layout! Tap to join:\n${url}\n\nOr paste this code in Fantasy → Join:\n${code}`;
-  if (typeof navigator.share === 'function') {
-    try {
-      await navigator.share({ text });
-      return 'shared';
-    } catch (err) {
-      if (err instanceof DOMException && err.name === 'AbortError') return 'cancelled';
-      throw err;
-    }
-  }
-  await navigator.clipboard.writeText(text);
-  return 'copied';
-}
-
-/** Rotate the join code (invalidates the old link). Commissioner-only. */
-export async function regenerateLeagueCode(leagueId: string): Promise<string> {
-  const { data, error } = await sessionClient().rpc('fantasy_regenerate_league_code', { p_league: leagueId });
-  if (error) throw error;
-  return data as string;
+  return `Join my fantasy league on The Layout! Tap to join:\n${url}\n\nOr paste this code in Fantasy → Join:\n${code}`;
 }
 
 /** Join a league by its shareable code. Idempotent; returns the league id.
@@ -1015,6 +995,36 @@ export async function addDrop(
     p_add_name: add.playerName,
   });
   if (error) throw error;
+}
+
+// ─── Team transactions (public) ──────────────────────────────────────────────
+
+export interface TeamTransaction {
+  id: string;
+  kind: 'add_drop' | 'trade' | 'waiver';
+  addedName: string | null;
+  droppedName: string | null;
+  createdAt: string;
+}
+
+/** One team's adds, drops, waiver claims and trade legs, newest first. Public
+ *  read, so the team profile works signed out. */
+export async function getTeamTransactions(contestId: string, teamId: string, limit = 20): Promise<TeamTransaction[]> {
+  const { data, error } = await anon()
+    .from('fantasy_transactions')
+    .select('id, kind, added_name, dropped_name, created_at')
+    .eq('contest_id', contestId)
+    .eq('team_id', teamId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: r.id as string,
+    kind: r.kind as TeamTransaction['kind'],
+    addedName: (r.added_name as string) ?? null,
+    droppedName: (r.dropped_name as string) ?? null,
+    createdAt: r.created_at as string,
+  }));
 }
 
 // ─── Trades (2026-09-08) ───────────────────────────────────────────────────

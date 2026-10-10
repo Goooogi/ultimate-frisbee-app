@@ -3,7 +3,7 @@
 // LeagueView — the "League" tab body (root tab for points/event contests;
 // 4th tab for h2h weekly contests). Top → bottom: my-team CTA, draft card,
 // standings (h2h or points), playoffs mini-section,
-// schedule strip (weekly only), invite code + members panel. Web port of the
+// schedule strip (weekly only), invite code + join CTA. Web port of the
 // mobile app's LeagueView.tsx
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueView.tsx).
 //
@@ -15,18 +15,14 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useAuth } from '@/lib/auth/auth-provider';
 import {
   getContestPeriods,
   getContestStandings,
   getH2HStandings,
   getMatchups,
-  getLeagueMembers,
-  getMyLeagueRole,
   periodsToWeeks,
   waiverSettings,
   type ContestView,
-  type LeagueMember,
   type Matchup,
   type H2HStandingRow,
 } from '@/lib/fantasy/leagues';
@@ -60,7 +56,6 @@ function periodLockLabel(w: FantasyWeek): string {
 }
 
 export function LeagueView({ contest }: { contest: ContestView }) {
-  const { user } = useAuth();
   const isH2H = contestFormat(contest.settings) === 'h2h';
   const isWeekly = contest.settings.mode === 'weekly-stats';
   const isFaab = waiverSettings(contest.settings).mode === 'faab';
@@ -69,8 +64,6 @@ export function LeagueView({ contest }: { contest: ContestView }) {
   const [pointsStandings, setPointsStandings] = useState<LeaderboardRow[]>([]);
   const [h2hStandings, setH2hStandings] = useState<H2HStandingRow[]>([]);
   const [matchups, setMatchups] = useState<Matchup[]>([]);
-  const [members, setMembers] = useState<LeagueMember[]>([]);
-  const [isCommissioner, setIsCommissioner] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -81,34 +74,18 @@ export function LeagueView({ contest }: { contest: ContestView }) {
       isH2H ? getH2HStandings(contest.id).catch(() => []) : Promise.resolve([]),
       !isH2H ? getContestStandings(contest.id).catch(() => []) : Promise.resolve([]),
       getMatchups(contest.id).catch(() => []),
-      getLeagueMembers(contest.leagueId).catch(() => []),
-    ]).then(([periods, h2h, points, m, mem]) => {
+    ]).then(([periods, h2h, points, m]) => {
       if (cancelled) return;
       setWeeks(isWeekly ? periodsToWeeks(periods) : []);
       setH2hStandings(h2h);
       setPointsStandings(points);
       setMatchups(m);
-      setMembers(mem);
       setLoading(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [contest.id, contest.leagueId, isH2H, isWeekly]);
-
-  useEffect(() => {
-    if (!user) {
-      setIsCommissioner(false);
-      return;
-    }
-    let cancelled = false;
-    getMyLeagueRole(contest.leagueId)
-      .then((role) => !cancelled && setIsCommissioner(role === 'commissioner'))
-      .catch(() => !cancelled && setIsCommissioner(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [user, contest.leagueId]);
+  }, [contest.id, isH2H, isWeekly]);
 
   const hasSchedule = isWeekly && weeks.length > 0;
   const playoffMatchups = matchups.filter((m) => m.stage !== 'regular');
@@ -136,6 +113,7 @@ export function LeagueView({ contest }: { contest: ContestView }) {
             variant="icon"
             mode={contest.settings.mode}
             playerLeague={contest.competitionDef.playerLeague}
+            competition={contest.competition}
           />
         </div>
 
@@ -242,9 +220,9 @@ export function LeagueView({ contest }: { contest: ContestView }) {
         </section>
       )}
 
-      {/* ── Invite + members ───────────────────── */}
-      <InviteCodeRow leagueId={contest.leagueId} canRegenerate={isCommissioner} />
-      <LeagueMembersPanel leagueId={contest.leagueId} members={members} onLeaveRedirect="/fantasy" />
+      {/* ── Invite + join CTA ───────────────────── */}
+      <InviteCodeRow leagueId={contest.leagueId} />
+      <LeagueMembersPanel leagueId={contest.leagueId} />
     </div>
   );
 }

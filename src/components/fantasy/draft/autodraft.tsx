@@ -52,7 +52,7 @@ export function AutodraftToggle({
           <p className="m-0 font-tight text-[12px] text-muted leading-snug">
             {on
               ? "You're on autodraft. Turn it off to pick yourself."
-              : "We'll pick for you instantly — your queue first, then the best available."}
+              : "We'll pick for you instantly — your queue first, then the top-ranked player left."}
           </p>
         </div>
         <ToggleSwitch checked={on} onChange={toggle} disabled={busy} label="Autodraft" />

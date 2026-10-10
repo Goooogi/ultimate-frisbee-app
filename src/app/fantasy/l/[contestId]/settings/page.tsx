@@ -1,5 +1,5 @@
-// Fantasy — League Settings. Commissioner-only route reached from the league
-// shell's gear icon (owned by the layout at ../layout.tsx, which already
+// Fantasy — League Settings. Members' route (commissioner cards + Leave league)
+// reached from the league shell's gear icon (owned by the layout at ../layout.tsx, which already
 // wraps this page in AppShell + league header/nav — this page renders ONLY
 // the settings content).
 //

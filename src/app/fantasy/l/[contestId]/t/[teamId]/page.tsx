@@ -1,12 +1,10 @@
-// /fantasy/l/[contestId]/t/[teamId] — public team view inside a league.
-// Adapted from the legacy /fantasy/contests/[id]/t/[teamId] route to the new
-// canonical in-league path; chrome (league header + sub-tabs) now comes from
-// the parent layout instead of this page's own PageShell, so this renders
-// only the team header + roster content.
+// /fantasy/l/[contestId]/t/[teamId] — a team's Fantasy Profile inside a league
+// (FantasyProfile). Chrome (league header + sub-tabs) comes from the parent
+// layout. Proposing a trade happens here, from another team's profile.
 
 import Link from 'next/link';
 import { getContest, getContestTeam } from '@/lib/fantasy/leagues';
-import { ContestTeamView } from '@/components/fantasy/contest-team-view';
+import { FantasyProfile } from '@/components/fantasy/profile/fantasy-profile';
 
 export const revalidate = 60;
 
@@ -33,19 +31,5 @@ export default async function ContestTeamDetailPage({
     );
   }
 
-  return (
-    <div className="space-y-6">
-      <div>
-        {(team.ownerDisplayName || team.ownerUsername) && (
-          <p className="font-tight text-[12.5px] text-muted mb-1">
-            {team.ownerDisplayName ?? `@${team.ownerUsername}`}
-          </p>
-        )}
-        <h1 className="m-0 font-display italic text-[28px] lg:text-[32px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
-          {team.teamName}
-        </h1>
-      </div>
-      <ContestTeamView contest={contest} teamId={params.teamId} />
-    </div>
-  );
+  return <FantasyProfile contest={contest} teamId={params.teamId} />;
 }

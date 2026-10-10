@@ -1,8 +1,9 @@
 'use client';
 
-// TradesCard — LeagueView's compact trades teaser (private leagues only,
-// mounted under Standings). Links to the Trades tab; shows an open-trade
-// count badge (proposed + accepted) when there are any.
+// TradesCard — LeagueView's compact trades teaser (drafted weekly leagues
+// only; single-event leagues don't trade). Links to the Trades tab; shows an
+// open-trade count badge (proposed + accepted) when there are any. Trades are
+// proposed from a team's profile.
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -10,8 +11,10 @@ import { getTrades, type ContestView } from '@/lib/fantasy/leagues';
 
 export function TradesCard({ contest }: { contest: ContestView }) {
   const [openCount, setOpenCount] = useState(0);
+  const tradable = contest.settings.mode === 'weekly-stats' && contest.settings.draft === true;
 
   useEffect(() => {
+    if (!tradable) return;
     let cancelled = false;
     getTrades(contest.id)
       .then((trades) => {
@@ -22,7 +25,9 @@ export function TradesCard({ contest }: { contest: ContestView }) {
     return () => {
       cancelled = true;
     };
-  }, [contest.id]);
+  }, [contest.id, tradable]);
+
+  if (!tradable) return null;
 
   return (
     <section aria-labelledby="trades-heading">
@@ -40,7 +45,7 @@ export function TradesCard({ contest }: { contest: ContestView }) {
         ].join(' ')}
       >
         <span className="font-tight text-[14px] font-semibold text-ink">
-          {openCount > 0 ? `${openCount} open trade${openCount === 1 ? '' : 's'}` : 'Propose a trade'}
+          {openCount > 0 ? `${openCount} open trade${openCount === 1 ? '' : 's'}` : 'View trades'}
         </span>
         {openCount > 0 && (
           <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-accent text-accent-ink font-tight text-[11px] font-bold">

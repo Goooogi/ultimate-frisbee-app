@@ -117,6 +117,7 @@ export function TeamTabClient({ contest }: { contest: ContestView }) {
         label="How scoring works"
         mode={contest.settings.mode}
         playerLeague={contest.competitionDef.playerLeague}
+        competition={contest.competition}
       />
 
       <ContestRosterBuilder contest={contest} pool={pool} />

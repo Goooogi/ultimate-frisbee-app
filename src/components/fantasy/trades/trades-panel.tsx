@@ -3,8 +3,8 @@
 // TradesPanel — the Trades route body. Sections, newest-relevant first:
 // "Needs your response" (proposed, I'm receiver) → "Pending review"
 // (accepted) → "Open" (proposed by me) → "History" (executed/rejected/
-// cancelled/vetoed). Header "Propose trade" button opens
-// ProposeTradeDialog. Web port of the mobile app's TradesScreen.tsx
+// cancelled/vetoed). Trades are proposed from a team's profile
+// (/t/[teamId], Hunter 2026-10-09), not here. Web port of the mobile app's TradesScreen.tsx
 // (altiusapps/mobileapp-thelayout ·
 // src/components/fantasy/trades/TradesScreen.tsx).
 
@@ -19,7 +19,6 @@ import {
   type Trade,
 } from '@/lib/fantasy/leagues';
 import { TradeCard } from './trade-card';
-import { ProposeTradeDialog } from './propose-trade-dialog';
 
 export function TradesPanel({ contest }: { contest: ContestView }) {
   const { user } = useAuth();
@@ -29,7 +28,6 @@ export function TradesPanel({ contest }: { contest: ContestView }) {
   const [myTeam, setMyTeam] = useState<{ id: string; teamName: string } | null>(null);
   const [isCommissioner, setIsCommissioner] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [proposeOpen, setProposeOpen] = useState(false);
 
   const refresh = async () => {
     const [t, s] = await Promise.all([
@@ -85,7 +83,6 @@ export function TradesPanel({ contest }: { contest: ContestView }) {
   const history = trades.filter((t) => ['executed', 'rejected', 'cancelled', 'vetoed'].includes(t.status));
   const hasAny = needsResponse.length + pendingReview.length + open.length + history.length > 0;
 
-  const otherTeams = myTeam ? standings.filter((s) => s.teamId !== myTeam.id) : [];
 
   const renderSection = (title: string, rows: Trade[]) => {
     if (rows.length === 0) return null;
@@ -111,25 +108,9 @@ export function TradesPanel({ contest }: { contest: ContestView }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h2 className="m-0 font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
-          Trades
-        </h2>
-        {myTeam && otherTeams.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setProposeOpen(true)}
-            className={[
-              'px-4 py-2 rounded-full min-h-[36px]',
-              'bg-accent text-accent-ink font-tight text-[11.5px] font-bold tracking-[0.04em] uppercase',
-              'hover:opacity-90 transition-opacity duration-150 cursor-pointer',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-            ].join(' ')}
-          >
-            Propose trade
-          </button>
-        )}
-      </div>
+      <h2 className="m-0 font-display italic text-[26px] lg:text-[30px] font-bold tracking-[-0.02em] leading-[0.95] text-ink">
+        Trades
+      </h2>
 
       {!myTeam ? (
         <div className="bg-surface rounded-card-lg shadow-card py-8 text-center">
@@ -141,7 +122,7 @@ export function TradesPanel({ contest }: { contest: ContestView }) {
         </div>
       ) : !hasAny ? (
         <div className="bg-surface rounded-card-lg shadow-card py-8 text-center">
-          <p className="font-tight text-[14px] text-muted">No trades yet. Propose one to get started.</p>
+          <p className="font-tight text-[14px] text-muted">No trades yet. Open a team&apos;s profile to propose one.</p>
         </div>
       ) : (
         <>
@@ -152,18 +133,6 @@ export function TradesPanel({ contest }: { contest: ContestView }) {
         </>
       )}
 
-      {proposeOpen && myTeam && (
-        <ProposeTradeDialog
-          contest={contest}
-          myTeam={{ teamId: myTeam.id, teamName: myTeam.teamName }}
-          otherTeams={otherTeams}
-          onClose={() => setProposeOpen(false)}
-          onDone={async () => {
-            setProposeOpen(false);
-            await refresh();
-          }}
-        />
-      )}
     </div>
   );
 }

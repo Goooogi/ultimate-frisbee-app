@@ -6,7 +6,8 @@
 
 import { SCORING } from '@/lib/fantasy/scoring';
 import { EVENT_SCORING, placementBonus } from '@/lib/fantasy/event-adapter';
-import type { ContestMode, FantasyPlayerLeague } from '@/lib/fantasy/competitions';
+import { ratingExplainer } from '@/lib/fantasy/ratings';
+import type { CompetitionId, ContestMode, FantasyPlayerLeague } from '@/lib/fantasy/competitions';
 
 const SCORING_ROWS: { stat: string; off: string; def: string; neg: boolean }[] = [
   { stat: 'Goal', off: `+${SCORING.offender.goal}`, def: `+${SCORING.defender.goal}`, neg: false },
@@ -27,12 +28,17 @@ export function FantasyRulesContent({
   headingId,
   mode = 'weekly-stats',
   playerLeague,
+  competition,
 }: {
   headingId?: string;
   mode?: ContestMode;
   playerLeague?: FantasyPlayerLeague;
+  /** Picks the club vs college wording of the event player-ranking section. */
+  competition?: CompetitionId;
 }) {
-  if (mode === 'event') return <EventRulesContent headingId={headingId} playerLeague={playerLeague} />;
+  if (mode === 'event') {
+    return <EventRulesContent headingId={headingId} playerLeague={playerLeague} competition={competition} />;
+  }
   return (
     <>
       <div className="mb-5">
@@ -117,9 +123,11 @@ const PLACEMENT_ROWS: { label: string; place: number }[] = [
 function EventRulesContent({
   headingId,
   playerLeague,
+  competition,
 }: {
   headingId?: string;
   playerLeague?: FantasyPlayerLeague;
+  competition?: CompetitionId;
 }) {
   // USAU and EUCS publish goals + assists only; WFDF also records callahans.
   const statRows = [
@@ -127,6 +135,10 @@ function EventRulesContent({
     { stat: 'Assist', pts: EVENT_SCORING.assist },
     ...(playerLeague === 'wfdf' ? [{ stat: 'Callahan', pts: EVENT_SCORING.callahan }] : []),
   ];
+  // Only USAU nationals have a ranked player list. With no competition given,
+  // a USAU (or unspecified) pool gets the club wording.
+  const ranked = competition ?? (!playerLeague || playerLeague === 'usau' ? 'usau-club-nationals' : null);
+  const showRanking = ranked === 'usau-club-nationals' || ranked === 'usau-college-nationals';
   return (
     <>
       <div className="mb-5">
@@ -180,6 +192,21 @@ function EventRulesContent({
           Placement bonuses in coral go to every drafted player on that team.
         </p>
       </div>
+
+      {showRanking && (
+        <div className="mt-6">
+          <div className="text-[11px] font-bold tracking-[0.18em] uppercase text-muted font-tight mb-3">
+            How players are ranked
+          </div>
+          <ul className="space-y-2">
+            {ratingExplainer(ranked).map((line) => (
+              <li key={line} className="font-tight text-[13px] leading-snug text-muted">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </>
   );
 }

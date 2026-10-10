@@ -67,9 +67,18 @@ import {
 import { searchContestPlayers } from '@/lib/fantasy/draft';
 import { getMyContestTeam, type ContestView } from '@/lib/fantasy/leagues';
 import type { FantasyPlayerHit } from '@/lib/fantasy/data';
+import { getContestRatings, ratingKey, toRatingMap, type PlayerRating } from '@/lib/fantasy/ratings';
 import { AuctionRoom } from './draft/auction-room';
 import { CommissionerBar } from './draft/commissioner-bar';
 import { AutoBadge, AutodraftToggle } from './draft/autodraft';
+import {
+  RANKED_PAGE_SIZE,
+  RankingsHeader,
+  RatingLine,
+  RatingRowLine,
+  ShowMoreButton,
+  ratingToHit,
+} from './player-rating';
 
 interface TeamInfo {
   id: string;
@@ -90,6 +99,7 @@ interface Props {
 type RoomTab = 'players' | 'board' | 'queue' | 'picks';
 
 const ROOM_OPENS_BEFORE_MS = 4 * 60 * 60 * 1000; // 4 hours
+const RATINGS_REFRESH_MS = 5 * 60 * 1000;
 
 function formatDraftTime(iso: string): string {
   return new Date(iso).toLocaleString('en-US', {
@@ -119,6 +129,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
 
   const [myTeam, setMyTeam] = useState<TeamInfo | null>(null);
   const [queue, setQueue] = useState<DraftRef[]>([]);
+  const [ratings, setRatings] = useState<PlayerRating[]>([]);
   const [tab, setTab] = useState<RoomTab>('players');
   const [isCommissioner, setIsCommissioner] = useState(false);
 
@@ -223,6 +234,27 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
       cancelled = true;
     };
   }, [draft?.id, draft?.draftType]);
+
+  // ── Player ratings (the ranked list; [] for weekly contests) ─────────────
+  // Re-read during a live draft: the hourly rebuild can reorder the list, and
+  // autodraft always takes the current order. A failed re-read keeps the list.
+  const draftLive = draft?.status === 'live';
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      getContestRatings(contest)
+        .then((r) => {
+          if (!cancelled) setRatings(r);
+        })
+        .catch(() => {});
+    load();
+    const timer = draftLive ? setInterval(load, RATINGS_REFRESH_MS) : null;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contest.id, draftLive]);
 
   // ── My team ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -423,6 +455,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           myTeam={myTeam}
           queue={queue}
           setQueue={setQueue}
+          ratings={ratings}
           openNomination={openNomination}
           nominations={nominations}
           prices={prices}
@@ -447,6 +480,7 @@ export function DraftRoom({ contest, teams, basePath }: Props) {
           autodraftTeamIds={autodraftTeamIds}
           queue={queue}
           setQueue={setQueue}
+          ratings={ratings}
           tab={tab}
           setTab={setTab}
           onRequireAuth={() => setAuthOpen(true)}
@@ -627,6 +661,7 @@ function LiveRoom({
   autodraftTeamIds,
   queue,
   setQueue,
+  ratings,
   tab,
   setTab,
   onRequireAuth,
@@ -643,6 +678,7 @@ function LiveRoom({
   autodraftTeamIds: Set<string>;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
+  ratings: PlayerRating[];
   tab: RoomTab;
   setTab: (t: RoomTab) => void;
   onRequireAuth: () => void;
@@ -699,13 +735,21 @@ function LiveRoom({
             isMyClock={isMyClock}
             queue={queue}
             setQueue={setQueue}
+            ratings={ratings}
             onRequireAuth={onRequireAuth}
             refetch={refetch}
           />
         )}
         {tab === 'board' && <BoardPanel draft={draft} picks={picks} teams={teams} autodraftTeamIds={autodraftTeamIds} />}
         {tab === 'queue' && (
-          <QueuePanel draft={draft} myTeam={myTeam} queue={queue} setQueue={setQueue} onRequireAuth={onRequireAuth} />
+          <QueuePanel
+            draft={draft}
+            myTeam={myTeam}
+            queue={queue}
+            setQueue={setQueue}
+            ratings={ratings}
+            onRequireAuth={onRequireAuth}
+          />
         )}
         {tab === 'picks' && <PicksPanel picks={picks} teamById={teamById} />}
         <div className="h-4" />
@@ -726,6 +770,7 @@ function LiveRoom({
             isMyClock={isMyClock}
             queue={queue}
             setQueue={setQueue}
+            ratings={ratings}
             picks={picks}
             onRequireAuth={onRequireAuth}
             refetch={refetch}
@@ -745,6 +790,7 @@ function DesktopRail(props: {
   isMyClock: boolean;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
+  ratings: PlayerRating[];
   picks: DraftPick[];
   onRequireAuth: () => void;
   refetch: () => void;
@@ -777,6 +823,7 @@ function DesktopRail(props: {
           isMyClock={props.isMyClock}
           queue={props.queue}
           setQueue={props.setQueue}
+          ratings={props.ratings}
           onRequireAuth={props.onRequireAuth}
           refetch={props.refetch}
         />
@@ -787,6 +834,7 @@ function DesktopRail(props: {
           myTeam={props.myTeam}
           queue={props.queue}
           setQueue={props.setQueue}
+          ratings={props.ratings}
           onRequireAuth={props.onRequireAuth}
         />
       )}
@@ -854,6 +902,7 @@ function PlayersPanel({
   isMyClock,
   queue,
   setQueue,
+  ratings,
   onRequireAuth,
   refetch,
 }: {
@@ -865,6 +914,7 @@ function PlayersPanel({
   isMyClock: boolean;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
+  ratings: PlayerRating[];
   onRequireAuth: () => void;
   refetch: () => void;
 }) {
@@ -876,6 +926,16 @@ function PlayersPanel({
   const [pickError, setPickError] = useState<string | null>(null);
 
   const league = contest.competitionDef.playerLeague;
+
+  const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
+  const available = useMemo(
+    () => ratings.filter((r) => !draftedByKey.has(ratingKey(r.playerLeague, r.playerId))),
+    [ratings, draftedByKey],
+  );
+  const [shown, setShown] = useState(RANKED_PAGE_SIZE);
+  // Nothing typed yet: the best players still on the board instead of a blank prompt.
+  const showRanked = query.trim().length < 2 && available.length > 0;
+  const listHits = showRanked ? available.slice(0, shown).map(ratingToHit) : results;
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -955,23 +1015,32 @@ function PlayersPanel({
         </p>
       )}
 
-      {query.trim().length < 2 ? (
+      {ratings.length > 0 && (
+        <RankingsHeader
+          competition={contest.competition}
+          title={showRanked ? 'Best available' : undefined}
+          className="mb-2"
+        />
+      )}
+
+      {query.trim().length < 2 && !showRanked ? (
         <p className="text-faint font-tight text-[13px] py-6 text-center">
           Search the player pool to draft or queue someone.
         </p>
-      ) : searching ? (
+      ) : searching && !showRanked ? (
         <PlayerListSkeleton />
-      ) : results.length === 0 ? (
+      ) : listHits.length === 0 ? (
         <p className="text-faint font-tight text-[13px] py-6 text-center">No players found.</p>
       ) : (
         <ul className="space-y-1.5">
-          {results.map((hit) => {
+          {listHits.map((hit) => {
             const key = `${league}:${hit.playerId}`;
             const draftedTeamId = draftedByKey.get(key) ?? null;
             return (
               <PlayerRow
                 key={hit.playerId}
                 hit={hit}
+                rating={ratingMap.get(key)}
                 drafted={draftedTeamId !== null}
                 draftedTeamName={draftedTeamId ? teamById.get(draftedTeamId)?.teamName ?? null : null}
                 queued={queue.some((q) => q.playerId === hit.playerId && q.playerLeague === league)}
@@ -982,6 +1051,11 @@ function PlayersPanel({
               />
             );
           })}
+          {showRanked && shown < available.length && (
+            <li className="pt-2">
+              <ShowMoreButton onClick={() => setShown((n) => n + RANKED_PAGE_SIZE)} />
+            </li>
+          )}
         </ul>
       )}
     </div>
@@ -990,6 +1064,7 @@ function PlayersPanel({
 
 function PlayerRow({
   hit,
+  rating,
   drafted,
   draftedTeamName,
   queued,
@@ -999,6 +1074,7 @@ function PlayerRow({
   onQueue,
 }: {
   hit: FantasyPlayerHit;
+  rating: PlayerRating | undefined;
   drafted: boolean;
   draftedTeamName: string | null;
   queued: boolean;
@@ -1010,7 +1086,7 @@ function PlayerRow({
   return (
     <li
       className={[
-        'flex items-center gap-2 px-3 py-2.5 rounded-card-sm',
+        'flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2.5 rounded-card-sm',
         drafted ? 'opacity-45' : 'hover:bg-surface-hi transition-colors duration-150',
       ].join(' ')}
     >
@@ -1051,6 +1127,7 @@ function PlayerRow({
           </button>
         </div>
       )}
+      <RatingRowLine rating={rating} />
     </li>
   );
 }
@@ -1182,26 +1259,34 @@ function QueuePanel({
   myTeam,
   queue,
   setQueue,
+  ratings,
   onRequireAuth,
 }: {
   draft: Draft;
   myTeam: TeamInfo | null;
   queue: DraftRef[];
   setQueue: (q: DraftRef[]) => void;
+  ratings: PlayerRating[];
   onRequireAuth: () => void;
 }) {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
 
   const persist = useCallback(
     (next: DraftRef[]) => {
       setQueue(next);
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      // Save the newest queue, not this call's: an add from the Players tab
+      // saves at once, and a stale timer would overwrite it.
       saveTimer.current = setTimeout(() => {
-        saveDraftQueue(draft.id, next).catch(() => {});
+        saveDraftQueue(draft.id, queueRef.current).catch(() => {});
       }, 400);
     },
     [draft.id, setQueue],
   );
+
+  const ratingMap = useMemo(() => toRatingMap(ratings), [ratings]);
 
   if (!myTeam) {
     return (
@@ -1222,7 +1307,8 @@ function QueuePanel({
     return (
       <div className="bg-surface rounded-card-lg shadow-card p-8 text-center">
         <p className="text-muted font-tight text-[13px]">
-          Your queue is empty. Add players from the PLAYERS tab — the top of your queue is what autopick takes if your clock expires.
+          Your queue is empty. Add players from the PLAYERS tab. If your clock runs out, autodraft picks for you: your
+          queue first, then the top-ranked player left.
         </p>
       </div>
     );
@@ -1250,9 +1336,10 @@ function QueuePanel({
             className={['flex items-center gap-2 px-4 py-3', idx > 0 ? 'border-t border-hairline' : ''].join(' ')}
           >
             <span className="font-tight text-[11px] font-bold text-faint tabular w-5">{idx + 1}</span>
-            <span className="flex-1 min-w-0 font-tight text-[13.5px] font-semibold text-ink truncate">
-              {entry.playerName}
-            </span>
+            <div className="flex-1 min-w-0">
+              <div className="font-tight text-[13.5px] font-semibold text-ink truncate">{entry.playerName}</div>
+              <RatingLine rating={ratingMap.get(ratingKey(entry.playerLeague, entry.playerId))} compact />
+            </div>
             <div className="flex items-center gap-0.5 flex-shrink-0">
               <button
                 type="button"

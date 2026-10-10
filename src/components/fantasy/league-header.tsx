@@ -1,18 +1,25 @@
 'use client';
 
 // LeagueHeader — chrome row for every screen inside a fantasy league (contest).
-// Back link → league logo → name + "{shortLabel} · {year}" → commissioner share →
-// feed/chat → commissioner gear (client island: resolves getMyLeagueRole, only
-// the commissioner sees share + gear).
+// Back link → league logo → name + "{shortLabel} · {year}" → commissioner
+// invite (InviteMenu: Email invite or Text message) → feed/chat → settings gear
+// (client island: resolves getMyLeagueRole; only the commissioner sees invite,
+// every member sees the gear — Settings holds Leave league).
 // Web port of the mobile app's LeagueShell.tsx header row
 // (altiusapps/mobileapp-thelayout · src/components/fantasy/LeagueShell.tsx).
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth/auth-provider';
-import { getLeagueCode, getMyLeagueRole, shareLeagueInvite, type ContestView, type FantasyLeagueSummary } from '@/lib/fantasy/leagues';
+import {
+  getMyLeagueRole,
+  type ContestView,
+  type FantasyLeagueSummary,
+  type LeagueRole,
+} from '@/lib/fantasy/leagues';
 import { getGame } from '@/lib/fantasy/games';
 import { LeagueLogo } from '@/components/fantasy/league-logo';
+import { InviteMenu } from '@/components/fantasy/invite-menu';
 
 interface Props {
   contest: ContestView;
@@ -21,43 +28,25 @@ interface Props {
 
 export function LeagueHeader({ contest, league }: Props) {
   const { user } = useAuth();
-  const [isCommissioner, setIsCommissioner] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [role, setRole] = useState<LeagueRole | null>(null);
+  const isCommissioner = role === 'commissioner';
 
   const title = league?.name ?? contest.name;
   const game = getGame(contest.competition);
 
   useEffect(() => {
     if (!user) {
-      setIsCommissioner(false);
+      setRole(null);
       return;
     }
     let cancelled = false;
     getMyLeagueRole(contest.leagueId)
-      .then((role) => !cancelled && setIsCommissioner(role === 'commissioner'))
-      .catch(() => !cancelled && setIsCommissioner(false));
+      .then((r) => !cancelled && setRole(r))
+      .catch(() => !cancelled && setRole(null));
     return () => {
       cancelled = true;
     };
   }, [user, contest.leagueId]);
-
-  const handleShare = async () => {
-    setSharing(true);
-    setShareError(null);
-    try {
-      const result = await shareLeagueInvite(await getLeagueCode(contest.leagueId));
-      if (result === 'copied') {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1800);
-      }
-    } catch (err) {
-      setShareError(err instanceof Error ? err.message : 'Could not share the join code.');
-    } finally {
-      setSharing(false);
-    }
-  };
 
   return (
     <>
@@ -93,30 +82,7 @@ export function LeagueHeader({ contest, league }: Props) {
         </p>
       </div>
 
-      {isCommissioner && (
-        <button
-          type="button"
-          onClick={handleShare}
-          disabled={sharing}
-          aria-label="Share join code"
-          className={[
-            'flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full cursor-pointer',
-            'text-ink hover:text-accent hover:bg-ink/5 transition-colors duration-150',
-            'disabled:opacity-50 disabled:cursor-not-allowed',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
-          ].join(' ')}
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path
-              d="M12 15V4m0 0L8 8m4-4l4 4M5 12v7a1 1 0 001 1h12a1 1 0 001-1v-7"
-              stroke="currentColor"
-              strokeWidth={1.7}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-      )}
+      {isCommissioner && <InviteMenu leagueId={contest.leagueId} trigger="icon" />}
 
       <Link
         href={`/fantasy/l/${contest.id}/feed`}
@@ -138,7 +104,7 @@ export function LeagueHeader({ contest, league }: Props) {
         </svg>
       </Link>
 
-      {isCommissioner && (
+      {role && (
         <Link
           href={`/fantasy/l/${contest.id}/settings`}
           aria-label="League settings"
@@ -160,16 +126,6 @@ export function LeagueHeader({ contest, league }: Props) {
         </Link>
       )}
     </div>
-    {shareError && (
-      <p role="alert" className="m-0 pb-2 font-tight text-[12px] text-live">
-        {shareError}
-      </p>
-    )}
-    {copied && (
-      <p role="status" className="m-0 pb-2 font-tight text-[12px] text-muted">
-        Invite copied to clipboard.
-      </p>
-    )}
     </>
   );
 }
